@@ -494,11 +494,11 @@ let currentRole = localStorage.getItem('pv_role') || ''; // 'admin' | 'boutique'
 // ============================================================================
 // JOURNAL D'ACTIVITÉ (audit log) — visible admin uniquement
 // ============================================================================
-// Stocké dans localStorage (clé 'pv_auditLog'). Chaque entrée :
-// { ts: ISO timestamp, role: 'admin'|'boutique', action: string, detail: string }
-// Max 500 entrées (FIFO).
+// Stocké dans les données partagées (Supabase/localStorage) avec le reste.
+// Chaque entrée : { ts: ISO timestamp, role: 'admin'|'boutique', action: string, detail: string }
+// Max 500 entrées (FIFO). Fusionné au chargement pour combiner les logs de tous les postes.
 const AUDIT_LOG_MAX = 500;
-let auditLog = JSON.parse(localStorage.getItem('pv_auditLog') || '[]');
+let auditLog = [];
 
 function logAction(action, detail) {
   const entry = {
@@ -509,7 +509,7 @@ function logAction(action, detail) {
   };
   auditLog.push(entry);
   if (auditLog.length > AUDIT_LOG_MAX) auditLog = auditLog.slice(-AUDIT_LOG_MAX);
-  try { localStorage.setItem('pv_auditLog', JSON.stringify(auditLog)); } catch(e) {}
+  // Le journal est sauvegardé avec les données partagées (dans saveData)
 }
 
 function renderJournal() {
@@ -540,7 +540,7 @@ function renderJournal() {
     </select>
     <input type="text" placeholder="Rechercher..." value="${searchFilter.replace(/"/g, '&quot;')}" oninput="_journalSearch=this.value; renderJournal();" style="padding:4px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:3px; font-size:11px; width:180px;">
     <span style="margin-left:auto; font-size:10px; color:#64748b;">${auditLog.length} entrée${auditLog.length > 1 ? 's' : ''}</span>
-    <span onclick="if(confirm('Vider le journal ?')){auditLog=[];localStorage.removeItem('pv_auditLog');renderJournal();}" style="cursor:pointer; padding:3px 10px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-size:10px; font-weight:700;">Vider</span>
+    <span onclick="if(confirm('Vider le journal ?')){auditLog=[];saveData();renderJournal();}" style="cursor:pointer; padding:3px 10px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-size:10px; font-weight:700;">Vider</span>
   </div>`;
 
   // Filtrage
@@ -5114,6 +5114,16 @@ async function loadData() {
     campagnes.forEach(c => ensureCampagneModel(c));
     nextCampagneId = typeof data.nextCampagneId === 'number' ? data.nextCampagneId
       : (campagnes.length ? Math.max(...campagnes.map(c => parseInt(String(c.id).replace('CAMP-',''))||0)) + 1 : 1);
+    // Journal d'activité : fusionner les logs distants avec les logs locaux (dédoublonnage par ts+action+detail)
+    if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {
+      const existingKeys = new Set(auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
+      data.auditLog.forEach(e => {
+        const key = e.ts + '|' + e.action + '|' + e.detail;
+        if (!existingKeys.has(key)) { auditLog.push(e); existingKeys.add(key); }
+      });
+      auditLog.sort((a, b) => a.ts.localeCompare(b.ts));
+      if (auditLog.length > AUDIT_LOG_MAX) auditLog = auditLog.slice(-AUDIT_LOG_MAX);
+    }
     // Tombstones : IDs supprimés volontairement (empêche le merge de les ressusciter)
     if (Array.isArray(data._deletedIds)) data._deletedIds.forEach(id => _deletedIds.add(id));
     // Migration : op.campagne (string) → op.campagneId (ref). Crée une entité
@@ -5858,7 +5868,7 @@ async function loadData() {
 }
 
 function saveData() {
-  const payload = {baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds)};
+  const payload = {baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)};
   const jsonStr = JSON.stringify(payload);
   // Contrôle quota localStorage (~5MB max)
   const sizeMB = (jsonStr.length * 2) / (1024 * 1024); // UTF-16 = 2 bytes/char
