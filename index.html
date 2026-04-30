@@ -531,6 +531,30 @@ function _logActionLabel(actionId) {
 function _logShopName(sh) {
   return SHOP_LABELS[sh] || sh;
 }
+function _logStepLabel(stepKey, actionOrOp) {
+  // Chercher dans les steps d'action
+  if (actionOrOp && actionOrOp.type && ACTION_STEPS[actionOrOp.type]) {
+    var def = ACTION_STEPS[actionOrOp.type].find(function(s) { return s.key === stepKey; });
+    if (def) return def.label;
+  }
+  // Chercher dans les steps d'OP (shop + global)
+  if (actionOrOp && actionOrOp.id) {
+    var op = ops.find(function(o) { return o.id === actionOrOp.id; }) || actionOrOp;
+    if (typeof computeOpGlobalStepDefs === 'function') {
+      var gd = computeOpGlobalStepDefs(op);
+      var gf = gd.find(function(d) { return d.key === stepKey; });
+      if (gf) return gf.label;
+    }
+    if (typeof computeOpShopStepDefs === 'function') {
+      var sd = computeOpShopStepDefs(op, SHOPS[0]);
+      var sf = sd.find(function(d) { return d.key === stepKey; });
+      if (sf) return sf.label;
+    }
+  }
+  // Fallback lisible
+  var labels = { desinstallation: 'OP désinstallée', commande: 'Commandé', recu: 'En stock', rayon: 'Changée en rayon', etiquette: 'Étiquette faite', swappy: 'Mis à jour Swappy', swappyOn: 'Actif Swappy', swappyOff: 'Désactivé Swappy', monte: 'Monté sur le mur', vendu: 'Vendu / plus de stock', done: 'Fait' };
+  return labels[stepKey] || stepKey;
+}
 function _logOpLabel(opId) {
   var op = ops.find(function(x) { return x.id === opId; });
   if (!op) return opId;
@@ -2121,7 +2145,7 @@ function computeOpShopStepDefs(op, shop) {
 function toggleOpGlobalStep(opId, stepKey, checked) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
-  logAction('Étape globale OP', (checked ? '✓' : '✕') + ' ' + stepKey + ' sur ' + _logOpLabel(opId));
+  logAction('Étape globale OP', (checked ? '✓' : '✕') + ' ' + _logStepLabel(stepKey, op) + ' sur ' + _logOpLabel(opId));
   ensureOpModel(op);
   if (!op.progress) op.progress = { global: {} };
   if (!op.progress.global) op.progress.global = {};
@@ -3808,7 +3832,7 @@ function toggleOpStep(opId, shop, stepKey, checked) {
   ensureOpSteps(op);
   const st = op.etats[shop];
   if (!st) return;
-  logAction('Étape OP', _logShopName(shop) + ' → ' + (checked ? '✓' : '✕') + ' ' + stepKey + ' sur ' + _logOpLabel(opId));
+  logAction('Étape OP', _logShopName(shop) + ' → ' + (checked ? '✓' : '✕') + ' ' + _logStepLabel(stepKey, op) + ' sur ' + _logOpLabel(opId));
   st.steps[stepKey] = !!checked;
   // Synchro .done = true ssi toutes les steps sont cochées
   st.done = opAllStepsDone(op, shop);
@@ -4400,7 +4424,7 @@ function toggleActionStep(actionId, shop, stepKey) {
   ensureActionSteps(a);
   const st = a.etats[shop];
   if (!st) return;
-  logAction('Étape cochée', _logShopName(shop) + ' → ' + stepKey + ' sur ' + _logActionLabel(actionId));
+  logAction('Mise en place', _logShopName(shop) + ' → ' + _logStepLabel(stepKey, a) + ' sur ' + _logActionLabel(actionId));
   if (!st.steps) st.steps = makeStepMap(a);
   st.steps[stepKey] = !st.steps[stepKey];
   _applyActionShopChange(a, shop);
