@@ -348,7 +348,7 @@
         <option value="">Tous statuts</option><option value="DANS_OFFRE">Dans l'offre</option><option value="A_RENTRER">À rentrer</option><option value="A_REMPLACER">À remplacer</option><option value="FIN_DE_VIE">Fin de vie</option><option value="A_SORTIR">À sortir</option><option value="SORTI">Sorti</option>
       </select>
       <select id="kitSort" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="tirage">Tri: Puissance + Autonomie</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="case">Tri: Case technique</option><option value="marque">Tri: Marque (blocs)</option><option value="modele">Tri: Nom modèle</option><option value="date">Tri: Date</option><option value="marge">Tri: Marge €</option><option value="note">Tri: Note</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="w">Tri: Puissance W</option><option value="mah">Tri: Batterie mAh</option>
+        <option value="case">⭐ Tri: Case technique</option><option value="tirage">Tri: Puissance + Autonomie</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Marque (blocs)</option><option value="modele">Tri: Nom modèle</option><option value="date">Tri: Date</option><option value="marge">Tri: Marge €</option><option value="note">Tri: Note</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="w">Tri: Puissance W</option><option value="mah">Tri: Batterie mAh</option>
       </select>
       <select id="kitSubSort" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#94a3b8; border-radius:4px;" title="Sous-tri (uniquement en vue 'blocs par marque')">
         <option value="case">Puis: Case</option><option value="pv">Puis: PV</option><option value="marge">Puis: Marge</option><option value="modele">Puis: Modèle</option><option value="w">Puis: W</option>
@@ -374,7 +374,7 @@
         <option value="">Tous statuts</option><option value="DANS_OFFRE">Dans l'offre</option><option value="A_RENTRER">À rentrer</option><option value="EN_ATTENTE">En attente</option><option value="A_REMPLACER">À remplacer</option><option value="FIN_DE_VIE">Fin de vie</option><option value="A_SORTIR">À sortir</option><option value="SORTI">Sorti</option>
       </select>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="liste">Tri: Liste</option><option value="marque">Tri: Par marque</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
+        <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Par marque</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
       </select>
     </div>
     <div id="liqStats" style="margin-bottom:8px;"></div>
@@ -401,7 +401,7 @@
         <option value="">Tous statuts</option><option value="DANS_OFFRE">Dans l'offre</option><option value="EN_ATTENTE">En attente</option><option value="A_RENTRER">À rentrer</option><option value="A_REMPLACER">À remplacer</option><option value="FIN_DE_VIE">Fin de vie</option><option value="A_SORTIR">À sortir</option><option value="SORTI">Sorti</option>
       </select>
       <select id="pdSort" onchange="renderBasePD();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="case">Tri: Case technique</option><option value="grille">Vue: Grille PA / MM</option><option value="marque">Tri: Marque</option><option value="marge">Tri: Marge €</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="statut">Tri: Statut</option>
+        <option value="case">⭐ Tri: Case technique</option><option value="grille">Vue: Grille PA / MM</option><option value="marque">Tri: Marque</option><option value="marge">Tri: Marge €</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="statut">Tri: Statut</option>
       </select>
       <button onclick="showAddPdForm()" style="background:#06b6d4; padding:6px 14px; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;">+ Ajouter PD</button>
     </div>
@@ -4926,7 +4926,7 @@ function saveUiState() {
     kitFilterProfil: document.getElementById('filterProfil')?.value || '',
     kitFilterRole: document.getElementById('filterRole')?.value || '',
     kitFilterStatut: document.getElementById('filterStatut')?.value || '',
-    kitSort: document.getElementById('kitSort')?.value || 'tirage',
+    kitSort: document.getElementById('kitSort')?.value || 'case',
     kitSortCol, kitSortDir,
     kitSubSort: document.getElementById('kitSubSort')?.value || 'case',
     liqExpanded: Object.keys(liqExpanded).filter(k => liqExpanded[k]),
@@ -4956,7 +4956,7 @@ function restoreUiState() {
     if (s.liqFilterProfil) { const el = document.getElementById('liqFilterProfil'); if (el) el.value = s.liqFilterProfil; }
     if (s.liqFilterRole) { const el = document.getElementById('liqFilterRole'); if (el) el.value = s.liqFilterRole; }
     if (s.liqFilterStatut) { const el = document.getElementById('liqFilterStatut'); if (el) el.value = s.liqFilterStatut; }
-    if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) { el.value = isAdmin() ? s.liqViewMode : 'liste'; } }
+    if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) el.value = s.liqViewMode; }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
     if (s.liqSortDir) liqSortDir = s.liqSortDir;
     // Kits
@@ -4965,7 +4965,7 @@ function restoreUiState() {
     if (s.kitFilterProfil) { const el = document.getElementById('filterProfil'); if (el) el.value = s.kitFilterProfil; }
     if (s.kitFilterRole) { const el = document.getElementById('filterRole'); if (el) el.value = s.kitFilterRole; }
     if (s.kitFilterStatut) { const el = document.getElementById('filterStatut'); if (el) el.value = s.kitFilterStatut; }
-    if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) { el.value = isAdmin() ? s.kitSort : 'case'; } }
+    if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) el.value = s.kitSort; }
     if (s.kitSortCol) kitSortCol = s.kitSortCol;
     if (typeof s.kitSortDir === 'number') kitSortDir = s.kitSortDir;
     if (s.kitSubSort) { const el = document.getElementById('kitSubSort'); if (el) el.value = s.kitSubSort; }
@@ -4980,7 +4980,7 @@ function restoreUiState() {
     if (s.pdFilterCase) { const el = document.getElementById('pdFilterCaseSel'); if (el) el.value = s.pdFilterCase; }
     if (s.pdFilterRole) { const el = document.getElementById('pdFilterRoleSel'); if (el) el.value = s.pdFilterRole; }
     if (s.pdFilterStatut) { const el = document.getElementById('pdFilterStatutSel'); if (el) el.value = s.pdFilterStatut; }
-    if (s.pdSort) { const el = document.getElementById('pdSort'); if (el) { el.value = isAdmin() ? s.pdSort : 'case'; } }
+    if (s.pdSort) { const el = document.getElementById('pdSort'); if (el) el.value = s.pdSort; }
     if (s.pdSortCol) pdSortCol = s.pdSortCol;
     if (typeof s.pdSortDir === 'number') pdSortDir = s.pdSortDir;
     // Sub-tab propositions (kits/liquides/pd)
@@ -7436,7 +7436,7 @@ function renderKits() {
   });
 
   let html = '';
-  const sortMode = document.getElementById('kitSort')?.value || 'tirage';
+  const sortMode = document.getElementById('kitSort')?.value || 'case';
 
   // === MODE FREETOUCH (mur) ===
   if (sortMode === 'freetouch') {
