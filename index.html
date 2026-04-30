@@ -823,6 +823,17 @@ function applyRoleUI() {
   // Onglet Journal : visible uniquement pour l'admin
   const tabBtnJournal = document.getElementById('tabBtnJournal');
   if (tabBtnJournal) tabBtnJournal.style.display = isAdmin() ? '' : 'none';
+
+  // Pré-filtrer sur la boutique connectée
+  if (currentRole === 'boutique' && currentShop) {
+    // Dashboard : select shop
+    const _ds = document.getElementById('dashShop');
+    if (_ds && !_ds._shopPreset) { _ds.value = currentShop; _ds._shopPreset = true; }
+    // OP : filtre boutique
+    if (!opShopFilter && typeof opShopFilter !== 'undefined') { opShopFilter = currentShop; }
+    // Relevés : "Je suis" = ma boutique
+    if (myShop !== currentShop && !window._shopRelevesPreset) { myShop = currentShop; localStorage.setItem('pilotVapeMyShop', currentShop); window._shopRelevesPreset = true; }
+  }
 }
 
 // Auto-appel debounced de applyRoleUI après chaque rendu DOM
