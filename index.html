@@ -1804,6 +1804,7 @@ const PIECE_TYPES = [
   { key: 'MACARON_ETAGERE',       label: 'Macaron étagère',       support: 'physique', perShop: true },
   { key: 'FRONTON_BAC',           label: 'Fronton bac à fouille', support: 'physique', perShop: true },
   { key: 'PLV_AUTRE',             label: 'PLV autre',             support: 'physique', perShop: true },
+  { key: 'PRODUIT',              label: 'Produit',               support: 'physique', perShop: true },
   // --- Digitales ---
   { key: 'VIDEO_ECRAN',           label: 'Vidéo écran boutique',  support: 'digital',  perShop: true  },
   { key: 'SMS_CLIENT',            label: 'SMS client',            support: 'digital',  perShop: false },
@@ -1827,6 +1828,7 @@ const EMPLACEMENTS_PHYSIQUES = [
   { key: 'DERRIERE_COMPTOIR',   label: 'Derrière comptoir (commodes)' },
   { key: 'MUR_LIBRE_TOUCHER',   label: 'Mur libre toucher' },
   { key: 'ETAGERE_LIQUIDES',    label: 'Étagère liquide' },
+  { key: 'EMPL_LIQUIDE_MOMENT', label: 'Emplacement liquide du moment' },
   { key: 'COMMODES',            label: 'Commodes' },
   { key: 'ZONE_FOUILLE',        label: 'Zone bac à fouille' },
   { key: 'CAISSE',              label: 'Caisse' },
@@ -4954,7 +4956,7 @@ function restoreUiState() {
     if (s.liqFilterProfil) { const el = document.getElementById('liqFilterProfil'); if (el) el.value = s.liqFilterProfil; }
     if (s.liqFilterRole) { const el = document.getElementById('liqFilterRole'); if (el) el.value = s.liqFilterRole; }
     if (s.liqFilterStatut) { const el = document.getElementById('liqFilterStatut'); if (el) el.value = s.liqFilterStatut; }
-    if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) el.value = s.liqViewMode; }
+    if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) { el.value = isAdmin() ? s.liqViewMode : 'grille'; } }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
     if (s.liqSortDir) liqSortDir = s.liqSortDir;
     // Kits
@@ -4963,7 +4965,7 @@ function restoreUiState() {
     if (s.kitFilterProfil) { const el = document.getElementById('filterProfil'); if (el) el.value = s.kitFilterProfil; }
     if (s.kitFilterRole) { const el = document.getElementById('filterRole'); if (el) el.value = s.kitFilterRole; }
     if (s.kitFilterStatut) { const el = document.getElementById('filterStatut'); if (el) el.value = s.kitFilterStatut; }
-    if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) el.value = s.kitSort; }
+    if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) { el.value = isAdmin() ? s.kitSort : 'tirage'; } }
     if (s.kitSortCol) kitSortCol = s.kitSortCol;
     if (typeof s.kitSortDir === 'number') kitSortDir = s.kitSortDir;
     if (s.kitSubSort) { const el = document.getElementById('kitSubSort'); if (el) el.value = s.kitSubSort; }
@@ -4978,7 +4980,7 @@ function restoreUiState() {
     if (s.pdFilterCase) { const el = document.getElementById('pdFilterCaseSel'); if (el) el.value = s.pdFilterCase; }
     if (s.pdFilterRole) { const el = document.getElementById('pdFilterRoleSel'); if (el) el.value = s.pdFilterRole; }
     if (s.pdFilterStatut) { const el = document.getElementById('pdFilterStatutSel'); if (el) el.value = s.pdFilterStatut; }
-    if (s.pdSort) { const el = document.getElementById('pdSort'); if (el) el.value = s.pdSort; }
+    if (s.pdSort) { const el = document.getElementById('pdSort'); if (el) { el.value = isAdmin() ? s.pdSort : 'case'; } }
     if (s.pdSortCol) pdSortCol = s.pdSortCol;
     if (typeof s.pdSortDir === 'number') pdSortDir = s.pdSortDir;
     // Sub-tab propositions (kits/liquides/pd)
@@ -13984,6 +13986,8 @@ function renderOpCardHtml(op, options) {
   const compact = !!(options && options.compact);
   const noEdit  = !!(options && options.noEdit);
   const expanded = opDashExpanded.has(op.id);
+  const timeStatus = opTimeStatus(op);
+  const _isTerminee = timeStatus === 'TERMINEE';
 
   // Mode compact (Dashboard) : 1 ligne avec l'essentiel + caret pour dérouler
   if (compact && !expanded) {
@@ -14011,7 +14015,7 @@ function renderOpCardHtml(op, options) {
     linkedInfo = `<span style="font-size:10px; color:#94a3b8;">← ${typeLabel} <span style="color:${meta.color};">${sourceAction.id}</span>${extra}</span>`;
   }
   // Pour les OP auto (relevé concurrence) : enrichir avec le concurrent source
-  if (op.auto && op.type === 'PRIX_ROUGE' && kit) {
+  if (op.auto && op.type === 'PRIX_ROUGE' && kit && sourceAction && sourceAction.releveId) {
     const _verdict = computePriceVerdict(kit);
     const _concLabel = _verdict && _verdict.minConcurrent ? _verdict.minConcurrent.label : null;
     const _concPrix = _verdict && _verdict.minConcurrent ? Number(_verdict.minConcurrent.p).toFixed(2) + '€' : '';
@@ -14059,7 +14063,6 @@ function renderOpCardHtml(op, options) {
         <span onclick="event.stopPropagation(); deleteOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444450; border-radius:3px;">✕</span>`;
   }
 
-  const timeStatus = opTimeStatus(op);
   const timeMeta   = OP_TIME_STATUS[timeStatus];
   const timePhrase = opTimePhrase(op);
   const timeBadge  = `<span style="font-size:9.5px; padding:2px 7px; background:${timeMeta.color}25; color:${timeMeta.color}; border:1px solid ${timeMeta.color}60; border-radius:3px; font-weight:700; letter-spacing:0.3px;">${timeMeta.label}</span>`;
@@ -14221,12 +14224,15 @@ function renderOpCardHtml(op, options) {
       ? `<div style="font-size:10px; color:#64748b; font-style:italic; padding:4px 0;">Pas d'action locale (pièces non affectées à ce shop)</div>`
       : defs.map(d => {
         const checked = st && st.steps && st.steps[d.key] === true;
+        const isDesinstall = d.kind === 'desinstall';
+        const _stepGrey = (_isTerminee && !isDesinstall) ? 'opacity:0.35; filter:saturate(0.3);' : '';
+        const _stepHighlight = (_isTerminee && isDesinstall && !checked) ? 'background:#1c1117; border:1px solid #ef444460; border-radius:4px; padding:5px 6px; margin:2px -6px;' : '';
         const box = checked
-          ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:${col}; color:#0f172a; border:1px solid ${col}; border-radius:3px; font-size:10px; font-weight:700;">✓</span>`
-          : `<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid ${col}80; border-radius:3px;"></span>`;
+          ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:${col}; color:#0f172a; border:1px solid ${col}; border-radius:3px; font-size:${isDesinstall ? '11' : '10'}px; font-weight:700;">✓</span>`
+          : `<span style="display:inline-block; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:transparent; border:${isDesinstall ? '2' : '1'}px solid ${isDesinstall ? col : col + '80'}; border-radius:3px;"></span>`;
         return `<div onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"
-          style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'}; border-radius:3px; user-select:none;"
-          onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'">
+          style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; cursor:pointer; font-size:${isDesinstall ? '12' : '11'}px; color:${isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8')}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${_stepGrey} ${_stepHighlight}"
+          onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'">
           ${box}
           <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}</span>
         </div>`;
@@ -14251,10 +14257,10 @@ function renderOpCardHtml(op, options) {
 
   // Opacité selon le statut temporel
   let cardOpacity = 1;
-  if (timeStatus === 'TERMINEE') cardOpacity = 0.55;
+  if (_isTerminee) cardOpacity = 0.7;
   else if (timeStatus === 'A_VENIR') cardOpacity = 0.8;
 
-  return `<div id="opCard-${op.id}" style="background:#1e293b; border:1px solid ${meta.color}40; border-left:3px solid ${meta.color}; border-radius:6px; padding:10px 12px; margin-bottom:6px; opacity:${cardOpacity};">
+  return `<div id="opCard-${op.id}" style="background:${_isTerminee ? '#151c2a' : '#1e293b'}; border:1px solid ${meta.color}40; border-left:3px solid ${meta.color}; border-radius:6px; padding:10px 12px; margin-bottom:6px; opacity:${cardOpacity};">
     <div ${headerClickAttrs}>
       ${chevron}
       <span style="font-size:10px; padding:2px 8px; background:${meta.color}25; color:${meta.color}; border-radius:3px; font-weight:700; letter-spacing:0.3px;">${meta.label}</span>
@@ -14398,9 +14404,34 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   // Mini-tags (condensés, bulleless)
   const miniTags = [];
   // Origine de l'OP : auto (relevé concurrence) vs manuelle (destockage)
-  if (op.auto && op.type === 'PRIX_ROUGE') {
+  const _compactSourceActionId = op.prixActionId || op.rentrerActionId || op.sortirActionId || op.rentrerPrixActionId || op.mepActionId;
+  const _compactSourceAction = _compactSourceActionId ? actions.find(x => x.id === _compactSourceActionId) : null;
+  if (op.auto && op.type === 'PRIX_ROUGE' && _compactSourceAction && _compactSourceAction.releveId) {
     miniTags.push(`<span style="font-size:9px; padding:1px 5px; background:#22d3ee15; color:#22d3ee; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;" title="OP générée automatiquement depuis un relevé de prix concurrent">📊 Relevé</span>`);
   }
+  // Badge croisé : OP ↔ Prix Rouge liés au même produit
+  try {
+    var _opPids = op.produitIds || [];
+    if (_opPids.length > 0) {
+      if (op.type === 'PRIX_ROUGE') {
+        // Sur un PR, chercher les OP non-PR liées au même produit
+        var _linkedOps = ops.filter(function(o) { return o.id !== op.id && o.type !== 'PRIX_ROUGE' && !o._archived && (o.produitIds || []).some(function(pid) { return _opPids.indexOf(pid) >= 0; }); });
+        for (var _li = 0; _li < _linkedOps.length; _li++) {
+          var _lo = _linkedOps[_li];
+          var _loMeta = OP_TYPE_META[_lo.type] || {};
+          var _loIcon = _lo.type === 'COUP' ? '⚡' : (_loMeta.icon || '🎯');
+          var _loLabel = _lo.type === 'COUP' ? 'One-shot' : (_loMeta.label || _lo.type);
+          miniTags.push('<span style="font-size:9px; padding:1px 5px; background:#fcd34d15; color:#fcd34d; border:1px solid #fcd34d40; border-radius:3px; font-weight:600; white-space:nowrap;">' + _loIcon + ' ' + _loLabel + '</span>');
+        }
+      } else {
+        // Sur une OP non-PR, chercher les PR liés au même produit
+        var _linkedPRs = ops.filter(function(o) { return o.id !== op.id && o.type === 'PRIX_ROUGE' && !o._archived && (o.produitIds || []).some(function(pid) { return _opPids.indexOf(pid) >= 0; }); });
+        if (_linkedPRs.length > 0) {
+          miniTags.push('<span style="font-size:9px; padding:1px 5px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;">🔴 Prix rouge</span>');
+        }
+      }
+    }
+  } catch(e) { console.warn('sister badge err', e); }
   if (mecaMeta) miniTags.push(`<span style="font-size:9px; color:#67e8f9;" title="${mecaMeta.desc || ''}">⚙ ${mecaMeta.label}</span>`);
   if (op.partenaire) miniTags.push(`<span style="font-size:9px; color:#fcd34d;" title="Partenaire">🤝 ${op.partenaire}</span>`);
   if (op.challenge)  miniTags.push(`<span style="font-size:9px; color:#fda4af;" title="Challenge">🏆</span>`);
@@ -14428,30 +14459,38 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
 
   // Alerte désinstallation : OP terminée mais pas encore désinstallée sur toutes les boutiques
   const _needsDesinstall = timeStatus === 'TERMINEE' && !isOpFullyDesinstalled(op);
-  if (_needsDesinstall) {
-    // Compter les boutiques restantes
-    const _desinstShops = SHOPS.filter(sh => !(op.etats && op.etats[sh] && op.etats[sh].steps && op.etats[sh].steps.desinstallation));
-    const _desinstLabel = _desinstShops.map(sh => SHOP_LABELS[sh][0]).join('');
-    miniTags.push(`<span style="font-size:9px; padding:1px 6px; background:#ef444430; color:#fca5a5; border:1px solid #ef444480; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;" title="À désinstaller dans : ${_desinstShops.map(sh => SHOP_LABELS[sh]).join(', ')}">🔻 Désinstaller (${_desinstLabel})</span>`);
-  }
+  // (badge désinstallation rendu séparément hors du filtre grisé)
 
-  // Opacité : terminée non désinstallée = plus visible (alerte), terminée désinstallée = grisé
+  // Opacité : terminée = grisé, à venir = légèrement transparent
   let opacity = 1;
-  if (timeStatus === 'TERMINEE') opacity = _needsDesinstall ? 0.85 : 0.45;
+  const _compactIsTerminee = timeStatus === 'TERMINEE';
+  if (_compactIsTerminee) opacity = _needsDesinstall ? 0.5 : 0.35;
   else if (timeStatus === 'A_VENIR') opacity = 0.75;
+  const _compactGreyStyle = _compactIsTerminee ? 'opacity:' + opacity + '; filter:saturate(0.3);' : 'opacity:' + opacity + ';';
 
   const campagneHtml = (() => { const nom = getCampagneLabel(op.campagneId); if (!nom) return ''; const w = getCampagneWindow(op.campagneId); const out = isOpOutsideCampagne(op); const wLbl = w ? ` (${fmtFR(w.dateDebut) || '?'} → ${fmtFR(w.dateFin) || '?'})` : ''; const warn = out.outside ? `<span style="font-size:9px; padding:1px 5px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-weight:700;" title="Hors fenêtre : ${out.reason}">⚠</span>` : ''; return `<span style="font-size:9px; padding:1px 6px; background:#f59e0b20; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; font-weight:600;" title="Campagne${wLbl}">📣 ${nom}</span>${warn}`; })();
   const productHtml = (() => { const d = getOpProductDisplay(op); const famBadge = (!d.isKit && d.famille) ? `<span style="font-size:9px; padding:1px 5px; background:${d.famille.color}20; color:${d.famille.color}; border:1px solid ${d.famille.color}50; border-radius:3px; font-weight:600;" title="${d.famille.label}">${d.famille.icon}</span>` : ''; const pdBadge = d.isPd ? `<span style="font-size:9px; padding:1px 6px; background:#06b6d422; color:#22d3ee; border:1px solid #06b6d450; border-radius:3px; font-weight:600;">🔩 PD</span>` : ''; return `${famBadge}${pdBadge}<span style="font-size:11.5px; color:${d.color}; font-weight:700;">${d.label}</span>`; })();
 
+  // Badge désinstallation séparé (hors du filtre grisé, sur la même ligne)
+  let _desinstBadgeHtml = '';
+  if (_needsDesinstall) {
+    const _dShops = SHOPS.filter(sh => !(op.etats && op.etats[sh] && op.etats[sh].steps && op.etats[sh].steps.desinstallation));
+    const _dLabel = _dShops.map(sh => SHOP_LABELS[sh]).join(', ');
+    _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#ef444430; color:#fca5a5; border:1px solid #ef444480; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller — ' + _dLabel + '</span>';
+  }
+
   return `<div id="opCard-${op.id}" onclick="toggleOpExpand('${op.id}')" title="Cliquer pour voir le détail / cocher les étapes"
-    style="background:#1e293b; border:1px solid ${meta.color}30; border-radius:4px; padding:6px 10px; margin-bottom:4px; cursor:pointer; display:grid; grid-template-columns:14px 90px minmax(0,1fr) minmax(0,1.2fr) 140px 80px 66px; align-items:center; gap:6px; opacity:${opacity};">
-    <span style="color:${meta.color}; font-size:11px; font-weight:700;">▸</span>
-    <span style="font-size:9.5px; padding:1px 6px; background:${meta.color}25; color:${meta.color}; border-radius:3px; font-weight:700; letter-spacing:0.3px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${meta.label}</span>
-    <span style="display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">${productHtml}</span>
-    <span style="display:flex; align-items:center; gap:6px; overflow:hidden; white-space:nowrap;">${campagneHtml} ${miniTagsHtml}</span>
-    <span style="font-size:10px; color:${timeMeta.color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${timePhrase}</span>
-    <span style="text-align:center;">${timeBadge}</span>
-    <span style="display:inline-flex; gap:3px; justify-content:center;">${shopDots}</span>
+    style="background:${_compactIsTerminee ? '#151c2a' : '#1e293b'}; border:1px solid ${meta.color}30; border-radius:4px; padding:6px 10px; margin-bottom:4px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+    <div style="flex:1; min-width:0; display:grid; grid-template-columns:14px 90px minmax(0,1fr) minmax(0,1.2fr) 140px 80px 66px; align-items:center; gap:6px; ${_compactIsTerminee ? 'opacity:' + opacity + '; filter:saturate(0.3);' : (opacity < 1 ? 'opacity:' + opacity + ';' : '')}">
+      <span style="color:${meta.color}; font-size:11px; font-weight:700;">▸</span>
+      <span style="font-size:9.5px; padding:1px 6px; background:${meta.color}25; color:${meta.color}; border-radius:3px; font-weight:700; letter-spacing:0.3px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${meta.label}</span>
+      <span style="display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">${productHtml}</span>
+      <span style="display:flex; align-items:center; gap:6px; overflow:hidden; white-space:nowrap;">${campagneHtml} ${miniTagsHtml}</span>
+      <span style="font-size:10px; color:${timeMeta.color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${timePhrase}</span>
+      <span style="text-align:center;">${timeBadge}</span>
+      <span style="display:inline-flex; gap:3px; justify-content:center;">${shopDots}</span>
+    </div>
+    ${_desinstBadgeHtml}
   </div>`;
 }
 
@@ -14538,6 +14577,8 @@ function renderOpEditPanel(op) {
         <select onchange="event.stopPropagation(); setPieceType('${op.id}','${p.id}', this.value)" style="padding:3px 6px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:3px; font-size:10.5px;">${typeOpts}</select>
         <select onchange="event.stopPropagation(); setPieceSource('${op.id}','${p.id}', this.value)" style="padding:3px 6px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:3px; font-size:10.5px;">${sourceOpts}</select>
         <input type="text" value="${(p.libelle || '').replace(/"/g, '&quot;')}" placeholder="Libellé (optionnel)" onchange="event.stopPropagation(); setPieceLibelle('${op.id}','${p.id}', this.value)" style="flex:1; min-width:100px; padding:3px 6px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:3px; font-size:10.5px;">
+        <span onclick="event.stopPropagation(); movePiece('${op.id}','${p.id}',-1)" style="cursor:pointer; font-size:10px; padding:2px 5px; background:#33415520; color:#94a3b8; border:1px solid #334155; border-radius:3px;" title="Monter">▲</span>
+        <span onclick="event.stopPropagation(); movePiece('${op.id}','${p.id}',1)" style="cursor:pointer; font-size:10px; padding:2px 5px; background:#33415520; color:#94a3b8; border:1px solid #334155; border-radius:3px;" title="Descendre">▼</span>
         <span onclick="event.stopPropagation(); removePiece('${op.id}','${p.id}')" style="cursor:pointer; font-size:11px; padding:2px 6px; background:#ef444415; color:#fca5a5; border:1px solid #ef444450; border-radius:3px;" title="Supprimer cette pièce">✕</span>
       </div>
       ${affBlock}
@@ -14703,7 +14744,7 @@ function setOpCommanderProduits(opId, checked) {
 function defaultSourceForPieceType(type) {
   if (type === 'ETIQUETTE_FREETOUCH' || type === 'ETIQUETTE_PRIX_BARRE' || type === 'ETIQUETTE_SPECIALE') return 'freetouch';
   if (type === 'BAC_A_FOUILLE') return 'stock';
-  if (['AFFICHE_A3','AFFICHE_A4','XBANNER','KAKEMONO','VIDEO_ECRAN','SMS_CLIENT','MAIL_CLIENT','RESEAUX_SOCIAUX','SITE_WEB'].includes(type)) return 'custom';
+  if (['AFFICHE_A3','AFFICHE_A4','AFFICHE_A5','XBANNER','KAKEMONO','VIDEO_ECRAN','SMS_CLIENT','MAIL_CLIENT','RESEAUX_SOCIAUX','SITE_WEB'].includes(type)) return 'custom';
   return 'fournie';
 }
 function addPieceToOp(opId, pieceType) {
@@ -14723,6 +14764,18 @@ function removePiece(opId, pieceId) {
   // Purge des steps associés
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
+}
+function movePiece(opId, pieceId, dir) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const op = ops.find(o => o.id === opId); if (!op) return;
+  const idx = op.pieces.findIndex(p => p.id === pieceId);
+  if (idx < 0) return;
+  const newIdx = idx + dir;
+  if (newIdx < 0 || newIdx >= op.pieces.length) return;
+  const tmp = op.pieces[idx];
+  op.pieces[idx] = op.pieces[newIdx];
+  op.pieces[newIdx] = tmp;
+  saveData(); renderOps && renderOps();
 }
 function setPieceType(opId, pieceId, newType) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
