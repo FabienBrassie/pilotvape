@@ -511,6 +511,33 @@ function logAction(action, detail) {
   if (auditLog.length > AUDIT_LOG_MAX) auditLog = auditLog.slice(-AUDIT_LOG_MAX);
   // Le journal est sauvegardé avec les données partagées (dans saveData)
 }
+// Helpers pour logs lisibles
+function _logProdName(prodId) {
+  var k = baseKits.find(function(x) { return x.id === prodId; });
+  if (k) return k.marque + ' ' + k.modele;
+  var l = baseLiq.find(function(x) { return x.id === prodId; });
+  if (l) return l.marque + ' ' + (l.gamme || l.modele || '');
+  var p = basePD.find(function(x) { return x.id === prodId; });
+  if (p) return p.marque + ' ' + (p.modele || '');
+  return prodId || '?';
+}
+function _logActionLabel(actionId) {
+  var a = actions.find(function(x) { return x.id === actionId; });
+  if (!a) return actionId;
+  var type = a.type || '?';
+  var prod = _logProdName(a.produitId);
+  return type.toLowerCase() + ' ' + prod;
+}
+function _logShopName(sh) {
+  return SHOP_LABELS[sh] || sh;
+}
+function _logOpLabel(opId) {
+  var op = ops.find(function(x) { return x.id === opId; });
+  if (!op) return opId;
+  var d = getOpProductDisplay(op);
+  var meta = OP_TYPE_META[op.type] || {};
+  return (meta.label || op.type) + ' — ' + d.label;
+}
 
 function renderJournal() {
   const container = document.getElementById('journalContent');
@@ -2094,7 +2121,7 @@ function computeOpShopStepDefs(op, shop) {
 function toggleOpGlobalStep(opId, stepKey, checked) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
-  logAction('Étape globale OP', opId + ' ' + stepKey + ' ' + checked);
+  logAction('Étape globale OP', (checked ? '✓' : '✕') + ' ' + stepKey + ' sur ' + _logOpLabel(opId));
   ensureOpModel(op);
   if (!op.progress) op.progress = { global: {} };
   if (!op.progress.global) op.progress.global = {};
@@ -3781,7 +3808,7 @@ function toggleOpStep(opId, shop, stepKey, checked) {
   ensureOpSteps(op);
   const st = op.etats[shop];
   if (!st) return;
-  logAction('Étape OP cochée/décochée', opId + ' ' + shop + ' ' + stepKey + ' ' + checked);
+  logAction('Étape OP', _logShopName(shop) + ' → ' + (checked ? '✓' : '✕') + ' ' + stepKey + ' sur ' + _logOpLabel(opId));
   st.steps[stepKey] = !!checked;
   // Synchro .done = true ssi toutes les steps sont cochées
   st.done = opAllStepsDone(op, shop);
@@ -4373,7 +4400,7 @@ function toggleActionStep(actionId, shop, stepKey) {
   ensureActionSteps(a);
   const st = a.etats[shop];
   if (!st) return;
-  logAction('Action étape boutique', actionId + ' ' + shop + ' ' + stepKey);
+  logAction('Étape cochée', _logShopName(shop) + ' → ' + stepKey + ' sur ' + _logActionLabel(actionId));
   if (!st.steps) st.steps = makeStepMap(a);
   st.steps[stepKey] = !st.steps[stepKey];
   _applyActionShopChange(a, shop);
@@ -4394,7 +4421,7 @@ function toggleActionShop(actionId, shop) {
   ensureActionSteps(a);
   const st = a.etats[shop];
   if (!st) { console.warn('[toggleActionShop] etats manquant pour shop:', shop, 'action:', actionId); return; }
-  logAction('Action boutique bascule', actionId + ' ' + shop);
+  logAction('Action validée', _logShopName(shop) + ' → ' + _logActionLabel(actionId));
   const defs = getActionSteps(a);
   const allDone = defs.every(d => st.steps && st.steps[d.key] === true);
   defs.forEach(d => { if (!st.steps) st.steps = {}; st.steps[d.key] = !allDone; });
@@ -12711,7 +12738,7 @@ function submitNewOp() {
   seedOpDefaults(newOp);
   ensureOpSteps(newOp);
   pushOpTraced(newOp, 'submitNewOp');
-  logAction('Nouvelle OP créée', type + ' ' + (produitLibre ? produitLibre.libelle : (produitIds[0] || 'unknown')));
+  logAction('Nouvelle OP', (OP_TYPE_META[type] || {}).label + ' — ' + (produitLibre ? produitLibre.libelle : _logProdName(produitIds[0])));
   // Reset des champs (on garde Type et Campagne pour enchaîner les vagues d'une même campagne)
   ['opKit','opDateFin','opComment','opLibreLibelle','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment','opMecaType','opMecaDescription','opPartenaire'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
@@ -12737,7 +12764,7 @@ function closeOp(id) {
   const op = ops.find(o => o.id === id);
   if (!op) return;
   if (op.auto) { pvAlert('OP auto — clôturée via l\'action PRIX associée.'); return; }
-  logAction('Clôture OP', id + ' manual');
+  logAction('Clôture OP', _logOpLabel(id) + ' (manuelle)');
   op.dateFin = ymd(new Date());
   saveData();
   renderOps();
@@ -12781,7 +12808,7 @@ async function quickAttachCampagne(opId) {
     }
   }
   op.campagneId = campagne.id;
-  logAction('OP rattachée campagne', opId + ' ' + campagne.nom);
+  logAction('OP rattachée campagne', _logOpLabel(opId) + ' → 📣 ' + campagne.nom);
   // Proposer d'aligner les dates de l'OP sur celles de la campagne
   if (campagne.dateDebut || campagne.dateFin) {
     const campDates = `${campagne.dateDebut ? fmtFR(campagne.dateDebut) : '?'} → ${campagne.dateFin ? fmtFR(campagne.dateFin) : '?'}`;
@@ -13621,7 +13648,7 @@ function executeOpClosure(opId, motif, params) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
   if (op.dateFin) { pvAlert('OP déjà clôturée.'); return; }
-  logAction('Clôture OP', opId + ' ' + motif);
+  logAction('Clôture OP', _logOpLabel(opId) + ' — ' + motif);
   const today = ymd(new Date());
   const kit = baseKits.find(k => k.id === (op.produitIds || [])[0]);
   params = params || {};
@@ -14676,7 +14703,7 @@ function setOpChallenge(opId, v) {
 async function setOpDateDebut(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
-  logAction('Date début OP modifiée', opId + ' ' + v);
+  logAction('Date début OP', _logOpLabel(opId) + ' → ' + v);
   if (v) op.dateDebut = v;
   // Sync sibling one-shot ↔ PR : proposer d'aligner la date de début
   const sibling = _findOneShotSibling(op);
@@ -14690,7 +14717,7 @@ async function setOpDateDebut(opId, v) {
 async function setOpDateFin(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
-  logAction('Date fin OP modifiée', opId + ' ' + v);
+  logAction('Date fin OP', _logOpLabel(opId) + ' → ' + v);
   op.dateFin = v || null;
   // Sync sibling one-shot ↔ PR : proposer d'aligner la date de fin
   const sibling = _findOneShotSibling(op);
