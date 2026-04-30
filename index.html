@@ -6024,7 +6024,18 @@ async function _saveToSupabase(payload, _retryCount) {
         if (payload.propositionsLiq) payload.propositionsLiq = _mergeArray(payload.propositionsLiq, remote.propositionsLiq, 'id');
         if (payload.propositionsPD) payload.propositionsPD = _mergeArray(payload.propositionsPD, remote.propositionsPD, 'id');
         if (payload.campagnes) payload.campagnes = _mergeArray(payload.campagnes, remote.campagnes, 'id');
-        // 4. Prendre le max des compteurs d'ID pour éviter les collisions
+        // 4. Fusionner l'auditLog distant (dédoublonnage par ts+action+detail)
+        if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
+          const _logKeys = new Set(payload.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
+          remote.auditLog.forEach(e => {
+            var k = e.ts + '|' + e.action + '|' + e.detail;
+            if (!_logKeys.has(k)) { payload.auditLog.push(e); _logKeys.add(k); }
+          });
+          payload.auditLog.sort((a, b) => a.ts.localeCompare(b.ts));
+          if (payload.auditLog.length > AUDIT_LOG_MAX) payload.auditLog = payload.auditLog.slice(-AUDIT_LOG_MAX);
+          auditLog = payload.auditLog; // mettre à jour la variable globale aussi
+        }
+        // 5. Prendre le max des compteurs d'ID pour éviter les collisions
         if (typeof remote.nextActionId === 'number') payload.nextActionId = Math.max(payload.nextActionId || 0, remote.nextActionId);
         if (typeof remote.nextOpId === 'number') payload.nextOpId = Math.max(payload.nextOpId || 0, remote.nextOpId);
         if (typeof remote.nextReleveId === 'number') payload.nextReleveId = Math.max(payload.nextReleveId || 0, remote.nextReleveId);
@@ -6087,6 +6098,18 @@ function _startAutoSync() {
       _mergeArray(actions, remote.actions, 'id'); // nouvelles actions distantes
       _mergeArray(ops, remote.ops, 'id'); // nouvelles OPs distantes
       if (baseKits.length !== bk || baseLiq.length !== bl || basePD.length !== bp) changed = true;
+      // Fusionner auditLog distant
+      if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
+        const _prevLogLen = auditLog.length;
+        const _logKeys = new Set(auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
+        remote.auditLog.forEach(e => {
+          var k = e.ts + '|' + e.action + '|' + e.detail;
+          if (!_logKeys.has(k)) { auditLog.push(e); _logKeys.add(k); }
+        });
+        auditLog.sort((a, b) => a.ts.localeCompare(b.ts));
+        if (auditLog.length > AUDIT_LOG_MAX) auditLog = auditLog.slice(-AUDIT_LOG_MAX);
+        if (auditLog.length !== _prevLogLen) changed = true;
+      }
       // Max des compteurs
       if (typeof remote.nextActionId === 'number') nextActionId = Math.max(nextActionId, remote.nextActionId);
       if (typeof remote.nextOpId === 'number') nextOpId = Math.max(nextOpId, remote.nextOpId);
@@ -6094,7 +6117,7 @@ function _startAutoSync() {
       if (changed) {
         console.log('[AUTO-SYNC] Changements distants intégrés');
         // Sauvegarder localement (données fusionnées en mémoire)
-        localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds)}));
+        localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
         // Pas de re-render automatique pour ne pas interrompre la navigation.
         // Afficher un bandeau discret invitant l'utilisateur à rafraîchir quand il est prêt.
         if (!document.getElementById('syncBanner')) {
