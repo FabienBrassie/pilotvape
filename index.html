@@ -4956,7 +4956,7 @@ function restoreUiState() {
     if (s.liqFilterProfil) { const el = document.getElementById('liqFilterProfil'); if (el) el.value = s.liqFilterProfil; }
     if (s.liqFilterRole) { const el = document.getElementById('liqFilterRole'); if (el) el.value = s.liqFilterRole; }
     if (s.liqFilterStatut) { const el = document.getElementById('liqFilterStatut'); if (el) el.value = s.liqFilterStatut; }
-    if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) { el.value = isAdmin() ? s.liqViewMode : 'grille'; } }
+    if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) { el.value = isAdmin() ? s.liqViewMode : 'liste'; } }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
     if (s.liqSortDir) liqSortDir = s.liqSortDir;
     // Kits
@@ -4965,7 +4965,7 @@ function restoreUiState() {
     if (s.kitFilterProfil) { const el = document.getElementById('filterProfil'); if (el) el.value = s.kitFilterProfil; }
     if (s.kitFilterRole) { const el = document.getElementById('filterRole'); if (el) el.value = s.kitFilterRole; }
     if (s.kitFilterStatut) { const el = document.getElementById('filterStatut'); if (el) el.value = s.kitFilterStatut; }
-    if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) { el.value = isAdmin() ? s.kitSort : 'tirage'; } }
+    if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) { el.value = isAdmin() ? s.kitSort : 'case'; } }
     if (s.kitSortCol) kitSortCol = s.kitSortCol;
     if (typeof s.kitSortDir === 'number') kitSortDir = s.kitSortDir;
     if (s.kitSubSort) { const el = document.getElementById('kitSubSort'); if (el) el.value = s.kitSubSort; }
