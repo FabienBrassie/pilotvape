@@ -490,6 +490,7 @@ function hashPin(pin) {
   return sha256(pin);
 }
 let currentRole = localStorage.getItem('pv_role') || ''; // 'admin' | 'boutique' | ''
+let currentShop = localStorage.getItem('pv_shop') || ''; // 'pessac' | 'merignac' | 'langon' | ''
 
 // ============================================================================
 // JOURNAL D'ACTIVITÉ (audit log) — visible admin uniquement
@@ -501,9 +502,11 @@ const AUDIT_LOG_MAX = 500;
 let auditLog = [];
 
 function logAction(action, detail) {
+  var roleLabel = currentRole || '?';
+  if (currentRole === 'boutique' && currentShop) roleLabel = SHOP_LABELS[currentShop] || currentShop;
   const entry = {
     ts: new Date().toISOString(),
-    role: currentRole || '?',
+    role: roleLabel,
     action: action,
     detail: detail || ''
   };
@@ -583,7 +586,8 @@ function renderJournal() {
     <select onchange="_journalRoleFilter=this.value; renderJournal();" style="padding:4px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:3px; font-size:11px;">
       <option value="" ${!roleFilter ? 'selected' : ''}>Tous les rôles</option>
       <option value="admin" ${roleFilter === 'admin' ? 'selected' : ''}>Admin</option>
-      <option value="boutique" ${roleFilter === 'boutique' ? 'selected' : ''}>Boutique</option>
+      ${SHOPS.map(sh => '<option value="' + SHOP_LABELS[sh] + '" ' + (roleFilter === SHOP_LABELS[sh] ? 'selected' : '') + '>' + SHOP_LABELS[sh] + '</option>').join('')}
+      <option value="boutique" ${roleFilter === 'boutique' ? 'selected' : ''}>Boutique (ancien)</option>
     </select>
     <select onchange="_journalActionFilter=this.value; renderJournal();" style="padding:4px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:3px; font-size:11px;">
       <option value="" ${!actionFilter ? 'selected' : ''}>Toutes les actions</option>
@@ -639,7 +643,17 @@ function isAdmin() { return currentRole === 'admin'; }
 
 function showLoginScreen() {
   // Si déjà loggé, ne rien faire
-  if (currentRole === 'admin' || currentRole === 'boutique') { applyRoleUI(); return; }
+  if (currentRole === 'admin') { applyRoleUI(); return; }
+  if (currentRole === 'boutique' && currentShop) { applyRoleUI(); return; }
+  if (currentRole === 'boutique' && !currentShop) {
+    // Boutique connectée mais shop pas encore choisi → forcer la sélection
+    const overlay = document.createElement('div');
+    overlay.id = 'loginOverlay';
+    overlay.style.cssText = 'position:fixed; inset:0; z-index:99999; display:flex; align-items:center; justify-content:center; background:#0f172a;';
+    document.body.appendChild(overlay);
+    _showShopPicker();
+    return;
+  }
   const overlay = document.createElement('div');
   overlay.id = 'loginOverlay';
   overlay.style.cssText = 'position:fixed; inset:0; z-index:99999; display:flex; align-items:center; justify-content:center; background:#0f172a;';
@@ -674,9 +688,25 @@ function loginAsBoutique() {
     document.getElementById('loginError').textContent = 'PIN boutique incorrect';
     return;
   }
+  // Demander quelle boutique
+  _showShopPicker();
+}
+function _showShopPicker() {
+  const ov = document.getElementById('loginOverlay');
+  if (!ov) return;
+  ov.innerHTML = '<div style="text-align:center; max-width:360px;">'
+    + '<h2 style="color:#f1f5f9; font-size:20px; margin-bottom:16px;">Quelle boutique ?</h2>'
+    + SHOPS.map(function(sh) {
+        return '<button onclick="_selectShop(\'' + sh + '\')" style="display:block; width:100%; margin:8px 0; padding:14px 20px; background:' + SHOP_COLORS[sh] + '25; color:' + SHOP_COLORS[sh] + '; border:2px solid ' + SHOP_COLORS[sh] + '; border-radius:8px; font-size:16px; font-weight:700; cursor:pointer;">' + SHOP_LABELS[sh] + '</button>';
+      }).join('')
+    + '</div>';
+}
+function _selectShop(shop) {
   currentRole = 'boutique';
+  currentShop = shop;
   localStorage.setItem('pv_role', 'boutique');
-  logAction('Connexion', 'boutique');
+  localStorage.setItem('pv_shop', shop);
+  logAction('Connexion', SHOP_LABELS[shop]);
   const ov = document.getElementById('loginOverlay');
   if (ov) ov.remove();
   applyRoleUI();
@@ -699,7 +729,9 @@ function loginAsAdmin() {
 
 function logout() {
   currentRole = '';
+  currentShop = '';
   localStorage.removeItem('pv_role');
+  localStorage.removeItem('pv_shop');
   location.reload();
 }
 
@@ -724,10 +756,12 @@ function applyRoleUI() {
       badge.style.color = '#4ade80';
       badge.style.border = '1px solid #22c55e60';
     } else {
-      badge.textContent = 'BOUTIQUE';
-      badge.style.background = '#3b82f630';
-      badge.style.color = '#60a5fa';
-      badge.style.border = '1px solid #3b82f660';
+      var _shopLabel = currentShop ? SHOP_LABELS[currentShop] : 'BOUTIQUE';
+      var _shopCol = currentShop ? SHOP_COLORS[currentShop] : '#3b82f6';
+      badge.textContent = _shopLabel;
+      badge.style.background = _shopCol + '30';
+      badge.style.color = _shopCol;
+      badge.style.border = '1px solid ' + _shopCol + '60';
     }
   }
   // Masquer les éléments admin-only
