@@ -2996,6 +2996,17 @@ function archiveOldData() {
   const cutoff90 = ymd(_90d);
   let countArchived = 0, countPurged = 0;
 
+  // Désarchiver les OPs de campagnes encore actives (correction rétroactive)
+  ops.forEach(op => {
+    if (!op._archived || !op.campagneId) return;
+    const campSiblings = ops.filter(o => o.id !== op.id && o.campagneId === op.campagneId);
+    const campStillActive = campSiblings.some(o => !o._archived && (opTimeStatus(o) !== 'TERMINEE' || !isOpFullyDesinstalled(o)));
+    if (campStillActive) {
+      op._archived = false;
+      console.log('[ARCHIVE] Désarchivage OP', op.id, '— campagne encore active');
+    }
+  });
+
   // Archiver les actions terminées (FAIT ou annulées) > 15 jours
   actions.forEach(a => {
     if (a._archived) return;
@@ -3008,13 +3019,21 @@ function archiveOldData() {
     }
   });
 
-  // Archiver les OPs fermées > 15 jours — SEULEMENT si désinstallée sur toutes les boutiques
+  // Archiver les OPs fermées > 15 jours — SEULEMENT si :
+  //  - désinstallée sur toutes les boutiques
+  //  - ET pas dans une campagne encore active (on garde l'OP visible tant que la campagne tourne)
   ops.forEach(op => {
     if (op._archived) return;
     if (!op.dateFin) return;
     if (op.dateFin > cutoff15) return;
     // Bloquer l'archivage si la désinstallation n'est pas validée sur toutes les boutiques
     if (!isOpFullyDesinstalled(op)) return;
+    // Bloquer l'archivage si l'OP fait partie d'une campagne encore active
+    if (op.campagneId) {
+      const campSiblings = ops.filter(o => o.id !== op.id && o.campagneId === op.campagneId && !o._archived);
+      const campStillActive = campSiblings.some(o => opTimeStatus(o) !== 'TERMINEE' || !isOpFullyDesinstalled(o));
+      if (campStillActive) return; // campagne pas finie → on ne touche pas
+    }
     op._archived = true;
     countArchived++;
   });
@@ -3043,6 +3062,11 @@ function archiveOldData() {
   ops = ops.filter(o => {
     if (!o._archived) return true;
     if (!o.dateFin || o.dateFin > cutoff90) return true;
+    // Ne pas purger si la campagne est encore active
+    if (o.campagneId) {
+      const _cSibs = ops.filter(s => s.id !== o.id && s.campagneId === o.campagneId && !s._archived);
+      if (_cSibs.length > 0) return true;
+    }
     return false;
   });
   countPurged += (beforeOps - ops.length);
@@ -3132,6 +3156,23 @@ function syncAutoActions() {
     // FIN_DE_VIE : pas d'action SORTIR, le produit s'écoule. Apparaît dans Besoins à combler.
     if (pd.statutVie === 'A_RENTRER') ensureActionForPd(pd, 'RENTRER');
     cleanupActionsForPd(pd);
+  });
+  // Auto-lien remplaceId : un kit A_RENTRER sans remplaceId qui partage exactement
+  // la même case technique (profil + caseTech + rôle) qu'un kit à sortir → lien automatique.
+  // Ne lie que s'il n'y a qu'un seul candidat évident (sinon on laisse l'admin choisir).
+  baseKits.forEach(function(kR) {
+    if (kR.statutVie !== 'A_RENTRER' || kR.remplaceId || kR.oneShot) return;
+    var sortants = baseKits.filter(function(kS) {
+      return kS.id !== kR.id && ['A_SORTIR', 'FIN_DE_VIE', 'A_REMPLACER'].includes(kS.statutVie)
+        && !kS.oneShot && _kitsShareCell(kS, kR);
+    });
+    if (sortants.length === 1) {
+      kR.remplaceId = sortants[0].id;
+      console.log('[AUTO-REMPLACE] ' + kR.marque + ' ' + kR.modele + ' remplace ' + sortants[0].marque + ' ' + sortants[0].modele);
+      // Synchroniser aussi le replaceParId sur l'action SORTIR
+      var sortirA = actions.find(function(a) { return a.type === 'SORTIR' && !a.annulee && a.produitId === sortants[0].id; });
+      if (sortirA && !sortirA.replaceParId) sortirA.replaceParId = kR.id;
+    }
   });
   syncMiseEnPlaceActions();
   syncPriceActions();
@@ -7215,8 +7256,8 @@ async function updateKitField(id, field, val) {
       kit[field] = val;
     }
     syncKitToProp(kit);
-    // Si le PV/PA change, le verdict concurrent change aussi → resynchroniser les actions auto.
-    if (field === 'pv' || field === 'pa') {
+    // Si le PV/PA/profil/rôle change → resynchroniser les actions auto (verdict, auto-remplace, etc.)
+    if (['pv', 'pa', 'profilChoisi', 'roleChoisi'].includes(field)) {
       if (typeof syncAutoActions === 'function') syncAutoActions();
     }
     // Popup : proposer une action PRIX dans le dashboard quand le PV change
@@ -10195,6 +10236,18 @@ function renderDashboard() {
           const _lkColorDim = _lkLeaving ? '#f8717188' : '#64748b';
           const _lkSuffix = _lkLeaving ? '' : ' <em style="font-weight:normal; color:#64748b;">(encore en offre)</em>';
           subtitleRow2 = `<span style="color:#94a3b8;">← remplace <span style="font-weight:400; color:${_lkColorDim};">${linkedKit.marque}</span> <strong style="color:${_lkColor};">${linkedKit.modele}</strong>${_lkSuffix}</span>`;
+        } else if (kit && kit.remplaceId) {
+          var _rkFallback = baseKits.find(function(k) { return k.id === kit.remplaceId; });
+          if (_rkFallback) {
+            var _rkSv = _rkFallback.statutVie || 'DANS_OFFRE';
+            var _rkLeaving = ['A_SORTIR','FIN_DE_VIE','SORTI'].includes(_rkSv);
+            var _rkColor = _rkLeaving ? '#f87171' : '#94a3b8';
+            var _rkColorDim = _rkLeaving ? '#f8717188' : '#64748b';
+            var _rkSuffix = _rkLeaving ? '' : ' <em style="font-weight:normal; color:#64748b;">(encore en offre)</em>';
+            subtitleRow2 = `<span style="color:#94a3b8;">← remplace <span style="font-weight:400; color:${_rkColorDim};">${_rkFallback.marque}</span> <strong style="color:${_rkColor};">${_rkFallback.modele}</strong>${_rkSuffix}</span>`;
+          } else {
+            subtitleRow2 = `<span style="color:#64748b; font-style:italic;">case à pourvoir</span>`;
+          }
         } else {
           subtitleRow2 = `<span style="color:#64748b; font-style:italic;">case à pourvoir</span>`;
         }
@@ -10410,13 +10463,18 @@ function renderDashboard() {
             // Kits : remplaceId existant OU inverse replaceParId
             const currentRempl = kit.remplaceId || _invProdId || '';
             const sortants = baseKits.filter(k => ['A_SORTIR','FIN_DE_VIE','A_REMPLACER'].includes(k.statutVie));
+            // Trier : même case technique en premier
+            const _sameCellSortants = sortants.filter(s => typeof _kitsShareCell === 'function' && _kitsShareCell(kit, s));
+            const _otherSortants = sortants.filter(s => _sameCellSortants.indexOf(s) < 0);
             const linkedRempl = currentRempl ? baseKits.find(k => k.id === currentRempl) : null;
             const showsLinked = linkedRempl && !sortants.some(s => s.id === linkedRempl.id);
             const _isInverse = !kit.remplaceId && _invProdId;
             const extraOpt = showsLinked
               ? `<option value="${linkedRempl.id}" selected>${linkedRempl.marque} — ${linkedRempl.modele} (déjà ${STATUT_LABELS[linkedRempl.statutVie]||linkedRempl.statutVie})</option>`
               : '';
-            const opts = sortants.map(s => `<option value="${s.id}" ${currentRempl === s.id ? 'selected' : ''}>${s.marque} — ${s.modele}</option>`).join('');
+            const _sameCellOpts = _sameCellSortants.map(s => `<option value="${s.id}" ${currentRempl === s.id ? 'selected' : ''}>★ ${s.marque} — ${s.modele} (même case)</option>`).join('');
+            const _otherOpts = _otherSortants.map(s => `<option value="${s.id}" ${currentRempl === s.id ? 'selected' : ''}>${s.marque} — ${s.modele}</option>`).join('');
+            const opts = _sameCellOpts + _otherOpts;
             const orphanNote = showsLinked
               ? `<span style="font-size:10px; color:#f59e0b;">lien vers produit sorti</span>`
               : (currentRempl
@@ -11256,30 +11314,52 @@ function renderDashboard() {
     if (opTimeStatus(op) === 'TERMINEE') return false;
     return true;
   });
+  // Pour le Gantt : inclure aussi les OP terminées récentes (dans la fenêtre)
+  const _allVisibleOps = ops.filter(op => {
+    if (op._archived) return false;
+    if (!op.dateDebut) return false;
+    return true;
+  });
   const _opsInWindow = [];
   const _opsLater    = [];
-  _activeOps.forEach(op => {
+  _allVisibleOps.forEach(op => {
     const dDeb = op.dateDebut;
-    const dFinRaw = op.dateFin || op.dateDebut; // OP ponctuelle : 1 jour
-    const dFin = dFinRaw < dDeb ? dDeb : dFinRaw; // garde-fou dateFin inversée
-    // Chevauche la fenêtre si dFin >= windowStart && dDeb <= windowEnd.
+    const dFinRaw = op.dateFin || op.dateDebut;
+    const dFin = dFinRaw < dDeb ? dDeb : dFinRaw;
     if (dFin >= _windowStart && dDeb <= _windowEnd) _opsInWindow.push(op);
-    else if (dDeb > _windowEnd) _opsLater.push(op);
+    else if (dDeb > _windowEnd && opTimeStatus(op) !== 'TERMINEE') _opsLater.push(op);
   });
 
   // Compteurs d'alerte (pour les chips de header)
-  const _nbRetard = _opsInWindow.filter(op => {
+  const _opsInWindowActive = _opsInWindow.filter(op => opTimeStatus(op) !== 'TERMINEE');
+  const _opsRetard = _opsInWindowActive.filter(op => {
     const dFin = op.dateFin || op.dateDebut;
     return dFin < _today && !op.auto && op.type !== 'NATIONALE';
-  }).length;
-  const _nbImmNotReady = _opsInWindow.filter(op => opTimeStatus(op) === 'IMMINENTE' && opOverallProgress(op) < 0.5).length;
-  const _nbIncomplete  = _opsInWindow.filter(op => opTimeStatus(op) === 'EN_COURS'  && opOverallProgress(op) < 1).length;
+  });
+  const _opsImmNotReady = _opsInWindowActive.filter(op => opTimeStatus(op) === 'IMMINENTE' && opOverallProgress(op) < 0.5);
+  const _opsIncomplete  = _opsInWindowActive.filter(op => opTimeStatus(op) === 'EN_COURS'  && opOverallProgress(op) < 1);
   const _nbClotureSug  = ops.filter(op => op.closureSuggested).length;
 
+  // Helper : chip cliquable — si 1 seule OP, clic direct ; sinon clic sur la première + tooltip listant toutes
+  const _alertChip = (opsList, bgColor, textColor, borderColor, icon, label) => {
+    if (!opsList.length) return '';
+    const n = opsList.length;
+    const firstId = opsList[0].id;
+    const tipLines = opsList.map(op => {
+      const d = getOpProductDisplay(op);
+      const meta = OP_TYPE_META[op.type] || { label: op.type };
+      return meta.label + ' — ' + d.label;
+    }).join('&#10;');
+    return `<span onclick="event.stopPropagation(); switchTabProgrammatic('ops','${firstId}')"
+      title="${tipLines}"
+      style="font-size:10px; padding:2px 8px; background:${bgColor}; color:${textColor}; border:1px solid ${borderColor}; border-radius:3px; font-weight:700; cursor:pointer; transition:filter 0.15s;"
+      onmouseover="this.style.filter='brightness(1.3)'" onmouseout="this.style.filter='none'">${icon} ${n} ${label}</span>`;
+  };
+
   const _headerChips = [
-    _nbRetard      ? `<span style="font-size:10px; padding:2px 8px; background:#ef444422; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-weight:700;">⏰ ${_nbRetard} en retard</span>` : '',
-    _nbImmNotReady ? `<span style="font-size:10px; padding:2px 8px; background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b60; border-radius:3px; font-weight:700;">⚠ ${_nbImmNotReady} imminente${_nbImmNotReady > 1 ? 's' : ''} pas prête${_nbImmNotReady > 1 ? 's' : ''}</span>` : '',
-    _nbIncomplete  ? `<span style="font-size:10px; padding:2px 8px; background:#8b5cf622; color:#c4b5fd; border:1px solid #8b5cf660; border-radius:3px; font-weight:700;">● ${_nbIncomplete} en cours incomplète${_nbIncomplete > 1 ? 's' : ''}</span>` : '',
+    _alertChip(_opsRetard, '#ef444422', '#fca5a5', '#ef444460', '⏰', 'en retard'),
+    _alertChip(_opsImmNotReady, '#f59e0b22', '#fbbf24', '#f59e0b60', '⚠', _opsImmNotReady.length > 1 ? 'imminentes pas prêtes' : 'imminente pas prête'),
+    _alertChip(_opsIncomplete, '#8b5cf622', '#c4b5fd', '#8b5cf660', '●', _opsIncomplete.length > 1 ? 'en cours incomplètes' : 'en cours incomplète'),
     _nbClotureSug  ? `<span style="font-size:10px; padding:2px 8px; background:#06b6d422; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; font-weight:700;">💡 ${_nbClotureSug} clôture${_nbClotureSug > 1 ? 's' : ''} suggérée${_nbClotureSug > 1 ? 's' : ''}</span>` : ''
   ].filter(Boolean).join(' ');
 
@@ -11287,174 +11367,250 @@ function renderDashboard() {
     ? `<span style="font-size:10px; padding:2px 8px; background:#33415580; color:#cbd5e1; border:1px solid #475569; border-radius:3px;" title="Au-delà de ${_TIMELINE_DAYS_AFTER} jours">▸ ${_opsLater.length} plus tard</span>`
     : '';
 
-  // ---- HEATMAP DE DENSITÉ (1 barre verticale = 1 jour) ----------------------
-  // Codes couleurs par type d'OP : chaque barre est empilée en segments colorés,
-  // un par type présent ce jour-là. Au survol (title natif), on liste les OPs.
-  // La hauteur totale = densité (nb d'OPs actives), normalisée sur le max de la fenêtre.
-  const _dayOpsByType = new Array(_totalSpan).fill(null).map(() => ({}));
+  // ---- MINI-GANTT (1 ligne par OP/campagne, barres horizontales) ----------------------
+  // Chaque OP ou groupe-campagne = 1 barre horizontale positionnée selon ses dates.
+  // Les campagnes regroupent leurs OPs sur la même ligne (rayures).
+  // Algorithme de lanes (bin-packing) pour éviter les chevauchements.
+
+  // 1) Construire les "entries" : campagne groupée ou OP solo
+  const _ganttEntries = []; // { id, label, color, dateDebut, dateFin, isCamp, campId, ops[], pct, type, clickId }
+  const _campMap = new Map();
   _opsInWindow.forEach(op => {
+    if (op.campagneId) {
+      if (!_campMap.has(op.campagneId)) _campMap.set(op.campagneId, []);
+      _campMap.get(op.campagneId).push(op);
+    }
+  });
+  // Campagnes : stratégie différenciée
+  //  - OP NATIONALE en campagne → éclatée : 1 barre par OP, lanes réservées en bloc
+  //    exclusif (aucune autre OP ne peut apparaître dans ces lanes).
+  //    Bin-packing interne : si 2 OPs nationales ne se chevauchent pas elles partagent
+  //    la même lane → le bloc fait le minimum de lignes nécessaire.
+  //  - Toutes les autres campagnes → 1 seule barre groupée (rayures)
+  const _campLaneGroups = []; // { campId, nom, entries[], nbInternalLanes } — pour blocs exclusifs
+  _campMap.forEach((cOps, cId) => {
+    const nom = getCampagneLabel(cId) || 'Campagne';
+    // Est-ce une campagne contenant des NATIONALE ?
+    const hasNationale = cOps.some(o => o.type === 'NATIONALE');
+    if (hasNationale) {
+      // Éclater : 1 barre par OP, bin-packing interne pour minimiser les lanes
+      const sorted = cOps.slice().sort((a, b) => (a.dateDebut || '').localeCompare(b.dateDebut || ''));
+      const internalLanes = []; // chaque = dateFin du dernier élément placé
+      const groupEntries = [];
+      sorted.forEach(op => {
+        const meta = OP_TYPE_META[op.type] || { label: op.type, color: '#94a3b8' };
+        const d = getOpProductDisplay(op);
+        const dDeb = op.dateDebut;
+        const dFinRaw = op.dateFin || op.dateDebut;
+        const dFin = dFinRaw < dDeb ? dDeb : dFinRaw;
+        // Trouver la première lane interne libre
+        let iLane = -1;
+        for (let li = 0; li < internalLanes.length; li++) {
+          if (dDeb > internalLanes[li]) { iLane = li; break; }
+        }
+        if (iLane < 0) { iLane = internalLanes.length; internalLanes.push(''); }
+        internalLanes[iLane] = dFin;
+        const entry = {
+          id: op.id, label: d.label,
+          color: meta.color, dateDebut: dDeb, dateFin: dFin,
+          isCamp: false, campId: cId, campNom: nom, ops: [op], pct: opOverallProgress(op),
+          type: op.type, clickId: op.id,
+          typeLbl: meta.label,
+          _campGroup: cId,
+          _internalLane: iLane
+        };
+        groupEntries.push(entry);
+        _ganttEntries.push(entry);
+      });
+      _campLaneGroups.push({ campId: cId, nom: nom, entries: groupEntries, nbInternalLanes: internalLanes.length });
+    } else {
+      // Grouper en 1 seule barre (prix rouge, lancement groupé, etc.)
+      const cDeb = cOps.reduce((m, o) => (!m || o.dateDebut < m) ? o.dateDebut : m, null);
+      const cFinRaw = cOps.reduce((m, o) => { const f = o.dateFin || o.dateDebut; return (!m || f > m) ? f : m; }, null);
+      const cFin = cFinRaw < cDeb ? cDeb : cFinRaw;
+      const avgPct = cOps.reduce((s, o) => s + opOverallProgress(o), 0) / cOps.length;
+      // Type dominant (pour la couleur)
+      const tc = {}; cOps.forEach(o => { tc[o.type] = (tc[o.type]||0)+1; });
+      const domType = Object.entries(tc).sort((a,b) => b[1]-a[1])[0][0];
+      const meta = OP_TYPE_META[domType] || { label: domType, color: '#94a3b8' };
+      _ganttEntries.push({
+        id: 'camp_' + cId, label: '📣 ' + nom + ' (' + cOps.length + ' OPs)',
+        color: meta.color, dateDebut: cDeb, dateFin: cFin,
+        isCamp: true, campId: cId, ops: cOps, pct: avgPct,
+        type: domType, clickId: cOps[0].id
+      });
+    }
+  });
+  // OPs solo (pas dans une campagne)
+  _opsInWindow.filter(op => !op.campagneId).forEach(op => {
+    const meta = OP_TYPE_META[op.type] || { label: op.type, color: '#94a3b8' };
+    const d = getOpProductDisplay(op);
     const dDeb = op.dateDebut;
     const dFinRaw = op.dateFin || op.dateDebut;
-    const dFin = dFinRaw < dDeb ? dDeb : dFinRaw; // garde-fou : dateFin < dateDebut → traiter comme ponctuelle
-    const s = Math.max(0, _daysBetween(_windowStart, dDeb));
-    const e = Math.min(_totalSpan - 1, _daysBetween(_windowStart, dFin));
-    for (let i = s; i <= e; i++) {
-      if (!_dayOpsByType[i][op.type]) _dayOpsByType[i][op.type] = [];
-      _dayOpsByType[i][op.type].push(op);
+    const dFin = dFinRaw < dDeb ? dDeb : dFinRaw;
+    _ganttEntries.push({
+      id: op.id, label: d.label,
+      color: meta.color, dateDebut: dDeb, dateFin: dFin,
+      isCamp: false, ops: [op], pct: opOverallProgress(op),
+      type: op.type, clickId: op.id,
+      typeLbl: meta.label
+    });
+  });
+
+  // 2) Trier : campagnes éclatées d'abord (pour réserver leurs blocs de lanes), puis le reste
+  const _sortKey = (e) => (e._campGroup ? '0_' + e._campGroup : '1') + '_' + (e.dateDebut || '') + '_' + String(99999 - _daysBetween(e.dateDebut, e.dateFin)).padStart(5, '0');
+  _ganttEntries.sort((a, b) => _sortKey(a).localeCompare(_sortKey(b)));
+
+  // 3) Assigner les lanes
+  //    - Campagnes éclatées (NATIONALE) : bloc exclusif de N lanes réservées.
+  //      N = nbInternalLanes (calculé par bin-packing interne ci-dessus).
+  //      Chaque OP utilise entry._internalLane pour sa position dans le bloc.
+  //      Les lanes du bloc sont « réservées » : aucune autre OP ne peut s'y placer.
+  //    - Autres : bin-packing glouton classique, en évitant les lanes réservées.
+  const _lanes = []; // chaque lane = dateFin du dernier élément placé
+  const _campLaneAssigned = new Map(); // campId → { startLane, nbLanes, endDate }
+
+  // D'abord, réserver les blocs pour chaque campagne éclatée
+  // Les lanes sont bloquées jusqu'à la date de fin de la campagne (pas indéfiniment)
+  _campLaneGroups.forEach(cg => {
+    const startLane = _lanes.length;
+    const nb = cg.nbInternalLanes || 1;
+    // Date de fin de la campagne = max(dateFin de toutes les OPs du groupe)
+    const campEnd = cg.entries.reduce((m, e) => {
+      const f = e.dateFin || e.dateDebut;
+      return (!m || f > m) ? f : m;
+    }, null) || '';
+    for (let i = 0; i < nb; i++) {
+      _lanes.push(campEnd); // bloquée jusqu'à la fin de la campagne, libre après
+    }
+    _campLaneAssigned.set(cg.campId, { startLane: startLane, nbLanes: nb, endDate: campEnd });
+  });
+
+  // Puis placer toutes les entries
+  _ganttEntries.forEach(entry => {
+    if (entry._campGroup) {
+      // Campagne éclatée : utiliser le bloc réservé + _internalLane
+      const cInfo = _campLaneAssigned.get(entry._campGroup);
+      entry.lane = cInfo.startLane + (entry._internalLane || 0);
+      return;
+    }
+    // OPs normales : bin-packing classique
+    // Les lanes de campagne sont occupées jusqu'à campEnd, mais libres après
+    let assigned = false;
+    for (let li = 0; li < _lanes.length; li++) {
+      const lastEnd = _lanes[li];
+      if (entry.dateDebut > lastEnd) {
+        _lanes[li] = entry.dateFin;
+        entry.lane = li;
+        assigned = true;
+        break;
+      }
+    }
+    if (!assigned) {
+      entry.lane = _lanes.length;
+      _lanes.push(entry.dateFin);
     }
   });
-  // Compter en regroupant les OPs de campagne comme 1 seule entrée par campagne
-  const _dayTotals = _dayOpsByType.map(byType => {
-    let total = 0;
-    Object.entries(byType).forEach(([type, arr]) => {
-      const campIds = new Set();
-      let soloCount = 0;
-      arr.forEach(op => {
-        if (op.campagneId) campIds.add(op.campagneId);
-        else soloCount++;
-      });
-      total += campIds.size + soloCount;
-    });
-    return total;
-  });
-  const _maxDens = Math.max(1, ..._dayTotals);
 
-  // Les infos détaillées de chaque jour sont stockées dans un tableau global
-  // (rafraîchi à chaque rendu) et affichées via un vrai tooltip HTML qui suit la souris.
-  window._heatmapDayTips = new Array(_totalSpan);
+  const _nbLanes = Math.max(1, _lanes.length);
+  const _laneH = 16; // hauteur d'une barre en px
+  const _laneGap = 2;
+  const _ganttH = _nbLanes * (_laneH + _laneGap) + 4; // hauteur totale
 
-  const _densityBars = _dayOpsByType.map((byType, i) => {
-    const total = _dayTotals[i];
-    const isToday = i === _TIMELINE_DAYS_BEFORE;
-    const isPast  = i < _TIMELINE_DAYS_BEFORE;
-    const dateStr = (() => { const d = _mkDate(_windowStart); d.setDate(d.getDate() + i); return ymd(d); })();
-    const dLong = (() => {
-      const d = _mkDate(dateStr);
-      return d.toLocaleDateString('fr-FR', { weekday: 'long', day: '2-digit', month: 'long' });
-    })();
-
-    // Construction du contenu HTML du tooltip (détaillé)
-    const _suffix = isToday
-      ? " <span style=\"color:#22c55e;\">(aujourd'hui)</span>"
-      : isPast
-        ? " <span style=\"color:#64748b;\">(passé)</span>"
-        : '';
-    let tipHtml = `<div style="font-weight:700; color:#f1f5f9; margin-bottom:4px; text-transform:capitalize;">${dLong}${_suffix}</div>`;
-    if (total === 0) {
-      tipHtml += `<div style="color:#64748b; font-style:italic;">Aucune OP active ce jour-là.</div>`;
-    } else {
-      tipHtml += `<div style="color:#94a3b8; margin-bottom:6px; font-size:10px;">${total} OP${total > 1 ? 's' : ''} active${total > 1 ? 's' : ''}</div>`;
-      // Regrouper les PR par campagne dans le tooltip
-      const _tipCampShown = new Set();
-      OP_TYPES.forEach(t => {
-        const arr = byType[t.key];
-        if (!arr) return;
-        // Séparer PR campagne vs reste
-        const campGroups = new Map();
-        const soloOps = [];
-        arr.forEach(op => {
-          if (op.campagneId) {
-            if (!campGroups.has(op.campagneId)) campGroups.set(op.campagneId, []);
-            campGroups.get(op.campagneId).push(op);
-          } else {
-            soloOps.push(op);
-          }
-        });
-        // Afficher les campagnes (une seule ligne par campagne)
-        campGroups.forEach((cOps, cId) => {
-          if (_tipCampShown.has(cId)) return;
-          _tipCampShown.add(cId);
-          const cNom = getCampagneLabel(cId) || 'Campagne';
-          const cDeb = cOps.reduce((m, o) => (!m || o.dateDebut < m) ? o.dateDebut : m, null);
-          const cFin = cOps.reduce((m, o) => { const f = o.dateFin || o.dateDebut; return (!m || f > m) ? f : m; }, null);
-          const cDuree = cDeb === cFin ? _fmtDay(cDeb) : `${_fmtDay(cDeb)} → ${_fmtDay(cFin)}`;
-          const cPct = Math.round(cOps.reduce((s, o) => s + opOverallProgress(o), 0) / cOps.length * 100);
-          const campColor = t.color;
-          tipHtml += `<div style="display:flex; align-items:center; gap:6px; padding:2px 0; border-top:1px solid #33415560;">
-            <span style="display:inline-block; width:8px; height:8px; background:#f59e0b; border-radius:2px; flex-shrink:0;"></span>
-            <span style="color:#f59e0b; font-size:9px; font-weight:700;">📣 ${cNom}</span>
-            <span style="color:${campColor}; font-weight:600;">${t.label} ×${cOps.length}</span>
-            <span style="color:#64748b; font-size:9.5px; margin-left:auto;">${cDuree} · ${cPct}%</span>
-          </div>`;
-        });
-        // Afficher les OPs individuelles (hors campagne)
-        soloOps.forEach(op => {
-          const d = getOpProductDisplay(op);
-          const dDeb = op.dateDebut;
-          const dFin = op.dateFin || op.dateDebut;
-          const duree = dDeb === dFin ? _fmtDay(dDeb) : `${_fmtDay(dDeb)} → ${_fmtDay(dFin)}`;
-          const pct = Math.round(opOverallProgress(op) * 100);
-          tipHtml += `<div style="display:flex; align-items:center; gap:6px; padding:2px 0; border-top:1px solid #33415560;">
-            <span style="display:inline-block; width:8px; height:8px; background:${t.color}; border-radius:2px; flex-shrink:0;"></span>
-            <span style="color:${t.color}; font-size:9px; font-weight:700; text-transform:uppercase;">${t.label}</span>
-            <span style="color:#e2e8f0; font-weight:600;">${d.label}</span>
-            <span style="color:#64748b; font-size:9.5px; margin-left:auto;">${duree} · ${pct}%</span>
-          </div>`;
-        });
-      });
-    }
-    window._heatmapDayTips[i] = tipHtml;
-
-    const handlers = `onmouseenter="showHeatmapTip(event, ${i})" onmousemove="moveHeatmapTip(event)" onmouseleave="hideHeatmapTip()"`;
-
-    if (total === 0) {
-      const col = isToday ? '#22c55e' : '#1e293b';
-      return `<div ${handlers} style="flex:1; height:14%; background:${col}; margin:0 0.5px; border-radius:1px; align-self:flex-end; min-width:2px; opacity:${isPast ? 0.5 : 1}; cursor:help;"></div>`;
-    }
-
-    // Segments visuels : 1 par OP, mais les OPs de même campagne → 1 seul segment.
-    const orderedEntries = []; // { color, dateDebut, dateFin }
-    OP_TYPES.forEach(t => {
-      const arr = byType[t.key];
-      if (!arr) return;
-      const campMap = new Map();
-      arr.forEach(op => {
-        if (op.campagneId) {
-          if (!campMap.has(op.campagneId)) campMap.set(op.campagneId, []);
-          campMap.get(op.campagneId).push(op);
-        } else {
-          orderedEntries.push({ color: t.color, dateDebut: op.dateDebut, dateFin: op.dateFin || op.dateDebut });
-        }
-      });
-      // Chaque campagne = 1 segment (rayures pour les distinguer)
-      campMap.forEach((cOps, cId) => {
-        const cDeb = cOps.reduce((m, o) => (!m || o.dateDebut < m) ? o.dateDebut : m, null);
-        const cFin = cOps.reduce((m, o) => { const f = o.dateFin || o.dateDebut; return (!m || f > m) ? f : m; }, null);
-        orderedEntries.push({ color: t.color, dateDebut: cDeb, dateFin: cFin, isCamp: true });
-      });
-    });
-    const segments = orderedEntries.map((entry, idx) => {
-      const segPct = 100 / orderedEntries.length;
-      const opacity = isPast ? 0.5 : 1;
-      const opStart = _daysBetween(_windowStart, entry.dateDebut);
-      const opEnd   = _daysBetween(_windowStart, entry.dateFin);
-      const isStart = i === opStart;
-      const isEnd   = i === opEnd;
-      const bright = 0.82 + ((idx % 4) * 0.08);
-      const caps = [];
-      if (isStart) caps.push('inset 0 2px 0 0 rgba(255,255,255,0.9)');
-      if (isEnd && !isStart) caps.push('inset 0 -2px 0 0 rgba(0,0,0,0.75)');
-      if (isStart && isEnd) caps.push('inset 0 -2px 0 0 rgba(0,0,0,0.75)');
-      const shadow = caps.length ? `box-shadow:${caps.join(',')};` : '';
-      const sep = idx > 0 ? 'border-top:1px solid rgba(2,6,23,0.85);' : '';
-      // Campagnes PR : rayures pour les distinguer visuellement
-      const bg = entry.isCamp
-        ? `background:repeating-linear-gradient(45deg, ${entry.color}, ${entry.color} 2px, ${entry.color}80 2px, ${entry.color}80 4px);`
-        : `background:${entry.color};`;
-      return `<div style="height:${segPct}%; ${bg} opacity:${opacity}; filter:brightness(${bright.toFixed(2)}); ${sep}${shadow} min-height:3px;"></div>`;
-    }).join('');
-    // Hauteur : racine carrée + plancher haut pour garder les petits jours survolables.
-    const h = Math.max(45, Math.round(Math.sqrt(total / _maxDens) * 100));
-    const outline = isToday ? 'outline:1.5px solid #22c55e; outline-offset:-1px;' : '';
-    return `<div ${handlers} style="flex:1; height:${h}%; margin:0 0.5px; border-radius:1px; align-self:flex-end; min-width:2px; display:flex; flex-direction:column-reverse; overflow:hidden; cursor:help; ${outline}">${segments}</div>`;
-  }).join('');
-
+  // 4) Marqueurs temporels (ticks semaine + ligne aujourd'hui)
   const _weekTicks = [];
   for (let day = 0; day <= _totalSpan; day += 7) {
     const leftPct = (day / _totalSpan) * 100;
     const d = _mkDate(_windowStart); d.setDate(d.getDate() + day);
     _weekTicks.push(`<span style="position:absolute; left:${leftPct}%; font-size:9px; color:#64748b;">${_fmtDay(ymd(d))}</span>`);
   }
+  const _todayPct = (_TIMELINE_DAYS_BEFORE / _totalSpan) * 100;
+  const _todayLine = `<div style="position:absolute; left:${_todayPct.toFixed(2)}%; top:0; bottom:0; width:1.5px; background:#22c55e; opacity:0.7; z-index:2; pointer-events:none;"></div>`;
+
+  // 5) Rendu des bandeaux campagne (fond reliant les OPs d'une même campagne éclatée)
+  let _campBands = '';
+  _campLaneGroups.forEach(cg => {
+    const cInfo = _campLaneAssigned.get(cg.campId);
+    if (!cInfo) return;
+    const firstLane = cInfo.startLane;
+    const nbCampLanes = cInfo.nbLanes || 1;
+    const topPx = firstLane * (_laneH + _laneGap);
+    const heightPx = nbCampLanes * (_laneH + _laneGap) + 2;
+    // Emprise temporelle de la campagne
+    const cDeb = cg.entries.reduce((m, e) => (!m || e.dateDebut < m) ? e.dateDebut : m, null);
+    const cFinRaw = cg.entries.reduce((m, e) => { const f = e.dateFin || e.dateDebut; return (!m || f > m) ? f : m; }, null);
+    const cFin = cFinRaw < cDeb ? cDeb : cFinRaw;
+    const s = Math.max(0, _daysBetween(_windowStart, cDeb));
+    const e = Math.min(_totalSpan - 1, _daysBetween(_windowStart, cFin));
+    const leftPct = (s / _totalSpan) * 100;
+    const widthPct = Math.max(1, ((e - s + 1) / _totalSpan) * 100);
+    // Bandeau limité à l'emprise temporelle de la campagne (les lanes redeviennent libres après)
+    _campBands += `<div style="position:absolute; left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%; top:${topPx}px; height:${heightPx}px;
+      background:#f59e0b08; border:1px dashed #f59e0b30; border-radius:4px; z-index:0; pointer-events:none;"></div>`;
+    // Label campagne à gauche du bandeau
+    _campBands += `<div style="position:absolute; left:4px; top:${topPx}px; height:${heightPx}px;
+      display:flex; align-items:center; z-index:0; pointer-events:none;">
+      <span style="font-size:7.5px; color:#f59e0b; font-weight:600; white-space:nowrap; text-shadow:0 0 4px #0f172a, 0 0 8px #0f172a;">📣 ${cg.nom}</span>
+    </div>`;
+  });
+
+  // 6) Rendu des barres individuelles
+  const _ganttBars = _ganttEntries.map(entry => {
+    const s = Math.max(0, _daysBetween(_windowStart, entry.dateDebut));
+    const e = Math.min(_totalSpan - 1, _daysBetween(_windowStart, entry.dateFin));
+    const leftPct = (s / _totalSpan) * 100;
+    const widthPct = Math.max(0.8, ((e - s + 1) / _totalSpan) * 100);
+    const top = entry.lane * (_laneH + _laneGap) + 2;
+    const pctNum = Math.round(entry.pct * 100);
+    const pctCol = entry.pct >= 1 ? '#22c55e' : entry.pct >= 0.5 ? '#8b5cf6' : entry.pct > 0 ? '#f59e0b' : '#64748b';
+
+    // Alertes
+    const _fOps = entry.ops;
+    const nbLate = _fOps.filter(o => { const f = o.dateFin || o.dateDebut; return f < _today && !o.auto && o.type !== 'NATIONALE'; }).length;
+    const nbUrg  = _fOps.filter(o => opTimeStatus(o) === 'IMMINENTE' && opOverallProgress(o) < 0.5).length;
+    let alertIcon = '';
+    if (nbLate) alertIcon = '<span style="font-size:9px; margin-left:2px;">⏰</span>';
+    else if (nbUrg) alertIcon = '<span style="font-size:9px; margin-left:2px;">⚠</span>';
+
+    // Terminée ?
+    const isDone = entry.ops.every(o => opTimeStatus(o) === 'TERMINEE');
+
+    // Style barre
+    const isPast = entry.dateFin < _today;
+    const opacity = isDone ? '0.35' : isPast ? '0.55' : '1';
+    const doneFilter = isDone ? 'filter:grayscale(0.7) brightness(0.8);' : '';
+    const bg = entry.isCamp
+      ? `background:repeating-linear-gradient(45deg, ${entry.color}, ${entry.color} 3px, ${entry.color}70 3px, ${entry.color}70 6px);`
+      : `background:${entry.color}cc;`;
+    const border = isDone ? `border:1px solid #47556980;` : nbLate ? `border:1px solid #ef4444;` : nbUrg ? `border:1px solid #f59e0b;` : `border:1px solid ${entry.color}50;`;
+
+    // Label compact
+    const meta = OP_TYPE_META[entry.type] || { label: entry.type };
+    const shortLbl = entry.isCamp ? entry.label : (entry.typeLbl || meta.label);
+    const prodLbl = entry.isCamp ? '' : (' ' + entry.label);
+    const durDays = _daysBetween(entry.dateDebut, entry.dateFin) + 1;
+    const campTag = entry.campNom ? ' · 📣' + entry.campNom : '';
+
+    // Tooltip
+    const datesLbl = entry.dateDebut === entry.dateFin ? _fmtDay(entry.dateDebut) : _fmtDay(entry.dateDebut) + ' → ' + _fmtDay(entry.dateFin);
+    const tipText = (entry.isCamp ? entry.label : shortLbl + ' — ' + entry.label + campTag) + '\\n' + datesLbl + ' (' + durDays + 'j)' + '\\n' + pctNum + '% prête';
+
+    const doneIcon = isDone ? '<span style="font-size:9px; margin-left:2px; color:#22c55e;">✓</span>' : '';
+    const hoverFilter = isDone ? 'brightness(1.2)' : 'brightness(1.3)';
+
+    return `<div onclick="switchTabProgrammatic('ops','${entry.clickId}')"
+      title="${tipText.replace(/"/g, '&quot;')}"
+      style="position:absolute; left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%; top:${top}px; height:${_laneH}px;
+        ${bg} ${border} border-radius:3px; opacity:${opacity}; cursor:pointer; overflow:hidden;
+        display:flex; align-items:center; gap:2px; padding:0 4px; box-sizing:border-box; z-index:1;
+        ${doneFilter} transition: filter 0.15s;"
+      onmouseover="this.style.filter='${hoverFilter}'" onmouseout="this.style.filter='${isDone ? 'grayscale(0.7) brightness(0.8)' : 'none'}'">
+      <span style="font-size:8px; color:#fff; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 1px 2px rgba(0,0,0,0.6);">${shortLbl}${prodLbl}</span>
+      ${alertIcon}${doneIcon}
+      <div style="position:absolute; left:0; bottom:0; height:2px; width:${pctNum}%; background:${isDone ? '#22c55e' : pctCol}; border-radius:0 0 2px 2px;"></div>
+    </div>`;
+  }).join('');
+
   // Légende : uniquement les types réellement présents dans la fenêtre
   const _typesPresents = new Set();
   _opsInWindow.forEach(op => _typesPresents.add(op.type));
@@ -11463,17 +11619,24 @@ function renderDashboard() {
       <span style="display:inline-block; width:10px; height:10px; background:${t.color}; border-radius:2px;"></span>${t.label}
     </span>`
   ).join('');
+  const _campLegend = _campMap.size > 0
+    ? `<span style="display:inline-flex; align-items:center; gap:4px; font-size:9.5px; color:#94a3b8; margin-right:10px;">
+        <span style="display:inline-block; width:10px; height:10px; background:repeating-linear-gradient(45deg, #94a3b8, #94a3b8 2px, #94a3b880 2px, #94a3b880 4px); border-radius:2px;"></span>campagne
+      </span>`
+    : '';
+  const _nbDone = _opsInWindow.filter(op => opTimeStatus(op) === 'TERMINEE').length;
+  const _doneLegend = _nbDone > 0
+    ? `<span style="display:inline-flex; align-items:center; gap:4px; font-size:9.5px; color:#64748b; margin-right:10px;">
+        <span style="display:inline-block; width:10px; height:10px; background:#475569; border-radius:2px; opacity:0.5; filter:grayscale(0.7);"></span>terminée ✓
+      </span>`
+    : '';
 
-  const _capsLegend = `<span style="display:inline-flex; align-items:center; gap:4px; font-size:9.5px; color:#94a3b8; margin-right:10px;">
-      <span style="display:inline-block; width:10px; height:10px; background:#475569; border-radius:2px; box-shadow: inset 0 2px 0 0 rgba(255,255,255,0.9);"></span>début de vague
-    </span>
-    <span style="display:inline-flex; align-items:center; gap:4px; font-size:9.5px; color:#94a3b8; margin-right:10px;">
-      <span style="display:inline-block; width:10px; height:10px; background:#475569; border-radius:2px; box-shadow: inset 0 -2px 0 0 rgba(0,0,0,0.75);"></span>fin de vague
-    </span>`;
   const densityStrip = `<div style="position:relative; margin:2px 0 10px 0;">
-    <div style="display:flex; align-items:flex-end; height:52px; background:#0f172a; border:1px solid #33415580; border-radius:3px; padding:2px;">${_densityBars}</div>
+    <div style="position:relative; height:${_ganttH}px; background:#0f172a; border:1px solid #33415580; border-radius:3px; overflow:hidden;">
+      ${_campBands}${_todayLine}${_ganttBars}
+    </div>
     <div style="position:relative; height:14px; margin-top:1px;">${_weekTicks.join('')}</div>
-    ${_legend ? `<div style="margin-top:4px; display:flex; flex-wrap:wrap; align-items:center;">${_legend}${_capsLegend}</div>` : ''}
+    ${_legend ? `<div style="margin-top:4px; display:flex; flex-wrap:wrap; align-items:center;">${_legend}${_campLegend}${_doneLegend}</div>` : ''}
   </div>`;
 
   // ---- AGENDA PAR SEMAINE (lignes compactes, pilules cliquables)
@@ -11489,10 +11652,11 @@ function renderDashboard() {
   };
   const _fmtRange = (s, e) => `${_fmtDay(s)} → ${_fmtDay(e)}`;
 
+  // L'agenda par semaine n'affiche que les OP actives (les terminées sont déjà dans le Gantt)
   // OPs déjà commencées avant la fenêtre (survol visible quand même)
-  const _opsEnCoursAvant = _opsInWindow.filter(op => op.dateDebut < _windowStart);
+  const _opsEnCoursAvant = _opsInWindowActive.filter(op => op.dateDebut < _windowStart);
   // Les autres sont rangées par semaine (dateDebut)
-  const _opsAClasser = _opsInWindow.filter(op => op.dateDebut >= _windowStart && op.dateDebut <= _windowEnd);
+  const _opsAClasser = _opsInWindowActive.filter(op => op.dateDebut >= _windowStart && op.dateDebut <= _windowEnd);
 
   const _weekBuckets = new Map(); // key: lundi ISO → { start, end, ops[] }
   const firstMonday = _startOfWeek(_windowStart);
@@ -11660,7 +11824,7 @@ function renderDashboard() {
       ? `<div style="padding:14px; text-align:center; font-size:11px; color:#64748b; font-style:italic;">Aucune OP active dans les 6 prochaines semaines${_opsLater.length ? ' — ' + _opsLater.length + ' plus loin' : ''}.</div>`
       : `${densityStrip}
         <div style="background:#0f172a; border:1px solid #33415580; border-radius:4px;">${agendaInner}</div>
-        <div style="margin-top:6px; font-size:9.5px; color:#64748b; font-style:italic;">Barre du haut = densité d'OP par jour · semaine courante surlignée en vert · clic sur une pill → onglet OP · ⏰ retard · ⚠ imminente pas prête · ● en cours incomplète</div>`)}
+        <div style="margin-top:6px; font-size:9.5px; color:#64748b; font-style:italic;">Mini-Gantt : 1 barre = 1 OP ou campagne · trait vert = aujourd'hui · clic → onglet OP · ⏰ retard · ⚠ imminente pas prête</div>`)}
   </div>`;
 
   // Hiérarchie du Dashboard (pilotage quotidien du point de vente) :
