@@ -10967,7 +10967,12 @@ function renderDashboard() {
   const staleAlerts = computeStalePriceAlerts();
   updateRelevesStaleIndicator(staleAlerts);
   updateVerdictChangedIndicator();
-  const prixInner = prix.length === 0 ? emptyState('— ajoute un relevé concurrent dans l\'onglet Relevés prix') : renderGroupedActionCards(prix);
+  // Bouton batch étiquettes FT pour les actions PRIX kit
+  const _prixKitActions = prix.filter(a => a.produitType === 'kit' || (!a.produitType && baseKits.find(k => k.id === a.produitId)));
+  const _bulkEtiqBtn = _prixKitActions.length > 0
+    ? `<div style="margin-bottom:8px;"><button onclick="openBulkPrixEtiquetteDialog()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b60; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">🏷️ Étiquettes FT — ${_prixKitActions.length} kit${_prixKitActions.length > 1 ? 's' : ''} à modifier</button></div>`
+    : '';
+  const prixInner = prix.length === 0 ? emptyState('— ajoute un relevé concurrent dans l\'onglet Relevés prix') : (_bulkEtiqBtn + renderGroupedActionCards(prix));
   const prixBlock    = block('prix', 'Prix à modifier', '#f59e0b', prix.length, prixInner,
     'Déplier → cocher par boutique : prix en rayon · Swappy · (prix rouge si besoin). Auto-généré depuis les relevés concurrents.');
   // --- Opérations en cours ---
@@ -15839,6 +15844,94 @@ async function generateEtiquetteFromPrixAction(actionId, shop) {
   const safeName = (kit.marque + '_' + kit.modele).replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40);
   const fname = 'etiquette_' + shop + '_' + safeName + '_' + date + '.pdf';
   await generateEtiquettesPdf([{ kit, priceOverride: price }], shop, opOverride, fname);
+}
+
+// Dialogue batch : étiquettes FT pour toutes les actions PRIX kit en cours
+function openBulkPrixEtiquetteDialog() {
+  // Collecter les actions PRIX kit ouvertes et non clôturées
+  const prixActions = actions.filter(function(a) {
+    if (a.type !== 'PRIX' || a.annulee || a._archived) return false;
+    if (actionGlobalState(a) === 'FAIT') return false;
+    var kit = baseKits.find(function(k) { return k.id === a.produitId; });
+    return !!kit;
+  });
+  if (prixActions.length === 0) { pvAlert('Aucun kit à imprimer'); return; }
+
+  var overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:#0f172ad8;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+
+  var shopOpts = SHOPS.map(function(s) { return '<option value="' + s + '">' + SHOP_LABELS[s] + '</option>'; }).join('');
+
+  var listHtml = prixActions.map(function(a, i) {
+    var kit = baseKits.find(function(k) { return k.id === a.produitId; });
+    var price = (typeof a.prixRouge === 'number') ? a.prixRouge
+      : (typeof a.prixCible === 'number') ? a.prixCible : kit.pv;
+    var isRouge = (a.decisionChoice === 'rouge' || a.etiquetteRouge);
+    var rougeBadge = isRouge ? ' <span style="font-size:8px; padding:0 4px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:2px;">PR</span>' : '';
+    return '<label style="display:flex; align-items:center; gap:8px; padding:4px 6px; border-bottom:1px solid #33415530; cursor:pointer;" onmouseover="this.style.background=\'#1e293b80\'" onmouseout="this.style.background=\'transparent\'">'
+      + '<input type="checkbox" checked data-action-id="' + a.id + '" data-kit-id="' + kit.id + '" data-price="' + price + '" data-rouge="' + (isRouge ? '1' : '') + '" style="accent-color:#f59e0b; cursor:pointer;">'
+      + '<span style="flex:1; font-size:11px; color:#e2e8f0;">' + kit.marque + ' — <strong>' + kit.modele + '</strong>' + rougeBadge + '</span>'
+      + '<span style="font-size:10px; color:#f59e0b; font-weight:600;">' + price.toFixed(2) + '€</span>'
+      + '</label>';
+  }).join('');
+
+  overlay.innerHTML =
+    '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:22px;max-width:500px;width:100%;color:#e2e8f0;max-height:80vh;display:flex;flex-direction:column;">'
+    + '<h3 style="margin:0 0 4px;font-size:16px;">🏷️ Étiquettes Freetouch — Prix à modifier</h3>'
+    + '<p style="font-size:11px;color:#94a3b8;margin:0 0 12px;">' + prixActions.length + ' kit' + (prixActions.length > 1 ? 's' : '') + ' — décocher ceux à ne pas imprimer</p>'
+    + '<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">'
+    +   '<label style="font-size:11px;color:#cbd5e1;">Boutique :</label>'
+    +   '<select id="bulkPrixShop" style="padding:4px 8px;font-size:11px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + shopOpts + '</select>'
+    +   '<span style="flex:1;"></span>'
+    +   '<button id="bulkPrixSelectAll" style="padding:2px 8px;font-size:10px;background:#33415550;color:#94a3b8;border:1px solid #47556960;border-radius:3px;cursor:pointer;">Tout cocher</button>'
+    +   '<button id="bulkPrixSelectNone" style="padding:2px 8px;font-size:10px;background:#33415550;color:#94a3b8;border:1px solid #47556960;border-radius:3px;cursor:pointer;">Tout décocher</button>'
+    + '</div>'
+    + '<div id="bulkPrixList" style="flex:1;overflow-y:auto;border:1px solid #33415550;border-radius:4px;margin-bottom:12px;">' + listHtml + '</div>'
+    + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+    +   '<button id="bulkPrixCancel" style="padding:6px 14px;background:#334155;border:none;color:#e2e8f0;border-radius:4px;cursor:pointer;">Annuler</button>'
+    +   '<button id="bulkPrixGo" style="padding:6px 14px;background:#f59e0b;border:none;color:#0f172a;border-radius:4px;cursor:pointer;font-weight:700;">Générer le PDF</button>'
+    + '</div>'
+    + '</div>';
+
+  document.body.appendChild(overlay);
+  var close = function() { overlay.remove(); };
+
+  // Pré-sélectionner la boutique connectée si disponible
+  if (currentShop) {
+    var shopSel = overlay.querySelector('#bulkPrixShop');
+    if (shopSel) shopSel.value = currentShop;
+  }
+
+  overlay.querySelector('#bulkPrixCancel').onclick = close;
+  overlay.querySelector('#bulkPrixSelectAll').onclick = function() {
+    overlay.querySelectorAll('#bulkPrixList input[type=checkbox]').forEach(function(cb) { cb.checked = true; });
+  };
+  overlay.querySelector('#bulkPrixSelectNone').onclick = function() {
+    overlay.querySelectorAll('#bulkPrixList input[type=checkbox]').forEach(function(cb) { cb.checked = false; });
+  };
+  overlay.querySelector('#bulkPrixGo').onclick = async function() {
+    var shop = overlay.querySelector('#bulkPrixShop').value;
+    var checkboxes = overlay.querySelectorAll('#bulkPrixList input[type=checkbox]:checked');
+    if (checkboxes.length === 0) { pvAlert('Aucun kit sélectionné'); return; }
+
+    // Séparer les rouges des normaux (opOverride différent)
+    var normalItems = [];
+    var rougeItems = [];
+    checkboxes.forEach(function(cb) {
+      var item = { kitId: cb.dataset.kitId, priceOverride: parseFloat(cb.dataset.price) };
+      if (cb.dataset.rouge) rougeItems.push(item);
+      else normalItems.push(item);
+    });
+
+    close();
+    try {
+      if (normalItems.length > 0) await generateEtiquettesBulk(normalItems, shop, null);
+      if (rougeItems.length > 0) await generateEtiquettesBulk(rougeItems, shop, 'PRIX_ROUGE');
+    } catch(e) {
+      console.error(e);
+      pvAlert('Erreur génération : ' + (e.message || e));
+    }
+  };
 }
 
 async function generateEtiquettesBulk(items, shop, opOverride) {
