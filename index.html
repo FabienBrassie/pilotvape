@@ -2559,16 +2559,19 @@ function getLatestReleveDateByCompetitor(competitorKey) {
 //   futurPr: { prix, dateDebut, op } si un PR est prévu mais pas encore démarré
 function getEffectivePrice(kit) {
   if (!kit || typeof kit.pv !== 'number') return { prix: 0, source: 'pv' };
-  const today = ymd(new Date());
-  // Cherche les OPs PRIX_ROUGE ouvertes (destockage uniquement, pas les PR relevé qui sont pilotés depuis l'onglet relevé)
-  const prOps = ops.filter(o =>
-    o.type === 'PRIX_ROUGE' && (o.produitIds || []).includes(kit.id) && isOpOuverte(o) && !o.prixActionId
-  );
-  // PR actif = dateDebut <= today et pas terminé
-  const actif = prOps.find(o => o.dateDebut && o.dateDebut <= today && typeof o.prixRouge === 'number');
+  var today = ymd(new Date());
+  // Cherche TOUTES les OPs PRIX_ROUGE ouvertes pour ce kit
+  var prOps = ops.filter(function(o) {
+    return o.type === 'PRIX_ROUGE' && (o.produitIds || []).includes(kit.id) && isOpOuverte(o);
+  });
+  // Source de vérité = op.prixRouge (garanti par _normalizePrixRougeOps + sync)
+  var actif = prOps.find(function(o) {
+    return o.dateDebut && o.dateDebut <= today && typeof o.prixRouge === 'number';
+  });
   if (actif) {
-    // Un PR futur existe-t-il EN PLUS ? (rare mais possible)
-    const futur = prOps.find(o => o !== actif && o.dateDebut && o.dateDebut > today && typeof o.prixRouge === 'number');
+    var futur = prOps.find(function(o) {
+      return o !== actif && o.dateDebut && o.dateDebut > today && typeof o.prixRouge === 'number';
+    });
     return {
       prix: actif.prixRouge,
       source: 'pr_actif',
@@ -2576,12 +2579,14 @@ function getEffectivePrice(kit) {
       futurPr: futur ? { prix: futur.prixRouge, dateDebut: futur.dateDebut, op: futur } : null
     };
   }
-  // Pas de PR actif — y en a-t-il un prévu (dateDebut future) ?
-  const futur = prOps.find(o => o.dateDebut && o.dateDebut > today && typeof o.prixRouge === 'number');
+  // Pas de PR actif — prévu futur ?
+  var futur2 = prOps.find(function(o) {
+    return o.dateDebut && o.dateDebut > today && typeof o.prixRouge === 'number';
+  });
   return {
     prix: kit.pv,
-    source: futur ? 'pr_prevu' : 'pv',
-    futurPr: futur ? { prix: futur.prixRouge, dateDebut: futur.dateDebut, op: futur } : null
+    source: futur2 ? 'pr_prevu' : 'pv',
+    futurPr: futur2 ? { prix: futur2.prixRouge, dateDebut: futur2.dateDebut, op: futur2 } : null
   };
 }
 
@@ -3428,6 +3433,16 @@ function decidePrixAction(kitId, choice, customPrice, note) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const kit = baseKits.find(k => k.id === kitId);
   if (!kit) return;
+  // Garde-fou : si on veut du rouge et qu'une OP PRIX_ROUGE est déjà active, alerter
+  if (choice === 'rouge') {
+    const _existPR = ops.find(o =>
+      o.type === 'PRIX_ROUGE' && isOpOuverte(o) && (o.produitIds || []).includes(kitId)
+    );
+    if (_existPR) {
+      pvAlert('⚠️ Ce produit est déjà en Prix Rouge (OP ' + _existPR.id + '). Clôturez ou modifiez l\'OP existante avant d\'en créer une nouvelle.');
+      return;
+    }
+  }
   const info = computePriceVerdict(kit);
   if (!info || !info.minConcurrent) return;
   const wantRouge = (choice === 'rouge');
@@ -3632,6 +3647,132 @@ function syncOpsFromVerdicts() {
   });
 }
 
+// ---------------------------------------------------------------------------
+// NORMALISATION PRIX ROUGE : garantit que toute OP PRIX_ROUGE a prixRouge,
+// prixAvantRouge et source renseignés. S'exécute au chargement et absorbe
+// les données créées avant la refonte.
+// ---------------------------------------------------------------------------
+function _normalizePrixRougeOps() {
+  ops.forEach(function(op) {
+    if (op.type !== 'PRIX_ROUGE') return;
+
+    // 1) Déterminer la source si absente
+    if (!op.source) {
+      if (op.prixActionId)        op.source = 'prix_action';
+      else if (op.sortirActionId) op.source = 'sortir_action';
+      else if (op.rentrerPrixActionId) op.source = 'rentrer_action';
+      else                        op.source = 'manual';
+    }
+
+    // 2) Résoudre prixRouge si absent — chercher dans les actions liées
+    if (typeof op.prixRouge !== 'number') {
+      var resolved = null;
+      if (op.prixActionId) {
+        var aPrix = actions.find(function(x) { return x.id === op.prixActionId; });
+        if (aPrix && typeof aPrix.prixCible === 'number') resolved = aPrix.prixCible;
+      }
+      if (resolved === null && op.sortirActionId) {
+        var aSortir = actions.find(function(x) { return x.id === op.sortirActionId; });
+        if (aSortir && typeof aSortir.prixRouge === 'number') resolved = aSortir.prixRouge;
+      }
+      if (resolved === null && op.rentrerPrixActionId) {
+        var aRentrer = actions.find(function(x) { return x.id === op.rentrerPrixActionId; });
+        if (aRentrer && typeof aRentrer.prixRouge === 'number') resolved = aRentrer.prixRouge;
+      }
+      // Fallback : parser le commentaire de l'OP (contient souvent "à XX.XX€" ou "Cible XX.XX€")
+      if (resolved === null && op.commentaire) {
+        var _cm = op.commentaire.match(/(?:à|Cible)\s+(\d+[\.,]\d+)\s*€/);
+        if (_cm) resolved = parseFloat(_cm[1].replace(',', '.'));
+      }
+      // Fallback ultime : chercher via groupActionIds si c'est un PR groupé
+      if (resolved === null && op.groupActionIds && op.groupActionIds.length > 0) {
+        for (var _gi = 0; _gi < op.groupActionIds.length && resolved === null; _gi++) {
+          var _ga = actions.find(function(x) { return x.id === op.groupActionIds[_gi]; });
+          if (_ga && typeof _ga.prixRouge === 'number') resolved = _ga.prixRouge;
+        }
+      }
+      if (resolved !== null) {
+        op.prixRouge = resolved;
+      } else if (!op.dateFin) {
+        console.warn('[NORM-PR] OP', op.id, 'PRIX_ROUGE ouverte sans prixRouge résolu — actions liées:',
+          'prixActionId=', op.prixActionId, 'sortirActionId=', op.sortirActionId,
+          'rentrerPrixActionId=', op.rentrerPrixActionId, 'groupActionIds=', op.groupActionIds);
+      }
+    }
+
+    // 3) Résoudre prixAvantRouge si absent
+    if (typeof op.prixAvantRouge !== 'number') {
+      var avant = null;
+      if (op.prixActionId) {
+        var aPrix2 = actions.find(function(x) { return x.id === op.prixActionId; });
+        if (aPrix2 && typeof aPrix2.prixAvant === 'number') avant = aPrix2.prixAvant;
+      }
+      if (avant === null && op.sortirActionId) {
+        var aSortir2 = actions.find(function(x) { return x.id === op.sortirActionId; });
+        if (aSortir2 && typeof aSortir2.prixAvantRouge === 'number') avant = aSortir2.prixAvantRouge;
+      }
+      if (avant === null && op.rentrerPrixActionId) {
+        var aRentrer2 = actions.find(function(x) { return x.id === op.rentrerPrixActionId; });
+        if (aRentrer2 && typeof aRentrer2.prixAvantRouge === 'number') avant = aRentrer2.prixAvantRouge;
+      }
+      // Fallback groupActionIds
+      if (avant === null && op.groupActionIds && op.groupActionIds.length > 0) {
+        for (var _gi2 = 0; _gi2 < op.groupActionIds.length && avant === null; _gi2++) {
+          var _ga2 = actions.find(function(x) { return x.id === op.groupActionIds[_gi2]; });
+          if (_ga2 && typeof _ga2.prixAvantRouge === 'number') avant = _ga2.prixAvantRouge;
+        }
+      }
+      // Fallback : PV actuel du produit
+      if (avant === null) {
+        var pid = (op.produitIds || [])[0];
+        if (pid) {
+          var k = baseKits.find(function(x) { return x.id === pid; });
+          var g = k ? null : baseLiq.find(function(x) { return x.id === pid; });
+          var prod = k || g;
+          if (prod && typeof prod.pv === 'number') avant = prod.pv;
+        }
+      }
+      if (avant !== null) op.prixAvantRouge = avant;
+    }
+  });
+}
+
+// ── syncOpToActionPrice ──────────────────────────────────────────
+// Miroir inverse : copie op.prixRouge / op.prixAvantRouge vers
+// toutes les actions liées (prixActionId, sortirActionId, rentrerPrixActionId).
+// Idempotent — n'écrit que si la valeur diffère.
+// Retourne true si au moins un champ a été modifié.
+function syncOpToActionPrice(opId) {
+  var op = ops.find(function(o) { return o.id === opId; });
+  if (!op || op.type !== 'PRIX_ROUGE') return false;
+  var changed = false;
+
+  // Mapping : clé de lien sur l'OP → { champ prix cible, champ prix avant }
+  var links = [
+    { key: 'prixActionId',       prixField: 'prixCible', avantField: 'prixAvant'      },
+    { key: 'sortirActionId',     prixField: 'prixRouge', avantField: 'prixAvantRouge'  },
+    { key: 'rentrerPrixActionId', prixField: 'prixRouge', avantField: 'prixAvantRouge' }
+  ];
+
+  links.forEach(function(link) {
+    var actionId = op[link.key];
+    if (!actionId) return;
+    var a = actions.find(function(x) { return x.id === actionId; });
+    if (!a) return;
+
+    if (typeof op.prixRouge === 'number' && a[link.prixField] !== op.prixRouge) {
+      a[link.prixField] = op.prixRouge;
+      changed = true;
+    }
+    if (typeof op.prixAvantRouge === 'number' && a[link.avantField] !== op.prixAvantRouge) {
+      a[link.avantField] = op.prixAvantRouge;
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
 // Synchronise l'OP PRIX_ROUGE d'une action PRIX avec son état courant.
 // - Si l'action est "rouge" (decisionChoice === 'rouge') et pas annulée → assure une OP PRIX_ROUGE active.
 // - Si l'action n'est plus "rouge" (recalibrer / remonter / annulée) → clôt l'OP active liée.
@@ -3652,20 +3793,35 @@ function syncPrixRougeOp(a, opts) {
         dateFin: null,
         commentaire: typeof a.prixCible === 'number' ? 'Cible ' + a.prixCible.toFixed(2) + '€' : 'Prix rouge auto',
         prixActionId: a.id,
+        source: 'prix_action',
         auto: true,
         etats: {}
       };
       seedOpDefaults(op);
       ensureOpSteps(op);
+      // Propager le prix cible sur l'OP — source de vérité = OP
+      if (typeof a.prixCible === 'number') {
+        op.prixRouge = a.prixCible;
+      }
+      op.prixAvantRouge = (typeof a.prixAvant === 'number') ? a.prixAvant
+        : ((baseKits.find(function(k){return k.id===a.produitId;}) || {}).pv || null);
       pushOpTraced(op, 'syncPrixRougeOp');
       a.opId = op.id;
       return op;
     }
     // Garantit la cohérence des steps si le type a évolué
     ensureOpSteps(linked);
+    if (!linked.source) linked.source = 'prix_action';
     // Réouvre si clôturée par erreur puis réactivée
     if (linked.dateFin) linked.dateFin = null;
-    if (typeof a.prixCible === 'number') linked.commentaire = 'Cible ' + a.prixCible.toFixed(2) + '€';
+    if (typeof a.prixCible === 'number') {
+      linked.commentaire = 'Cible ' + a.prixCible.toFixed(2) + '€';
+      linked.prixRouge = a.prixCible;
+    }
+    if (typeof linked.prixAvantRouge !== 'number') {
+      linked.prixAvantRouge = (typeof a.prixAvant === 'number') ? a.prixAvant
+        : ((baseKits.find(function(k){return k.id===(a.produitId||((linked.produitIds||[])[0]));}) || {}).pv || null);
+    }
     return linked;
   }
   // Plus "rouge" → clore l'OP si encore active
@@ -3965,9 +4121,41 @@ function toggleOpStep(opId, shop, stepKey, checked) {
   // La clôture réelle se fait via la dateFin planifiée (cf. opTimeStatus) ou via le bouton « Clore » manuel.
   // ARCHIVAGE IMMÉDIAT : si l'OP est terminée et que la désinstallation vient d'être validée
   // sur toutes les boutiques, on archive immédiatement (pas besoin d'attendre 15j).
+  // EXCEPTION : OP PRIX_ROUGE dont le produit est encore en offre/stock → proposer de statuer sur le prix.
   if (stepKey === 'desinstallation' && checked && isOpFullyDesinstalled(op)) {
-    op._archived = true;
-    console.log('[DESINSTALL] OP', op.id, 'entièrement désinstallée → archivée immédiatement');
+    if (op.type === 'PRIX_ROUGE' && !op.returnActionId && op.motifCloture !== 'prix_acte') {
+      // Vérifier si au moins un produit est encore en offre (pas SORTI)
+      const _prIds = op.produitIds || [];
+      const _prodsEnOffre = _prIds.filter(function(pid) {
+        var k = baseKits.find(function(x) { return x.id === pid; });
+        if (k) return k.statutVie !== 'SORTI';
+        var g = baseLiq.find(function(x) { return x.id === pid; });
+        if (g) return g.statutVie !== 'SORTI' && g.statutVie !== 'SORTIE';
+        return false;
+      });
+      if (_prodsEnOffre.length > 0) {
+        // Ne pas archiver — ouvrir la modale de décision post prix rouge
+        showPostPrixRougeDecision(op.id);
+        saveData();
+        renderDashboard();
+        renderOps && renderOps();
+        return; // on sort, pas d'archivage
+      }
+    }
+    // Bloquer l'archivage si la campagne est encore active
+    if (op.campagneId) {
+      var _cSibs = ops.filter(function(o) { return o.id !== op.id && o.campagneId === op.campagneId && !o._archived; });
+      var _cActive = _cSibs.some(function(o) { return opTimeStatus(o) !== 'TERMINEE' || !isOpFullyDesinstalled(o); });
+      if (_cActive) {
+        console.log('[DESINSTALL] OP', op.id, 'désinstallée mais campagne encore active → pas d\'archivage');
+      } else {
+        op._archived = true;
+        console.log('[DESINSTALL] OP', op.id, 'entièrement désinstallée → archivée immédiatement');
+      }
+    } else {
+      op._archived = true;
+      console.log('[DESINSTALL] OP', op.id, 'entièrement désinstallée → archivée immédiatement');
+    }
   }
   saveData();
   renderDashboard();
@@ -4000,11 +4188,20 @@ function updateActionPrixRouge(actionId, val) {
     }
     a.prixRouge = prix;
   }
-  // Propager sur l'OP liée (SORTIR ou RENTRER)
-  const op = ops.find(o => (o.sortirActionId === a.id || o.rentrerPrixActionId === a.id) && o.type === 'PRIX_ROUGE');
+  // Propager sur l'OP liée (SORTIR, RENTRER ou PRIX)
+  const op = ops.find(o =>
+    o.type === 'PRIX_ROUGE' &&
+    (o.sortirActionId === a.id || o.rentrerPrixActionId === a.id || o.prixActionId === a.id)
+  );
   if (op) {
-    if (a.prixRouge) { op.prixRouge = a.prixRouge; op.prixAvantRouge = a.prixAvantRouge; }
-    else { delete op.prixRouge; delete op.prixAvantRouge; }
+    var newPrix = a.prixRouge || a.prixCible;
+    var newAvant = a.prixAvantRouge || a.prixAvant;
+    if (typeof newPrix === 'number') {
+      op.prixRouge = newPrix;
+      if (typeof newAvant === 'number') op.prixAvantRouge = newAvant;
+    } else {
+      op.prixRouge = null;
+    }
   }
   // Auto-créer/clore l'OP PRIX_ROUGE pour les RENTRER
   if (a.type === 'RENTRER') syncRentrerPrixRougeOp(a);
@@ -4035,6 +4232,10 @@ function syncRentrerPrixRougeOp(a) {
         dateFin: null,
         commentaire: 'Prix rouge one-shot : ' + label + (a.prixRouge ? ' à ' + a.prixRouge.toFixed(2) + '€' : ''),
         rentrerPrixActionId: a.id,
+        source: 'rentrer_action',
+        prixRouge: (typeof a.prixRouge === 'number') ? a.prixRouge : null,
+        prixAvantRouge: (typeof a.prixAvantRouge === 'number') ? a.prixAvantRouge
+          : ((prod && typeof prod.pv === 'number') ? prod.pv : null),
         auto: true,
         etats: {}
       };
@@ -4045,7 +4246,10 @@ function syncRentrerPrixRougeOp(a) {
       return op;
     }
     ensureOpSteps(linked);
+    if (!linked.source) linked.source = 'rentrer_action';
     if (linked.dateFin) linked.dateFin = null;
+    if (typeof a.prixRouge === 'number') linked.prixRouge = a.prixRouge;
+    if (typeof a.prixAvantRouge === 'number') linked.prixAvantRouge = a.prixAvantRouge;
     linked.commentaire = 'Prix rouge one-shot' + (a.prixRouge ? ' à ' + a.prixRouge.toFixed(2) + '€' : '');
     return linked;
   }
@@ -4174,6 +4378,7 @@ function setGroupPrixRouge(actionIdsPiped) {
       groupActionIds: grpActions.map(a => a.id),
       groupLabel: groupLabel,
       sortirActionId: grpActions[0].id,
+      source: 'sortir_action',
       dateDebut: dateDebut,
       dateFin: null,
       commentaire: `Prix rouge groupé : ${grpActions.length} produits à ${prixRouge.toFixed(2)}€`,
@@ -12656,6 +12861,27 @@ function renderReleves() {
     const isExclu = !!kit.exclusifCigusto;
     const validated = actions.find(a => a.type === 'PRIX' && a.produitId === kit.id && !a.annulee && actionGlobalState(a) !== 'FAIT');
 
+    // État 0 : OP PRIX_ROUGE déjà ACTIVE (dateDebut <= today) pour ce kit
+    // → afficher un badge "Déjà en PR" pour éviter les doublons
+    // On exclut les PR futurs (dateDebut > today) qui apparaissent déjà en violet
+    const _todayPR = ymd(new Date());
+    const _existingPrOp = ops.find(o =>
+      o.type === 'PRIX_ROUGE' && isOpOuverte(o) && (o.produitIds || []).includes(kit.id)
+      && o.dateDebut && o.dateDebut <= _todayPR
+      && (!validated || o.prixActionId !== validated.id) // pas celle qu'on a soi-même créée
+    );
+    if (_existingPrOp && !validated) {
+      const _prPrix = _existingPrOp.prixRouge;
+      const _prLbl = typeof _prPrix === 'number' ? _prPrix.toFixed(2) + '€' : '';
+      const _prSrc = _existingPrOp.prixActionId ? 'relevé' : 'destockage';
+      return `<td style="padding:6px 8px; text-align:center; border-bottom:1px solid #1e293b; white-space:nowrap;">
+        <span onclick="switchTabProgrammatic('ops','${_existingPrOp.id}')" title="Une OP Prix Rouge est déjà active pour ce produit (${_prSrc}). Cliquer pour la voir."
+          style="cursor:pointer; font-size:9.5px; padding:3px 8px; background:#ef444420; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-weight:700;">
+          🔴 Déjà en PR${_prLbl ? ' à ' + _prLbl : ''}
+        </span>
+      </td>`;
+    }
+
     // État 1 : édition en place
     if (decisionEditState && decisionEditState.kitId === kit.id) {
       const choice = decisionEditState.choice;
@@ -12845,7 +13071,9 @@ function renderReleves() {
           pvSuffix = `<div style="font-size:8px; color:#f59e0b; font-weight:600; line-height:1;">PR actif <span style="text-decoration:line-through; color:#64748b;">${k.pv.toFixed(2)}€</span></div>`;
         }
         if (eff.futurPr) {
-          pvSuffix += `<div style="font-size:8px; color:#a78bfa; font-weight:600; line-height:1;" title="PR prévu le ${eff.futurPr.dateDebut} à ${eff.futurPr.prix.toFixed(2)}€ — avancer la date si besoin">⏳ PR ${eff.futurPr.prix.toFixed(2)}€ le ${eff.futurPr.dateDebut.slice(5)}</div>`;
+          var _fprParts = eff.futurPr.dateDebut.split('-');
+          var _fprDateFr = _fprParts[2] + '/' + _fprParts[1];
+          pvSuffix += `<div style="font-size:8px; color:#a78bfa; font-weight:600; line-height:1;" title="PR prévu le ${_fprDateFr} à ${eff.futurPr.prix.toFixed(2)}€ — avancer la date si besoin">⏳ PR ${eff.futurPr.prix.toFixed(2)}€ le ${_fprDateFr}</div>`;
         }
         // Couleur de la police du PV : rouge si plus cher que le moins cher concurrent, vert si moins cher,
         // neutre si égal ou pas de comparaison possible. Tolérance 1% pour éviter le flicker sur écarts minimes.
@@ -13961,6 +14189,113 @@ function toggleOpEdit(opId) {
 
 // État UI : OPs dont le panneau de clôture est ouvert
 const opClosureOpen = new Set();
+// --- Modale post-prix-rouge : que faire du prix quand l'OP est entièrement désinstallée ? ---
+function showPostPrixRougeDecision(opId) {
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  const pIds = op.produitIds || [];
+  // Déterminer le produit et son prix actuel / prix d'avant le rouge
+  const prod = baseKits.find(k => pIds.includes(k.id)) || baseLiq.find(g => pIds.includes(g.id));
+  const prodLabel = prod ? ((prod.marque || '') + ' ' + (prod.modele || prod.gamme || prod.designation || '')).trim() : 'ce produit';
+  const prixRouge = (typeof op.prixRouge === 'number') ? op.prixRouge : (prod ? prod.pv : null);
+  const prixAvant = (typeof op.prixAvantRouge === 'number') ? op.prixAvantRouge : (prod ? prod.pv : null);
+  const prixAvantTxt = typeof prixAvant === 'number' ? prixAvant.toFixed(2) + '€' : 'prix initial';
+  const prixRougeTxt = typeof prixRouge === 'number' ? prixRouge.toFixed(2) + '€' : '?€';
+
+  const isGrouped = pIds.length > 1;
+  const groupLabel = isGrouped ? ' (' + pIds.length + ' produits)' : '';
+
+  const _modalHtml = `
+    <div style="text-align:left;">
+      <div style="font-size:14px; font-weight:700; color:#f1f5f9; margin-bottom:10px;">🏁 OP Prix Rouge désinstallée</div>
+      <div style="font-size:12px; color:#cbd5e1; margin-bottom:14px;">
+        <strong>${prodLabel}</strong>${groupLabel} est toujours en offre.<br>
+        Le prix rouge était <strong style="color:#ef4444;">${prixRougeTxt}</strong>${typeof prixAvant === 'number' ? ' (avant : ' + prixAvantTxt + ')' : ''}.<br><br>
+        Que souhaitez-vous faire du prix ?
+      </div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <button onclick="postPrixRougeDecision('${opId}', 'retour_normal')" style="padding:10px 16px; background:#3b82f6; color:white; border:none; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; text-align:left;">
+          🏷️ Remettre le prix normal${typeof prixAvant === 'number' ? ' (' + prixAvantTxt + ')' : ''}
+          <div style="font-size:10px; font-weight:400; color:#bfdbfe; margin-top:2px;">Les équipes remettent l'étiquette au prix d'avant</div>
+        </button>
+        <button onclick="postPrixRougeDecision('${opId}', 'modifier_prix')" style="padding:10px 16px; background:#f59e0b; color:#0f172a; border:none; border-radius:6px; font-size:12px; font-weight:700; cursor:pointer; text-align:left;">
+          ✏️ Modifier le prix définitivement
+          <div style="font-size:10px; font-weight:400; color:#78350f; margin-top:2px;">Crée une action "Prix à modifier" dans le dashboard</div>
+        </button>
+        <button onclick="postPrixRougeDecision('${opId}', 'rien')" style="padding:8px 16px; background:#1e293b; color:#94a3b8; border:1px solid #334155; border-radius:6px; font-size:11px; cursor:pointer; text-align:left;">
+          Pas d'action — archiver tel quel
+        </button>
+      </div>
+    </div>`;
+  // Modale sans boutons standards — les boutons custom ferment la modale via postPrixRougeDecision
+  window._postPrModal = _pvModal(_modalHtml, [], function() {});
+}
+
+function postPrixRougeDecision(opId, decision) {
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  // Fermer la modale
+  if (window._postPrModal) { window._postPrModal.remove(); window._postPrModal = null; }
+
+  if (decision === 'retour_normal') {
+    // Utiliser le circuit existant retour_prix : crée une action PRIX "retour au prix d'avant"
+    const prixAvant = op.prixAvantRouge;
+    if (typeof prixAvant === 'number' && prixAvant > 0) {
+      executeOpClosure(opId, 'retour_prix', { price: prixAvant });
+    } else {
+      // Pas de prix d'avant connu → ouvrir la modale de clôture classique
+      toggleOpClosure(opId);
+      switchTabProgrammatic('ops', opId);
+    }
+  } else if (decision === 'modifier_prix') {
+    // Créer une action PRIX pour chaque produit encore en offre
+    const pIds = op.produitIds || [];
+    pIds.forEach(function(pid) {
+      var kit = baseKits.find(function(k) { return k.id === pid; });
+      var liq = baseLiq.find(function(g) { return g.id === pid; });
+      var prod = kit || liq;
+      if (!prod) return;
+      if (prod.statutVie === 'SORTI' || prod.statutVie === 'SORTIE') return;
+      // Vérifier qu'il n'y a pas déjà une action PRIX ouverte
+      var existing = actions.find(function(a) {
+        return a.type === 'PRIX' && a.produitId === pid && !a.annulee && actionGlobalState(a) !== 'FAIT';
+      });
+      if (existing) return;
+      var a = {
+        id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
+        type: 'PRIX',
+        produitId: pid,
+        produitType: kit ? 'kit' : 'liq',
+        priorite: 'HAUTE',
+        dateCreation: ymd(new Date()),
+        auteur: 'Post prix rouge',
+        etats: {},
+        dateCloture: null,
+        annulee: false,
+        lienOP: op.id,
+        decisionChoice: 'recalibrer',
+        prixAvant: (typeof op.prixRouge === 'number') ? op.prixRouge : prod.pv,
+        prixCible: null, // L'admin décidera du nouveau prix
+        note: 'Suite à fin d\'OP prix rouge — prix à redéfinir',
+        etiquetteRouge: false
+      };
+      a.etats = makeShopStates(a);
+      actions.push(a);
+    });
+    // Archiver l'OP prix rouge
+    op._archived = true;
+    op.motifCloture = op.motifCloture || 'desinstalled_prix_a_modifier';
+    if (!op.dateFin) op.dateFin = ymd(new Date());
+    pvAlert('Action "Prix à modifier" créée dans le dashboard. 👍');
+  } else {
+    // 'rien' — archiver tel quel
+    op._archived = true;
+  }
+  saveData();
+  renderDashboard();
+  renderOps && renderOps();
+}
+
 function toggleOpClosure(opId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   if (opClosureOpen.has(opId)) opClosureOpen.delete(opId);
@@ -16618,6 +16953,7 @@ loadData().then(async () => {
     (typeof OP_TYPES !== 'undefined' ? OP_TYPES : []).forEach(t => opTypeCollapsed.add(t.key));
     (typeof campagnes !== 'undefined' ? campagnes : []).forEach(c => { if (c && c.id) opCampagneCollapsed.add(c.id); });
   } catch (e) {}
+  _normalizePrixRougeOps();
   syncAutoActions();
   restoreUiState();
   // Restaurer l'onglet actif
