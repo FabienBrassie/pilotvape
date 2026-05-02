@@ -555,7 +555,7 @@ function _logStepLabel(stepKey, actionOrOp) {
     }
   }
   // Fallback lisible
-  var labels = { desinstallation: 'OP désinstallée', commande: 'Commandé', recu: 'En stock', rayon: 'Changée en rayon', etiquette: 'Étiquette faite', swappy: 'Mis à jour Swappy', swappyOn: 'Actif Swappy', swappyOff: 'Désactivé Swappy', monte: 'Monté sur le mur', vendu: 'Vendu / plus de stock', done: 'Fait' };
+  var labels = { desinstallation: 'OP désinstallée', commande: 'Commandé sur Swappy', recu: 'Reçu en boutique', prod_commandee: 'Commandé sur Swappy', prod_recue: 'Reçu en boutique', rayon: 'Changée en rayon', etiquette: 'Étiquette faite', swappy: 'Mis à jour Swappy', monte: 'Monté sur le mur', vendu: 'Réappro coupée sur Swappy', swappyOff: 'Désactivé sur Swappy', done: 'Fait' };
   return labels[stepKey] || stepKey;
 }
 function _logOpLabel(opId) {
@@ -2134,8 +2134,8 @@ function computeOpShopStepDefs(op, shop) {
   // Les steps "Produit commandé / reçu" sont déjà portés, pour une OP COUP, par le
   // mirror RENTRER (① Commandé / ① En stock) — on évite donc le doublon ici.
   if (op.prep && op.prep.commanderProduits && op.type !== 'COUP') {
-    defs.push({ key: 'prod_commandee', label: 'Produit commandé', kind: 'prod' });
-    defs.push({ key: 'prod_recue',     label: 'Produit reçu',     kind: 'prod' });
+    defs.push({ key: 'prod_commandee', label: 'Commandé sur Swappy', kind: 'prod' });
+    defs.push({ key: 'prod_recue',     label: 'Reçu en boutique',    kind: 'prod' });
   }
   (op.pieces || []).forEach(p => {
     if (!pieceIsPerShop(p)) return;
@@ -2652,11 +2652,10 @@ function updateVerdictChangedIndicator() {
 // Sous-étapes par type d'action — une shop n'est "done" que quand toutes ses sous-étapes sont cochées.
 // Non ordonnées : l'équipe peut cocher dans n'importe quel ordre (la réalité terrain ne suit pas toujours l'ordre).
 const ACTION_STEPS = {
-  SORTIR:        [{ key: 'vendu',     label: 'Vendu / plus de stock' },
+  SORTIR:        [{ key: 'vendu',     label: 'Réappro coupée sur Swappy' },
                   { key: 'swappyOff', label: 'Désactivé sur Swappy' }],
-  RENTRER:       [{ key: 'commande',  label: 'Commandé' },
-                  { key: 'recu',      label: 'En stock' },
-                  { key: 'swappyOn',  label: 'Actif' }],
+  RENTRER:       [{ key: 'commande',  label: 'Commandé sur Swappy' },
+                  { key: 'recu',      label: 'Reçu en boutique' }],
   MISE_EN_PLACE: [{ key: 'monte',     label: 'Monté sur le mur' }],
   PRIX:          [{ key: 'etiquette', label: 'Étiquette faite' },
                   { key: 'rayon',     label: 'Changée en rayon' },
@@ -3791,6 +3790,17 @@ function _opActionStepMirror(a, op) {
     Object.keys(a_to_o).forEach(k => { o_to_a[a_to_o[k]] = k; });
     return { a_to_o, o_to_a };
   }
+  // Cas non-COUP : RENTRER ↔ OP avec prep.commanderProduits
+  // Synchronise « Commandé / En stock » du dashboard avec « Produit commandé / Produit reçu » de l'OP.
+  if (a.type === 'RENTRER' && op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
+    var _isLinked = (op.rentrerActionId === a.id) ||
+      ((op.produitIds || []).indexOf(a.produitId) >= 0);
+    if (!_isLinked) return null;
+    var a_to_o2 = { commande: 'prod_commandee', recu: 'prod_recue' };
+    var o_to_a2 = {};
+    Object.keys(a_to_o2).forEach(function(k) { o_to_a2[a_to_o2[k]] = k; });
+    return { a_to_o: a_to_o2, o_to_a: o_to_a2 };
+  }
   return null;
 }
 
@@ -3806,6 +3816,11 @@ function syncActionStepsToOp(a) {
   }
   if (a.type === 'RENTRER') {
     ops.filter(o => o.type === 'COUP' && o.rentrerActionId === a.id).forEach(o => linkedOps.push(o));
+    // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit
+    ops.filter(function(o) {
+      return o.type !== 'COUP' && !o._archived && o.prep && o.prep.commanderProduits &&
+        ((o.rentrerActionId === a.id) || ((o.produitIds || []).indexOf(a.produitId) >= 0));
+    }).forEach(function(o) { linkedOps.push(o); });
   }
   if (a.type === 'SORTIR') {
     ops.filter(o => o.type === 'COUP' && o.sortirActionId === a.id).forEach(o => linkedOps.push(o));
@@ -3821,6 +3836,9 @@ function syncActionStepsToOp(a) {
       Object.entries(m.a_to_o).forEach(([ak, ok]) => {
         if (typeof ast.steps[ak] === 'boolean' && typeof ost.steps[ok] === 'boolean') {
           ost.steps[ok] = ast.steps[ak];
+          // Propager le timestamp du step source vers le step miroir
+          if (!ost._stepTs) ost._stepTs = {};
+          ost._stepTs[ok] = (ast._stepTs && ast._stepTs[ak]) || new Date().toISOString();
         }
       });
       ost.done = opAllStepsDone(op, sh);
@@ -3831,8 +3849,9 @@ function syncActionStepsToOp(a) {
 }
 
 // Recopie l'état des sous-étapes de l'OP → action(s) liée(s). Appelé après toggleOpStep
-// pour qu'un clic côté OP se reflète côté Dashboard. Gère PRIX_ROUGE auto ET COUP
-// (qui miroite vers 2 actions : RENTRER + SORTIR).
+// pour qu'un clic côté OP se reflète côté Dashboard. Gère PRIX_ROUGE auto, COUP
+// (qui miroite vers 2 actions : RENTRER + SORTIR), et non-COUP avec commanderProduits
+// (qui miroite « Produit commandé / reçu » ↔ RENTRER « Commandé / En stock »).
 function syncOpStepsToAction(op) {
   if (!op) return;
   const targets = [];
@@ -3850,6 +3869,16 @@ function syncOpStepsToAction(op) {
       if (a) targets.push(a);
     }
   }
+  // Non-COUP avec commanderProduits → miroir vers RENTRER du même produit
+  if (op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
+    var _pid = (op.produitIds || [])[0];
+    if (_pid) {
+      var _ra = op.rentrerActionId
+        ? actions.find(function(x) { return x.id === op.rentrerActionId; })
+        : actions.find(function(x) { return x.type === 'RENTRER' && x.produitId === _pid && !x.annulee; });
+      if (_ra && targets.indexOf(_ra) < 0) targets.push(_ra);
+    }
+  }
   targets.forEach(a => {
     ensureActionSteps(a);
     const m = _opActionStepMirror(a, op);
@@ -3861,6 +3890,9 @@ function syncOpStepsToAction(op) {
       Object.entries(m.o_to_a).forEach(([ok, ak]) => {
         if (typeof ost.steps[ok] === 'boolean' && typeof ast.steps[ak] === 'boolean') {
           ast.steps[ak] = ost.steps[ok];
+          // Propager le timestamp du step source vers le step miroir
+          if (!ast._stepTs) ast._stepTs = {};
+          ast._stepTs[ak] = (ost._stepTs && ost._stepTs[ok]) || new Date().toISOString();
         }
       });
       ast.done = allStepsDone(a, sh);
@@ -3879,6 +3911,8 @@ function toggleOpStep(opId, shop, stepKey, checked) {
   if (!st) return;
   logAction('Étape OP', _logShopName(shop) + ' → ' + (checked ? '✓' : '✕') + ' ' + _logStepLabel(stepKey, op) + ' sur ' + _logOpLabel(opId));
   st.steps[stepKey] = !!checked;
+  if (!st._stepTs) st._stepTs = {};
+  st._stepTs[stepKey] = new Date().toISOString();
   // Synchro .done = true ssi toutes les steps sont cochées
   st.done = opAllStepsDone(op, shop);
   if (st.done && !st.dateFait) st.dateFait = ymd(new Date());
@@ -4472,6 +4506,8 @@ function toggleActionStep(actionId, shop, stepKey) {
   logAction('Mise en place', _logShopName(shop) + ' → ' + _logStepLabel(stepKey, a) + ' sur ' + _logActionLabel(actionId));
   if (!st.steps) st.steps = makeStepMap(a);
   st.steps[stepKey] = !st.steps[stepKey];
+  if (!st._stepTs) st._stepTs = {};
+  st._stepTs[stepKey] = new Date().toISOString();
   _applyActionShopChange(a, shop);
   syncActionStepsToOp(a);
   saveData();
@@ -4493,7 +4529,9 @@ function toggleActionShop(actionId, shop) {
   logAction('Action validée', _logShopName(shop) + ' → ' + _logActionLabel(actionId));
   const defs = getActionSteps(a);
   const allDone = defs.every(d => st.steps && st.steps[d.key] === true);
-  defs.forEach(d => { if (!st.steps) st.steps = {}; st.steps[d.key] = !allDone; });
+  var _tsNow = new Date().toISOString();
+  if (!st._stepTs) st._stepTs = {};
+  defs.forEach(d => { if (!st.steps) st.steps = {}; st.steps[d.key] = !allDone; st._stepTs[d.key] = _tsNow; });
   _applyActionShopChange(a, shop);
   // Miroir vers l'OP PRIX_ROUGE auto liée (un seul "prix rouge" physique)
   syncActionStepsToOp(a);
@@ -6015,20 +6053,38 @@ function _mergeEtats(localActions, remoteActions) {
       const ls = a.etats && a.etats[sh];
       const rs = remote.etats[sh];
       if (!ls || !rs) return;
-      // Fusionner done : true gagne
-      if (rs.done && !ls.done) {
-        ls.done = true;
-        ls.dateFait = rs.dateFait || ls.dateFait;
-        mergeCount++;
-      }
-      // Fusionner steps : true gagne pour chaque clé
+      // Fusionner steps : last-write-wins basé sur _stepTs (timestamp par step)
       if (rs.steps && ls.steps) {
+        var _lTs = ls._stepTs || {};
+        var _rTs = rs._stepTs || {};
         Object.keys(rs.steps).forEach(k => {
-          if (rs.steps[k] === true && ls.steps[k] !== true) {
-            ls.steps[k] = true;
-            mergeCount++;
+          if (typeof rs.steps[k] !== 'boolean') return;
+          var localTs  = _lTs[k] || '';
+          var remoteTs = _rTs[k] || '';
+          // Si le remote est plus récent (ou pas de ts local), prendre le remote
+          if (remoteTs > localTs) {
+            if (rs.steps[k] !== ls.steps[k]) {
+              ls.steps[k] = rs.steps[k];
+              if (!ls._stepTs) ls._stepTs = {};
+              ls._stepTs[k] = remoteTs;
+              mergeCount++;
+            }
           }
+          // Sinon on garde le local (plus récent ou égal)
         });
+      }
+      // Recalculer done après merge des steps
+      if (ls.steps) {
+        var _allDone = Object.values(ls.steps).every(function(v) { return v === true; });
+        if (_allDone && !ls.done) {
+          ls.done = true;
+          ls.dateFait = ls.dateFait || ymd(new Date());
+          mergeCount++;
+        } else if (!_allDone && ls.done) {
+          ls.done = false;
+          ls.dateFait = null;
+          mergeCount++;
+        }
       }
       // Fusionner responsable : prendre le non-vide
       if (rs.responsable && !ls.responsable) ls.responsable = rs.responsable;
@@ -6061,11 +6117,28 @@ function _mergeOpEtats(localOps, remoteOps) {
       const ls = op.etats && op.etats[sh];
       const rs = remote.etats[sh];
       if (!ls || !rs) return;
-      if (rs.done && !ls.done) { ls.done = true; ls.dateFait = rs.dateFait || ls.dateFait; }
+      // Fusionner steps : last-write-wins basé sur _stepTs
       if (rs.steps && ls.steps) {
+        var _lTs = ls._stepTs || {};
+        var _rTs = rs._stepTs || {};
         Object.keys(rs.steps).forEach(k => {
-          if (rs.steps[k] === true && ls.steps[k] !== true) ls.steps[k] = true;
+          if (typeof rs.steps[k] !== 'boolean') return;
+          var localTs  = _lTs[k] || '';
+          var remoteTs = _rTs[k] || '';
+          if (remoteTs > localTs) {
+            if (rs.steps[k] !== ls.steps[k]) {
+              ls.steps[k] = rs.steps[k];
+              if (!ls._stepTs) ls._stepTs = {};
+              ls._stepTs[k] = remoteTs;
+            }
+          }
         });
+      }
+      // Recalculer done après merge
+      if (ls.steps) {
+        var _allDone = Object.values(ls.steps).every(function(v) { return v === true; });
+        if (_allDone && !ls.done) { ls.done = true; ls.dateFait = ls.dateFait || ymd(new Date()); }
+        else if (!_allDone && ls.done) { ls.done = false; ls.dateFait = null; }
       }
     });
   });
@@ -8508,7 +8581,22 @@ function renderLiqGammeCard(g, showDetail) {
     <span style="font-size:8px; color:${sc}; flex-shrink:0;">${isExpanded ? '▾' : '▸'}</span>
     <span style="font-size:10px; color:#94a3b8; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.marque}</span>
   </span>`;
-  html += `<span style="font-size:11px; font-weight:600; color:#f1f5f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span>`;
+  // Badges statut notable sur la gamme et/ou ses parfums (visible sur toutes les vues)
+  var _cardParfumBadge = '';
+  var _notableStatuts = ['A_SORTIR', 'FIN_DE_VIE', 'A_RENTRER', 'A_REMPLACER', 'EN_ATTENTE'];
+  _notableStatuts.forEach(function(_ns) {
+    var _nsc = liqGammeStatusColor(_ns);
+    if (g.statutVie === _ns) {
+      // Gamme entière dans ce statut
+      _cardParfumBadge += ' <span style="font-size:7px; padding:0 3px; background:' + _nsc + '22; color:' + _nsc + '; border:1px solid ' + _nsc + '70; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;">gamme ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
+      return;
+    }
+    var _nsP = (g.parfums || []).filter(function(p) { return p.s === _ns; });
+    if (_nsP.length > 0) {
+      _cardParfumBadge += ' <span style="font-size:7px; padding:0 3px; background:' + _nsc + '22; color:' + _nsc + '; border:1px solid ' + _nsc + '70; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;">' + _nsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
+    }
+  });
+  html += `<span style="font-size:11px; font-weight:600; color:#f1f5f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;"><span style="overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span>${_cardParfumBadge}</span>`;
   html += `<span style="display:flex; gap:3px; align-items:center;">${_opChips}</span>`;
   html += `<span style="font-size:8px; padding:1px 4px; background:${ctColor}15; color:${ctColor}; border:1px solid ${ctColor}30; border-radius:2px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.ct || '?'}</span>`;
   html += `<span style="font-size:8px; padding:1px 4px; background:${sc}15; color:${sc}; border:1px solid ${sc}35; border-radius:2px; text-align:center; font-weight:600; text-transform:uppercase; letter-spacing:0.2px;">${statLbl}</span>`;
@@ -8631,7 +8719,12 @@ function renderLiqGammeDetail(g) {
           }
         }
       });
+      // Si un filtre statut est actif, n'afficher que les parfums qui matchent
+      var _detailFStatut = (document.getElementById('liqFilterStatut') || {}).value || '';
+      var _filterParfums = !!_detailFStatut;
+      var _hiddenCount = 0;
       g.parfums.forEach((p, pi) => {
+        if (_filterParfums && p.s !== _detailFStatut) { _hiddenCount++; return; }
         const pSc = liqGammeStatusColor(p.s || 'OK');
         const pCtColor = LIQ_GOUT_COLORS[p.ct] || '#94a3b8';
         const dimStyle = p.s === 'SORTI' ? 'opacity:0.4;' : '';
@@ -8648,6 +8741,9 @@ function renderLiqGammeDetail(g) {
         html += `<button onclick="removeLiqParfum('${g.id}',${pi})" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #ef444440; color:#ef4444; border-radius:2px; cursor:pointer; line-height:1.2;" title="Retirer">×</button>`;
         html += `</div>`;
       });
+      if (_hiddenCount > 0) {
+        html += `<div style="font-size:9px; color:#64748b; font-style:italic; padding:2px 0;">+ ${_hiddenCount} parfum${_hiddenCount > 1 ? 's' : ''} masqué${_hiddenCount > 1 ? 's' : ''} par le filtre</div>`;
+      }
     }
     html += `<button onclick="addLiqParfum('${g.id}')" style="margin-top:4px; padding:2px 10px; font-size:10px; background:#22c55e20; color:#22c55e; border:1px solid #22c55e40; border-radius:2px; cursor:pointer;">+ parfum</button>`;
 
@@ -8679,7 +8775,9 @@ function renderLiqAll() {
     const matchFormat = !fFormat || g.format === fFormat;
     const matchProfil = !fProfil || g.profilChoisi === fProfil;
     const matchRole = !fRole || g.roleChoisi === fRole;
-    const matchStatut = !fStatut || g.statutVie === fStatut;
+    // Statut : match sur la gamme OU sur au moins un parfum ayant ce statut
+    const matchStatut = !fStatut || g.statutVie === fStatut
+      || (g.parfums || []).some(function(p) { return p.s === fStatut; });
     return matchSearch && matchFormat && matchProfil && matchRole && matchStatut;
   });
 
@@ -9006,9 +9104,23 @@ function renderLiqAll() {
           const _liqPrOp = ops.find(o => o.type === 'PRIX_ROUGE' && isOpOuverte(o) && (o.produitIds||[]).includes(g.id) && isPrixRougeEnCours(o));
           const _liqPvStrike = !!_liqPrOp;
 
+          // Badges statut notable sur la gamme et/ou ses parfums
+          var _parfumFilterBadge = '';
+          var _listNotable = ['A_SORTIR', 'FIN_DE_VIE', 'A_RENTRER', 'A_REMPLACER', 'EN_ATTENTE'];
+          _listNotable.forEach(function(_lns) {
+            var _lnsc = liqGammeStatusColor(_lns);
+            if (g.statutVie === _lns) {
+              _parfumFilterBadge += ' <span style="font-size:8px; padding:0 4px; background:' + _lnsc + '22; color:' + _lnsc + '; border:1px solid ' + _lnsc + '70; border-radius:3px; font-weight:700; white-space:nowrap;">gamme ' + (LIQ_GAMME_STATUT_LABELS[_lns]||_lns).toLowerCase() + '</span>';
+              return;
+            }
+            var _lnsP = (g.parfums || []).filter(function(p) { return p.s === _lns; });
+            if (_lnsP.length > 0) {
+              _parfumFilterBadge += ' <span style="font-size:8px; padding:0 4px; background:' + _lnsc + '22; color:' + _lnsc + '; border:1px solid ' + _lnsc + '70; border-radius:3px; font-weight:700; white-space:nowrap;">' + _lnsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_lns]||_lns).toLowerCase() + '</span>';
+            }
+          });
           html += `<div style="${rowStyle}" onclick="toggleLiqSection('liq-detail-${g.id}');">
             <div style="background:${sc}; border-radius:2px; width:3px; height:100%;"></div>
-            <div style="color:#f1f5f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><span style="color:#94a3b8;">${g.marque}</span> — <span style="font-weight:600;">${g.gamme}</span>${_liqOneShotBadge}</div>
+            <div style="color:#f1f5f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><span style="color:#94a3b8;">${g.marque}</span> — <span style="font-weight:600;">${g.gamme}</span>${_liqOneShotBadge}${_parfumFilterBadge}</div>
             <div style="display:flex; gap:2px; flex-wrap:wrap; align-items:center;">${liqGammeOpChips(g)}</div>
             <div style="font-size:9px; color:${fmtColor};">${LIQ_FORMAT_LABELS[g.format]||g.format}</div>
             <div style="font-size:9px; color:${ctColor};">${g.ct||'—'}</div>
@@ -14850,7 +14962,25 @@ function setOpCommanderProduits(opId, checked) {
   const op = ops.find(o => o.id === opId); if (!op) return;
   ensureOpModel(op);
   op.prep.commanderProduits = !!checked;
+  // Auto-lier le rentrerActionId si le produit a une action RENTRER en cours
+  if (checked && !op.rentrerActionId && op.type !== 'COUP') {
+    var _pid = (op.produitIds || [])[0];
+    if (_pid) {
+      var _ra = actions.find(function(x) { return x.type === 'RENTRER' && x.produitId === _pid && !x.annulee; });
+      if (_ra) {
+        op.rentrerActionId = _ra.id;
+        // Synchroniser l'état existant de l'action vers l'OP
+        ensureOpSteps(op);
+        syncActionStepsToOp(_ra);
+      }
+    }
+  }
   ensureOpSteps(op);
+  // Si on vient d'activer, synchroniser les steps existants du RENTRER
+  if (checked && op.rentrerActionId) {
+    var _ra2 = actions.find(function(x) { return x.id === op.rentrerActionId; });
+    if (_ra2) syncActionStepsToOp(_ra2);
+  }
   saveData(); renderDashboard(); renderOps && renderOps();
 }
 
