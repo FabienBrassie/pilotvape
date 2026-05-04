@@ -3226,8 +3226,8 @@ function ensureOneShotOp(kit) {
     if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
     return op;
   }
-  // OP existe : on garantit les liens + réouvre si refermée prématurément
-  if (op.dateFin) op.dateFin = null;
+  // OP existe : on garantit les liens. Ne PAS réouvrir si dateFin posée manuellement.
+  // if (op.dateFin) op.dateFin = null;  — retiré : l'admin peut poser une dateFin volontaire
   if (aRentrer && op.rentrerActionId !== aRentrer.id) op.rentrerActionId = aRentrer.id;
   if (aSortir  && op.sortirActionId  !== aSortir.id)  op.sortirActionId  = aSortir.id;
   if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
@@ -3812,8 +3812,7 @@ function syncPrixRougeOp(a, opts) {
     // Garantit la cohérence des steps si le type a évolué
     ensureOpSteps(linked);
     if (!linked.source) linked.source = 'prix_action';
-    // Réouvre si clôturée par erreur puis réactivée
-    if (linked.dateFin) linked.dateFin = null;
+    // Ne PAS réouvrir automatiquement — l'admin peut poser une dateFin volontaire
     if (typeof a.prixCible === 'number') {
       linked.commentaire = 'Cible ' + a.prixCible.toFixed(2) + '€';
       linked.prixRouge = a.prixCible;
@@ -4247,7 +4246,7 @@ function syncRentrerPrixRougeOp(a) {
     }
     ensureOpSteps(linked);
     if (!linked.source) linked.source = 'rentrer_action';
-    if (linked.dateFin) linked.dateFin = null;
+    // Ne PAS réouvrir si dateFin posée manuellement par l'admin
     if (typeof a.prixRouge === 'number') linked.prixRouge = a.prixRouge;
     if (typeof a.prixAvantRouge === 'number') linked.prixAvantRouge = a.prixAvantRouge;
     linked.commentaire = 'Prix rouge one-shot' + (a.prixRouge ? ' à ' + a.prixRouge.toFixed(2) + '€' : '');
