@@ -3297,8 +3297,8 @@ function ensureOneShotOpLiq(gamme) {
     if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
     return op;
   }
-  // OP existe : garantir les liens + réouvrir si fermée prématurément
-  if (op.dateFin) op.dateFin = null;
+  // OP existe : garantir les liens (ne PAS réinitialiser dateFin pour respecter les dates admin)
+  // if (op.dateFin) op.dateFin = null;  // Retiré — même fix que ensureOneShotOp (kit)
   if (aRentrer && op.rentrerActionId !== aRentrer.id) op.rentrerActionId = aRentrer.id;
   if (aSortir  && op.sortirActionId  !== aSortir.id)  op.sortirActionId  = aSortir.id;
   if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
@@ -15389,32 +15389,95 @@ async function setOpDateDebut(opId, v) {
   const op = ops.find(o => o.id === opId); if (!op) return;
   logAction('Date début OP', _logOpLabel(opId) + ' → ' + v);
   if (v) op.dateDebut = v;
-  // Sync sibling one-shot ↔ PR : proposer d'aligner la date de début
+  saveData();
+  // Sync sibling one-shot ↔ PR : toujours proposer d'aligner la date de début
   const sibling = _findOneShotSibling(op);
-  if (sibling && sibling.dateDebut !== v && v) {
-    if (await pvConfirm('Synchroniser la date de début sur l\'OP liée (' + sibling.id + ' — ' + (sibling.type === 'PRIX_ROUGE' ? 'Prix Rouge' : sibling.type) + ') ?')) {
+  if (sibling && v) {
+    const sibType = sibling.type === 'PRIX_ROUGE' ? 'Prix Rouge' : sibling.type;
+    if (await pvConfirm('Synchroniser la date de début sur l\'OP liée (' + sibling.id + ' — ' + sibType + ') ?')) {
       sibling.dateDebut = v;
+      // Désarchiver le sibling si les dates le rendent actif
+      if (sibling._archived && opTimeStatus(sibling) !== 'TERMINEE') {
+        sibling._archived = false;
+        console.log('[SYNC] Désarchivage automatique de', sibling.id, '— OP encore active');
+      }
+      saveData();
+      pvAlert('✅ Date de début synchronisée sur ' + sibling.id + ' (' + sibType + ') → ' + v);
     }
   }
-  saveData(); renderDashboard(); renderOps && renderOps();
+  // Forcer l'expansion de la section + carte + panneau d'édition du sibling
+  if (sibling && !sibling._archived) {
+    _forceExpandOpSection(sibling);
+    opDashExpanded.add(sibling.id);
+    opEditOpen.add(sibling.id);
+  }
+  renderDashboard(); renderOps && renderOps();
+  if (sibling && !sibling._archived) {
+    setTimeout(function() {
+      var card = document.getElementById('opCard-' + sibling.id);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.style.outline = '2px solid #22d3ee';
+        setTimeout(function() { card.style.outline = ''; }, 3000);
+      }
+    }, 200);
+  }
 }
 async function setOpDateFin(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   logAction('Date fin OP', _logOpLabel(opId) + ' → ' + v);
   op.dateFin = v || null;
-  // Sync sibling one-shot ↔ PR : proposer d'aligner la date de fin
+  // Première sauvegarde : l'OP principale est à jour
+  saveData();
+  // Sync sibling one-shot ↔ PR : toujours proposer d'aligner la date de fin
   const sibling = _findOneShotSibling(op);
   if (sibling) {
-    const sibFin = sibling.dateFin || null;
     const newFin = v || null;
-    if (sibFin !== newFin) {
-      if (await pvConfirm('Synchroniser la date de fin sur l\'OP liée (' + sibling.id + ' — ' + (sibling.type === 'PRIX_ROUGE' ? 'Prix Rouge' : sibling.type) + ') ?')) {
-        sibling.dateFin = newFin;
+    const sibType = sibling.type === 'PRIX_ROUGE' ? 'Prix Rouge' : sibling.type;
+    const sibFinLbl = sibling.dateFin || 'aucune';
+    if (await pvConfirm('Synchroniser la date de fin sur l\'OP liée (' + sibling.id + ' — ' + sibType + ') ?\n\nDate actuelle : ' + sibFinLbl + '\nNouvelle date : ' + (newFin || 'aucune'))) {
+      sibling.dateFin = newFin;
+      // Désarchiver le sibling si les dates le rendent actif (correction de _archived incohérent)
+      if (sibling._archived && opTimeStatus(sibling) !== 'TERMINEE') {
+        sibling._archived = false;
+        console.log('[SYNC] Désarchivage automatique de', sibling.id, '— OP encore active');
       }
+      saveData();
+      pvAlert('✅ Date de fin synchronisée sur ' + sibling.id + ' (' + sibType + ') → ' + (newFin || 'aucune'));
     }
   }
-  saveData(); renderDashboard(); renderOps && renderOps();
+  // Forcer l'expansion de la section + carte + panneau d'édition du sibling
+  if (sibling && !sibling._archived) {
+    _forceExpandOpSection(sibling);
+    opDashExpanded.add(sibling.id);
+    opEditOpen.add(sibling.id);
+  }
+  renderDashboard(); renderOps && renderOps();
+  // Scroll vers la carte du sibling pour montrer le résultat (si visible)
+  if (sibling && !sibling._archived) {
+    setTimeout(function() {
+      var card = document.getElementById('opCard-' + sibling.id);
+      if (card) {
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        card.style.outline = '2px solid #22d3ee';
+        setTimeout(function() { card.style.outline = ''; }, 3000);
+      }
+    }, 200);
+  }
+}
+
+// Force l'expansion de la section contenant l'OP cible pour que renderOpCardHtml l'inclue.
+// Gère les deux modes de vue : timeline (_tl_EN_COURS, _tl_IMMINENTE, etc.) et par type (COUP, PRIX_ROUGE, etc.)
+function _forceExpandOpSection(op) {
+  if (!op) return;
+  // Mode timeline : déterminer dans quel bucket tombe l'OP après modification
+  var tlKey = '_tl_' + opTimeStatus(op);
+  if (opTypeCollapsed.has(tlKey)) opTypeCollapsed.delete(tlKey);
+  // Mode par type : s'assurer que le type de l'OP est aussi expansé
+  if (op.type && opTypeCollapsed.has(op.type)) opTypeCollapsed.delete(op.type);
+  // Sous-niveau campagne : si l'OP appartient à une campagne, l'ouvrir aussi
+  if (op.campagneId && opCampagneCollapsed.has(op.campagneId)) opCampagneCollapsed.delete(op.campagneId);
 }
 
 // Trouve l'OP sœur d'un couple one-shot / PRIX_ROUGE lié à la même action RENTRER.
