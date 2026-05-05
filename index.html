@@ -10040,7 +10040,7 @@ function renderDashboard() {
     if (globalState === 'FAIT' && !showDone) return false;
     // Filtre prodType : '' = tous, 'kit' = kits uniquement, 'liq' = liquides uniquement, 'pd' = PD
     if (fProdType && fProdType !== (a.produitType || 'kit')) return false;
-    if (fPrio && a.priorite !== fPrio) return false;
+    if (fPrio && effectivePrio(a) !== fPrio) return false;
     if (fShop) {
       // Ne pas afficher si le shop filtré a déjà fait cette action (et qu'on n'affiche pas les clôturées)
       if (a.etats[fShop].done && !showDone) return false;
@@ -10113,20 +10113,42 @@ function renderDashboard() {
     if (candidates.length === 1) continuityMap[a.id] = candidates[0];
   });
 
-  // Priorité effective :
-  //   SORTIR        → HAUTE (stock dormant = cash qui dort, à vider en priorité)
-  //   MISE_EN_PLACE → HAUTE si au moins une shop est en état A_FAIRE (rentré + sorti → faut monter sur le mur)
-  //   RENTRER       → HAUTE si lié à un SORTIR (fermer le cycle), NORMALE sinon
+  // Priorité effective — 3 niveaux réels :
+  //   HAUTE    = OP imminente (≤7j) ou en cours pas prête (<50%)
+  //   NORMALE  = a une OP rattachée (mais pas de pression temporelle immédiate)
+  //   BASSE    = pas d'OP rattachée
   //   Override utilisateur (HAUTE/NORMALE/BASSE) prime sur l'AUTO.
+  function _findLinkedOps(a) {
+    return ops.filter(o => {
+      if (o._archived || o.dateFin && o.dateFin < ymd(new Date())) return false;
+      return o.rentrerActionId === a.id || o.sortirActionId === a.id
+        || o.prixActionId === a.id || o.rentrerPrixActionId === a.id
+        || (o.groupActionIds && o.groupActionIds.includes(a.id));
+    });
+  }
+  function _hasUrgentOp(linkedOps) {
+    for (const o of linkedOps) {
+      const ts = opTimeStatus(o);
+      if (ts === 'IMMINENTE') return true;
+      if (ts === 'EN_COURS' && opOverallProgress(o) < 0.5) return true;
+      if (ts === 'A_VENIR') {
+        const d = new Date(o.dateDebut + 'T00:00:00');
+        const today = new Date(); today.setHours(0,0,0,0);
+        if (Math.round((d - today) / 86400000) <= 7) return true;
+      }
+    }
+    return false;
+  }
   function effectivePrio(a) {
     if (a.priorite && a.priorite !== 'AUTO') return a.priorite;
-    if (a.type === 'SORTIR') return 'HAUTE';
-    if (a.type === 'MISE_EN_PLACE') {
-      const ready = SHOPS.some(sh => mepShopStatus(a, sh) === 'A_FAIRE');
-      return ready ? 'HAUTE' : 'NORMALE';
-    }
-    if (a.type === 'RENTRER') return linkMap[a.id] ? 'HAUTE' : 'NORMALE';
-    return 'NORMALE';
+    const linked = _findLinkedOps(a);
+    const hasOp = linked.length > 0;
+    const urgent = hasOp && _hasUrgentOp(linked);
+    // Règle universelle quel que soit le type :
+    //   OP urgente → HAUTE | OP non urgente → NORMALE | pas d'OP → BASSE
+    if (urgent) return 'HAUTE';
+    if (hasOp)  return 'NORMALE';
+    return 'BASSE';
   }
 
   const sortir = actions.filter(a => (a.type === 'SORTIR' || a.type === 'SWAP_COMPOSANT') && isVisible(a));
@@ -10136,18 +10158,28 @@ function renderDashboard() {
   const besoins = computeBesoins();
   const historique = actions.filter(a => a.dateCloture && (!fPrio || effectivePrio(a) === fPrio));
 
-  // Tri : paires liées d'abord, puis par profil+case pour cohérence
+  // Tri : priorité d'abord (HAUTE → NORMALE → BASSE), puis paires liées, puis profil+case
+  const _prioRank = { HAUTE: 0, NORMALE: 1, BASSE: 2 };
   const sortByPair = (x, y) => {
+    const px = _prioRank[effectivePrio(x)] ?? 1;
+    const py = _prioRank[effectivePrio(y)] ?? 1;
+    if (px !== py) return px - py;
     const kx = baseKits.find(k => k.id === x.produitId);
     const ky = baseKits.find(k => k.id === y.produitId);
-    if (!kx || !ky) return 0;
-    const lx = linkMap[x.id] ? 0 : 1;
-    const ly = linkMap[y.id] ? 0 : 1;
-    if (lx !== ly) return lx - ly;
-    return pairKey(kx).localeCompare(pairKey(ky));
+    if (kx && ky) {
+      const lx = linkMap[x.id] ? 0 : 1;
+      const ly = linkMap[y.id] ? 0 : 1;
+      if (lx !== ly) return lx - ly;
+      return pairKey(kx).localeCompare(pairKey(ky));
+    }
+    // Liquides ou mix : tri par nom produit
+    const nx = (x.produitId || '').localeCompare(y.produitId || '');
+    return nx;
   };
   sortir.sort(sortByPair);
   rentrer.sort(sortByPair);
+  meps.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
+  prix.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
 
   const prioColor = (p) => p === 'HAUTE' ? '#ef4444' : p === 'BASSE' ? '#64748b' : '#f59e0b';
 
@@ -10534,7 +10566,8 @@ function renderDashboard() {
 
     const hasComments = SHOPS.some(sh => a.etats[sh].commentaire);
     const commentIcon = hasComments ? `<span title="Commentaires shops" style="font-size:11px; color:#f59e0b;">💬</span>` : '';
-    const prioDot = prio === 'HAUTE' ? `<span title="Priorité haute" style="width:6px; height:6px; background:${pc}; border-radius:50%; flex-shrink:0; margin-right:4px;"></span>` : '';
+    const prioDot = prio === 'HAUTE' ? `<span title="Priorité haute (OP imminente)" style="width:6px; height:6px; background:${pc}; border-radius:50%; flex-shrink:0; margin-right:4px;"></span>`
+      : prio === 'BASSE' ? `<span title="Priorité basse (pas d'OP)" style="width:6px; height:6px; background:${pc}; border-radius:50%; flex-shrink:0; margin-right:4px; opacity:0.5;"></span>` : '';
 
     // Chip "OP en cours" : si une OP ouverte est liée à cette action → indicateur visuel dans l'en-tête.
     // Code couleur selon le type d'OP (rouge pour PRIX_ROUGE, orange MISE_EN_AVANT, cyan NOUVEAUTE, etc.)
@@ -11013,6 +11046,8 @@ function renderDashboard() {
 
   // Rend les cartes d'action d'un lot de liquides (gamme-level + parfum groups)
   function _renderLiqActionsInner(liqActions) {
+    // Trier par priorité
+    liqActions.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
     // Séparer : actions parfum vs actions gamme-level
     const parfumActions = liqActions.filter(a => a.produitParfumId);
     const gammeActions = liqActions.filter(a => !a.produitParfumId);
@@ -11024,7 +11059,13 @@ function renderDashboard() {
       groups[key].push(a);
     });
     let html = gammeActions.map(renderActionCard).join('');
-    Object.keys(groups).forEach(gammeId => {
+    // Trier les groupes par meilleure priorité
+    const groupKeys = Object.keys(groups).sort((a, b) => {
+      const pa = Math.min(...groups[a].map(x => _prioRank[effectivePrio(x)] ?? 1));
+      const pb = Math.min(...groups[b].map(x => _prioRank[effectivePrio(x)] ?? 1));
+      return pa - pb;
+    });
+    groupKeys.forEach(gammeId => {
       html += _renderGammeParfumGroup(groups[gammeId]);
     });
     return html;
@@ -11108,7 +11149,14 @@ function renderDashboard() {
       if (!byMarque[marque]) byMarque[marque] = [];
       byMarque[marque].push(a);
     });
-    const marques = Object.keys(byMarque).sort();
+    const marques = Object.keys(byMarque).sort((a, b) => {
+      // Tri par meilleure priorité de la marque (HAUTE → NORMALE → BASSE), puis alphabétique
+      const bestPrio = (acts) => Math.min(...acts.map(x => _prioRank[effectivePrio(x)] ?? 1));
+      const pa = bestPrio(byMarque[a]);
+      const pb = bestPrio(byMarque[b]);
+      if (pa !== pb) return pa - pb;
+      return a.localeCompare(b);
+    });
 
     let liqInnerHtml = '';
     // Si une seule marque → pas d'accordéon marque, juste le contenu
@@ -11497,7 +11545,7 @@ function renderDashboard() {
     return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' });
   };
   const _TIMELINE_DAYS_BEFORE = 7;
-  const _TIMELINE_DAYS_AFTER  = 42;
+  const _TIMELINE_DAYS_AFTER  = 30;
   const _totalSpan = _TIMELINE_DAYS_BEFORE + _TIMELINE_DAYS_AFTER;
   const _windowStart = (() => { const d = _mkDate(_today); d.setDate(d.getDate() - _TIMELINE_DAYS_BEFORE); return ymd(d); })();
   const _windowEnd   = (() => { const d = _mkDate(_today); d.setDate(d.getDate() + _TIMELINE_DAYS_AFTER);  return ymd(d); })();
@@ -11779,7 +11827,7 @@ function renderDashboard() {
     const s = Math.max(0, _daysBetween(_windowStart, cDeb));
     const e = Math.min(_totalSpan - 1, _daysBetween(_windowStart, cFin));
     const leftPct = (s / _totalSpan) * 100;
-    const widthPct = Math.max(1, ((e - s + 1) / _totalSpan) * 100);
+    const widthPct = Math.max(4, ((e - s + 1) / _totalSpan) * 100);
     // Bandeau limité à l'emprise temporelle de la campagne (les lanes redeviennent libres après)
     _campBands += `<div style="position:absolute; left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%; top:${topPx}px; height:${heightPx}px;
       background:#3b82f640; border:1px dashed #3b82f680; border-radius:4px; z-index:0; pointer-events:none;"></div>`;
@@ -11795,7 +11843,7 @@ function renderDashboard() {
     const s = Math.max(0, _daysBetween(_windowStart, entry.dateDebut));
     const e = Math.min(_totalSpan - 1, _daysBetween(_windowStart, entry.dateFin));
     const leftPct = (s / _totalSpan) * 100;
-    const widthPct = Math.max(0.8, ((e - s + 1) / _totalSpan) * 100);
+    const widthPct = Math.max(4, ((e - s + 1) / _totalSpan) * 100);
     const top = entry.lane * (_laneH + _laneGap) + 2;
     const pctNum = Math.round(entry.pct * 100);
     const pctCol = entry.pct >= 1 ? '#22c55e' : entry.pct >= 0.5 ? '#8b5cf6' : entry.pct > 0 ? '#f59e0b' : '#64748b';
@@ -11815,15 +11863,22 @@ function renderDashboard() {
     const isPast = entry.dateFin < _today;
     const opacity = isDone ? '0.35' : isPast ? '0.55' : '1';
     const doneFilter = isDone ? 'filter:grayscale(0.7) brightness(0.8);' : '';
+    const _realDays = _daysBetween(entry.dateDebut, entry.dateFin) + 1;
+    const _realPct = (_realDays / _totalSpan) * 100;
+    const _isWidened = widthPct > _realPct + 0.5; // bloc artificiellement élargi par le min 4%
     const bg = entry.noEndDate
       ? `background:linear-gradient(to right, ${entry.color}cc 30%, ${entry.color}60 70%, transparent 100%);`
-      : entry.isCamp
-        ? `background:repeating-linear-gradient(45deg, ${entry.color}, ${entry.color} 3px, ${entry.color}70 3px, ${entry.color}70 6px);`
-        : `background:${entry.color}cc;`;
+      : _isWidened
+        ? `background:linear-gradient(to right, ${entry.color}cc ${Math.round(_realPct / widthPct * 100)}%, ${entry.color}40 100%);`
+        : entry.isCamp
+          ? `background:repeating-linear-gradient(45deg, ${entry.color}, ${entry.color} 3px, ${entry.color}70 3px, ${entry.color}70 6px);`
+          : `background:${entry.color}cc;`;
     const _borderColor = isDone ? '#47556980' : nbLate ? '#ef4444' : nbUrg ? '#f59e0b' : entry.color + '50';
     const border = entry.noEndDate
       ? `border-top:1px solid ${_borderColor}; border-bottom:1px solid ${_borderColor}; border-left:1px solid ${_borderColor}; border-right:none; border-image:linear-gradient(to right, ${_borderColor} 30%, transparent 100%) 1;`
-      : `border:1px solid ${_borderColor};`;
+      : _isWidened
+        ? `border-top:1px solid ${_borderColor}; border-bottom:1px solid ${_borderColor}; border-left:1px solid ${_borderColor}; border-right:none;`
+        : `border:1px solid ${_borderColor};`;
 
     // Label compact
     const meta = OP_TYPE_META[entry.type] || { label: entry.type };
@@ -11844,11 +11899,11 @@ function renderDashboard() {
     return `<div onclick="switchTabProgrammatic('ops','${entry.clickId}')"
       title="${tipText.replace(/"/g, '&quot;')}"
       style="position:absolute; left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%; top:${top}px; height:${_laneH}px;
-        ${bg} ${border} border-radius:3px; opacity:${opacity}; cursor:pointer; overflow:hidden;
-        display:flex; align-items:center; gap:2px; padding:0 4px; box-sizing:border-box; z-index:1;
+        ${bg} ${border} border-radius:3px; opacity:${opacity}; cursor:pointer; overflow:${_isWidened ? 'visible' : 'hidden'};
+        display:flex; align-items:center; gap:2px; padding:0 4px; box-sizing:border-box; z-index:${_isWidened ? 2 : 1};
         ${doneFilter} transition: filter 0.15s;"
-      onmouseover="this.style.filter='${hoverFilter}'" onmouseout="this.style.filter='${isDone ? 'grayscale(0.7) brightness(0.8)' : 'none'}'">
-      <span style="font-size:8px; color:#fff; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-shadow:0 1px 2px rgba(0,0,0,0.6);">${shortLbl}${prodLbl}</span>
+      onmouseover="this.style.filter='${hoverFilter}'; ${_isWidened ? "this.style.zIndex='5';" : ''}" onmouseout="this.style.filter='${isDone ? 'grayscale(0.7) brightness(0.8)' : 'none'}'; ${_isWidened ? "this.style.zIndex='2';" : ''}">
+      <span style="font-size:8px; color:#fff; font-weight:700; white-space:nowrap; text-shadow:0 1px 2px rgba(0,0,0,0.6), 0 0 3px rgba(0,0,0,0.8);">${_isWidened ? ((shortLbl + prodLbl).split(' ')[0].length > 10 ? (shortLbl + prodLbl).substring(0, 10) + '…' : (shortLbl + prodLbl).split(' ')[0] + '…') : shortLbl + prodLbl}</span>
       ${alertIcon}${doneIcon}
       <div style="position:absolute; left:0; bottom:0; height:2px; width:${pctNum}%; background:${isDone ? '#22c55e' : pctCol}; border-radius:0 0 2px 2px;"></div>
     </div>`;
