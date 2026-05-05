@@ -382,7 +382,14 @@
   </div>
 
   <div id="releves" class="tab-content">
+    <div id="relevesSubTabs" style="display:flex; gap:0; margin-bottom:10px; border-bottom:2px solid #1e293b;">
+      <span class="releves-sub-tab active" data-sub="kits" onclick="switchRelSubTab('kits')" style="padding:8px 18px; font-size:12px; font-weight:700; cursor:pointer; color:#e2e8f0; border-bottom:2px solid #3b82f6; margin-bottom:-2px;">🔧 Kits</span>
+      <span class="releves-sub-tab" data-sub="pd-box" onclick="switchRelSubTab('pd-box')" style="padding:8px 18px; font-size:12px; font-weight:700; cursor:pointer; color:#64748b; border-bottom:2px solid transparent; margin-bottom:-2px;">🔋 Box</span>
+      <span class="releves-sub-tab" data-sub="pd-ato" onclick="switchRelSubTab('pd-ato')" style="padding:8px 18px; font-size:12px; font-weight:700; cursor:pointer; color:#64748b; border-bottom:2px solid transparent; margin-bottom:-2px;">💨 Ato</span>
+    </div>
     <div id="relevesContent"></div>
+    <div id="relevesPdBoxContent" style="display:none;"></div>
+    <div id="relevesPdAtoContent" style="display:none;"></div>
   </div>
 
   <div id="basePD" class="tab-content">
@@ -1855,7 +1862,8 @@ function getOpProductDisplay(op) {
   if (liq) {
     const _fmt = liq.format || '';
     // Déterminer le scope : parfum spécifique, X réf., ou gamme entière
-    const _srcA = (op.sortirActionId || op.prixActionId) ? actions.find(x => x.id === (op.sortirActionId || op.prixActionId)) : null;
+    const _srcAId = op.sortirActionId || op.prixActionId || op.rentrerActionId || op.rentrerPrixActionId;
+    const _srcA = _srcAId ? actions.find(x => x.id === _srcAId) : null;
     let _scope = '';
     if (_srcA && _srcA.produitParfumId && liq.parfums) {
       const _pf = liq.parfums.find(p => p.id === _srcA.produitParfumId);
@@ -2111,10 +2119,16 @@ function seedOpDefaults(op) {
 //   - pour chaque pièce digitale non-perShop : [plv_<id>_diffusee]
 function computeOpGlobalStepDefs(op) {
   const defs = [];
+  const produitDejaGere = op.prep && op.prep.commanderProduits;
   (op.pieces || []).forEach(p => {
     if (p.source === 'fournie') {
-      defs.push({ key: 'plv_' + p.id + '_commandee', label: 'Commander ' + pieceLabel(p),    pieceId: p.id });
-      defs.push({ key: 'plv_' + p.id + '_recue',     label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id });
+      // Si la pièce est de type PRODUIT et que "Produits à commander" est activé,
+      // les steps Commander/Réceptionner sont déjà gérés par-shop (Commandé sur Swappy / Reçu en boutique).
+      // On ne les duplique pas en amont global.
+      if (!(p.type === 'PRODUIT' && produitDejaGere)) {
+        defs.push({ key: 'plv_' + p.id + '_commandee', label: 'Commander ' + pieceLabel(p),    pieceId: p.id });
+        defs.push({ key: 'plv_' + p.id + '_recue',     label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id });
+      }
     } else if (p.source === 'custom') {
       defs.push({ key: 'plv_' + p.id + '_visuelCree', label: 'Créer le visuel ' + pieceLabel(p), pieceId: p.id });
     }
@@ -2538,17 +2552,23 @@ function dateDiffDays(dStr) {
 function getLatestPriceForKitCompetitor(kitId, compKey) {
   const list = relevesPrix.filter(r => r.produitId === kitId && r.prix && typeof r.prix[compKey] === 'number');
   if (!list.length) return null;
-  return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+  return list.slice().reverse().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
 }
 // Dernier relevé (toutes sources) pour un produit — utilisé pour "date de dernier refresh"
 function getLatestReleveForKit(kitId) {
-  const list = relevesPrix.filter(r => r.produitId === kitId);
+  const list = relevesPrix.filter(r => !r.produitType && r.produitId === kitId);
   if (!list.length) return null;
   return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
 }
 // Dernière date de relevé pour un concurrent donné (toutes shops confondues)
 function getLatestReleveDateByCompetitor(competitorKey) {
-  const list = relevesPrix.filter(r => r.prix && typeof r.prix[competitorKey] === 'number');
+  const list = relevesPrix.filter(r => !r.produitType && r.prix && typeof r.prix[competitorKey] === 'number');
+  if (!list.length) return null;
+  return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].date;
+}
+// Dernière date de relevé fait PAR une boutique précise (via le champ "par") — kits uniquement
+function getLatestReleveDateByShop(shop) {
+  const list = relevesPrix.filter(r => !r.produitType && r.par === shop);
   if (!list.length) return null;
   return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].date;
 }
@@ -2634,6 +2654,79 @@ function computeStalePriceAlerts() {
     }
   });
   return alerts;
+}
+
+// ── RELEVÉS PD : fonctions de données ──
+// Dernier relevé d'un concurrent pour une PD spécifique
+function getLatestPriceForPdCompetitor(pdId, compKey) {
+  const list = relevesPrix.filter(r => r.produitType === 'pd' && r.produitId === pdId && r.prix && typeof r.prix[compKey] === 'number');
+  if (!list.length) return null;
+  // reverse() avant sort : à date égale, l'entrée la plus récente (fin de tableau) gagne
+  return list.slice().reverse().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0];
+}
+// Dernière date de relevé PD par boutique et catégorie
+function getLatestPdReleveDateByShop(shop, cat) {
+  const compKey = SHOP_COMPETITOR[shop];
+  const pdIds = new Set(basePD.filter(p => p.categorie === cat && p.statutVie !== 'SORTI').map(p => p.id));
+  const list = relevesPrix.filter(r => r.produitType === 'pd' && r.par === shop && pdIds.has(r.produitId) && r.prix && typeof r.prix[compKey] === 'number');
+  if (!list.length) return null;
+  return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].date;
+}
+// Fraîcheur PD : BOX = début de mois (1-5), ATO = mi-mois (15-19)
+// Périmé si : pas de relevé ce mois dans la fenêtre OU > 30 jours glissants
+const PD_RELEVE_STALE_DAYS = 30;
+function isPdReleveStale(shop, cat) {
+  const lastDate = getLatestPdReleveDateByShop(shop, cat);
+  if (!lastDate) return { stale: true, days: Infinity, reason: 'jamais' };
+  const days = dateDiffDays(lastDate);
+  if (days >= PD_RELEVE_STALE_DAYS) return { stale: true, days, reason: 'ancien_30j' };
+  // Vérifier le calendaire : BOX = relevé attendu entre le 1er et le 5, ATO = entre le 15 et le 19
+  const today = new Date(); today.setHours(0,0,0,0);
+  const dom = today.getDate(); // jour du mois
+  const lastD = new Date(lastDate + 'T00:00:00');
+  const sameMonth = lastD.getFullYear() === today.getFullYear() && lastD.getMonth() === today.getMonth();
+  if (cat === 'BOX' && dom >= 5 && !sameMonth) return { stale: true, days, reason: 'calendaire' };
+  if (cat === 'ATO' && dom >= 19 && (!sameMonth || lastD.getDate() < 15)) return { stale: true, days, reason: 'calendaire' };
+  return { stale: false, days, reason: null };
+}
+// Prix effectif PD (même logique que kits, avec PR destockage)
+function getEffectivePdPrice(pd) {
+  if (!pd || typeof pd.pv !== 'number') return { prix: 0, source: 'pv' };
+  var today = ymd(new Date());
+  var prOps = ops.filter(function(o) {
+    return o.type === 'PRIX_ROUGE' && (o.produitIds || []).includes(pd.id) && isOpOuverte(o);
+  });
+  var actif = prOps.find(function(o) {
+    return o.dateDebut && o.dateDebut <= today && typeof o.prixRouge === 'number';
+  });
+  if (actif) return { prix: actif.prixRouge, source: 'pr_actif', prOp: actif };
+  return { prix: pd.pv, source: 'pv' };
+}
+// Verdict PD (mêmes seuils que kits)
+function computePdPriceVerdict(pd) {
+  if (!pd || typeof pd.pv !== 'number' || pd.pv <= 0) return null;
+  const prixC = [];
+  let latestRel = null;
+  CONCURRENTS.forEach(c => {
+    if (pd.nonDispoChez && pd.nonDispoChez[c.key]) return;
+    const r = getLatestPriceForPdCompetitor(pd.id, c.key);
+    if (!r) return;
+    const p = Number(r.prix[c.key]);
+    if (!(p > 0)) return;
+    prixC.push({ key: c.key, label: c.label, p, releve: r });
+    if (!latestRel || (r.date || '').localeCompare(latestRel.date || '') > 0) latestRel = r;
+  });
+  if (!prixC.length) return null;
+  const min = prixC.reduce((a, b) => a.p <= b.p ? a : b);
+  const eff = getEffectivePdPrice(pd);
+  const prixRef = eff.prix > 0 ? eff.prix : pd.pv;
+  const ecart = (prixRef - min.p) / min.p;
+  let verdict;
+  if (ecart > PRICE_THRESHOLDS.rouge)               verdict = 'ROUGE';
+  else if (ecart > PRICE_THRESHOLDS.haut)           verdict = 'RECALIBRAGE';
+  else if (ecart >= -PRICE_THRESHOLDS.haut)         verdict = 'OK';
+  else                                               verdict = 'A_STATUER';
+  return { verdict, ecart, minConcurrent: min, prixConcurrents: prixC, releve: latestRel, effectivePrice: eff };
 }
 
 // Met à jour la pastille orange sur l'onglet Relevés prix si au moins un relevé est périmé (> 7j)
@@ -5273,7 +5366,7 @@ function switchTab(evt, tabName) {
     if (tabName === 'baseKits') renderKits();
     if (tabName === 'baseLiq') renderLiqAll();
     if (tabName === 'propositions') { renderPropositions(); renderPropositionsLiq(); renderPropositionsPD(); }
-    if (tabName === 'releves') renderReleves();
+    if (tabName === 'releves') switchRelSubTab(relevesSubTab);
     if (tabName === 'basePD') renderBasePD();
     if (tabName === 'propositionsPD') {
       // Redirect old propositionsPD tab to propositions + pd sub-tab
@@ -5396,7 +5489,7 @@ function switchTabProgrammatic(tabName, focusOpId) {
   if (tabName === 'baseKits') renderKits();
   if (tabName === 'baseLiq') renderLiqAll();
   if (tabName === 'propositions') { renderPropositions(); renderPropositionsLiq(); }
-  if (tabName === 'releves') renderReleves();
+  if (tabName === 'releves') switchRelSubTab(relevesSubTab);
   if (tabName === 'ops') renderOps();
   // Déplie et scroll vers l'OP ciblée via scrollToOpCard (qui gère type + campagne collapsed)
   if (focusOpId && tabName === 'ops') {
@@ -6338,6 +6431,21 @@ function _mergeEtats(localActions, remoteActions) {
         ls.commentaire = rs.commentaire;
       }
     });
+    // Fusionner replaceParId : garder le non-nul (le local prime, sinon prendre le remote)
+    if (!a.replaceParId && remote.replaceParId) {
+      a.replaceParId = remote.replaceParId;
+      mergeCount++;
+    }
+    // Fusionner priorite : garder le non-AUTO (le local prime)
+    if ((!a.priorite || a.priorite === 'AUTO') && remote.priorite && remote.priorite !== 'AUTO') {
+      a.priorite = remote.priorite;
+      mergeCount++;
+    }
+    // Fusionner prixRouge
+    if (remote.prixRouge != null && a.prixRouge == null) {
+      a.prixRouge = remote.prixRouge;
+      mergeCount++;
+    }
   });
   // Ajouter les actions distantes qui n'existent pas localement (créées par une autre session)
   const localIds = new Set(localActions.map(a => a.id));
@@ -11083,6 +11191,15 @@ function renderDashboard() {
     // Helper : rend un sous-accordéon générique (Kits, PD, etc.)
     function _renderSubAccordion(label, icon, actions, subKeyPrefix) {
       if (actions.length === 0) return '';
+      // Tri : priorité d'abord, puis avec remplaçant avant sans remplaçant
+      actions.sort((a, b) => {
+        const pa = _prioRank[effectivePrio(a)] ?? 1;
+        const pb = _prioRank[effectivePrio(b)] ?? 1;
+        if (pa !== pb) return pa - pb;
+        const ra = (a.replaceParId || linkMap[a.id]) ? 0 : 1;
+        const rb = (b.replaceParId || linkMap[b.id]) ? 0 : 1;
+        return ra - rb;
+      });
       const subKey = subKeyPrefix + '_' + (actions[0] ? actions[0].type : '');
       const isExpanded = expandedActions.has(subKey);
       const _shopDots = SHOPS.map(sh => {
@@ -11578,8 +11695,8 @@ function renderDashboard() {
     const dDeb = op.dateDebut;
     const _hasValidFin = op.dateFin && op.dateFin >= dDeb;
     const dFinRaw = _hasValidFin ? op.dateFin : (() => {
-      var _d15a = new Date(dDeb + 'T00:00:00'); _d15a.setDate(_d15a.getDate() + 15);
-      var _d15b = new Date(); _d15b.setDate(_d15b.getDate() + 15);
+      var _d15a = new Date(dDeb + 'T00:00:00'); _d15a.setDate(_d15a.getDate() + 10);
+      var _d15b = new Date(); _d15b.setDate(_d15b.getDate() + 10);
       var _best = _d15a > _d15b ? _d15a : _d15b;
       return ymd(_best);
     })();
@@ -11662,8 +11779,8 @@ function renderDashboard() {
         const _hasValidFin = op.dateFin && op.dateFin >= dDeb;
         const _noEnd = !_hasValidFin;
         const dFinRaw = _hasValidFin ? op.dateFin : (() => {
-          var _d30 = new Date(dDeb + 'T00:00:00'); _d30.setDate(_d30.getDate() + 15);
-          var _d7 = new Date(); _d7.setDate(_d7.getDate() + 15);
+          var _d30 = new Date(dDeb + 'T00:00:00'); _d30.setDate(_d30.getDate() + 10);
+          var _d7 = new Date(); _d7.setDate(_d7.getDate() + 10);
           var _best = _d30 > _d7 ? _d30 : _d7;
           return ymd(_best);
         })();
@@ -11696,8 +11813,8 @@ function renderDashboard() {
       const cFinRaw = cOps.reduce((m, o) => {
         const _hasValidFin = o.dateFin && o.dateFin >= o.dateDebut;
         const f = _hasValidFin ? o.dateFin : (() => {
-          var _d30 = new Date((o.dateDebut || cDeb) + 'T00:00:00'); _d30.setDate(_d30.getDate() + 15);
-          var _d7 = new Date(); _d7.setDate(_d7.getDate() + 15);
+          var _d30 = new Date((o.dateDebut || cDeb) + 'T00:00:00'); _d30.setDate(_d30.getDate() + 10);
+          var _d7 = new Date(); _d7.setDate(_d7.getDate() + 10);
           var _best = _d30 > _d7 ? _d30 : _d7;
           return ymd(_best);
         })();
@@ -11724,10 +11841,10 @@ function renderDashboard() {
     const dDeb = op.dateDebut;
     const _hasValidFin = op.dateFin && op.dateFin >= dDeb;
     const _noEnd = !_hasValidFin;
-    // Sans date de fin valide : étendre le bloc au max entre +15j depuis début et +15j après aujourd'hui
+    // Sans date de fin valide : étendre le bloc au max entre +10j depuis début et +10j après aujourd'hui
     const dFinRaw = _hasValidFin ? op.dateFin : (() => {
-      var _d30 = new Date(dDeb + 'T00:00:00'); _d30.setDate(_d30.getDate() + 15);
-      var _d7  = new Date(); _d7.setDate(_d7.getDate() + 15);
+      var _d30 = new Date(dDeb + 'T00:00:00'); _d30.setDate(_d30.getDate() + 10);
+      var _d7  = new Date(); _d7.setDate(_d7.getDate() + 10);
       var _best = _d30 > _d7 ? _d30 : _d7;
       return ymd(_best);
     })();
@@ -11797,8 +11914,8 @@ function renderDashboard() {
   });
 
   const _nbLanes = Math.max(1, _lanes.length);
-  const _laneH = 16; // hauteur d'une barre en px
-  const _laneGap = 2;
+  const _laneH = 22; // hauteur d'une barre en px
+  const _laneGap = 3;
   const _ganttH = _nbLanes * (_laneH + _laneGap) + 4; // hauteur totale
 
   // 4) Marqueurs temporels (ticks semaine + ligne aujourd'hui)
@@ -11903,7 +12020,7 @@ function renderDashboard() {
         display:flex; align-items:center; gap:2px; padding:0 4px; box-sizing:border-box; z-index:${_isWidened ? 2 : 1};
         ${doneFilter} transition: filter 0.15s;"
       onmouseover="this.style.filter='${hoverFilter}'; ${_isWidened ? "this.style.zIndex='5';" : ''}" onmouseout="this.style.filter='${isDone ? 'grayscale(0.7) brightness(0.8)' : 'none'}'; ${_isWidened ? "this.style.zIndex='2';" : ''}">
-      <span style="font-size:8px; color:#fff; font-weight:700; white-space:nowrap; text-shadow:0 1px 2px rgba(0,0,0,0.6), 0 0 3px rgba(0,0,0,0.8);">${_isWidened ? ((shortLbl + prodLbl).split(' ')[0].length > 10 ? (shortLbl + prodLbl).substring(0, 10) + '…' : (shortLbl + prodLbl).split(' ')[0] + '…') : shortLbl + prodLbl}</span>
+      <span style="font-size:9.5px; color:#fff; font-weight:700; white-space:nowrap; text-shadow:0 1px 2px rgba(0,0,0,0.6), 0 0 3px rgba(0,0,0,0.8);">${_isWidened ? ((shortLbl + prodLbl).split(' ')[0].length > 10 ? (shortLbl + prodLbl).substring(0, 10) + '…' : (shortLbl + prodLbl).split(' ')[0] + '…') : shortLbl + prodLbl}</span>
       ${alertIcon}${doneIcon}
       <div style="position:absolute; left:0; bottom:0; height:2px; width:${pctNum}%; background:${isDone ? '#22c55e' : pctCol}; border-radius:0 0 2px 2px;"></div>
     </div>`;
@@ -12127,8 +12244,7 @@ function renderDashboard() {
     ${_opsCollapsed ? '' : (_opsInWindow.length === 0
       ? `<div style="padding:14px; text-align:center; font-size:11px; color:#64748b; font-style:italic;">Aucune OP active dans les 6 prochaines semaines${_opsLater.length ? ' — ' + _opsLater.length + ' plus loin' : ''}.</div>`
       : `${densityStrip}
-        <div style="background:#0f172a; border:1px solid #33415580; border-radius:4px;">${agendaInner}</div>
-        <div style="margin-top:6px; font-size:9.5px; color:#64748b; font-style:italic;">Mini-Gantt : 1 barre = 1 OP ou campagne · trait vert = aujourd'hui · clic → onglet OP · ⏰ retard · ⚠ imminente pas prête</div>`)}
+        <div style="margin-top:4px; font-size:9.5px; color:#64748b; font-style:italic;">1 barre = 1 OP ou campagne · trait vert = aujourd'hui · clic → onglet OP · ⏰ retard · ⚠ imminente pas prête</div>`)}
   </div>`;
 
   // Hiérarchie du Dashboard (pilotage quotidien du point de vente) :
@@ -12179,6 +12295,23 @@ function renderDashboard() {
 // seule la colonne du concurrent assigné à cette shop devient éditable (Pessac→Vapostore, etc.).
 // Un clic "Enregistrer" commit tous les prix saisis d'un coup (une entrée relevé par produit).
 
+// --- Sous-onglets Kits / BOX / ATO ---
+let relevesSubTab = 'kits'; // 'kits' | 'pd-box' | 'pd-ato'
+function switchRelSubTab(sub) {
+  relevesSubTab = sub;
+  document.querySelectorAll('.releves-sub-tab').forEach(el => {
+    const active = el.dataset.sub === sub;
+    el.style.color = active ? '#e2e8f0' : '#64748b';
+    el.style.borderBottomColor = active ? (sub === 'kits' ? '#3b82f6' : sub === 'pd-box' ? '#f59e0b' : '#06b6d4') : 'transparent';
+    if (active) el.classList.add('active'); else el.classList.remove('active');
+  });
+  document.getElementById('relevesContent').style.display = sub === 'kits' ? '' : 'none';
+  document.getElementById('relevesPdBoxContent').style.display = sub === 'pd-box' ? '' : 'none';
+  document.getElementById('relevesPdAtoContent').style.display = sub === 'pd-ato' ? '' : 'none';
+  if (sub === 'kits') renderReleves();
+  else renderRelevesPd(sub === 'pd-box' ? 'BOX' : 'ATO');
+}
+
 let myShop = localStorage.getItem('pilotVapeMyShop') || 'pessac';
 let releveEditMode = false;
 let releveDraft = {};         // { kitId: { prix: number, url: string } }
@@ -12195,7 +12328,7 @@ let quickReleveEdit = null;
 let relevesSortCol = '';
 let relevesSortDir = 1;
 
-function setMyShop(s) { myShop = s; localStorage.setItem('pilotVapeMyShop', s); renderReleves(); }
+function setMyShop(s) { myShop = s; localStorage.setItem('pilotVapeMyShop', s); switchRelSubTab(relevesSubTab); }
 function setRelevesFilterVerdict(v) { relevesFilterVerdict = v; renderReleves(); }
 function setRelevesSort(col) {
   if (relevesSortCol === col) { relevesSortDir *= -1; }
@@ -12674,7 +12807,7 @@ function renderReleves() {
     return `<span onclick="setMyShop('${sh}')" style="cursor:pointer; padding:4px 12px; border-radius:4px; font-size:11px; font-weight:700; background:${active ? col : 'transparent'}; color:${active ? '#0f172a' : col}; border:1px solid ${col}80;">${SHOP_LABELS[sh]}</span>`;
   }).join(' ');
 
-  const lastMyCompDate = getLatestReleveDateByCompetitor(myCompKey);
+  const lastMyCompDate = getLatestReleveDateByShop(myShop);
   const lastMyDays = dateDiffDays(lastMyCompDate);
   const freshness = lastMyCompDate
     ? (lastMyDays >= RELEVE_STALE_DAYS
@@ -12808,17 +12941,27 @@ function renderReleves() {
     ${sortChip('verdict', 'Proposition', 'Trier par criticité de la proposition')}
     ${sortChip('produit', 'Produit', 'Trier par nom de produit')}
     ${sortChip('pv', 'PV', 'Trier par notre prix de vente')}
-    ${sortChip('date', 'Date', 'Trier par date du dernier relevé')}
     ${sortResetBtn}
     <span style="margin-left:auto; font-size:10px; color:#64748b;">${filtered.length}/${kits.length} produit${filtered.length>1?'s':''} · ${relevesPrix.length} relevé${relevesPrix.length>1?'s':''} au total</span>
   </div>`;
 
   // --- Tableau ---
-  // Colonnes : Produit · PV · [3 concurrents] · Verdict · Dernier
+  // Colonnes : Produit · PV · [3 concurrents] · Verdict · Décision
   // Hauteur de ligne compacte. Ma colonne de concurrent est soulignée pour repérage visuel.
   // Entêtes cliquables pour trier (même mécanique que Base Kit).
   const sortArrow = (col) => relevesSortCol === col ? (relevesSortDir > 0 ? ' ▲' : ' ▼') : '';
-  const colHead = (c, isMe) => `<th onclick="setRelevesSort('${c.key}')" title="Trier par prix ${c.label}" style="cursor:pointer; user-select:none; padding:6px 8px; text-align:right; color:${c.color}; font-size:10px; letter-spacing:0.3px; font-weight:700; text-transform:uppercase; background:${isMe ? c.color + '15' : 'transparent'}; border-bottom:2px solid ${isMe ? c.color : c.color + '40'};">${c.label}${isMe ? ' ✎' : ''}${sortArrow(c.key)}</th>`;
+  const colHead = (c, isMe) => {
+    // Pastille fraîcheur : trouver quelle boutique relève ce concurrent
+    const shopForComp = Object.entries(SHOP_COMPETITOR).find(([s, ck]) => ck === c.key);
+    const shopName = shopForComp ? shopForComp[0] : null;
+    const lastDate = shopName ? getLatestReleveDateByShop(shopName) : null;
+    const days = lastDate ? dateDiffDays(lastDate) : Infinity;
+    const fresh = days < RELEVE_STALE_DAYS;
+    const dotColor = days === Infinity ? '#64748b' : fresh ? '#22c55e' : '#ef4444';
+    const dotTitle = days === Infinity ? `${SHOP_LABELS[shopName] || '?'} : jamais relevé` : `${SHOP_LABELS[shopName] || '?'} : relevé il y a ${days}j (${lastDate})`;
+    const dot = `<span title="${dotTitle}" style="display:inline-block; width:7px; height:7px; background:${dotColor}; border-radius:50%; margin-left:4px; vertical-align:middle;"></span>`;
+    return `<th onclick="setRelevesSort('${c.key}')" title="Trier par prix ${c.label}" style="cursor:pointer; user-select:none; padding:6px 8px; text-align:right; color:${c.color}; font-size:10px; letter-spacing:0.3px; font-weight:700; text-transform:uppercase; background:${isMe ? c.color + '15' : 'transparent'}; border-bottom:2px solid ${isMe ? c.color : c.color + '40'};">${c.label}${dot}${isMe ? ' ✎' : ''}${sortArrow(c.key)}</th>`;
+  };
 
   const cellCompetitor = (k, c, isEditable) => {
     // Produit exclusif Cigusto : pas de relevé possible, cellule grisée explicite
@@ -13220,7 +13363,6 @@ function renderReleves() {
           ${compCells}
           ${verdictCell(info, k)}
           ${decisionCell(info, k)}
-          ${dateCell(info, k)}
         </tr>`;
         if (!histOpen) return row;
         const history = relevesPrix.filter(r => r.produitId === k.id)
@@ -13257,7 +13399,458 @@ function renderReleves() {
           ${CONCURRENTS.map(c => colHead(c, releveEditMode && c.key === myCompKey)).join('')}
           <th onclick="setRelevesSort('verdict')" title="Trier par criticité de la proposition" style="cursor:pointer; user-select:none; padding:8px; text-align:center; color:${relevesSortCol==='verdict'?'#e2e8f0':'#94a3b8'}; font-size:10px; letter-spacing:0.3px; font-weight:700; text-transform:uppercase; border-bottom:2px solid #334155;">Proposition${sortArrow('verdict')}</th>
           <th style="padding:8px; text-align:center; color:#94a3b8; font-size:10px; letter-spacing:0.3px; font-weight:700; text-transform:uppercase; border-bottom:2px solid #334155;" title="Décision de Fabien — crée une action suivie dans Dashboard">Décision</th>
-          <th onclick="setRelevesSort('date')" title="Trier par date du dernier relevé" style="cursor:pointer; user-select:none; padding:8px; text-align:left; color:${relevesSortCol==='date'?'#e2e8f0':'#94a3b8'}; font-size:10px; letter-spacing:0.3px; font-weight:700; text-transform:uppercase; border-bottom:2px solid #334155;">Dernier${sortArrow('date')}</th>
+        </tr>
+      </thead>
+      <tbody>${tbodyRows}</tbody>
+    </table>
+  </div>`;
+
+  container.innerHTML = `<div class="sticky-sub">${header}${toolbar}</div>` + tableHtml;
+}
+
+// ============================================================================
+// RELEVÉS DE PRIX PD (sous-onglets BOX / ATO)
+// ============================================================================
+let relevesPdEditMode = false;
+let relevesPdDraft = {};       // { pdId: { prix: number, url: string } }
+let relevesPdDraftDate = null;
+let relevesPdDraftCat = null;  // 'BOX' | 'ATO'
+let relevesPdFilterVerdict = '';
+let relevesPdSortCol = '';
+let relevesPdSortDir = 1;
+let relevesPdHistoryOpen = new Set();
+let quickRelevePdEdit = null; // { pdId, compKey, value, url, cat }
+
+function setRelevesPdFilterVerdict(v) { relevesPdFilterVerdict = v; renderRelevesPd(relevesPdDraftCat || (relevesSubTab === 'pd-box' ? 'BOX' : 'ATO')); }
+function setRelevesPdSort(col) {
+  if (relevesPdSortCol === col) relevesPdSortDir *= -1;
+  else { relevesPdSortCol = col; relevesPdSortDir = 1; }
+  renderRelevesPd(relevesPdDraftCat || (relevesSubTab === 'pd-box' ? 'BOX' : 'ATO'));
+}
+function toggleRelevePdHistory(pdId) {
+  if (relevesPdHistoryOpen.has(pdId)) relevesPdHistoryOpen.delete(pdId); else relevesPdHistoryOpen.add(pdId);
+  renderRelevesPd(relevesPdDraftCat || (relevesSubTab === 'pd-box' ? 'BOX' : 'ATO'));
+}
+
+function pdsForReleve(cat) {
+  return basePD.filter(p => p.categorie === cat && p.statutVie !== 'SORTI')
+    .sort((a, b) => {
+      const ca = (a.caseTech || '').localeCompare(b.caseTech || '');
+      if (ca !== 0) return ca;
+      const pa = (a.pv || 0) - (b.pv || 0);
+      if (pa !== 0) return pa;
+      return (a.marque + ' ' + a.modele).localeCompare(b.marque + ' ' + b.modele);
+    });
+}
+
+function startRelevePdEdit(cat) {
+  relevesPdEditMode = true;
+  relevesPdDraft = {};
+  relevesPdDraftDate = ymd(new Date());
+  relevesPdDraftCat = cat;
+  const compKey = SHOP_COMPETITOR[myShop];
+  pdsForReleve(cat).forEach(pd => {
+    const prev = getLatestPriceForPdCompetitor(pd.id, compKey);
+    if (prev) relevesPdDraft[pd.id] = { prix: prev.prix[compKey], url: (prev.urls && prev.urls[compKey]) || '' };
+  });
+  renderRelevesPd(cat);
+}
+function cancelRelevePdEdit() {
+  relevesPdEditMode = false;
+  relevesPdDraft = {};
+  renderRelevesPd(relevesPdDraftCat || (relevesSubTab === 'pd-box' ? 'BOX' : 'ATO'));
+}
+function setRelevePdDraftPrice(pdId, val) {
+  if (!relevesPdDraft[pdId]) relevesPdDraft[pdId] = { prix: null, url: '' };
+  relevesPdDraft[pdId].prix = val === '' ? null : Number(val);
+}
+function setRelevePdDraftUrl(pdId, val) {
+  if (!relevesPdDraft[pdId]) relevesPdDraft[pdId] = { prix: null, url: '' };
+  relevesPdDraft[pdId].url = val;
+}
+function setRelevePdDraftDate(val) { relevesPdDraftDate = val; }
+
+function commitRelevePdEdit() {
+  const compKey = SHOP_COMPETITOR[myShop];
+  const date = relevesPdDraftDate || ymd(new Date());
+  const cat = relevesPdDraftCat;
+  const entries = Object.entries(relevesPdDraft).filter(([pid, v]) => typeof v.prix === 'number' && v.prix > 0);
+  if (!entries.length) { pvAlert('Aucun prix saisi'); return; }
+  const toSave = entries.filter(([pid, v]) => {
+    const prev = getLatestPriceForPdCompetitor(pid, compKey);
+    if (!prev) return true;
+    const prevPrix = prev.prix[compKey];
+    const prevUrl = (prev.urls && prev.urls[compKey]) || '';
+    const sameDay = prev.date === date && prev.par === myShop;
+    if (sameDay && prevPrix === v.prix && prevUrl === (v.url || '')) return false;
+    return true;
+  });
+  if (!toSave.length) { pvAlert('Rien à enregistrer — aucune valeur modifiée.'); return; }
+  toSave.forEach(([pid, v]) => {
+    const same = relevesPrix.find(r =>
+      r.produitType === 'pd' && r.produitId === pid && r.par === myShop && r.date === date &&
+      r.prix && typeof r.prix[compKey] === 'number'
+    );
+    if (same) {
+      same.prix[compKey] = v.prix;
+      if (!same.urls) same.urls = {};
+      if (v.url) same.urls[compKey] = v.url; else delete same.urls[compKey];
+      return;
+    }
+    relevesPrix.push({
+      id: 'REL-' + String(nextReleveId++).padStart(4, '0'),
+      produitId: pid,
+      produitType: 'pd',
+      date,
+      prix: { [compKey]: v.prix },
+      urls: v.url ? { [compKey]: v.url } : {},
+      note: '',
+      par: myShop
+    });
+  });
+  relevesPdEditMode = false;
+  relevesPdDraft = {};
+  syncAutoActions();
+  saveData();
+  renderRelevesPd(cat);
+  renderDashboard();
+}
+
+// Décision prix PD — crée/met à jour une action PRIX depuis le relevé
+function decidePdPrixAction(pdId, choice, targetPrice) {
+  const pd = basePD.find(p => p.id === pdId);
+  if (!pd) return;
+  let a = actions.find(x => x.type === 'PRIX' && x.produitId === pdId && x.produitType === 'pd' && !x.annulee && actionGlobalState(x) !== 'FAIT');
+  if (!a) {
+    a = ensureActionForPd(pd, 'PRIX');
+  }
+  a.prixDecision = choice; // 'recalibrer' | 'remonter' | 'rouge'
+  if (typeof targetPrice === 'number') a.prixCible = targetPrice;
+  a.verdictChanged = false;
+  saveData();
+  renderRelevesPd(pd.categorie);
+  renderDashboard();
+}
+
+// --- Édition rapide PD (double-clic sur une cellule prix) ---
+function startQuickRelevePdEdit(pdId, compKey, cat) {
+  if (relevesPdEditMode) return;
+  const prev = getLatestPriceForPdCompetitor(pdId, compKey);
+  const prevPrix = prev ? prev.prix[compKey] : '';
+  const prevUrl = prev && prev.urls ? (prev.urls[compKey] || '') : '';
+  quickRelevePdEdit = {
+    pdId, compKey, cat,
+    value: typeof prevPrix === 'number' ? String(prevPrix) : '',
+    url: prevUrl
+  };
+  renderRelevesPd(cat);
+  setTimeout(() => {
+    const el = document.getElementById('quick-releve-pd-input');
+    if (el) { el.focus(); el.select(); }
+  }, 10);
+}
+function cancelQuickRelevePdEdit() {
+  const cat = quickRelevePdEdit ? quickRelevePdEdit.cat : (relevesSubTab === 'pd-box' ? 'BOX' : 'ATO');
+  quickRelevePdEdit = null;
+  renderRelevesPd(cat);
+}
+function setQuickRelevePdValue(v) { if (quickRelevePdEdit) quickRelevePdEdit.value = v; }
+function setQuickRelevePdUrl(v)   { if (quickRelevePdEdit) quickRelevePdEdit.url = v; }
+function commitQuickRelevePdEdit() {
+  if (!quickRelevePdEdit) return;
+  const { pdId, compKey, cat } = quickRelevePdEdit;
+  const inputEl = document.getElementById('quick-releve-pd-input');
+  const rawValue = inputEl ? inputEl.value : quickRelevePdEdit.value;
+  const url = quickRelevePdEdit.url;
+  const price = parseFloat(String(rawValue).replace(',', '.'));
+  if (!(price > 0)) { pvAlert('Prix invalide (valeur: ' + rawValue + ')'); return; }
+  const date = ymd(new Date());
+  // Chercher l'entrée affichée (celle que getLatestPriceForPdCompetitor retournerait)
+  // puis tout relevé du même jour/shop comme fallback
+  const displayed = getLatestPriceForPdCompetitor(pdId, compKey);
+  const same = (displayed && displayed.date === date && displayed.par === myShop) ? displayed
+    : relevesPrix.find(r =>
+        r.produitType === 'pd' && r.produitId === pdId && r.par === myShop && r.date === date &&
+        r.prix && typeof r.prix[compKey] === 'number'
+      );
+  if (same) {
+    same.prix[compKey] = price;
+    if (!same.urls) same.urls = {};
+    if (url) same.urls[compKey] = url; else delete same.urls[compKey];
+  } else {
+    const newId = 'REL-' + String(nextReleveId++).padStart(4, '0');
+    relevesPrix.push({
+      id: 'REL-' + String(nextReleveId++).padStart(4, '0'),
+      produitId: pdId,
+      produitType: 'pd',
+      date,
+      prix: { [compKey]: price },
+      urls: url ? { [compKey]: url } : {},
+      note: '',
+      par: myShop
+    });
+  }
+  quickRelevePdEdit = null;
+  syncAutoActions();
+  saveData();
+  renderRelevesPd(cat);
+  renderDashboard();
+}
+
+function renderRelevesPd(cat) {
+  const containerId = cat === 'BOX' ? 'relevesPdBoxContent' : 'relevesPdAtoContent';
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const myCompKey = SHOP_COMPETITOR[myShop];
+  const myCompMeta = CONCURRENTS.find(c => c.key === myCompKey);
+  const catIcon = PD_CAT_ICONS[cat];
+  const catColor = PD_CAT_COLORS[cat];
+
+  // Fraîcheur par shop
+  const freshInfo = isPdReleveStale(myShop, cat);
+  const freshness = freshInfo.days === Infinity
+    ? `<span style="color:#fca5a5;">⚠ jamais relevé</span>`
+    : freshInfo.stale
+      ? `<span style="color:#fca5a5;">⚠ ${freshInfo.days}j depuis le dernier relevé${freshInfo.reason === 'calendaire' ? ' (attendu ce mois)' : ''}</span>`
+      : `<span style="color:#86efac;">✓ dernier relevé il y a ${freshInfo.days}j</span>`;
+
+  // Toolbar shop + bouton relevé
+  const shopBtns = SHOPS.map(sh => {
+    const active = sh === myShop;
+    const col = SHOP_COLORS[sh];
+    return `<span onclick="setMyShop('${sh}')" style="cursor:pointer; padding:4px 12px; border-radius:4px; font-size:11px; font-weight:700; background:${active ? col : 'transparent'}; color:${active ? '#0f172a' : col}; border:1px solid ${col}80;">${SHOP_LABELS[sh]}</span>`;
+  }).join(' ');
+
+  const actionBtn = relevesPdEditMode && relevesPdDraftCat === cat
+    ? `<span onclick="commitRelevePdEdit()" style="cursor:pointer; padding:6px 14px; background:#22c55e; color:#0f172a; border-radius:4px; font-size:12px; font-weight:700;">💾 Enregistrer</span>
+       <span onclick="cancelRelevePdEdit()" style="cursor:pointer; padding:6px 14px; background:transparent; color:#94a3b8; border:1px solid #475569; border-radius:4px; font-size:12px;">Annuler</span>`
+    : `<span onclick="startRelevePdEdit('${cat}')" style="cursor:pointer; padding:6px 14px; background:${myCompMeta.color}; color:#0f172a; border-radius:4px; font-size:12px; font-weight:700;">✎ Faire mon relevé ${myCompMeta.label}</span>`;
+
+  const dateInput = relevesPdEditMode && relevesPdDraftCat === cat
+    ? `<input type="date" value="${relevesPdDraftDate || ''}" oninput="setRelevePdDraftDate(this.value)" style="padding:4px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:4px; font-size:11px;">`
+    : '';
+
+  const calHint = cat === 'BOX' ? '📅 Relevé attendu en début de mois' : '📅 Relevé attendu en milieu de mois';
+
+  const header = `
+  <div style="background:#1e293b; border:1px solid #334155; border-radius:6px; padding:12px; margin-bottom:10px;">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <span style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">Je suis</span>
+      ${shopBtns}
+      <span style="font-size:11px; color:#94a3b8;">→ je relève <strong style="color:${myCompMeta.color};">${myCompMeta.label}</strong></span>
+      <span style="font-size:10.5px; margin-left:8px;">${freshness}</span>
+      <span style="margin-left:auto; display:flex; gap:6px; align-items:center;">${dateInput}${actionBtn}</span>
+    </div>
+    <div style="margin-top:6px; font-size:10px; color:#64748b; font-style:italic;">${calHint}</div>
+  </div>`;
+
+  // Filtres verdict
+  const verdictFilterBtns = ['', 'ROUGE', 'RECALIBRAGE', 'A_STATUER', 'OK', 'AUCUN'].map(v => {
+    const active = relevesPdFilterVerdict === v;
+    const label = v === '' ? 'Tous' : (v === 'AUCUN' ? 'Sans relevé' : VERDICT_META[v].label);
+    const color = v === '' ? '#94a3b8' : (v === 'AUCUN' ? '#64748b' : VERDICT_META[v].color);
+    return `<span onclick="setRelevesPdFilterVerdict('${v}')" style="cursor:pointer; padding:2px 10px; border-radius:3px; font-size:10px; font-weight:700; background:${active ? color : 'transparent'}; color:${active ? '#0f172a' : color}; border:1px solid ${color}60;">${label}</span>`;
+  }).join(' ');
+
+  const pds = pdsForReleve(cat);
+  const rows = pds.map(pd => ({ pd, info: computePdPriceVerdict(pd) }));
+  const filtered = rows.filter(r => {
+    if (!relevesPdFilterVerdict) return true;
+    if (relevesPdFilterVerdict === 'AUCUN') return !r.info;
+    return r.info && r.info.verdict === relevesPdFilterVerdict;
+  });
+
+  // Tri
+  if (relevesPdSortCol) {
+    filtered.sort((a, b) => {
+      const dir = relevesPdSortDir;
+      if (relevesPdSortCol === 'caseTech') return dir * (a.pd.caseTech || '').localeCompare(b.pd.caseTech || '');
+      if (relevesPdSortCol === 'produit') return dir * (a.pd.marque + ' ' + a.pd.modele).localeCompare(b.pd.marque + ' ' + b.pd.modele);
+      if (relevesPdSortCol === 'pv') return dir * ((a.pd.pv || 0) - (b.pd.pv || 0));
+      if (relevesPdSortCol === 'verdict') {
+        const vr = v => !v ? 7 : v.verdict === 'ROUGE' ? 0 : v.verdict === 'RECALIBRAGE' ? 1 : v.verdict === 'A_STATUER' ? 2 : 3;
+        return dir * (vr(a.info) - vr(b.info));
+      }
+      if (['LPV','KZA','VAP'].includes(relevesPdSortCol)) {
+        const pa = a.info ? (a.info.prixConcurrents.find(x => x.key === relevesPdSortCol) || {}).p || 0 : 0;
+        const pb = b.info ? (b.info.prixConcurrents.find(x => x.key === relevesPdSortCol) || {}).p || 0 : 0;
+        return dir * (pa - pb);
+      }
+      return 0;
+    });
+  }
+
+  const sortArrow = (col) => relevesPdSortCol === col ? (relevesPdSortDir > 0 ? ' ▲' : ' ▼') : '';
+  const sortChip = (col, label, tip) => {
+    const active = relevesPdSortCol === col;
+    const arrow = active ? (relevesPdSortDir > 0 ? ' ▲' : ' ▼') : '';
+    return `<span onclick="setRelevesPdSort('${col}')" title="${tip}" style="cursor:pointer; user-select:none; font-size:10px; padding:2px 8px; background:${active ? '#334155' : 'transparent'}; color:${active ? '#e2e8f0' : '#94a3b8'}; border:1px solid ${active ? '#64748b' : '#475569'}; border-radius:3px; font-weight:${active ? 700 : 500};">${label}${arrow}</span>`;
+  };
+
+  const toolbar = `
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px; padding:4px 8px; flex-wrap:wrap;">
+    <span style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px;">Proposition</span>
+    ${verdictFilterBtns}
+    <span style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin-left:8px;">Tri</span>
+    ${sortChip('caseTech', 'Case', 'Trier par case technique')}
+    ${sortChip('verdict', 'Proposition', 'Trier par criticité')}
+    ${sortChip('produit', 'Produit', 'Trier par nom')}
+    ${sortChip('pv', 'PV', 'Trier par prix de vente')}
+    <span style="margin-left:auto; font-size:10px; color:#64748b;">${filtered.length}/${pds.length} PD</span>
+  </div>`;
+
+  // En-têtes colonnes concurrents avec pastille fraîcheur
+  const colHeadPd = (c, isMe) => {
+    const shopForComp = Object.entries(SHOP_COMPETITOR).find(([s, ck]) => ck === c.key);
+    const shopName = shopForComp ? shopForComp[0] : null;
+    const fi = shopName ? isPdReleveStale(shopName, cat) : { stale: true, days: Infinity };
+    const dotColor = fi.days === Infinity ? '#64748b' : fi.stale ? '#ef4444' : '#22c55e';
+    const dotTitle = fi.days === Infinity ? `${SHOP_LABELS[shopName] || '?'} : jamais relevé` : `${SHOP_LABELS[shopName] || '?'} : relevé il y a ${fi.days}j`;
+    const dot = `<span title="${dotTitle}" style="display:inline-block; width:7px; height:7px; background:${dotColor}; border-radius:50%; margin-left:4px; vertical-align:middle;"></span>`;
+    return `<th onclick="setRelevesPdSort('${c.key}')" title="Trier par prix ${c.label}" style="cursor:pointer; user-select:none; padding:6px 8px; text-align:right; color:${c.color}; font-size:10px; letter-spacing:0.3px; font-weight:700; text-transform:uppercase; background:${isMe ? c.color + '15' : 'transparent'}; border-bottom:2px solid ${isMe ? c.color : c.color + '40'};">${c.label}${dot}${isMe ? ' ✎' : ''}${sortArrow(c.key)}</th>`;
+  };
+
+  // Cellule concurrent
+  const cellComp = (pd, c, isEditable) => {
+    const prev = getLatestPriceForPdCompetitor(pd.id, c.key);
+    const prevP = prev ? prev.prix[c.key] : null;
+    const prevUrl = prev && prev.urls ? prev.urls[c.key] : '';
+    const stale = prev && dateDiffDays(prev.date) >= PD_RELEVE_STALE_DAYS;
+
+    // Édition rapide via double-clic (prioritaire sur lecture seule, mais pas sur le mode édition complet)
+    if (!(relevesPdEditMode && relevesPdDraftCat === cat) && quickRelevePdEdit && quickRelevePdEdit.pdId === pd.id && quickRelevePdEdit.compKey === c.key) {
+      const v = quickRelevePdEdit.value;
+      const u = quickRelevePdEdit.url;
+      return `<td style="padding:3px 6px; text-align:right; background:${c.color}15; border-bottom:1px solid #1e293b; outline:2px solid ${c.color}80;">
+        <div style="display:flex; flex-direction:column; gap:2px; align-items:flex-end;">
+          <input id="quick-releve-pd-input" type="number" step="0.01" min="0" inputmode="decimal" value="${v}"
+            oninput="setQuickRelevePdValue(this.value)"
+            onkeydown="if(event.key==='Enter'){event.preventDefault();commitQuickRelevePdEdit();}else if(event.key==='Escape'){event.preventDefault();cancelQuickRelevePdEdit();}"
+            placeholder="${prevP != null ? prevP.toFixed(2) : '—'}"
+            style="width:95px; padding:4px 8px; text-align:right; background:#0f172a; color:#22c55e; border:1px solid ${c.color}; border-radius:3px; font-size:13px; font-weight:700;">
+          <input type="url" value="${(u || '').replace(/"/g,'&quot;')}"
+            oninput="setQuickRelevePdUrl(this.value)"
+            placeholder="URL (optionnel)"
+            style="width:95px; padding:1px 4px; background:transparent; color:#64748b; border:none; border-bottom:1px dotted #33415580; border-radius:0; font-size:9px; text-align:right;">
+          <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; width:100%;">
+            <span onclick="commitQuickRelevePdEdit()" title="Enregistrer (Entrée)" style="cursor:pointer; font-size:9px; padding:1px 6px; background:#22c55e; color:#0f172a; border-radius:3px; font-weight:700;">✓</span>
+            <span onclick="cancelQuickRelevePdEdit()" title="Annuler (Échap)" style="cursor:pointer; font-size:10px; color:#64748b; padding:0 3px;">✕</span>
+          </div>
+        </div>
+      </td>`;
+    }
+
+    if (isEditable && relevesPdEditMode && relevesPdDraftCat === cat) {
+      const dv = relevesPdDraft[pd.id];
+      const curVal = dv ? (dv.prix != null ? dv.prix : '') : (prevP || '');
+      return `<td style="padding:4px; text-align:right; border-bottom:1px solid #1e293b; background:${c.color}08;">
+        <input type="number" step="0.01" value="${curVal}" oninput="setRelevePdDraftPrice('${pd.id}', this.value)"
+          style="width:60px; padding:3px 5px; font-size:11px; text-align:right; background:#0f172a; color:#e2e8f0; border:1px solid ${c.color}60; border-radius:3px;">
+      </td>`;
+    }
+    const dblClick = `ondblclick="startQuickRelevePdEdit('${pd.id}','${c.key}','${cat}')"`;
+    if (prevP == null) return `<td ${dblClick} style="padding:6px 8px; text-align:right; color:#475569; font-size:11px; border-bottom:1px solid #1e293b; cursor:pointer;" title="Double-clic pour saisir un prix">—</td>`;
+    const col = stale ? '#94a3b8' : '#e2e8f0';
+    const urlLink = prevUrl ? `<a href="${prevUrl}" target="_blank" title="${prevUrl}" style="color:${c.color}; font-size:8px; margin-left:3px;">🔗</a>` : '';
+    return `<td ${dblClick} style="padding:6px 8px; text-align:right; font-size:11px; color:${col}; border-bottom:1px solid #1e293b; cursor:pointer; ${stale ? 'opacity:0.6;' : ''}" title="Double-clic pour modifier">${prevP.toFixed(2)}€${urlLink}</td>`;
+  };
+
+  // Cellule verdict
+  const verdictCellPd = (info) => {
+    if (!info) return `<td style="padding:6px 8px; text-align:center; font-size:10px; color:#475569; border-bottom:1px solid #1e293b;">—</td>`;
+    const vm = VERDICT_META[info.verdict];
+    const ecartPct = (info.ecart * 100).toFixed(1);
+    const sign = info.ecart >= 0 ? '+' : '';
+    return `<td style="padding:6px 8px; text-align:center; border-bottom:1px solid #1e293b;">
+      <span style="font-size:10px; padding:2px 8px; background:${vm.color}18; color:${vm.color}; border:1px solid ${vm.color}50; border-radius:3px; font-weight:700;">${vm.label}</span>
+      <div style="font-size:9px; color:#64748b; margin-top:1px;">${sign}${ecartPct}% vs ${info.minConcurrent.label}</div>
+    </td>`;
+  };
+
+  // Cellule décision
+  const DECISION_META_PD = {
+    recalibrer: { label: 'Baisser', color: '#f59e0b', verb: 'Recalibrer' },
+    remonter: { label: 'Remonter', color: '#3b82f6', verb: 'Remonter' },
+    rouge: { label: 'Prix rouge', color: '#ef4444', verb: 'Prix rouge' }
+  };
+  const decisionCellPd = (info, pd) => {
+    if (!info || info.verdict === 'OK') return `<td style="padding:6px 8px; border-bottom:1px solid #1e293b;"></td>`;
+    // Décision déjà prise ?
+    const existingAction = actions.find(a => a.type === 'PRIX' && a.produitId === pd.id && a.produitType === 'pd' && !a.annulee && actionGlobalState(a) !== 'FAIT');
+    if (existingAction && existingAction.prixDecision) {
+      const d = DECISION_META_PD[existingAction.prixDecision] || DECISION_META_PD.recalibrer;
+      return `<td style="padding:6px 8px; text-align:center; border-bottom:1px solid #1e293b;">
+        <span style="font-size:9px; padding:2px 7px; background:${d.color}25; color:${d.color}; border:1px solid ${d.color}50; border-radius:3px; font-weight:700;">✓ ${d.label}</span>
+      </td>`;
+    }
+    // Proposition auto
+    const primaryChoice = info.verdict === 'ROUGE' ? 'rouge' : info.verdict === 'RECALIBRAGE' ? 'recalibrer' : info.verdict === 'A_STATUER' ? 'remonter' : null;
+    if (!primaryChoice) return `<td style="padding:6px 8px; border-bottom:1px solid #1e293b;"></td>`;
+    const dPrim = DECISION_META_PD[primaryChoice];
+    const target = info.minConcurrent ? Number(info.minConcurrent.p) : null;
+    const priceLbl = target != null ? ` ${target.toFixed(2)}€` : '';
+    return `<td style="padding:6px 8px; text-align:left; border-bottom:1px solid #1e293b; white-space:nowrap;">
+      <div style="display:inline-flex; align-items:center; gap:5px;">
+        <span style="font-size:9.5px; padding:2px 7px; background:${dPrim.color}18; color:${dPrim.color}; border:1px solid ${dPrim.color}70; border-radius:3px; font-weight:700;">✨ ${dPrim.label}${priceLbl}</span>
+        <span onclick="decidePdPrixAction('${pd.id}','${primaryChoice}',${target != null ? target : 'undefined'})" style="cursor:pointer; font-size:10px; padding:2px 9px; background:${dPrim.color}; color:#0f172a; border-radius:3px; font-weight:800;">OK</span>
+      </div>
+    </td>`;
+  };
+
+  // Lignes du tableau
+  const isEditing = relevesPdEditMode && relevesPdDraftCat === cat;
+  const tbodyRows = filtered.map(({ pd, info }) => {
+    const caseLabel = PD_CASE_LABELS[pd.caseTech] || pd.caseTech || '—';
+    const compCells = CONCURRENTS.map(c => cellComp(pd, c, c.key === myCompKey)).join('');
+    const histOpen = relevesPdHistoryOpen.has(pd.id);
+    const pvDisplay = pd.pv > 0 ? pd.pv.toFixed(2) + '€' : '<span style="color:#475569;">—</span>';
+
+    let row = `<tr style="background:#0f172a80;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#0f172a80'">
+      <td style="padding:6px 8px; border-bottom:1px solid #1e293b;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <span style="cursor:pointer; color:#64748b; font-size:9px; width:10px;" onclick="toggleRelevePdHistory('${pd.id}')">${histOpen ? '▾' : '▸'}</span>
+          <span style="font-size:9px; padding:1px 5px; background:${catColor}25; color:${catColor}; border-radius:3px; font-weight:700;">${caseLabel}</span>
+          <span style="color:#94a3b8; font-weight:500;">${pd.marque}</span>
+          <span style="color:#f1f5f9; font-weight:700;">${pd.modele}</span>
+        </div>
+      </td>
+      <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #1e293b; font-size:11px; color:#e2e8f0; font-weight:700;">${pvDisplay}</td>
+      ${compCells}
+      ${verdictCellPd(info)}
+      ${decisionCellPd(info, pd)}
+    </tr>`;
+
+    if (!histOpen) return row;
+    // Historique des relevés
+    const history = relevesPrix.filter(r => r.produitType === 'pd' && r.produitId === pd.id)
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const histInner = history.length === 0
+      ? '<span style="color:#64748b; font-style:italic;">Aucun relevé</span>'
+      : history.map(r => {
+          const parLbl = r.par ? `<span style="font-size:9px; padding:1px 5px; background:${SHOP_COLORS[r.par]}25; color:${SHOP_COLORS[r.par]}; border-radius:3px;">${SHOP_LABELS[r.par]}</span>` : '';
+          const pxLine = CONCURRENTS.map(c => {
+            const p = r.prix && r.prix[c.key];
+            return p != null ? `<span style="color:${c.color};">${c.label}: ${Number(p).toFixed(2)}€</span>` : '';
+          }).filter(Boolean).join(' · ');
+          return `<div style="display:flex; gap:8px; align-items:center; padding:3px 0; font-size:10px; color:#94a3b8;">
+            <span style="color:#64748b; min-width:70px;">${r.date}</span> ${parLbl} ${pxLine}
+          </div>`;
+        }).join('');
+    row += `<tr><td colspan="7" style="padding:6px 16px 10px 32px; background:#0f172a; border-bottom:1px solid #1e293b;">${histInner}</td></tr>`;
+    return row;
+  }).join('');
+
+  const tableHtml = `
+  <div style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+      <thead>
+        <tr style="background:#0f172a;">
+          <th onclick="setRelevesPdSort('produit')" style="cursor:pointer; user-select:none; padding:8px; text-align:left; color:${relevesPdSortCol==='produit'?'#e2e8f0':'#94a3b8'}; font-size:10px; font-weight:700; text-transform:uppercase; border-bottom:2px solid #334155;">Produit${sortArrow('produit')}</th>
+          <th onclick="setRelevesPdSort('pv')" style="cursor:pointer; user-select:none; padding:8px; text-align:right; color:${relevesPdSortCol==='pv'?'#e2e8f0':'#cbd5e1'}; font-size:10px; font-weight:700; text-transform:uppercase; border-bottom:2px solid #334155;">Notre PV${sortArrow('pv')}</th>
+          ${CONCURRENTS.map(c => colHeadPd(c, isEditing && c.key === myCompKey)).join('')}
+          <th onclick="setRelevesPdSort('verdict')" style="cursor:pointer; user-select:none; padding:8px; text-align:center; color:${relevesPdSortCol==='verdict'?'#e2e8f0':'#94a3b8'}; font-size:10px; font-weight:700; text-transform:uppercase; border-bottom:2px solid #334155;">Proposition${sortArrow('verdict')}</th>
+          <th style="padding:8px; text-align:center; color:#94a3b8; font-size:10px; font-weight:700; text-transform:uppercase; border-bottom:2px solid #334155;">Décision</th>
         </tr>
       </thead>
       <tbody>${tbodyRows}</tbody>
