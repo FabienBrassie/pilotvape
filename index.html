@@ -344,11 +344,9 @@
       <select id="filterRole" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option><option value="LES_DEUX">Les deux</option>
       </select>
-      <select id="filterStatut" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="">Tous statuts</option><option value="DANS_OFFRE">Dans l'offre</option><option value="A_RENTRER">À rentrer</option><option value="A_REMPLACER">À remplacer</option><option value="FIN_DE_VIE">Fin de vie</option><option value="A_SORTIR">À sortir</option><option value="SORTI">Sorti</option>
-      </select>
+      <div id="statut-multi-kit" style="position:relative; display:inline-block;"></div>
       <select id="kitSort" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="case">⭐ Tri: Case technique</option><option value="tirage">Tri: Puissance + Autonomie</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Marque (blocs)</option><option value="modele">Tri: Nom modèle</option><option value="date">Tri: Date</option><option value="marge">Tri: Marge €</option><option value="note">Tri: Note</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="w">Tri: Puissance W</option><option value="mah">Tri: Batterie mAh</option>
+        <option value="case">⭐ Tri: Case technique</option><option value="tirage">Vue: Par profil</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Marque (blocs)</option><option value="modele">Tri: Nom modèle</option><option value="date">Tri: Date</option><option value="marge">Tri: Marge €</option><option value="note">Tri: Note</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="w">Tri: Puissance W</option><option value="mah">Tri: Batterie mAh</option>
       </select>
       <select id="kitSubSort" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#94a3b8; border-radius:4px;" title="Sous-tri (uniquement en vue 'blocs par marque')">
         <option value="case">Puis: Case</option><option value="pv">Puis: PV</option><option value="marge">Puis: Marge</option><option value="modele">Puis: Modèle</option><option value="w">Puis: W</option>
@@ -370,9 +368,7 @@
       <select id="liqFilterRole" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option><option value="COMPLEMENT">Complément</option><option value="NOTORIETE">Notoriété</option><option value="COUP">One-shot</option>
       </select>
-      <select id="liqFilterStatut" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="">Tous statuts</option><option value="DANS_OFFRE">Dans l'offre</option><option value="A_RENTRER">À rentrer</option><option value="EN_ATTENTE">En attente</option><option value="A_REMPLACER">À remplacer</option><option value="FIN_DE_VIE">Fin de vie</option><option value="A_SORTIR">À sortir</option><option value="SORTI">Sorti</option>
-      </select>
+      <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Par marque</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
       </select>
@@ -404,9 +400,7 @@
       <select id="pdFilterRoleSel" onchange="renderBasePD();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option>
       </select>
-      <select id="pdFilterStatutSel" onchange="renderBasePD();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="">Tous statuts</option><option value="DANS_OFFRE">Dans l'offre</option><option value="EN_ATTENTE">En attente</option><option value="A_RENTRER">À rentrer</option><option value="A_REMPLACER">À remplacer</option><option value="FIN_DE_VIE">Fin de vie</option><option value="A_SORTIR">À sortir</option><option value="SORTI">Sorti</option>
-      </select>
+      <div id="statut-multi-pd" style="position:relative; display:inline-block;"></div>
       <select id="pdSort" onchange="renderBasePD();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="case">⭐ Tri: Case technique</option><option value="grille">Vue: Grille PA / MM</option><option value="marque">Tri: Marque</option><option value="marge">Tri: Marge €</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="statut">Tri: Statut</option>
       </select>
@@ -5386,14 +5380,14 @@ function saveUiState() {
     liqFilterFormat: document.getElementById('liqFilterFormat')?.value || '',
     liqFilterProfil: document.getElementById('liqFilterProfil')?.value || '',
     liqFilterRole: document.getElementById('liqFilterRole')?.value || '',
-    liqFilterStatut: document.getElementById('liqFilterStatut')?.value || '',
+    liqFilterStatut: liqStatutFilter,
     liqViewMode: document.getElementById('liqSort')?.value || 'grille',
     liqSortCol, liqSortDir,
     kitSearch: document.getElementById('kitSearch')?.value || '',
     kitFilterTirage: document.getElementById('filterTirage')?.value || '',
     kitFilterProfil: document.getElementById('filterProfil')?.value || '',
     kitFilterRole: document.getElementById('filterRole')?.value || '',
-    kitFilterStatut: document.getElementById('filterStatut')?.value || '',
+    kitFilterStatut: kitStatutFilter,
     kitSort: document.getElementById('kitSort')?.value || 'case',
     kitSortCol, kitSortDir,
     kitSubSort: document.getElementById('kitSubSort')?.value || 'case',
@@ -5405,7 +5399,7 @@ function saveUiState() {
     pdFilterCat: document.getElementById('pdFilterCatSel')?.value || '',
     pdFilterCase: document.getElementById('pdFilterCaseSel')?.value || '',
     pdFilterRole: document.getElementById('pdFilterRoleSel')?.value || '',
-    pdFilterStatut: document.getElementById('pdFilterStatutSel')?.value || '',
+    pdFilterStatut: pdStatutFilter,
     pdSort: document.getElementById('pdSort')?.value || 'case',
     pdSortCol, pdSortDir
   };
@@ -5423,7 +5417,7 @@ function restoreUiState() {
     if (s.liqFilterFormat) { const el = document.getElementById('liqFilterFormat'); if (el) el.value = s.liqFilterFormat; }
     if (s.liqFilterProfil) { const el = document.getElementById('liqFilterProfil'); if (el) el.value = s.liqFilterProfil; }
     if (s.liqFilterRole) { const el = document.getElementById('liqFilterRole'); if (el) el.value = s.liqFilterRole; }
-    if (s.liqFilterStatut) { const el = document.getElementById('liqFilterStatut'); if (el) el.value = s.liqFilterStatut; }
+    if (s.liqFilterStatut) { liqStatutFilter = Array.isArray(s.liqFilterStatut) ? s.liqFilterStatut : (s.liqFilterStatut ? [s.liqFilterStatut] : []); }
     if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) el.value = s.liqViewMode; }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
     if (s.liqSortDir) liqSortDir = s.liqSortDir;
@@ -5432,7 +5426,7 @@ function restoreUiState() {
     if (s.kitFilterTirage) { const el = document.getElementById('filterTirage'); if (el) el.value = s.kitFilterTirage; }
     if (s.kitFilterProfil) { const el = document.getElementById('filterProfil'); if (el) el.value = s.kitFilterProfil; }
     if (s.kitFilterRole) { const el = document.getElementById('filterRole'); if (el) el.value = s.kitFilterRole; }
-    if (s.kitFilterStatut) { const el = document.getElementById('filterStatut'); if (el) el.value = s.kitFilterStatut; }
+    if (s.kitFilterStatut) { kitStatutFilter = Array.isArray(s.kitFilterStatut) ? s.kitFilterStatut : (s.kitFilterStatut ? [s.kitFilterStatut] : []); }
     if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) el.value = s.kitSort; }
     if (s.kitSortCol) kitSortCol = s.kitSortCol;
     if (typeof s.kitSortDir === 'number') kitSortDir = s.kitSortDir;
@@ -5447,7 +5441,7 @@ function restoreUiState() {
     if (s.pdFilterCat) { const el = document.getElementById('pdFilterCatSel'); if (el) el.value = s.pdFilterCat; }
     if (s.pdFilterCase) { const el = document.getElementById('pdFilterCaseSel'); if (el) el.value = s.pdFilterCase; }
     if (s.pdFilterRole) { const el = document.getElementById('pdFilterRoleSel'); if (el) el.value = s.pdFilterRole; }
-    if (s.pdFilterStatut) { const el = document.getElementById('pdFilterStatutSel'); if (el) el.value = s.pdFilterStatut; }
+    if (s.pdFilterStatut) { pdStatutFilter = Array.isArray(s.pdFilterStatut) ? s.pdFilterStatut : (s.pdFilterStatut ? [s.pdFilterStatut] : []); }
     if (s.pdSort) { const el = document.getElementById('pdSort'); if (el) el.value = s.pdSort; }
     if (s.pdSortCol) pdSortCol = s.pdSortCol;
     if (typeof s.pdSortDir === 'number') pdSortDir = s.pdSortDir;
@@ -7824,6 +7818,17 @@ function renderKitMiniCard(k, showControls, large) {
         ${renderRoleSelect(k)}
         ${renderCaseTechSelect(k)}
         ${renderProfilSelect(k)}
+        ${(() => {
+          const _murOv = k.caseMurOverride || '';
+          const _realCt = getEffectiveCaseTech(k);
+          const _hasMurOv = _murOv && _murOv !== _realCt;
+          const _allCases = ['MTL_RDL_10C','MTL_RDL_20C','DL_10C','DL_20C','DL+_10C','DL+_20C'];
+          const _ctL = { MTL_RDL_10C:'MTL/RDL 10C', MTL_RDL_20C:'MTL/RDL 20C', DL_10C:'DL 10C', DL_20C:'DL 20C', 'DL+_10C':'DL+ 10C', 'DL+_20C':'DL+ 20C' };
+          return '<select onclick="event.stopPropagation()" onchange="updateKitCaseMur(\'' + k.id + '\', this.value)" title="Afficher ce kit dans une autre case sur le mur" style="padding:1px 4px; font-size:10px; background:#0f172a; border:1px solid ' + (_hasMurOv ? '#a78bfa80' : '#47556930') + '; color:' + (_hasMurOv ? '#a78bfa' : '#64748b') + '; border-radius:3px;">'
+            + '<option value=""' + (!_hasMurOv ? ' selected' : '') + '>Mur: ' + (_ctL[_realCt]||_realCt) + '</option>'
+            + _allCases.filter(c => c !== _realCt).map(c => '<option value="' + c + '"' + (_murOv === c ? ' selected' : '') + '>Mur → ' + (_ctL[c]||c) + '</option>').join('')
+            + '</select>';
+        })()}
         <button onclick="event.stopPropagation(); openKitEtiquetteDialog('${k.id}')" style="padding:2px 8px; font-size:9px; background:#3b82f620; color:#60a5fa; border:1px solid #3b82f660; border-radius:3px; cursor:pointer;" title="Générer étiquette pour ce produit">🏷️ Étiquette</button>
         <button onclick="event.stopPropagation(); sendBackToProposition('${k.id}')" style="margin-left:auto; padding:2px 8px; font-size:9px; background:#ef444420; color:#ef4444; border:1px solid #ef444460; border-radius:3px; cursor:pointer;" title="Retirer de la base kits et renvoyer en proposition">↩ Renvoyer en proposition</button>
       </div>` : ''}
@@ -7899,6 +7904,83 @@ function highlightKit(id) {
 function updateKitProfil(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit.profilChoisi = val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
 function updateKitRole(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit.roleChoisi = val === 'AUTO' ? '' : val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
 
+// Statut multi-select filter arrays
+let kitStatutFilter = [];
+let liqStatutFilter = [];
+let pdStatutFilter = [];
+
+function toggleStatutFilter(filterName, value) {
+  let arr;
+  if (filterName === 'kit') arr = kitStatutFilter;
+  else if (filterName === 'liq') arr = liqStatutFilter;
+  else if (filterName === 'pd') arr = pdStatutFilter;
+
+  const idx = arr.indexOf(value);
+  if (idx >= 0) arr.splice(idx, 1);
+  else arr.push(value);
+
+  renderStatutMultiSelect(filterName);
+  if (filterName === 'kit') { renderKits(); }
+  else if (filterName === 'liq') { renderLiqAll(); }
+  else if (filterName === 'pd') { renderBasePD(); }
+  saveUiState();
+}
+
+function clearStatutFilter(filterName) {
+  if (filterName === 'kit') kitStatutFilter = [];
+  else if (filterName === 'liq') liqStatutFilter = [];
+  else if (filterName === 'pd') pdStatutFilter = [];
+  renderStatutMultiSelect(filterName);
+  if (filterName === 'kit') renderKits();
+  else if (filterName === 'liq') renderLiqAll();
+  else if (filterName === 'pd') renderBasePD();
+  saveUiState();
+}
+
+function renderStatutMultiSelect(filterName) {
+  const container = document.getElementById('statut-multi-' + filterName);
+  if (!container) return;
+
+  const arr = filterName === 'kit' ? kitStatutFilter : filterName === 'liq' ? liqStatutFilter : pdStatutFilter;
+  const statuts = filterName === 'kit'
+    ? ['DANS_OFFRE','A_RENTRER','A_REMPLACER','FIN_DE_VIE','A_SORTIR','SORTI']
+    : ['DANS_OFFRE','A_RENTRER','EN_ATTENTE','A_REMPLACER','FIN_DE_VIE','A_SORTIR','SORTI'];
+  const labels = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", SORTI:"Sorti" };
+  const statusColors = { DANS_OFFRE:'#22c55e', A_RENTRER:'#3b82f6', EN_ATTENTE:'#6366f1', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', A_SORTIR:'#ef4444', SORTI:'#64748b' };
+
+  const tags = arr.length === 0
+    ? '<span style="color:#94a3b8; font-size:10px;">Tous statuts</span>'
+    : arr.map(s => `<span style="font-size:9px; padding:1px 5px; background:${statusColors[s]||'#64748b'}20; color:${statusColors[s]||'#94a3b8'}; border:1px solid ${statusColors[s]||'#64748b'}50; border-radius:3px; font-weight:600; display:inline-flex; align-items:center; gap:2px; white-space:nowrap;">${labels[s]||s}<span onclick="event.stopPropagation(); toggleStatutFilter('${filterName}','${s}')" style="cursor:pointer; margin-left:2px; font-size:8px; opacity:0.6;">×</span></span>`).join('');
+
+  const dropdownId = 'statut-dropdown-' + filterName;
+  const checkboxes = statuts.map(s => {
+    const checked = arr.includes(s);
+    const c = statusColors[s] || '#64748b';
+    return `<label style="display:flex; align-items:center; gap:6px; padding:4px 8px; cursor:pointer; font-size:11px; color:${c}; transition:background 0.1s;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleStatutFilter('${filterName}','${s}')" style="margin:0; accent-color:${c}; cursor:pointer;">
+      ${labels[s]||s}
+    </label>`;
+  }).join('');
+
+  container.innerHTML = `
+    <div onclick="document.getElementById('${dropdownId}').style.display = document.getElementById('${dropdownId}').style.display === 'block' ? 'none' : 'block'; event.stopPropagation();" style="display:flex; align-items:center; gap:4px; padding:4px 8px; min-width:100px; background:#0f172a; border:1px solid ${arr.length > 0 ? '#60a5fa80' : '#475569'}; border-radius:4px; cursor:pointer; flex-wrap:wrap; min-height:28px;">
+      ${tags}
+      <span style="margin-left:auto; font-size:8px; color:#64748b;">▼</span>
+    </div>
+    <div id="${dropdownId}" style="display:none; position:absolute; top:100%; left:0; right:0; min-width:160px; background:#0f172a; border:1px solid #475569; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:100; padding:4px 0; margin-top:2px;">
+      ${arr.length > 0 ? `<div onclick="clearStatutFilter('${filterName}')" style="padding:4px 8px; font-size:10px; color:#94a3b8; cursor:pointer; border-bottom:1px solid #1e293b; text-align:center;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background=''">Effacer tout</div>` : ''}
+      ${checkboxes}
+    </div>`;
+}
+
+// Global click handler to close dropdowns
+document.addEventListener('click', () => {
+  ['kit','liq','pd'].forEach(f => {
+    const dd = document.getElementById('statut-dropdown-' + f);
+    if (dd) dd.style.display = 'none';
+  });
+});
+
 async function sendBackToProposition(id) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   if (!await pvConfirm('Renvoyer ce produit en proposition ? Il sera retiré de la base kits.')) return;
@@ -7922,7 +8004,7 @@ function renderKits() {
   const fProfil = document.getElementById('filterProfil')?.value || '';
   const fTirage = document.getElementById('filterTirage')?.value || '';
   const fRole = document.getElementById('filterRole')?.value || '';
-  const fStatut = document.getElementById('filterStatut')?.value || '';
+  const fStatut = kitStatutFilter;
 
   let filtered = baseKits.filter(k => {
     const matchSearch = !search || k.marque.toLowerCase().includes(search) || k.modele.toLowerCase().includes(search);
@@ -7930,7 +8012,7 @@ function renderKits() {
     const matchTirage = !fTirage || normKitTirage(k.tirage) === fTirage;
     // Note: filter uses effective caseTech for autonomie matching
     const matchRole = !fRole || getEffectiveRoles(k).includes(fRole);
-    const matchStatut = !fStatut || k.statutVie === fStatut;
+    const matchStatut = fStatut.length === 0 || fStatut.includes(k.statutVie);
     return matchSearch && matchProfil && matchTirage && matchRole && matchStatut;
   });
 
@@ -7954,7 +8036,7 @@ function renderKits() {
   const placed = new Set(); // track kit IDs already placed
   actifs.forEach(k => {
     const prof = k.profilChoisi || '';
-    const ect = getEffectiveCaseTech(k);
+    const ect = k.caseMurOverride || getEffectiveCaseTech(k);
     // Le tirage d'indexation doit suivre la case technique EFFECTIVE (caseTechChoisi
     // prioritaire), sinon un kit forcé DL_10C reste rangé dans MTL_RDL_10C (case
     // d'origine) alors que les autres vues (freetouch, liste, murs) le placent bien
@@ -8270,7 +8352,7 @@ function renderKits() {
     return;
   }
 
-  // === MODE BLOCS (tri par défaut : Puissance + Autonomie) ===
+  // === MODE BLOCS (tri par défaut : Par profil) ===
   profilOrder.forEach(prof => {
     const color = profilColors[prof];
     let dansOffre = 0;
@@ -8479,46 +8561,63 @@ function updateKitStatus(id, status) {
   renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id);
   // Si passage à A_SORTIR → proposer un remplacement par un kit A_RENTRER
   if ((status === 'A_SORTIR' || status === 'FIN_DE_VIE') && oldStatus !== status) {
-    promptRemplacement('kit', id, kit.marque + ' ' + kit.modele, kit.profilChoisi, getEffectiveCaseTech(kit));
+    promptRemplacement('kit', id, kit.marque + ' ' + kit.modele, kit.profilChoisi, kit.caseMurOverride || getEffectiveCaseTech(kit));
   }
 }
 // --- Modale de remplacement ---
-// Quand un produit passe à A_SORTIR/FIN_DE_VIE, propose de le lier à un produit A_RENTRER.
+// Quand un produit passe à A_SORTIR/FIN_DE_VIE, propose 3 options :
+// 1. Choisir un remplaçant (montre tous les produits de même catégorie)
+// 2. Pas encore de remplaçant (besoins à combler, comportement par défaut)
+// 3. Pas besoin de remplacer (marque le produit, exclut des besoins)
 // type: 'kit' | 'liq' | 'pd'
 function promptRemplacement(type, sortirId, sortirLabel, profil, caseTech) {
-  // Chercher les candidats A_RENTRER du même type
+  // Tous les candidats du même type (sauf SORTI et le produit lui-même)
   let candidates = [];
   if (type === 'kit') {
-    candidates = baseKits.filter(k => k.id !== sortirId && k.statutVie === 'A_RENTRER')
+    candidates = baseKits
+      .filter(k => k.id !== sortirId && k.statutVie !== 'SORTI')
       .map(k => ({
         id: k.id,
         label: k.marque + ' ' + k.modele,
         detail: (k.profilChoisi || '—') + ' · ' + (getEffectiveCaseTech(k) || '—'),
+        statut: k.statutVie,
         sameProfil: k.profilChoisi === profil,
-        sameCase: getEffectiveCaseTech(k) === caseTech
+        sameCase: (k.caseMurOverride || getEffectiveCaseTech(k)) === caseTech
       }));
   } else if (type === 'liq') {
-    candidates = baseLiq.filter(g => g.id !== sortirId && g.statutVie === 'A_RENTRER')
+    candidates = baseLiq
+      .filter(g => g.id !== sortirId && g.statutVie !== 'SORTI')
       .map(g => ({
         id: g.id,
         label: g.marque + ' — ' + g.gamme + ' (' + (g.format || '') + ')',
         detail: g.ct || '—',
+        statut: g.statutVie,
         sameProfil: false,
         sameCase: false
       }));
   } else if (type === 'pd') {
-    candidates = basePD.filter(p => p.id !== sortirId && p.statutVie === 'A_RENTRER')
+    candidates = basePD
+      .filter(p => p.id !== sortirId && p.statutVie !== 'SORTI')
       .map(p => ({
         id: p.id,
         label: p.marque + ' ' + p.modele,
         detail: p.type || '—',
+        statut: p.statutVie,
         sameProfil: false,
         sameCase: false
       }));
   }
-  if (!candidates.length) return; // Pas de candidat A_RENTRER → pas de prompt
-  // Trier : même profil+case en premier, puis même profil, puis le reste
+  // Trier : même case d'abord (probable remplaçant direct), puis A_RENTRER, puis profil+case
   candidates.sort((a, b) => {
+    // Même case technique en priorité absolue (sur le même slot du mur = remplaçant naturel)
+    const aCaseScore = a.sameCase ? 0 : 1;
+    const bCaseScore = b.sameCase ? 0 : 1;
+    if (aCaseScore !== bCaseScore) return aCaseScore - bCaseScore;
+    // A_RENTRER en second (mis en avant)
+    const aIsRentrer = a.statut === 'A_RENTRER' ? 0 : 1;
+    const bIsRentrer = b.statut === 'A_RENTRER' ? 0 : 1;
+    if (aIsRentrer !== bIsRentrer) return aIsRentrer - bIsRentrer;
+    // Au sein de chaque groupe, trier par profil matching
     const sa = (a.sameProfil && a.sameCase ? 0 : a.sameProfil ? 1 : 2);
     const sb = (b.sameProfil && b.sameCase ? 0 : b.sameProfil ? 1 : 2);
     return sa - sb || a.label.localeCompare(b.label);
@@ -8527,12 +8626,20 @@ function promptRemplacement(type, sortirId, sortirLabel, profil, caseTech) {
   const overlay = document.createElement('div');
   overlay.id = 'remplacement-overlay';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; display:flex; align-items:center; justify-content:center;';
+
+  // Options de candidats
   const options = candidates.map(c => {
-    const highlight = c.sameProfil && c.sameCase ? 'background:#22c55e18; border:1px solid #22c55e60;'
-                    : c.sameProfil ? 'background:#3b82f618; border:1px solid #3b82f660;'
+    // A_RENTRER en vert clair (surligné)
+    const highlight = (c.sameCase && c.statut === 'A_RENTRER') ? 'background:#22c55e30; border:1px solid #22c55e90;'
+                    : c.sameCase ? 'background:#a78bfa18; border:1px solid #a78bfa60;'
+                    : c.statut === 'A_RENTRER' ? 'background:#22c55e15; border:1px solid #22c55e50;'
+                    : c.sameProfil ? 'background:#3b82f610; border:1px solid #3b82f640;'
                     : 'background:#1e293b; border:1px solid #334155;';
-    const badge = c.sameProfil && c.sameCase ? '<span style="font-size:8px; padding:1px 5px; background:#22c55e30; color:#22c55e; border-radius:3px; font-weight:700;">même profil + case</span>'
-               : c.sameProfil ? '<span style="font-size:8px; padding:1px 5px; background:#3b82f630; color:#3b82f6; border-radius:3px; font-weight:700;">même profil</span>' : '';
+    const badges = [];
+    if (c.sameCase) badges.push('<span style="font-size:8px; padding:1px 5px; background:#a78bfa30; color:#a78bfa; border-radius:3px; font-weight:700;">même case</span>');
+    if (c.statut === 'A_RENTRER') badges.push('<span style="font-size:8px; padding:2px 6px; background:#22c55e40; color:#22c55e; border-radius:3px; font-weight:700;">À RENTRER</span>');
+    else if (c.sameProfil) badges.push('<span style="font-size:8px; padding:1px 5px; background:#3b82f630; color:#3b82f6; border-radius:3px; font-weight:700;">même profil</span>');
+    const badge = badges.join(' ');
     return `<div onclick="confirmRemplacement('${type}','${sortirId}','${c.id}')" style="cursor:pointer; padding:8px 12px; ${highlight} border-radius:5px; display:flex; align-items:center; gap:8px; transition:background 0.15s;" onmouseenter="this.style.background='#334155'" onmouseleave="this.style.background=''">
       <div style="flex:1;">
         <div style="color:#f1f5f9; font-weight:600; font-size:12px;">${c.label}</div>
@@ -8541,24 +8648,37 @@ function promptRemplacement(type, sortirId, sortirLabel, profil, caseTech) {
       ${badge}
     </div>`;
   }).join('');
+
   overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:20px; max-width:420px; width:90%; max-height:70vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.5);">
-    <div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:4px;">Remplacer par…</div>
-    <div style="color:#94a3b8; font-size:11px; margin-bottom:12px;"><span style="color:#f1f5f9; font-weight:600;">${sortirLabel}</span> passe en sortie. Un produit à rentrer le remplace ?</div>
+    <div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:4px;">Ce produit sort — remplacement ?</div>
+    <div style="color:#94a3b8; font-size:11px; margin-bottom:12px;"><span style="color:#f1f5f9; font-weight:600;">${sortirLabel}</span> passe en sortie. Que souhaitez-vous faire ?</div>
     <div style="overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:4px; padding-right:4px;">
       ${options}
     </div>
     <div style="margin-top:12px; display:flex; gap:8px; justify-content:flex-end;">
-      <span onclick="closeRemplacement()" style="cursor:pointer; padding:6px 16px; font-size:11px; color:#94a3b8; border:1px solid #475569; border-radius:5px;">Non, pas de remplacement</span>
+      <button onclick="markNoReplacement('${type}','${sortirId}')" style="cursor:pointer; padding:6px 16px; font-size:11px; color:#78716c; background:#27241d; border:1px solid #44403c; border-radius:5px; font-family:inherit; font-weight:500; transition:all 0.15s;" onmouseenter="this.style.background='#36322c'" onmouseleave="this.style.background='#27241d'">Pas besoin de remplacer</button>
+      <button onclick="closeRemplacement()" style="cursor:pointer; padding:6px 16px; font-size:11px; color:#22c55e; background:#15803d20; border:1px solid #22c55e60; border-radius:5px; font-family:inherit; font-weight:500; transition:all 0.15s;" onmouseenter="this.style.background='#22c55e30'" onmouseleave="this.style.background='#15803d20'">Pas encore de remplaçant</button>
     </div>
   </div>`;
   document.body.appendChild(overlay);
   overlay.addEventListener('click', e => { if (e.target === overlay) closeRemplacement(); });
 }
 function confirmRemplacement(type, sortirId, rentrerIdChoice) {
+  // Quand un remplacement est choisi, supprimer le flag "pas besoin de remplacer"
   if (type === 'kit') {
+    const k = baseKits.find(x => x.id === sortirId);
+    if (k) delete k.remplacementNonNecessaire;
     updateKitRemplaceId(rentrerIdChoice, sortirId);
-  } else {
-    // Pour liq/pd : lier via l'action SORTIR
+  } else if (type === 'liq') {
+    const g = baseLiq.find(x => x.id === sortirId);
+    if (g) delete g.remplacementNonNecessaire;
+    const sortirA = actions.find(a => a.type === 'SORTIR' && !a.annulee && a.produitId === sortirId);
+    if (sortirA) {
+      updateActionRemplacePar(sortirA.id, rentrerIdChoice);
+    }
+  } else if (type === 'pd') {
+    const p = basePD.find(x => x.id === sortirId);
+    if (p) delete p.remplacementNonNecessaire;
     const sortirA = actions.find(a => a.type === 'SORTIR' && !a.annulee && a.produitId === sortirId);
     if (sortirA) {
       updateActionRemplacePar(sortirA.id, rentrerIdChoice);
@@ -8569,6 +8689,23 @@ function confirmRemplacement(type, sortirId, rentrerIdChoice) {
 function closeRemplacement() {
   const el = document.getElementById('remplacement-overlay');
   if (el) el.remove();
+}
+function markNoReplacement(type, id) {
+  // Marquer le produit comme ne nécessitant pas de remplacement
+  // → exclut des besoins à combler
+  if (type === 'kit') {
+    const k = baseKits.find(x => x.id === id);
+    if (k) k.remplacementNonNecessaire = true;
+  } else if (type === 'liq') {
+    const g = baseLiq.find(x => x.id === id);
+    if (g) g.remplacementNonNecessaire = true;
+  } else if (type === 'pd') {
+    const p = basePD.find(x => x.id === id);
+    if (p) p.remplacementNonNecessaire = true;
+  }
+  saveData();
+  renderDashboard();
+  closeRemplacement();
 }
 function applyFilters() { renderKits(); }
 
@@ -9069,14 +9206,14 @@ function renderLiqGammeDetail(g) {
         }
       });
       // Si un filtre statut est actif, n'afficher que les parfums qui matchent
-      var _detailFStatut = (document.getElementById('liqFilterStatut') || {}).value || '';
-      var _filterParfums = !!_detailFStatut;
+      var _detailFStatut = liqStatutFilter;
+      var _filterParfums = _detailFStatut.length > 0;
       var _hiddenCount = 0;
       g.parfums.forEach((p, pi) => {
-        if (_filterParfums && p.s !== _detailFStatut) { _hiddenCount++; return; }
+        if (_filterParfums && !_detailFStatut.includes(p.s)) { _hiddenCount++; return; }
         const pSc = liqGammeStatusColor(p.s || 'OK');
         const pCtColor = LIQ_GOUT_COLORS[p.ct] || '#94a3b8';
-        const dimStyle = p.s === 'SORTI' ? 'opacity:0.4;' : '';
+        const dimStyle = p.s === 'SORTI' ? 'opacity:0.4;' : (p.exclu ? 'opacity:0.55;' : '');
         const _isPr = _parfumPrSet.has(p.id);
         const _prBadge = _isPr ? `<span style="font-size:8px; color:#ef4444; flex-shrink:0;" title="Prix rouge actif">🔴</span>` : '';
         html += `<div style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}">`;
@@ -9087,6 +9224,8 @@ function renderLiqGammeDetail(g) {
           <option value="" ${!p.ct?'selected':''}>?</option>${LIQ_GOUT_CATS.map(c => `<option value="${c}" ${p.ct===c?'selected':''}>${c}</option>`).join('')}</select>`;
         html += `<select onclick="event.stopPropagation();" onchange="updateLiqParfumField('${g.id}',${pi},'s',this.value)" style="padding:1px 4px; font-size:10px; background:#0f172a; border:1px solid #33415580; color:${pSc}; border-radius:2px;">
           ${LIQ_PARFUM_STATUTS.map(s => `<option value="${s}" ${p.s===s?'selected':''}>${LIQ_GAMME_STATUT_LABELS[s]||s}</option>`).join('')}</select>`;
+        html += `<label onclick="event.stopPropagation();" title="Exclusif Cigusto" style="display:inline-flex; align-items:center; gap:2px; padding:1px 5px; font-size:9px; background:${p.exclu ? '#64748b30' : 'transparent'}; color:${p.exclu ? '#cbd5e1' : '#64748b'}; border:1px solid ${p.exclu ? '#64748b' : '#33415540'}; border-radius:2px; cursor:pointer; font-weight:${p.exclu ? 700 : 400}; flex-shrink:0;">
+          <input type="checkbox" ${p.exclu ? 'checked' : ''} onchange="updateLiqParfumField('${g.id}',${pi},'exclu',this.checked)" style="margin:0; cursor:pointer; accent-color:#64748b; transform:scale(0.8);">Exclu</label>`;
         html += `<button onclick="removeLiqParfum('${g.id}',${pi})" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #ef444440; color:#ef4444; border-radius:2px; cursor:pointer; line-height:1.2;" title="Retirer">×</button>`;
         html += `</div>`;
       });
@@ -9114,7 +9253,7 @@ function renderLiqAll() {
   const fFormat = document.getElementById('liqFilterFormat')?.value || '';
   const fProfil = document.getElementById('liqFilterProfil')?.value || '';
   const fRole = document.getElementById('liqFilterRole')?.value || '';
-  const fStatut = document.getElementById('liqFilterStatut')?.value || '';
+  const fStatut = liqStatutFilter;
   const viewMode = document.getElementById('liqSort')?.value || 'grille';
 
   let filtered = baseLiq.filter(g => {
@@ -9125,8 +9264,8 @@ function renderLiqAll() {
     const matchProfil = !fProfil || g.profilChoisi === fProfil;
     const matchRole = !fRole || g.roleChoisi === fRole;
     // Statut : match sur la gamme OU sur au moins un parfum ayant ce statut
-    const matchStatut = !fStatut || g.statutVie === fStatut
-      || (g.parfums || []).some(function(p) { return p.s === fStatut; });
+    const matchStatut = fStatut.length === 0 || fStatut.includes(g.statutVie)
+      || (g.parfums || []).some(function(p) { return fStatut.includes(p.s); });
     return matchSearch && matchFormat && matchProfil && matchRole && matchStatut;
   });
 
@@ -10034,8 +10173,12 @@ function computeBesoins() {
   // Kits "one-shot" (coups / OP temporaires) indexés par slot — ils ne comblent PAS le slot
   // (car non pérennes) mais on veut les signaler sur les trous concernés.
   const oneShotsBySlot = {};
+  // Kits avec caseMurOverride : occupent physiquement un slot différent de leur vraie case.
+  // Ne comblent PAS le slot de manière pérenne, mais on le signale.
+  const murOverrideBySlot = {};
   baseKits.forEach(k => {
     const ct = getEffectiveCaseTech(k) || k.caseTech;
+    const murCt = k.caseMurOverride; // case sur le mur (si forcée)
     // Utilise getEffectiveRoles pour aligner la logique avec le mur (Freetouch) :
     // gère LES_DEUX, AUTO et les rôles suggérés automatiquement via rolePossible.
     const effRoles = getEffectiveRoles(k).filter(r => GRID_ROLES.includes(r));
@@ -10047,7 +10190,15 @@ function computeBesoins() {
         (oneShotsBySlot[key] = oneShotsBySlot[key] || []).push(k);
       });
     }
-    if (!['DANS_OFFRE','A_RENTRER'].includes(k.statutVie)) {
+    // Kits avec mur override actif : indexer par le slot MUR (pas le slot réel)
+    if (murCt && murCt !== ct && ['DANS_OFFRE','A_RENTRER'].includes(k.statutVie)
+        && k.profilChoisi && effRoles.length > 0 && !k.oneShot) {
+      effRoles.forEach(r => {
+        const murKey = k.profilChoisi + '|' + murCt + '|' + r;
+        (murOverrideBySlot[murKey] = murOverrideBySlot[murKey] || []).push(k);
+      });
+    }
+    if (!['DANS_OFFRE','A_RENTRER','FIN_DE_VIE'].includes(k.statutVie)) {
       // Indexer les A_REMPLACER pour rapprochement trou ↔ remplaçant
       if (k.statutVie === 'A_REMPLACER' && k.profilChoisi && ct && effRoles.length > 0) {
         effRoles.forEach(r => {
@@ -10063,6 +10214,8 @@ function computeBesoins() {
     // Seuls les rôles PA / MM occupent un slot. Les autres (AUCUN_INTERET, PA_TROP_HAUT, etc.)
     // ne remplissent pas la grille (et génèrent une anticipation ailleurs).
     if (effRoles.length === 0) return;
+    // FIN_DE_VIE remplit le slot (le produit est encore en stock sur le mur) mais sera
+    // signalé dans "Remplacements à anticiper" — pas de doublon avec un trou fantôme.
     effRoles.forEach(r => {
       const key = k.profilChoisi + '|' + ct + '|' + r;
       if (grid[key]) grid[key].push(k);
@@ -10075,7 +10228,8 @@ function computeBesoins() {
       trous.push({
         type: 'TROU', profil, caseTech, role,
         sortants: sortantsBySlot[key] || [],
-        oneShots: oneShotsBySlot[key] || []
+        oneShots: oneShotsBySlot[key] || [],
+        murOverrides: murOverrideBySlot[key] || []
       });
     }
   });
@@ -10085,7 +10239,13 @@ function computeBesoins() {
   //  - kits DANS_OFFRE avec rôle problématique (AUCUN_INTERET, MARGE_TROP_FAIBLE, PA_TROP_HAUT)
   const trouKeys = new Set(trous.map(t => t.profil + '|' + t.caseTech + '|' + t.role));
   const anticipations = [];
+  // Pré-indexer les kits qui ont un remplaçant désigné (remplaceId pointe vers le kit sortant)
+  const kitsAvecRemplacant = new Set();
+  baseKits.forEach(k => { if (k.remplaceId) kitsAvecRemplacant.add(k.remplaceId); });
   baseKits.forEach(k => {
+    if (k.remplacementNonNecessaire) return; // Exclure si "pas besoin de remplacer"
+    // Exclure si un autre kit est déjà désigné comme remplaçant de celui-ci
+    if (kitsAvecRemplacant.has(k.id)) return;
     if (k.statutVie === 'A_REMPLACER') {
       const ct = getEffectiveCaseTech(k) || k.caseTech;
       // Aligner sur getEffectiveRoles : un A_REMPLACER LES_DEUX peut couvrir 2 slots.
@@ -10102,13 +10262,14 @@ function computeBesoins() {
   });
   // Liquides A_REMPLACER ou FIN_DE_VIE → besoin à combler (trouver un remplaçant)
   baseLiq.forEach(g => {
+    if (g.remplacementNonNecessaire) return; // Exclure si "pas besoin de remplacer"
     if (['A_REMPLACER','FIN_DE_VIE'].includes(g.statutVie)) {
       anticipations.push({ type: 'ANTICIPATION_LIQ', gamme: g });
     }
     // Parfums individuels A_REMPLACER/FIN_DE_VIE (quand la gamme elle-même ne l'est pas)
     if (g.parfums && !['A_REMPLACER','FIN_DE_VIE'].includes(g.statutVie)) {
       g.parfums.forEach(p => {
-        if (['A_REMPLACER','FIN_DE_VIE'].includes(p.s)) {
+        if (['A_REMPLACER','FIN_DE_VIE'].includes(p.s) && !g.remplacementNonNecessaire) {
           anticipations.push({ type: 'ANTICIPATION_LIQ_PARFUM', gamme: g, parfum: p });
         }
       });
@@ -10116,6 +10277,7 @@ function computeBesoins() {
   });
   // PD A_REMPLACER ou FIN_DE_VIE → besoin à combler
   basePD.forEach(pd => {
+    if (pd.remplacementNonNecessaire) return; // Exclure si "pas besoin de remplacer"
     if (['A_REMPLACER','FIN_DE_VIE'].includes(pd.statutVie)) {
       anticipations.push({ type: 'ANTICIPATION_PD', pd: pd });
     }
@@ -11450,26 +11612,33 @@ function renderDashboard() {
   function renderBesoinTrou(t) {
     const hasSortants = t.sortants && t.sortants.length;
     const hasOneShot = t.oneShots && t.oneShots.length;
+    const hasMurOverride = t.murOverrides && t.murOverrides.length;
     const roleColor = ROLE_COLORS[t.role] || '#64748b';
     const roleShort = ROLE_SHORT[t.role] || t.role || '';
     // Pure trou = plus urgent que trou à remplacer : on affiche MANQUE en rouge vif, À REMPLACER en rouge atténué.
     const subject = hasSortants
       ? `remplace ${t.sortants.map(k => `<strong style="color:#fca5a5;">${k.marque} ${k.modele}</strong>`).join(', ')}`
       : `profil ${PROFIL_LABELS[t.profil]} — <strong style="color:#fca5a5;">aucun produit sur le slot ${roleShort}</strong>`;
-    const badgeLabel = hasSortants ? 'À REMPLACER' : '⚠ MANQUE';
-    const borderColor = '#ef4444';
-    const bgTint = hasSortants ? '#0f172a' : '#ef444414';
+    // Si un kit occupe ce slot via mur override → badge "occupé par" au lieu de MANQUE
+    const badgeLabel = hasMurOverride ? '↗ OCCUPÉ' : (hasSortants ? 'À REMPLACER' : '⚠ MANQUE');
+    const borderColor = hasMurOverride ? '#a78bfa' : '#ef4444';
+    const bgTint = hasMurOverride ? '#a78bfa08' : (hasSortants ? '#0f172a' : '#ef444414');
     // Hint "coup en cours" si un one-shot occupe temporairement le slot
     const oneShotHint = hasOneShot
       ? `<span title="One-shot en cours sur ce slot : ${t.oneShots.map(k => k.marque + ' ' + k.modele).join(', ')} — ne comble pas le slot de manière pérenne" style="font-size:8px; padding:1px 5px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700;">⚡ One-shot en cours</span>`
       : '';
-    return `<div style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:${bgTint}; border:1px dashed ${hasSortants ? 'transparent' : '#ef444480'}; border-left:3px solid ${borderColor}; border-radius:3px; margin-bottom:4px;">
+    // Hint "occupé par override mur" si un kit d'une autre case est forcé ici
+    const murOverrideHint = hasMurOverride
+      ? `<span title="Case occupée sur le mur par : ${t.murOverrides.map(k => k.marque + ' ' + k.modele + ' (vraie case : ' + (getEffectiveCaseTech(k) || '?') + ')').join(', ')}" style="font-size:8px; padding:1px 5px; background:#a78bfa18; color:#a78bfa; border:1px solid #a78bfa60; border-radius:3px; font-weight:700;">↗ Occupé par ${t.murOverrides.map(k => k.marque + ' ' + k.modele).join(', ')}</span>`
+      : '';
+    return `<div style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:${bgTint}; border:1px dashed ${hasSortants && !hasMurOverride ? 'transparent' : borderColor + '80'}; border-left:3px solid ${borderColor}; border-radius:3px; margin-bottom:4px;">
       <span style="font-size:9px; padding:1px 5px; background:${PROFIL_COLORS[t.profil]}25; color:${PROFIL_COLORS[t.profil]}; border-radius:3px; font-weight:700;">${PROFIL_SHORT[t.profil]}</span>
       <span style="font-size:11px; color:#e2e8f0; font-weight:600;">${t.caseTech}</span>
       <span style="font-size:9px; padding:1px 5px; background:${roleColor}25; color:${roleColor}; border-radius:3px; font-weight:700;">${roleShort}</span>
       <span style="font-size:10px; color:#94a3b8;">${subject}</span>
       ${oneShotHint}
-      <span style="margin-left:auto; font-size:9px; padding:1px 6px; background:${borderColor}${hasSortants ? '15' : '25'}; color:${borderColor}; border:1px solid ${borderColor}50; border-radius:3px; font-weight:700;">${badgeLabel}</span>
+      ${murOverrideHint}
+      <span style="margin-left:auto; font-size:9px; padding:1px 6px; background:${borderColor}${hasMurOverride ? '20' : (hasSortants ? '15' : '25')}; color:${borderColor}; border:1px solid ${borderColor}50; border-radius:3px; font-weight:700;">${badgeLabel}</span>
     </div>`;
   }
   function renderBesoinAnticipation(a) {
@@ -11567,6 +11736,11 @@ function renderDashboard() {
       const _bKitExp = expandedActions.has(_bKitKey);
       // Tri : "aucun produit" (MANQUE) en haut, "remplace X" (À REMPLACER) en dessous
       const _sortedTrous = _filteredTrous.slice().sort((a, b) => {
+        // Occupé par mur override → tout en bas (moins urgent)
+        const aMur = a.murOverrides && a.murOverrides.length ? 2 : 0;
+        const bMur = b.murOverrides && b.murOverrides.length ? 2 : 0;
+        if (aMur !== bMur) return aMur - bMur;
+        // MANQUE (aucun produit) en haut, À REMPLACER en dessous
         const aHas = a.sortants && a.sortants.length ? 1 : 0;
         const bHas = b.sortants && b.sortants.length ? 1 : 0;
         return aHas - bHas;
@@ -17620,14 +17794,14 @@ function openEtiquettesDialog() {
   const fProfil = document.getElementById('filterProfil')?.value || '';
   const fTirage = document.getElementById('filterTirage')?.value || '';
   const fRole = document.getElementById('filterRole')?.value || '';
-  const fStatut = document.getElementById('filterStatut')?.value || '';
+  const fStatut = kitStatutFilter;
   const visible = baseKits.filter(k => {
     if (k.statutVie === 'SORTI') return false;
     if (search && !(k.marque.toLowerCase().includes(search) || k.modele.toLowerCase().includes(search))) return false;
     if (fProfil && k.profilChoisi !== fProfil) return false;
     if (fTirage && normKitTirage(k.tirage) !== fTirage) return false;
     if (fRole && !getEffectiveRoles(k).includes(fRole)) return false;
-    if (fStatut && k.statutVie !== fStatut) return false;
+    if (fStatut.length > 0 && !fStatut.includes(k.statutVie)) return false;
     return true;
   });
   if (!visible.length) { pvAlert('Aucun produit ne correspond aux filtres actuels.'); return; }
@@ -17729,6 +17903,10 @@ loadData().then(async () => {
   _normalizePrixRougeOps();
   syncAutoActions();
   restoreUiState();
+  // Initialize multi-select dropdowns
+  renderStatutMultiSelect('kit');
+  renderStatutMultiSelect('liq');
+  renderStatutMultiSelect('pd');
   // Restaurer l'onglet actif
   const savedTab = localStorage.getItem('pv_activeTab');
   if (savedTab && document.getElementById(savedTab)) {
@@ -17912,14 +18090,13 @@ function renderBasePD() {
   const _catSel = document.getElementById('pdFilterCatSel');
   const _caseSel = document.getElementById('pdFilterCaseSel');
   const _roleSel = document.getElementById('pdFilterRoleSel');
-  const _statutSel = document.getElementById('pdFilterStatutSel');
   const _searchEl = document.getElementById('pdSearch');
   const _sortSel = document.getElementById('pdSort');
 
   const fCat = _catSel ? _catSel.value : '';
   const fCase = _caseSel ? _caseSel.value : '';
   const fRole = _roleSel ? _roleSel.value : '';
-  const fStatut = _statutSel ? _statutSel.value : '';
+  const fStatut = pdStatutFilter;
   const fSearch = _searchEl ? _searchEl.value.toLowerCase() : '';
   const sortMode = _sortSel ? _sortSel.value : 'case';
 
@@ -17936,7 +18113,7 @@ function renderBasePD() {
   let list = basePD.slice();
   if (fCat) list = list.filter(pd => pd.categorie === fCat);
   if (fCase) list = list.filter(pd => pd.caseTech === fCase);
-  if (fStatut) list = list.filter(pd => pd.statutVie === fStatut);
+  if (fStatut.length > 0) list = list.filter(pd => fStatut.includes(pd.statutVie));
   if (fRole) list = list.filter(pd => pd.roleChoisi === fRole);
   if (fSearch) list = list.filter(pd => (pd.marque + ' ' + pd.modele).toLowerCase().includes(fSearch));
 
