@@ -2689,17 +2689,13 @@ function isPdReleveStale(shop, cat) {
   if (cat === 'ATO' && dom >= 19 && (!sameMonth || lastD.getDate() < 15)) return { stale: true, days, reason: 'calendaire' };
   return { stale: false, days, reason: null };
 }
-// Prix effectif PD (même logique que kits, avec PR destockage)
+// Prix effectif PD — réutilise activePrixRougeForKit (même logique que le dashboard)
 function getEffectivePdPrice(pd) {
   if (!pd || typeof pd.pv !== 'number') return { prix: 0, source: 'pv' };
-  var today = ymd(new Date());
-  var prOps = ops.filter(function(o) {
-    return o.type === 'PRIX_ROUGE' && (o.produitIds || []).includes(pd.id) && isOpOuverte(o);
-  });
-  var actif = prOps.find(function(o) {
-    return o.dateDebut && o.dateDebut <= today && typeof o.prixRouge === 'number';
-  });
-  if (actif) return { prix: actif.prixRouge, source: 'pr_actif', prOp: actif };
+  var pr = activePrixRougeForKit(pd.id);
+  if (pr && typeof pr.prixCible === 'number' && pr.op && isPrixRougeEnCours(pr.op)) {
+    return { prix: pr.prixCible, source: 'pr_actif', prOp: pr.op };
+  }
   return { prix: pd.pv, source: 'pv' };
 }
 // Verdict PD (mêmes seuils que kits)
@@ -11569,7 +11565,13 @@ function renderDashboard() {
     if (_kitBesoinsCount > 0) {
       const _bKitKey = 'besoins_kits';
       const _bKitExp = expandedActions.has(_bKitKey);
-      const _bKitContent = (_filteredTrous.length > 0 ? `<div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin:2px 0 4px;">Cases à combler (${_filteredTrous.length})</div>` + _filteredTrous.map(renderBesoinTrou).join('') : '')
+      // Tri : "aucun produit" (MANQUE) en haut, "remplace X" (À REMPLACER) en dessous
+      const _sortedTrous = _filteredTrous.slice().sort((a, b) => {
+        const aHas = a.sortants && a.sortants.length ? 1 : 0;
+        const bHas = b.sortants && b.sortants.length ? 1 : 0;
+        return aHas - bHas;
+      });
+      const _bKitContent = (_sortedTrous.length > 0 ? `<div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin:2px 0 4px;">Cases à combler (${_sortedTrous.length})</div>` + _sortedTrous.map(renderBesoinTrou).join('') : '')
         + (_anticKits.length > 0 ? `<div style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; margin:8px 0 4px;">Remplacements à anticiper (${_anticKits.length})</div>` + _anticKits.map(renderBesoinAnticipation).join('') : '');
       besoinsInner += `<div style="margin-bottom:4px;">
         <div onclick="toggleActionExpand('${_bKitKey}')" style="display:grid; grid-template-columns:24px 1fr auto; gap:8px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
@@ -11809,7 +11811,9 @@ function renderDashboard() {
       // Grouper en 1 seule barre (prix rouge, lancement groupé, etc.)
       const cDeb = cOps.reduce((m, o) => (!m || o.dateDebut < m) ? o.dateDebut : m, null);
       const _campObj = getCampagne(cId);
-      const _campNoEnd = (!_campObj || !_campObj.dateFin) || cOps.some(o => !o.dateFin || o.dateFin < o.dateDebut);
+      // noEndDate si : pas de dateFin sur la campagne/OPs, OU si c'est un destockage (PRIX_ROUGE = "jusqu'à épuisement")
+      const _allPrixRouge = cOps.every(o => o.type === 'PRIX_ROUGE');
+      const _campNoEnd = _allPrixRouge || (!_campObj || !_campObj.dateFin) || cOps.some(o => !o.dateFin || o.dateFin < o.dateDebut);
       const cFinRaw = cOps.reduce((m, o) => {
         const _hasValidFin = o.dateFin && o.dateFin >= o.dateDebut;
         const f = _hasValidFin ? o.dateFin : (() => {
@@ -11984,7 +11988,9 @@ function renderDashboard() {
     const _realPct = (_realDays / _totalSpan) * 100;
     const _isWidened = widthPct > _realPct + 0.5; // bloc artificiellement élargi par le min 4%
     const bg = entry.noEndDate
-      ? `background:linear-gradient(to right, ${entry.color}cc 30%, ${entry.color}60 70%, transparent 100%);`
+      ? entry.isCamp
+        ? `background:repeating-linear-gradient(45deg, ${entry.color}, ${entry.color} 3px, ${entry.color}70 3px, ${entry.color}70 6px); -webkit-mask-image:linear-gradient(to right, black 30%, transparent 100%); mask-image:linear-gradient(to right, black 30%, transparent 100%);`
+        : `background:linear-gradient(to right, ${entry.color}cc 30%, ${entry.color}60 70%, transparent 100%);`
       : _isWidened
         ? `background:linear-gradient(to right, ${entry.color}cc ${Math.round(_realPct / widthPct * 100)}%, ${entry.color}40 100%);`
         : entry.isCamp
@@ -13804,7 +13810,27 @@ function renderRelevesPd(cat) {
     const caseLabel = PD_CASE_LABELS[pd.caseTech] || pd.caseTech || '—';
     const compCells = CONCURRENTS.map(c => cellComp(pd, c, c.key === myCompKey)).join('');
     const histOpen = relevesPdHistoryOpen.has(pd.id);
-    const pvDisplay = pd.pv > 0 ? pd.pv.toFixed(2) + '€' : '<span style="color:#475569;">—</span>';
+    // Prix effectif PD : tient compte d'un PR destockage actif
+    const effPd = getEffectivePdPrice(pd);
+    const pvBase = pd.pv > 0 ? pd.pv.toFixed(2) + '€' : '<span style="color:#475569;">—</span>';
+    let pvDisplay = pvBase;
+    let pvSuffix = '';
+    if (effPd.source === 'pr_actif') {
+      pvDisplay = effPd.prix.toFixed(2) + '€';
+      pvSuffix = `<div style="font-size:8px; color:#f59e0b; font-weight:600; line-height:1;">PR actif <span style="text-decoration:line-through; color:#64748b;">${pd.pv.toFixed(2)}€</span></div>`;
+    }
+    // Couleur PV : rouge si plus cher, vert si moins cher
+    let pvColor = '#cbd5e1';
+    let pvTitle = '';
+    const prixRef = effPd.prix > 0 ? effPd.prix : (pd.pv || 0);
+    if (info && info.minConcurrent) {
+      const minComp = Number(info.minConcurrent.p);
+      if (minComp > 0 && prixRef > 0) {
+        const ratio = prixRef / minComp;
+        if (ratio > 1.01)      { pvColor = '#ef4444'; pvTitle = `Plus cher que ${info.minConcurrent.label} (${((ratio-1)*100).toFixed(0)}%)`; }
+        else if (ratio < 0.99) { pvColor = '#22c55e'; pvTitle = `Moins cher que ${info.minConcurrent.label} (${((1-ratio)*100).toFixed(0)}%)`; }
+      }
+    }
 
     let row = `<tr style="background:#0f172a80;" onmouseover="this.style.background='#1e293b'" onmouseout="this.style.background='#0f172a80'">
       <td style="padding:6px 8px; border-bottom:1px solid #1e293b;">
@@ -13815,7 +13841,9 @@ function renderRelevesPd(cat) {
           <span style="color:#f1f5f9; font-weight:700;">${pd.modele}</span>
         </div>
       </td>
-      <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #1e293b; font-size:11px; color:#e2e8f0; font-weight:700;">${pvDisplay}</td>
+      <td style="padding:6px 8px; text-align:right; border-bottom:1px solid #1e293b; font-size:11px; color:${pvColor}; font-weight:700;" title="${pvTitle}">
+        <div>${pvDisplay}</div>${pvSuffix}
+      </td>
       ${compCells}
       ${verdictCellPd(info)}
       ${decisionCellPd(info, pd)}
