@@ -71,6 +71,7 @@
     .wall-empty { color: #fca5a5; font-weight: 600; }
     @keyframes kit-flash { 0% { box-shadow: 0 0 8px 2px #fbbf24cc; } 50% { box-shadow: 0 0 16px 6px #fbbf24aa; } 100% { box-shadow: 0 0 0 0 #fbbf2400; } }
     @keyframes pulse-alert { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+    @keyframes _subUrgPulse { 0%, 100% { box-shadow: 0 0 4px #f59e0b80; } 50% { box-shadow: 0 0 10px #f59e0bcc; } }
     @keyframes pvModalFadeIn { from { opacity: 0; } to { opacity: 1; } }
     @keyframes pvModalSlideIn { from { opacity: 0; transform: translateY(-10px) scale(0.97); } to { opacity: 1; transform: translateY(0) scale(1); } }
     .kit-highlight-card { animation: kit-flash 5s ease-out; outline: 2px solid #fbbf24; outline-offset: -1px; z-index: 5; position: relative; }
@@ -2839,6 +2840,64 @@ function actionGlobalState(a) {
   return 'EN_COURS';
 }
 
+// ── Substitution par boutique ──
+// Prend un kit quelconque et retourne l'état de substitution.
+// États possibles par shop :
+//   'FAIT'       = sortant sorti ET remplaçant reçu → substitution terminée
+//   'REÇU'       = remplaçant reçu MAIS sortant pas encore sorti → en attente de sortie
+//   'COMMANDE'   = remplaçant commandé (pas encore reçu)
+//   'URGENT'     = sortant vendu MAIS remplaçant pas encore commandé → trou dans l'offre !
+//   'ATTENTE'    = rien fait encore
+// Retourne { sortant, remplacant, shops: { pessac: state, ... } } ou null.
+function computeSubstitutionPair(kitId) {
+  const kit = baseKits.find(k => k.id === kitId);
+  if (!kit) return null;
+  // Cherche si ce kit est le REMPLAÇANT (il a remplaceId → pointe vers le sortant)
+  let sortant = null, remplacant = null;
+  if (kit.remplaceId) {
+    remplacant = kit;
+    sortant = baseKits.find(k => k.id === kit.remplaceId);
+  }
+  // Ou si ce kit est le SORTANT (un autre kit a remplaceId === kit.id)
+  if (!sortant) {
+    const r = baseKits.find(k => k.remplaceId === kit.id && !['SORTI','EN_ATTENTE'].includes(k.statutVie));
+    if (r) { sortant = kit; remplacant = r; }
+  }
+  if (!sortant || !remplacant) return null;
+  // Actions liées
+  const sortirAction = actions.find(a => a.type === 'SORTIR' && a.produitId === sortant.id && !a.annulee && actionGlobalState(a) !== 'FAIT');
+  const rentrerAction = actions.find(a => a.type === 'RENTRER' && a.produitId === remplacant.id && !a.annulee && actionGlobalState(a) !== 'FAIT');
+  // Fallback : actions déjà terminées (FAIT)
+  const sortirFait = !sortirAction ? actions.find(a => a.type === 'SORTIR' && a.produitId === sortant.id && !a.annulee && actionGlobalState(a) === 'FAIT') : null;
+  const rentrerFait = !rentrerAction ? actions.find(a => a.type === 'RENTRER' && a.produitId === remplacant.id && !a.annulee && actionGlobalState(a) === 'FAIT') : null;
+  const shopStates = {};
+  SHOPS.forEach(sh => {
+    // État SORTIR pour cette boutique
+    const sa = sortirAction || sortirFait;
+    const sortirDone = sa ? (sa.etats[sh] && sa.etats[sh].done) : (sortant.statutVie === 'SORTI');
+    // État RENTRER pour cette boutique
+    const ra = rentrerAction || rentrerFait;
+    let rentrerCommande = false, rentrerRecu = false;
+    if (ra && ra.etats[sh]) {
+      const st = ra.etats[sh];
+      if (st.done) { rentrerCommande = true; rentrerRecu = true; }
+      else if (st.steps) {
+        rentrerCommande = !!st.steps.commande;
+        rentrerRecu = !!st.steps.recu;
+      }
+    } else if (remplacant.statutVie === 'DANS_OFFRE') {
+      rentrerCommande = true; rentrerRecu = true;
+    }
+    if (sortirDone && rentrerRecu) shopStates[sh] = 'FAIT';
+    else if (sortirDone && rentrerCommande) shopStates[sh] = 'COMMANDE';
+    else if (sortirDone && !rentrerCommande) shopStates[sh] = 'URGENT';
+    else if (!sortirDone && rentrerRecu) shopStates[sh] = 'REÇU';
+    else if (!sortirDone && rentrerCommande) shopStates[sh] = 'COMMANDE';
+    else shopStates[sh] = 'ATTENTE';
+  });
+  return { sortant, remplacant, shops: shopStates, sortirAction: sortirAction || sortirFait, rentrerAction: rentrerAction || rentrerFait };
+}
+
 // Crée (si pas déjà existante) une action ouverte pour un kit
 function ensureActionForKit(kit, type) {
   // Existe déjà une action ouverte du même type pour ce produit ?
@@ -2953,12 +3012,20 @@ function ensureActionForParfum(gamme, parfumId, type) {
     !a.annulee &&
     a.produitType === 'liq'
   );
-  if (existing) return existing;
+  if (existing) {
+    // Garder le nom du parfum à jour (utile en fallback si l'ID change)
+    const _pf = (gamme.parfums || []).find(p => p.id === parfumId);
+    if (_pf && _pf.n) existing._parfumNom = _pf.n;
+    return existing;
+  }
+  // Résoudre le nom du parfum pour l'affichage fallback
+  const _pfObj = (gamme.parfums || []).find(p => p.id === parfumId);
   const a = {
     id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
     type,
     produitId: gamme.id,
     produitParfumId: parfumId,
+    _parfumNom: _pfObj ? _pfObj.n : null,
     produitType: 'liq',
     priorite: type === 'PRIX' ? 'NORMALE' : 'AUTO',
     dateCreation: ymd(new Date()),
@@ -3181,12 +3248,15 @@ function syncAutoActions() {
   });
   if (_orphanIds.size > 0) {
     actions = actions.filter(a => !_orphanIds.has(a.id));
+    // Marquer comme supprimées pour que le merge Supabase ne les ressuscite pas
+    _orphanIds.forEach(id => _deletedIds.add(id));
     // Nettoyer les groupActionIds des OP qui référençaient ces actions
     ops.forEach(op => {
       if (op.groupActionIds) {
         op.groupActionIds = op.groupActionIds.filter(id => !_orphanIds.has(id));
       }
     });
+    console.log('[Cleanup] ' + _orphanIds.size + ' actions orphelines supprimées et marquées dans _deletedIds');
   }
 
   // Migration : actions PRIX sans decisionChoice → déduire baisse/remonte depuis les prix
@@ -4882,6 +4952,23 @@ function _applyActionShopChange(a, shop) {
   }
 }
 
+// ── Notification substitution : quand on coche SORTIR sur une boutique, ──
+// alerter si le remplaçant n'est pas encore commandé sur cette boutique.
+function _checkSubstitutionAlert(a, shop) {
+  if (!a || a.type !== 'SORTIR' || a.annulee) return;
+  const st = a.etats && a.etats[shop];
+  if (!st || !st.done) return; // pas encore tout coché sur ce shop → rien à signaler
+  const sub = computeSubstitutionPair(a.produitId);
+  if (!sub || sub.shops[shop] !== 'URGENT') return;
+  const shopName = { pessac: 'Pessac', merignac: 'Mérignac', langon: 'Langon' }[shop] || shop;
+  // Toast non-bloquant (disparaît après 6s)
+  const toast = document.createElement('div');
+  toast.innerHTML = `⚠️ <strong>${sub.sortant.modele}</strong> est sorti à ${shopName}, mais <strong>${sub.remplacant.modele}</strong> n'est pas encore commandé ! <span style="color:#f59e0b; cursor:pointer; text-decoration:underline;" onclick="this.parentElement.remove()">OK</span>`;
+  toast.style.cssText = 'position:fixed; bottom:20px; left:50%; transform:translateX(-50%); z-index:99999; padding:12px 20px; background:#1e293b; color:#e2e8f0; font-size:12px; border:2px solid #f59e0b; border-radius:8px; box-shadow:0 4px 20px #00000080; max-width:500px; text-align:center;';
+  document.body.appendChild(toast);
+  setTimeout(() => { if (toast.parentElement) toast.remove(); }, 6000);
+}
+
 // Toggle d'une sous-étape précise (nouveau modèle granulaire)
 function toggleActionStep(actionId, shop, stepKey) {
   const a = actions.find(x => x.id === actionId && !x.annulee) || actions.find(x => x.id === actionId);
@@ -4897,6 +4984,7 @@ function toggleActionStep(actionId, shop, stepKey) {
   _applyActionShopChange(a, shop);
   syncActionStepsToOp(a);
   checkOneShotAutoClose(a);
+  _checkSubstitutionAlert(a, shop);
   saveData();
   try { if (typeof renderKits === 'function') renderKits(); } catch(e) { console.error(e); }
   try { if (typeof renderWalls === 'function') renderWalls(); } catch(e) { console.error(e); }
@@ -4923,6 +5011,7 @@ function toggleActionShop(actionId, shop) {
   // Miroir vers l'OP PRIX_ROUGE auto liée (un seul "prix rouge" physique)
   syncActionStepsToOp(a);
   checkOneShotAutoClose(a);
+  _checkSubstitutionAlert(a, shop);
 
   saveData();
   try { if (typeof renderKits === 'function') renderKits(); } catch(e) { console.error('[toggleActionShop] renderKits error:', e); }
@@ -5601,8 +5690,12 @@ async function loadData() {
   const initKitsMap = {};
   INIT_BASE_KITS.forEach(k => { initKitsMap[k.id] = k; });
 
-  // Tenter Supabase d'abord, fallback localStorage
-  let saved = null;
+  // ── Chargement avec MERGE local+remote ──
+  // Stratégie : on lit Supabase ET localStorage, puis on fusionne les deux
+  // (last-write-wins par _stepTs). Ça évite de perdre des coches locales si
+  // le save Supabase n'avait pas eu le temps de partir avant fermeture de page.
+  let remoteData = null;
+  let localData = null;
   try {
     const getUrl = `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=*&id=eq.1`;
     const getHeaders = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY };
@@ -5612,13 +5705,12 @@ async function loadData() {
       const rows = await res.json();
       console.log('[SUPABASE] Rows reçues:', rows.length);
       if (rows && rows.length > 0 && rows[0].data) {
-        saved = JSON.stringify(rows[0].data);
+        remoteData = rows[0].data;
         _supabaseOk = true;
         console.log('[SUPABASE] Données chargées depuis Supabase');
-        localStorage.setItem('pilotVapeData', saved);
       } else {
         console.warn('[SUPABASE] Table vide ou pas de colonne data');
-        _supabaseOk = true; // connexion OK mais vide
+        _supabaseOk = true;
       }
     } else {
       const errTxt = await res.text();
@@ -5629,9 +5721,56 @@ async function loadData() {
     console.warn('[SUPABASE] Inaccessible, fallback localStorage:', e.message);
     _supabaseOk = false;
   }
-  if (!saved) {
-    saved = localStorage.getItem('pilotVapeData');
-    if (saved) console.log('[LOCAL] Données chargées depuis localStorage');
+  // Lire aussi le localStorage (peut contenir des coches plus récentes non envoyées)
+  try {
+    const localSaved = localStorage.getItem('pilotVapeData');
+    if (localSaved) localData = JSON.parse(localSaved);
+  } catch(e) { console.warn('[LOCAL] Erreur lecture localStorage:', e.message); }
+
+  // ── Fusion au chargement ──
+  let saved = null;
+  if (remoteData && localData) {
+    // Les deux sources existent → on prend le remote comme base, on merge le local dedans
+    // (last-write-wins par _stepTs comme pour le merge-on-save)
+    console.log('[LOAD-MERGE] Fusion localStorage + Supabase');
+    // Merger les coches actions : local steps avec ts plus récent gagnent
+    remoteData.actions = _mergeEtats(remoteData.actions || [], localData.actions || []);
+    // Merger les coches OPs
+    remoteData.ops = _mergeOpEtats(remoteData.ops || [], localData.ops || []);
+    // Données structurelles : union (nouveaux items)
+    remoteData.baseKits = _mergeArray(remoteData.baseKits || [], localData.baseKits || [], 'id');
+    remoteData.baseLiq = _mergeLiqDeep(remoteData.baseLiq || [], localData.baseLiq || []);
+    remoteData.basePD = _mergeArray(remoteData.basePD || [], localData.basePD || [], 'id');
+    remoteData.relevesPrix = _mergeArray(remoteData.relevesPrix || [], localData.relevesPrix || [], 'id');
+    remoteData.propositions = _mergeArray(remoteData.propositions || [], localData.propositions || [], 'id');
+    if (localData.propositionsLiq) remoteData.propositionsLiq = _mergeArray(remoteData.propositionsLiq || [], localData.propositionsLiq || [], 'id');
+    if (localData.propositionsPD) remoteData.propositionsPD = _mergeArray(remoteData.propositionsPD || [], localData.propositionsPD || [], 'id');
+    if (localData.campagnes) remoteData.campagnes = _mergeArray(remoteData.campagnes || [], localData.campagnes || [], 'id');
+    // Compteurs : max des deux
+    if (typeof localData.nextActionId === 'number') remoteData.nextActionId = Math.max(remoteData.nextActionId || 0, localData.nextActionId);
+    if (typeof localData.nextOpId === 'number') remoteData.nextOpId = Math.max(remoteData.nextOpId || 0, localData.nextOpId);
+    if (typeof localData.nextReleveId === 'number') remoteData.nextReleveId = Math.max(remoteData.nextReleveId || 0, localData.nextReleveId);
+    if (typeof localData.nextCampagneId === 'number') remoteData.nextCampagneId = Math.max(remoteData.nextCampagneId || 0, localData.nextCampagneId);
+    // Tombstones : union
+    if (Array.isArray(localData._deletedIds)) {
+      if (!Array.isArray(remoteData._deletedIds)) remoteData._deletedIds = [];
+      localData._deletedIds.forEach(id => { if (remoteData._deletedIds.indexOf(id) < 0) remoteData._deletedIds.push(id); });
+    }
+    // AuditLog : fusion + dédup
+    if (Array.isArray(localData.auditLog) && localData.auditLog.length > 0) {
+      if (!Array.isArray(remoteData.auditLog)) remoteData.auditLog = [];
+      const _keys = new Set(remoteData.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
+      localData.auditLog.forEach(e => { var k = e.ts + '|' + e.action + '|' + e.detail; if (!_keys.has(k)) { remoteData.auditLog.push(e); _keys.add(k); } });
+      remoteData.auditLog.sort((a, b) => a.ts.localeCompare(b.ts));
+    }
+    saved = JSON.stringify(remoteData);
+    localStorage.setItem('pilotVapeData', saved);
+  } else if (remoteData) {
+    saved = JSON.stringify(remoteData);
+    localStorage.setItem('pilotVapeData', saved);
+  } else if (localData) {
+    saved = JSON.stringify(localData);
+    console.log('[LOCAL] Données chargées depuis localStorage (Supabase indisponible)');
   }
 
   if (saved) {
@@ -6463,9 +6602,39 @@ function saveData() {
   setTimeout(() => msg.style.display = 'none', 2000);
   // Sauvegarde Supabase avec debounce (1s)
   _savePending = true;
+  _lastPayload = payload; // garder le dernier payload pour flush avant fermeture
   if (_saveTimer) clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => _saveToSupabase(payload), 1000);
 }
+
+// ── Flush Supabase avant fermeture / mise en arrière-plan ──
+// Empêche la perte de données si la page est fermée pendant le debounce 1s.
+var _lastPayload = null;
+function _flushPendingSave() {
+  if (!_savePending || !_lastPayload || _supabaseOk === false) return;
+  if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
+  // Utilise fetch keepalive (fonctionne en beforeunload, contrairement à async)
+  try {
+    const headers = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
+    fetch(SUPABASE_URL + '/rest/v1/' + SUPABASE_TABLE + '?id=eq.1', {
+      method: 'PATCH',
+      headers: headers,
+      body: JSON.stringify({ data: _lastPayload, updated_at: new Date().toISOString() }),
+      keepalive: true  // crucial : permet au navigateur d'envoyer même après fermeture
+    }).catch(function() {}); // fire-and-forget
+    _savePending = false;
+    console.log('[FLUSH] Save Supabase envoyé avant fermeture (keepalive)');
+  } catch(e) {
+    console.warn('[FLUSH] Échec:', e.message);
+  }
+}
+window.addEventListener('beforeunload', _flushPendingSave);
+window.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden') _flushPendingSave();
+});
+// Aussi flusher quand la page perd le focus (extra sécurité pour mobiles)
+window.addEventListener('pagehide', _flushPendingSave);
+
 // ── Fusion des coches (merge-on-save) ──
 // Principe : une coche cochée (true) gagne toujours sur false.
 // Cela évite qu'une boutique écrase les coches d'une autre.
@@ -6611,6 +6780,43 @@ function _mergeArray(localArr, remoteArr, idField) {
   return localArr;
 }
 
+// ── Fusion profonde pour baseLiq : merge des parfums au sein de chaque gamme ──
+// Quand la même gamme existe côté local ET distant, on fusionne les listes de parfums
+// par nom (union). Ça empêche un nouveau parfum ajouté localement de disparaître si
+// le remote n'avait pas encore reçu le save. Les champs modifiés du parfum prennent
+// la version la plus récente (local gagne pour les champs non-null).
+function _mergeLiqDeep(localLiq, remoteLiq) {
+  if (!remoteLiq || !Array.isArray(remoteLiq)) return localLiq;
+  if (!localLiq) localLiq = [];
+  // 1) Ajouter gammes distantes inconnues localement
+  localLiq = _mergeArray(localLiq, remoteLiq, 'id');
+  // 2) Pour les gammes présentes des deux côtés, fusionner les parfums
+  const remoteMap = {};
+  remoteLiq.forEach(g => { if (g && g.id) remoteMap[g.id] = g; });
+  let parfumsMerged = 0;
+  localLiq.forEach(lg => {
+    const rg = remoteMap[lg.id];
+    if (!rg || !rg.parfums || !lg.parfums) return;
+    // Index des parfums locaux par nom (normalisé en minuscule pour éviter les doublons)
+    const localNames = new Set(lg.parfums.map(p => (p.n || '').toLowerCase().trim()));
+    // Ajouter les parfums distants absents localement
+    rg.parfums.forEach(rp => {
+      const key = (rp.n || '').toLowerCase().trim();
+      if (key && !localNames.has(key)) {
+        lg.parfums.push(rp);
+        localNames.add(key);
+        parfumsMerged++;
+      }
+    });
+    // Index inversé : parfums locaux absents du remote (= ajoutés localement, à conserver)
+    // On ne supprime JAMAIS un parfum local absent du remote : il a été créé localement.
+    // Recalculer nbRefs après fusion
+    lg.nbRefs = lg.parfums.filter(p => p.s !== 'SORTI').length;
+  });
+  if (parfumsMerged > 0) console.log('[MERGE-LIQ] +' + parfumsMerged + ' parfums distants ajoutés dans gammes existantes');
+  return localLiq;
+}
+
 async function _saveToSupabase(payload, _retryCount) {
   if (_supabaseOk === false) return;
   const retryCount = _retryCount || 0;
@@ -6629,7 +6835,7 @@ async function _saveToSupabase(payload, _retryCount) {
         payload.ops = _mergeOpEtats(payload.ops, remote.ops);
         // 3. Fusionner les données structurelles (nouveaux items créés par un autre admin)
         payload.baseKits = _mergeArray(payload.baseKits, remote.baseKits, 'id');
-        payload.baseLiq = _mergeArray(payload.baseLiq, remote.baseLiq, 'id');
+        payload.baseLiq = _mergeLiqDeep(payload.baseLiq, remote.baseLiq);
         payload.basePD = _mergeArray(payload.basePD, remote.basePD, 'id');
         payload.relevesPrix = _mergeArray(payload.relevesPrix, remote.relevesPrix, 'id');
         payload.propositions = _mergeArray(payload.propositions, remote.propositions, 'id');
@@ -6705,7 +6911,7 @@ function _startAutoSync() {
       // Fusionner nouveaux items structurels
       const bk = baseKits.length, bl = baseLiq.length, bp = basePD.length;
       _mergeArray(baseKits, remote.baseKits, 'id');
-      _mergeArray(baseLiq, remote.baseLiq, 'id');
+      _mergeLiqDeep(baseLiq, remote.baseLiq);
       _mergeArray(basePD, remote.basePD, 'id');
       _mergeArray(actions, remote.actions, 'id'); // nouvelles actions distantes
       _mergeArray(ops, remote.ops, 'id'); // nouvelles OPs distantes
@@ -7829,6 +8035,22 @@ function renderKitMiniCard(k, showControls, large) {
         <span style="font-size:${margeSize}; font-weight:600; color:#22c55e; white-space:nowrap;">+€${k.marge.toFixed(0)}</span>
         ${isCaseOverride ? '<span style="font-size:8px; padding:0 3px; background:#ef444420; color:#ef4444; border-radius:2px;">forcé</span>' : ''}
         ${svLbl && !isEnAttente ? `<span style="font-size:${large ? '10px' : '8px'}; font-weight:600; color:${sc};">${svLbl}</span>` : ''}
+        ${(() => {
+          const _sub = computeSubstitutionPair(k.id);
+          if (!_sub) return '';
+          const _isSortant = _sub.sortant.id === k.id;
+          const _other = _isSortant ? _sub.remplacant : _sub.sortant;
+          const _dots = SHOPS.map(sh => {
+            const st = _sub.shops[sh];
+            const c = st === 'FAIT' ? '#22c55e' : st === 'REÇU' ? '#a78bfa' : st === 'COMMANDE' ? '#3b82f6' : st === 'URGENT' ? '#f59e0b' : '#475569';
+            return '<span style="width:6px; height:6px; border-radius:50%; background:' + c + '; display:inline-block;" title="' + ({pessac:'Pessac',merignac:'Mérignac',langon:'Langon'}[sh]||sh) + ': ' + st + '"></span>';
+          }).join('');
+          const hasUrgent = SHOPS.some(sh => _sub.shops[sh] === 'URGENT');
+          const arrow = _isSortant ? '→' : '←';
+          const label = _isSortant ? _other.modele : _other.modele;
+          const urgBg = hasUrgent ? 'background:#f59e0b15; border:1px solid #f59e0b40;' : 'background:#33415520; border:1px solid #33415540;';
+          return '<span style="font-size:8px; padding:1px 5px; border-radius:3px; display:inline-flex; align-items:center; gap:3px; white-space:nowrap; ' + urgBg + ' color:' + (hasUrgent ? '#f59e0b' : '#94a3b8') + ';" title="Substitution: ' + _sub.sortant.modele + ' → ' + _sub.remplacant.modele + '">' + arrow + ' ' + label + ' ' + _dots + '</span>';
+        })()}
       </div>
       ${svLbl && isEnAttente ? `<span style="font-size:${large ? '10px' : '9px'}; font-weight:700; color:${sc}; background:#0f172a; padding:1px 6px; border:1px solid ${sc}80; border-radius:3px; letter-spacing:0.3px;">${svLbl}</span>` : ''}
       <span style="font-size:9px; color:#475569;">▼</span>
@@ -10198,7 +10420,7 @@ function renderWalls() {
     if (titulaire || oneShotActif) {
       entrants.forEach(k => { inner += renderProductLine(k, false); });
     }
-    // Sortants en mini-bandeau discret en bas
+    // Sortants en mini-bandeau discret en bas + indicateur substitution
     if (secondaires.length > 0) {
       inner += secondaires.map(k => {
         const col = svColor(k.statutVie);
@@ -10209,10 +10431,32 @@ function renderWalls() {
         const usePr = !!_pr;
         const displayCol = usePr ? '#ef4444' : col;
         const displayLbl = usePr ? (typeof _prPx === 'number' ? `🔴 ${_prPx.toFixed(2)}€` : '🔴 Prix rouge') : lbl;
-        return `<div data-kit-id="${k.id}" style="display:flex; align-items:center; gap:4px; padding:2px 4px; margin-top:auto; border-top:1px dashed ${displayCol}50; background:color-mix(in srgb, ${displayCol} 12%, #0f172a); border-radius:0 0 2px 2px;">
-          <span style="width:5px; height:5px; border-radius:50%; background:${displayCol}; flex-shrink:0;"></span>
-          <span style="font-size:8px; color:${displayCol}; ${usePr ? '' : 'text-decoration:line-through; '}white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${k.modele}</span>
-          <span style="font-size:7px; color:${displayCol}; font-weight:${usePr ? '700' : '600'}; flex-shrink:0;">${displayLbl}</span>
+        // ── Indicateur substitution par boutique ──
+        const _sub = computeSubstitutionPair(k.id);
+        let subBadge = '';
+        if (_sub) {
+          const _dots = SHOPS.map(sh => {
+            const st = _sub.shops[sh];
+            const shLbl = {pessac:'P', merignac:'M', langon:'L'}[sh] || sh[0].toUpperCase();
+            if (st === 'FAIT') return `<span title="${shLbl}: ${_sub.remplacant.modele} en place, ${k.modele} sorti ✓" style="font-size:7px; color:#22c55e; font-weight:700;">${shLbl}</span>`;
+            if (st === 'REÇU') return `<span title="${shLbl}: ${_sub.remplacant.modele} reçu mais ${k.modele} pas encore sorti" style="font-size:7px; color:#a78bfa; font-weight:700;">${shLbl}</span>`;
+            if (st === 'COMMANDE') return `<span title="${shLbl}: ${_sub.remplacant.modele} commandé" style="font-size:7px; color:#3b82f6; font-weight:700;">${shLbl}</span>`;
+            if (st === 'URGENT') return `<span title="${shLbl}: ${k.modele} vendu MAIS ${_sub.remplacant.modele} pas commandé !" style="font-size:7px; color:#f59e0b; font-weight:900; background:#f59e0b20; padding:0 2px; border-radius:2px; border:1px solid #f59e0b60;">⚠${shLbl}</span>`;
+            return `<span title="${shLbl}: en attente" style="font-size:7px; color:#64748b;">${shLbl}</span>`;
+          }).join(' ');
+          const hasUrgent = SHOPS.some(sh => _sub.shops[sh] === 'URGENT');
+          subBadge = `<div style="display:flex; align-items:center; gap:3px; padding:1px 4px; border-top:1px dashed #33415540;">
+            <span style="font-size:7px; color:${hasUrgent ? '#f59e0b' : '#64748b'}; white-space:nowrap;">↔ ${_sub.remplacant.modele}</span>
+            <span style="display:flex; gap:2px;">${_dots}</span>
+          </div>`;
+        }
+        return `<div data-kit-id="${k.id}" style="display:flex; flex-direction:column; margin-top:auto; border-top:1px dashed ${displayCol}50; background:color-mix(in srgb, ${displayCol} 12%, #0f172a); border-radius:0 0 2px 2px;">
+          <div style="display:flex; align-items:center; gap:4px; padding:2px 4px;">
+            <span style="width:5px; height:5px; border-radius:50%; background:${displayCol}; flex-shrink:0;"></span>
+            <span style="font-size:8px; color:${displayCol}; ${usePr ? '' : 'text-decoration:line-through; '}white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${k.modele}</span>
+            <span style="font-size:7px; color:${displayCol}; font-weight:${usePr ? '700' : '600'}; flex-shrink:0;">${displayLbl}</span>
+          </div>
+          ${subBadge}
         </div>`;
       }).join('');
     }
@@ -10582,23 +10826,41 @@ function renderDashboard() {
         background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; cursor:pointer; user-select:none; box-shadow:0 0 0 2px ${col}25;">${init}</span>`;
     }
 
+    // Détection urgence substitution sur RENTRER : le sortant est vendu mais ce remplaçant pas commandé
+    let subUrgent = false;
+    let subTipExtra = '';
+    if (a.type === 'RENTRER' && !done && a.produitId) {
+      const _subPair = computeSubstitutionPair(a.produitId);
+      if (_subPair) {
+        const _shState = _subPair.shops[sh];
+        if (_shState === 'URGENT') {
+          subUrgent = true;
+          subTipExtra = ' ⚠ ' + _subPair.sortant.modele + ' est sorti ici — URGENT à commander !';
+        } else if (_shState === 'REÇU') {
+          subTipExtra = ' · ' + _subPair.sortant.modele + ' pas encore sorti';
+        }
+      }
+    }
+
     // Remplissage : 0% = vide, 100% = plein, intermédiaire = conic-gradient partiel (camembert)
     let bg;
-    if (pct === 0)        bg = 'transparent';
+    if (pct === 0)        bg = subUrgent ? '#f59e0b25' : 'transparent';
     else if (pct === 1)   bg = col;
-    else                  bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, transparent 0)`;
-    const txt = done ? '#0f172a' : col;
+    else                  bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, ${subUrgent ? '#f59e0b15' : 'transparent'} 0)`;
+    const txt = done ? '#0f172a' : (subUrgent ? '#f59e0b' : col);
 
     // Tooltip détaillé : liste des sous-étapes avec ✓ / ○
     const stepsTip = defs.map(d => (st.steps && st.steps[d.key] ? '✓' : '○') + ' ' + d.label).join(' · ');
     const tooltip = done
       ? (SHOP_LABELS[sh] + ' — fait le ' + (st.dateFait||'?') + ' · ' + stepsTip)
-      : (SHOP_LABELS[sh] + ' — ' + nbDone + '/' + defs.length + ' · ' + stepsTip);
+      : (SHOP_LABELS[sh] + ' — ' + nbDone + '/' + defs.length + ' · ' + stepsTip + subTipExtra);
+
+    const urgentStyle = subUrgent ? 'border:2px solid #f59e0b; box-shadow:0 0 6px #f59e0b80; animation:_subUrgPulse 1.5s ease-in-out infinite;' : `border:1px solid ${col};`;
 
     return `<span onclick="event.stopPropagation(); toggleActionShop('${a.id}','${sh}')"
       title="${tooltip}"
       style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700;
-      background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; cursor:pointer; user-select:none;">${init}</span>`;
+      background:${bg}; color:${txt}; ${urgentStyle} border-radius:50%; cursor:pointer; user-select:none;">${subUrgent ? '⚠' : init}</span>`;
   }
 
   // Rend une ligne de sous-étapes cochables par shop (utilisé dans le panneau déplié)
@@ -10610,12 +10872,23 @@ function renderDashboard() {
     const label = SHOP_LABELS[sh];
     const nbDone = defs.filter(d => st.steps && st.steps[d.key] === true).length;
     const allDone = nbDone === defs.length;
+    // Urgence substitution dans le panneau déplié
+    let _subStepBadge = '';
+    if (a.type === 'RENTRER' && !allDone && a.produitId) {
+      const _sp = computeSubstitutionPair(a.produitId);
+      if (_sp && _sp.shops[sh] === 'URGENT') {
+        _subStepBadge = `<span style="font-size:8px; padding:1px 5px; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b60; border-radius:3px; font-weight:700; white-space:nowrap;">⚠ ${_sp.sortant.modele} sorti !</span>`;
+      } else if (_sp && _sp.shops[sh] === 'REÇU') {
+        _subStepBadge = `<span style="font-size:8px; padding:1px 5px; background:#a78bfa15; color:#a78bfa; border:1px solid #a78bfa40; border-radius:3px; white-space:nowrap;">📦 reçu, attente sortie</span>`;
+      }
+    }
     // Header boutique + chip progression
     const header = `<div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
       <span style="width:6px; height:14px; background:${col}; border-radius:2px;"></span>
       <span style="font-size:11px; font-weight:700; color:${col};">${label}</span>
       <span style="font-size:9px; padding:1px 6px; background:${col}22; color:${col}; border-radius:999px; font-weight:700;">${nbDone}/${defs.length}</span>
       ${allDone && st.dateFait ? `<span style="font-size:9px; color:#64748b;">fait le ${st.dateFait}</span>` : ''}
+      ${_subStepBadge}
     </div>`;
     const rows = defs.map(d => {
       const checked = st.steps && st.steps[d.key] === true;
@@ -10880,6 +11153,20 @@ function renderDashboard() {
         const _pvAvantR = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
         headerExtra += ` <span title="Prix rouge ${_prEcRent ? 'actif' : 'programmé'}${_prDateRent ? ' — dès ' + fmtFR(_prOpRent.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgRent}; color:${_prColorRent}; border:1px solid ${_prBorderRent}; border-radius:3px; white-space:nowrap;${_prOpaRent}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateRent}</span>`;
       }
+      // Badge urgence substitution : le sortant est vendu dans certaines boutiques
+      const _subRentrer = computeSubstitutionPair(a.produitId);
+      if (_subRentrer) {
+        const _urgShops = SHOPS.filter(sh => _subRentrer.shops[sh] === 'URGENT');
+        const _recuShops = SHOPS.filter(sh => _subRentrer.shops[sh] === 'REÇU');
+        if (_urgShops.length > 0) {
+          const _urgNames = _urgShops.map(sh => ({pessac:'P', merignac:'M', langon:'L'})[sh] || sh[0]).join('');
+          headerExtra += ` <span title="${_subRentrer.sortant.modele} est sorti à ${_urgShops.map(sh => SHOP_LABELS[sh]).join(', ')} — commander en priorité !" style="font-size:9px; font-weight:700; padding:1px 6px; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b70; border-radius:3px; white-space:nowrap; animation:_subUrgPulse 1.5s ease-in-out infinite;">⚠ ${_urgNames} : ${_subRentrer.sortant.modele} sorti !</span>`;
+        }
+        if (_recuShops.length > 0 && _urgShops.length === 0) {
+          const _recuNames = _recuShops.map(sh => ({pessac:'P', merignac:'M', langon:'L'})[sh] || sh[0]).join('');
+          headerExtra += ` <span title="Reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — en attente que ${_subRentrer.sortant.modele} sorte" style="font-size:9px; padding:1px 6px; background:#a78bfa18; color:#a78bfa; border:1px solid #a78bfa50; border-radius:3px; white-space:nowrap;">📦 ${_recuNames} : reçu, attente sortie</span>`;
+        }
+      }
     } else if (a.type === 'SWAP_COMPOSANT') {
       const _compLabel = a.componentLabel || 'composant';
       const _oldName = a.oldPdName || '?';
@@ -10912,7 +11199,7 @@ function renderDashboard() {
       // Parfum individuel vs gamme entière
       if (a.produitParfumId) {
         const _pf = prod.parfums ? prod.parfums.find(p => p.id === a.produitParfumId) : null;
-        const _pfName = _pf ? _pf.n : '?';
+        const _pfName = _pf ? (_pf.n || '(sans nom)') : (a._parfumNom || '⚠ parfum introuvable');
         titleMain = `<span style="font-weight:400; color:${_marqueColor};">${prod.marque}</span> — <strong style="${_modeleColor}">${prod.gamme}</strong> <span style="color:#94a3b8; font-weight:400;">·</span> <em style="color:#e2e8f0;">${_pfName}</em> <span style="font-size:9px; padding:1px 6px; background:#6366f122; color:#a5b4fc; border:1px solid #6366f150; border-radius:3px; font-weight:600; white-space:nowrap;">Parfum</span>`;
       } else {
         titleMain = `<span style="font-weight:400; color:${_marqueColor};">${prod.marque}</span> — <strong style="${_modeleColor}">${prod.gamme}</strong> (${prod.format}) <span style="font-size:9px; padding:1px 6px; background:#f5970b22; color:#fbbf24; border:1px solid #f5970b50; border-radius:3px; font-weight:600; white-space:nowrap;">Gamme entière</span>`;
@@ -19603,7 +19890,8 @@ function syncPropLiqToBaseLiq(prop) {
       const already = g.parfums && g.parfums.some(p => p.n === prop.nom);
       if (!already) {
         if (!g.parfums) g.parfums = [];
-        g.parfums.push({ n: prop.nom, ct: prop.ct || g.ct || '', s: 'A_RENTRER', pa: prop.pa, pv: prop.pv });
+        const _newPId = g.id + '_p' + String(Date.now()).slice(-6) + Math.random().toString(36).slice(2,5);
+        g.parfums.push({ id: _newPId, n: prop.nom, ct: prop.ct || g.ct || '', s: 'A_RENTRER', pa: prop.pa, pv: prop.pv });
         g.nbRefs = g.parfums.filter(p => p.s !== 'SORTI').length;
       }
     }
