@@ -4094,16 +4094,38 @@ function syncActionStepsToOp(a) {
     if (op) linkedOps.push(op);
   }
   if (a.type === 'RENTRER') {
-    ops.filter(o => o.type === 'COUP' && o.rentrerActionId === a.id).forEach(o => linkedOps.push(o));
+    ops.filter(o => o.type === 'COUP' && !o.dateFin && o.rentrerActionId === a.id).forEach(o => linkedOps.push(o));
+    // Fallback : COUP lié au même produit mais rentrerActionId manquant ou désynchronisé
+    if (linkedOps.length === 0 && a.produitId) {
+      ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(a.produitId) >= 0).forEach(o => {
+        if (linkedOps.indexOf(o) < 0) {
+          // Réparer le lien manquant
+          o.rentrerActionId = a.id;
+          if (!a.opId) a.opId = o.id;
+          linkedOps.push(o);
+        }
+      });
+    }
     // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit
     ops.filter(function(o) {
       return o.type !== 'COUP' && !o._archived && o.prep && o.prep.commanderProduits &&
         ((o.rentrerActionId === a.id) || ((o.produitIds || []).indexOf(a.produitId) >= 0));
-    }).forEach(function(o) { linkedOps.push(o); });
+    }).forEach(function(o) { if (linkedOps.indexOf(o) < 0) linkedOps.push(o); });
   }
   if (a.type === 'SORTIR') {
-    ops.filter(o => o.type === 'COUP' && o.sortirActionId === a.id).forEach(o => linkedOps.push(o));
+    ops.filter(o => o.type === 'COUP' && !o.dateFin && o.sortirActionId === a.id).forEach(o => linkedOps.push(o));
+    // Fallback : COUP lié au même produit mais sortirActionId manquant
+    if (linkedOps.length === 0 && a.produitId) {
+      ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(a.produitId) >= 0).forEach(o => {
+        if (linkedOps.indexOf(o) < 0) {
+          o.sortirActionId = a.id;
+          if (!a.opId) a.opId = o.id;
+          linkedOps.push(o);
+        }
+      });
+    }
   }
+  ensureActionSteps(a); // garantir que a.etats[sh].steps est initialisé
   linkedOps.forEach(op => {
     ensureOpSteps(op);
     const m = _opActionStepMirror(a, op);
@@ -4139,13 +4161,21 @@ function syncOpStepsToAction(op) {
     if (a) targets.push(a);
   }
   if (op.type === 'COUP') {
+    const _coupPid = (op.produitIds || [])[0];
     if (op.rentrerActionId) {
       const a = actions.find(x => x.id === op.rentrerActionId);
       if (a) targets.push(a);
+    } else if (_coupPid) {
+      // Fallback : trouver la RENTRER du même produit et réparer le lien
+      const a = actions.find(x => x.type === 'RENTRER' && x.produitId === _coupPid && !x.annulee);
+      if (a) { op.rentrerActionId = a.id; if (!a.opId) a.opId = op.id; targets.push(a); }
     }
     if (op.sortirActionId) {
       const a = actions.find(x => x.id === op.sortirActionId);
       if (a) targets.push(a);
+    } else if (_coupPid) {
+      const a = actions.find(x => x.type === 'SORTIR' && x.produitId === _coupPid && !x.annulee);
+      if (a) { op.sortirActionId = a.id; if (!a.opId) a.opId = op.id; targets.push(a); }
     }
   }
   // Non-COUP avec commanderProduits → miroir vers RENTRER du même produit
@@ -4198,6 +4228,11 @@ function toggleOpStep(opId, shop, stepKey, checked) {
   if (!st.done) st.dateFait = null;
   // Miroir vers l'action PRIX liée si OP PRIX_ROUGE auto (un seul "prix rouge" physique)
   syncOpStepsToAction(op);
+  // Auto-close one-shot : si le toggle côté OP a propagé le SORTIR à FAIT, clore le lifecycle
+  if (op.type === 'COUP' && op.sortirActionId) {
+    const _sortA = actions.find(x => x.id === op.sortirActionId);
+    if (_sortA) checkOneShotAutoClose(_sortA);
+  }
   // NB : on ne clôt PAS l'OP automatiquement quand toutes les boutiques sont prêtes.
   // « Tout coché » = l'OP est prête / mise en place correctement, pas terminée.
   // La clôture réelle se fait via la dateFin planifiée (cf. opTimeStatus) ou via le bouton « Clore » manuel.
@@ -4838,6 +4873,7 @@ function toggleActionStep(actionId, shop, stepKey) {
   st._stepTs[stepKey] = new Date().toISOString();
   _applyActionShopChange(a, shop);
   syncActionStepsToOp(a);
+  checkOneShotAutoClose(a);
   saveData();
   try { if (typeof renderKits === 'function') renderKits(); } catch(e) { console.error(e); }
   try { if (typeof renderWalls === 'function') renderWalls(); } catch(e) { console.error(e); }
@@ -4863,6 +4899,7 @@ function toggleActionShop(actionId, shop) {
   _applyActionShopChange(a, shop);
   // Miroir vers l'OP PRIX_ROUGE auto liée (un seul "prix rouge" physique)
   syncActionStepsToOp(a);
+  checkOneShotAutoClose(a);
 
   saveData();
   try { if (typeof renderKits === 'function') renderKits(); } catch(e) { console.error('[toggleActionShop] renderKits error:', e); }
@@ -4870,6 +4907,55 @@ function toggleActionShop(actionId, shop) {
   try { if (typeof renderPropositions === 'function') renderPropositions(); } catch(e) { console.error('[toggleActionShop] renderPropositions error:', e); }
   try { renderDashboard(); } catch(e) { console.error('[toggleActionStep] renderDashboard error:', e); }
   try { renderOps && renderOps(); } catch(e) { console.error('[toggleActionShop] renderOps error:', e); }
+}
+
+// ── Auto-close lifecycle one-shot ──
+// Appelé après chaque toggle d'action ou d'OP. Vérifie si un produit one-shot
+// a terminé TOUTES les étapes SORTIR sur TOUTES les boutiques → passe le produit
+// en SORTI, clôt la COUP OP, clôt la PR OP, nettoie les flags.
+function checkOneShotAutoClose(a) {
+  if (!a || a.annulee) return;
+  // Ne déclencher que sur une action SORTIR (ou RENTRER liée à un COUP pour vérif SORTIR)
+  const _pid = a.produitId;
+  if (!_pid) return;
+  // Trouver le kit/gamme/pd
+  const kit = baseKits.find(k => k.id === _pid);
+  const gamme = !kit ? baseLiq.find(g => g.id === _pid) : null;
+  const pd = (!kit && !gamme) ? basePD.find(p => p.id === _pid) : null;
+  const prod = kit || gamme || pd;
+  if (!prod || !prod.oneShot) return;
+  // Chercher l'action SORTIR du même produit
+  const sortirAction = a.type === 'SORTIR' ? a
+    : actions.find(x => x.type === 'SORTIR' && x.produitId === _pid && !x.annulee);
+  if (!sortirAction) return;
+  ensureActionSteps(sortirAction);
+  // Vérifier que SORTIR est FAIT sur toutes les boutiques
+  if (actionGlobalState(sortirAction) !== 'FAIT') return;
+  // ✅ Toutes les boutiques ont terminé le SORTIR → auto-close
+  const today = ymd(new Date());
+  logAction('Auto-close one-shot', (prod.marque || '') + ' ' + (prod.modele || prod.gamme || prod.designation || '') + ' → SORTI');
+  // 1) Passer le produit en SORTI
+  prod.statutVie = 'SORTI';
+  prod.oneShot = false;
+  // 2) Clôturer la COUP OP
+  const coupOp = prod.oneShotOpId ? ops.find(o => o.id === prod.oneShotOpId) : null;
+  if (coupOp && !coupOp.dateFin) coupOp.dateFin = today;
+  // Filet : toute COUP OP ouverte liée à ce produit
+  ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(_pid) >= 0)
+     .forEach(o => { o.dateFin = today; });
+  prod.oneShotOpId = null;
+  // 3) Clôturer les OP PRIX_ROUGE liées
+  ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin && (o.produitIds || []).indexOf(_pid) >= 0)
+     .forEach(o => { o.dateFin = today; });
+  // Aussi via sortirActionId ou rentrerPrixActionId
+  ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin &&
+     (o.sortirActionId === sortirAction.id ||
+      (o.rentrerPrixActionId && actions.some(ra => ra.id === o.rentrerPrixActionId && ra.produitId === _pid))))
+     .forEach(o => { o.dateFin = today; });
+  // 4) Re-synchro actions : cleanupActionsForKit va clôturer les actions orphelines
+  // et closeOneShotOp va fermer toute COUP OP résiduelle (puisque statutVie !== DANS_OFFRE/A_RENTRER)
+  try { syncAutoActions(); } catch(e) { console.error('[autoClose] syncAutoActions:', e); }
+  saveData();
 }
 
 function updateActionComment(actionId, shop, text) {
