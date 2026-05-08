@@ -3657,17 +3657,36 @@ async function annulerActionManuelle(actionId) {
 // Ici on fait juste la ménagerie : une action terminée/annulée => son OP se ferme.
 function syncOpsFromVerdicts() {
   const today = ymd(new Date());
+  // ── Helper : auto-close d'une OP (ne touche PAS aux dates posées manuellement) ──
+  function _autoClose(op, raison) {
+    if (op._dateFinManuelle) {
+      // L'utilisateur a posé cette date manuellement → ne PAS écraser
+      return;
+    }
+    if (!op.dateFin) {
+      console.log('[SYNC-AUTO]', op.id, op.type, '→ dateFin =', today, '—', raison);
+      op.dateFin = today;
+    }
+  }
+  // ── Helper : auto-close pour action disparue/annulée (+ sévère : même manuelle) ──
+  function _autoCloseOrphan(op, raison) {
+    if (!op.dateFin) {
+      console.log('[SYNC-ORPHAN]', op.id, op.type, '→ dateFin =', today, '—', raison);
+      op.dateFin = today;
+    }
+  }
+
   // PRIX → OP liée (prixActionId)
   ops.filter(o => o.prixActionId && !o.dateFin).forEach(op => {
     const a = actions.find(x => x.id === op.prixActionId);
-    if (!a || a.annulee) { op.dateFin = today; return; }
-    if (actionGlobalState(a) === 'FAIT') op.dateFin = today;
+    if (!a || a.annulee) { _autoCloseOrphan(op, 'action PRIX supprimée/annulée'); return; }
+    if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action PRIX terminée');
   });
   // RENTRER → OP fanfare liée (rentrerActionId). Exclut les OP COUP (gérées plus bas
   // car elles sont liées aux DEUX actions : entrée + sortie).
   ops.filter(o => o.rentrerActionId && !o.dateFin && o.type !== 'COUP').forEach(op => {
     const a = actions.find(x => x.id === op.rentrerActionId);
-    if (!a || a.annulee) { op.dateFin = today; return; }
+    if (!a || a.annulee) { _autoCloseOrphan(op, 'action RENTRER supprimée/annulée'); return; }
     // Une entrée en fanfare se clôt quand le produit est actif partout
     // SAUF si l'OP fait partie d'une campagne avec une dateFin future → la campagne dicte la durée
     if (actionGlobalState(a) === 'FAIT') {
@@ -3675,22 +3694,24 @@ function syncOpsFromVerdicts() {
         const cw = getCampagneWindow(op.campagneId);
         if (cw && cw.dateFin && cw.dateFin > today) return; // campagne encore active, ne pas clôturer
       }
-      op.dateFin = today;
+      _autoClose(op, 'action RENTRER terminée (fanfare)');
     }
   });
-  // Ré-ouvrir les fanfares fermées à tort : OP clôturée mais campagne encore active
+  // Ré-ouvrir les fanfares fermées À TORT par le code auto (PAS les fermetures manuelles).
+  // Garde-fou : ne réouvrir que si la fermeture n'était PAS manuelle.
   ops.filter(o => o.rentrerActionId && o.dateFin && o.campagneId && o.type !== 'COUP').forEach(op => {
+    if (op._dateFinManuelle) return; // ⚠ fermeture manuelle → ne JAMAIS réouvrir automatiquement
     const cw = getCampagneWindow(op.campagneId);
     if (cw && cw.dateFin && cw.dateFin > today && op.dateFin <= today) {
-      console.log('[SYNC] Réouverture OP', op.id, '— campagne encore active jusqu\'à', cw.dateFin);
+      console.log('[SYNC-REOPEN]', op.id, '— campagne encore active jusqu\'à', cw.dateFin, '(réouverture auto, non manuelle)');
       op.dateFin = null;
     }
   });
   // SORTIR → OP PRIX_ROUGE destockage liée (sortirActionId). Exclut COUP idem.
   ops.filter(o => o.sortirActionId && !o.dateFin && o.type !== 'COUP').forEach(op => {
     const a = actions.find(x => x.id === op.sortirActionId);
-    if (!a || a.annulee) { op.dateFin = today; return; }
-    if (actionGlobalState(a) === 'FAIT') op.dateFin = today;
+    if (!a || a.annulee) { _autoCloseOrphan(op, 'action SORTIR supprimée/annulée'); return; }
+    if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action SORTIR terminée (destockage)');
   });
   // COUP → OP commune liée aux 2 actions (entrée + sortie). Clôt uniquement quand
   // les DEUX lignes sont soldées (FAIT ou annulées). Un coup qui n'a "que" rentré
@@ -3700,20 +3721,22 @@ function syncOpsFromVerdicts() {
     const aS = op.sortirActionId  ? actions.find(x => x.id === op.sortirActionId)  : null;
     const isDone = (a) => !a || a.annulee || actionGlobalState(a) === 'FAIT';
     if (isDone(aR) && isDone(aS) && (aR || aS)) {
-      op.dateFin = today;
+      _autoClose(op, 'COUP : RENTRER+SORTIR terminées');
       // Libère le flag oneShot du kit : le coup est consommé.
-      const kit = baseKits.find(k => k.id === (op.produitIds || [])[0]);
-      if (kit) {
-        kit.oneShot = false;
-        kit.oneShotOpId = null;
+      if (op.dateFin) {
+        const kit = baseKits.find(k => k.id === (op.produitIds || [])[0]);
+        if (kit) {
+          kit.oneShot = false;
+          kit.oneShotOpId = null;
+        }
       }
     }
   });
   // MISE_EN_PLACE → OP liée (mepActionId)
   ops.filter(o => o.mepActionId && !o.dateFin).forEach(op => {
     const a = actions.find(x => x.id === op.mepActionId);
-    if (!a || a.annulee) { op.dateFin = today; return; }
-    if (actionGlobalState(a) === 'FAIT') op.dateFin = today;
+    if (!a || a.annulee) { _autoCloseOrphan(op, 'action MEP supprimée/annulée'); return; }
+    if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action MEP terminée');
   });
   // RETOUR DE PRIX (clôture PRIX_ROUGE type 'retour_prix') → returnActionId
   // L'OP reste ouverte tant que la nouvelle action PRIX de retour n'est pas FAIT partout.
@@ -3724,7 +3747,7 @@ function syncOpsFromVerdicts() {
     if (!a) return; // action supprimée, on laisse l'utilisateur décider
     if (a.annulee) return; // action annulée : on ne clôt pas auto, on attend une action de l'utilisateur
     if (actionGlobalState(a) === 'FAIT') {
-      op.dateFin = today;
+      _autoClose(op, 'action retour prix terminée');
       op.motifCloture = op.motifCloture || 'retour_prix_abouti';
     }
   });
@@ -5757,21 +5780,12 @@ async function loadData() {
         op.pieces = op.pieces.filter(p => p.type !== 'BAC_A_FOUILLE');
       }
     });
-    // Migration one-shot (avril 2026) : aligner les dateDebut des OPs en cours sur le 04/05/2026
-    // (date de démarrage terrain décidée par Fabien). Guard localStorage pour n'appliquer qu'une fois
-    // — l'utilisateur peut ensuite modifier librement les dates sans que la migration ne recase.
-    if (!localStorage.getItem('pilotVape_migration_dateDebut_20260504_done')) {
-      const TARGET_DATE = '2026-05-04';
-      let touched = 0;
-      ops.forEach(op => {
-        if (!op.dateFin && op.dateDebut !== TARGET_DATE) {
-          op.dateDebut = TARGET_DATE;
-          touched++;
-        }
-      });
-      if (touched > 0) console.log('[OP-LOAD] dateDebut réalignée au ' + TARGET_DATE + ' sur ' + touched + ' OP(s) en cours');
-      localStorage.setItem('pilotVape_migration_dateDebut_20260504_done', '1');
-    }
+    // Migration one-shot (avril 2026) : DÉJÀ APPLIQUÉE — ne plus ré-exécuter.
+    // L'ancienne migration forçait op.dateDebut = '2026-05-04' sur toutes les OPs ouvertes,
+    // ce qui écrasait les dates posées manuellement si localStorage était vidé.
+    // On la désactive définitivement (gardée en commentaire pour historique).
+    // if (!localStorage.getItem('pilotVape_migration_dateDebut_20260504_done')) { ... }
+    localStorage.setItem('pilotVape_migration_dateDebut_20260504_done', '1');
     // Idem pour les OPs : chaque OP doit avoir etats[shop].steps cohérent avec son type.
     ops.forEach(op => ensureOpSteps(op));
     // Migration : aligner la source des pièces au défaut sémantique de leur type.
@@ -11932,29 +11946,32 @@ function renderDashboard() {
   // Filtrage : OPs actives (non terminées), avec dateDebut renseignée.
   // On INCLUT les OP auto (PRIX_ROUGE) — la heatmap gère les pics (sqrt + plancher de hauteur)
   // et chaque vague est un segment distinct, donc plus de risque de saturation visuelle.
-  // Fallback : si une OP n'a pas de dateDebut mais est rattachée à une campagne, hériter les dates.
-  ops.forEach(op => {
-    if (op.campagneId && !op.dateDebut) {
+  // Fallback lecture seule : si une OP n'a pas de dateDebut mais est rattachée à une campagne,
+  // on calcule la date effective SANS MUTER l'objet OP (évite les écrasements silencieux).
+  function _effectiveDateDebut(op) {
+    if (op.dateDebut) return op.dateDebut;
+    if (op.campagneId) {
       const cw = getCampagneWindow(op.campagneId);
-      if (cw && cw.dateDebut) op.dateDebut = cw.dateDebut;
+      if (cw && cw.dateDebut) return cw.dateDebut;
     }
-  });
+    return null;
+  }
   const _activeOps = ops.filter(op => {
     if (op._archived) return false;
-    if (!op.dateDebut) return false;
+    if (!_effectiveDateDebut(op)) return false;
     if (opTimeStatus(op) === 'TERMINEE') return false;
     return true;
   });
   // Pour le Gantt : inclure aussi les OP terminées récentes (dans la fenêtre)
   const _allVisibleOps = ops.filter(op => {
     if (op._archived) return false;
-    if (!op.dateDebut) return false;
+    if (!_effectiveDateDebut(op)) return false;
     return true;
   });
   const _opsInWindow = [];
   const _opsLater    = [];
   _allVisibleOps.forEach(op => {
-    const dDeb = op.dateDebut;
+    const dDeb = _effectiveDateDebut(op);
     const _hasValidFin = op.dateFin && op.dateFin >= dDeb;
     const dFinRaw = _hasValidFin ? op.dateFin : (() => {
       var _d15a = new Date(dDeb + 'T00:00:00'); _d15a.setDate(_d15a.getDate() + 10);
@@ -14324,6 +14341,7 @@ function closeOp(id) {
   if (op.auto) { pvAlert('OP auto — clôturée via l\'action PRIX associée.'); return; }
   logAction('Clôture OP', _logOpLabel(id) + ' (manuelle)');
   op.dateFin = ymd(new Date());
+  op._dateFinManuelle = true; // protège contre la réouverture auto
   saveData();
   renderOps();
 }
@@ -14332,6 +14350,7 @@ function reopenOp(id) {
   const op = ops.find(o => o.id === id);
   if (!op) return;
   op.dateFin = null;
+  op._dateFinManuelle = false; // réouverture explicite → le cycle auto peut reprendre
   saveData();
   renderOps();
 }
@@ -16369,7 +16388,7 @@ async function setOpDateDebut(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   logAction('Date début OP', _logOpLabel(opId) + ' → ' + v);
-  if (v) op.dateDebut = v;
+  if (v) { op.dateDebut = v; op._dateDebutManuelle = true; }
   saveData();
   // Sync sibling one-shot ↔ PR : toujours proposer d'aligner la date de début
   const sibling = _findOneShotSibling(op);
@@ -16404,6 +16423,7 @@ async function setOpDateFin(opId, v) {
   const op = ops.find(o => o.id === opId); if (!op) return;
   logAction('Date fin OP', _logOpLabel(opId) + ' → ' + v);
   op.dateFin = v || null;
+  op._dateFinManuelle = !!(v); // marquer comme posée manuellement (protège contre les auto-sync)
   // Première sauvegarde : l'OP principale est à jour
   saveData();
   // Sync sibling one-shot ↔ PR : toujours proposer d'aligner la date de fin
