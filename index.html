@@ -3790,9 +3790,16 @@ function syncOpsFromVerdicts() {
   }
 
   // PRIX → OP liée (prixActionId)
+  // EXCEPTION : les OP PRIX_ROUGE (relevé/manuelle, pas destockage) ne sont PAS auto-fermées
+  // quand l'action PRIX est FAIT. L'action PRIX = "le prix a été changé sur Swappy", mais
+  // l'OP continue (produit en vitrine au prix réduit). C'est l'admin qui décide quand la PR
+  // s'arrête, et les étapes de fin (remettre le prix, ré-étiqueter) ne doivent pas être
+  // court-circuitées par une fermeture auto.
   ops.filter(o => o.prixActionId && !o.dateFin).forEach(op => {
     const a = actions.find(x => x.id === op.prixActionId);
     if (!a || a.annulee) { _autoCloseOrphan(op, 'action PRIX supprimée/annulée'); return; }
+    // PRIX_ROUGE relevé/manuelle (pas destockage) → PAS d'auto-close, l'admin gère la dateFin
+    if (op.type === 'PRIX_ROUGE' && !op.sortirActionId) return;
     if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action PRIX terminée');
   });
   // RENTRER → OP fanfare liée (rentrerActionId). Exclut les OP COUP (gérées plus bas
@@ -7560,11 +7567,11 @@ function renderPropositions() {
 
   // --- TROUS DANS L'OFFRE (inline, placés là où la proposition manquante devrait être) ---
   // Index des slots profil × caseTech × rôle vides dans le base kit.
-  // Map key (profil|caseTech|role) → sortants[] (kits A_REMPLACER qui occupaient ce slot).
+  // Map key (profil|caseTech|role) → { sortants[], oneShots[], murOverrides[] }.
   let trousMap = new Map();
   try {
     const besoins = computeBesoins();
-    if (besoins && besoins.trous) besoins.trous.forEach(t => trousMap.set(t.profil + '|' + t.caseTech + '|' + t.role, t.sortants || []));
+    if (besoins && besoins.trous) besoins.trous.forEach(t => trousMap.set(t.profil + '|' + t.caseTech + '|' + t.role, { sortants: t.sortants || [], oneShots: t.oneShots || [], murOverrides: t.murOverrides || [] }));
   } catch(e) { /* pas bloquant */ }
   const caseLblShort = { 'MTL_RDL_10C':'MTL/RDL · 10 cig', 'MTL_RDL_20C':'MTL/RDL · 20 cig', 'DL_10C':'DL · 10 cig', 'DL_20C':'DL · 20 cig', 'DL+_10C':'DL+ · 10 cig', 'DL+_20C':'DL+ · 20 cig' };
   const profLblShort = { RECREATIF:'Récréatif', PRUDENT:'Prudent', DECIDE:'Décidé' };
@@ -7572,19 +7579,33 @@ function renderPropositions() {
   const rolesOrder = ['PRIX_D_APPEL', 'MEILLEURE_MARGE'];
   // Rendu d'une "ligne manque" en ROUGE à placer dans les blocs Proposition.
   // Si un ou plusieurs kits A_REMPLACER occupaient ce slot, on les mentionne inline.
-  const renderTrouRow = (profil, caseTech, role, sortants) => {
+  // Si un one-shot ou un mur-override occupe le slot, on le signale aussi.
+  const renderTrouRow = (profil, caseTech, role, sortants, oneShots, murOverrides) => {
     const profCol = PROFIL_COLORS[profil] || '#64748b';
     const roleCol = ROLE_COLORS[role] || '#64748b';
     const roleShort = ROLE_SHORT[role] || role || '';
+    const hasOneShot = oneShots && oneShots.length;
+    const hasMurOverride = murOverrides && murOverrides.length;
     const subjectLine = (sortants && sortants.length)
       ? `— remplace ${sortants.map(k => `<strong style="color:#fca5a5;">${k.marque} ${k.modele}</strong>`).join(', ')} · à trouver`
       : `— slot vide dans votre offre, une proposition serait la bienvenue ici`;
-    return `<div style="margin:3px 6px; padding:5px 10px; background:#ef444414; border:1px dashed #ef444480; border-left:3px solid #ef4444; border-radius:4px; display:flex; align-items:center; gap:8px;">
+    const borderColor = hasMurOverride ? '#a78bfa' : '#ef4444';
+    const bgTint = hasMurOverride ? '#a78bfa08' : '#ef444414';
+    const badgeLabel = hasMurOverride ? '↗ OCCUPÉ' : (sortants && sortants.length ? 'À REMPLACER' : '⚠ MANQUE');
+    const oneShotHint = hasOneShot
+      ? `<span style="font-size:8px; padding:1px 5px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700;" title="One-shot en cours — ne comble pas le slot de manière pérenne">↗ Occupation temporaire par ${oneShots.map(k => k.marque + ' ' + k.modele).join(', ')}</span>`
+      : '';
+    const murOverrideHint = hasMurOverride
+      ? `<span style="font-size:8px; padding:1px 5px; background:#a78bfa18; color:#a78bfa; border:1px solid #a78bfa60; border-radius:3px; font-weight:700;" title="Case occupée sur le mur par un kit d'une autre case technique">↗ Occupé par ${murOverrides.map(k => k.marque + ' ' + k.modele).join(', ')}</span>`
+      : '';
+    return `<div style="margin:3px 6px; padding:5px 10px; background:${bgTint}; border:1px dashed ${borderColor}80; border-left:3px solid ${borderColor}; border-radius:4px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
       <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:${profCol}; flex-shrink:0;"></span>
-      <span style="font-size:10px; font-weight:700; color:#ef4444; letter-spacing:0.3px;">⚠ ${sortants && sortants.length ? 'À REMPLACER' : 'MANQUE'}</span>
+      <span style="font-size:10px; font-weight:700; color:${borderColor}; letter-spacing:0.3px;">${badgeLabel}</span>
       <span style="font-size:11px; color:#fca5a5; font-weight:600;">${profLblShort[profil] || profil} · ${caseLblShort[caseTech] || caseTech}</span>
       <span style="font-size:9px; padding:1px 5px; background:${roleCol}25; color:${roleCol}; border-radius:3px; font-weight:700;">${roleShort}</span>
       <span style="font-size:10px; color:#94a3b8; font-style:italic;">${subjectLine}</span>
+      ${oneShotHint}
+      ${murOverrideHint}
     </div>`;
   };
 
@@ -7606,7 +7627,7 @@ function renderPropositions() {
       profilsOrder.forEach(pr => {
         rolesOrder.forEach(rl => {
           const k = pr + '|' + ck + '|' + rl;
-          if (trousMap.has(k)) trousHere.push({ profil: pr, role: rl, sortants: trousMap.get(k) });
+          if (trousMap.has(k)) { const _t = trousMap.get(k); trousHere.push({ profil: pr, role: rl, sortants: _t.sortants, oneShots: _t.oneShots, murOverrides: _t.murOverrides }); }
         });
       });
       html += `<div style="margin-top:8px; background:${color}08; border:1px solid ${color}40; border-radius:6px; overflow:hidden;">`;
@@ -7616,7 +7637,7 @@ function renderPropositions() {
         ${trousHere.length ? `<span style="font-size:10px; color:#ef4444; font-weight:700;">· ${trousHere.length} manque${trousHere.length>1?'s':''}</span>` : ''}
       </div>`;
       // Lignes "manque" en tête du bloc (là où devrait être la proposition)
-      trousHere.forEach(t => { html += renderTrouRow(t.profil, ck, t.role, t.sortants); });
+      trousHere.forEach(t => { html += renderTrouRow(t.profil, ck, t.role, t.sortants, t.oneShots, t.murOverrides); });
       html += theHeader;
       if (caseProps.length === 0 && trousHere.length === 0) {
         html += `<div style="padding:6px 12px; font-size:10px; color:#475569; font-style:italic;">Aucune proposition</div>`;
@@ -7636,7 +7657,7 @@ function renderPropositions() {
         [nt + '_10C', nt + '_20C'].forEach(ck => {
           rolesOrder.forEach(rl => {
             const k = pr + '|' + ck + '|' + rl;
-            if (trousMap.has(k)) trousOfTirage.push({ profil: pr, caseTech: ck, role: rl, sortants: trousMap.get(k) });
+            if (trousMap.has(k)) { const _t = trousMap.get(k); trousOfTirage.push({ profil: pr, caseTech: ck, role: rl, sortants: _t.sortants, oneShots: _t.oneShots, murOverrides: _t.murOverrides }); }
           });
         });
       });
@@ -7656,7 +7677,7 @@ function renderPropositions() {
           <div style="flex:1; height:1px; background:${color}25;"></div>
         </div>`;
         // Lignes "manque" en tête de la sous-section
-        trousSub.forEach(t => { html += renderTrouRow(t.profil, t.caseTech, t.role, t.sortants); });
+        trousSub.forEach(t => { html += renderTrouRow(t.profil, t.caseTech, t.role, t.sortants, t.oneShots, t.murOverrides); });
         items.forEach(p => { html += renderPropRow(p); });
       });
       html += `</div>`;
@@ -10576,15 +10597,18 @@ function computeBesoins() {
     // Utilise getEffectiveRoles pour aligner la logique avec le mur (Freetouch) :
     // gère LES_DEUX, AUTO et les rôles suggérés automatiquement via rolePossible.
     const effRoles = getEffectiveRoles(k).filter(r => GRID_ROLES.includes(r));
-    // Index one-shot actifs (DANS_OFFRE ou A_RENTRER) par slot, pour signalement sur les trous
+    // Index one-shot actifs (DANS_OFFRE ou A_RENTRER) par slot, pour signalement sur les trous.
+    // Si le one-shot a un caseMurOverride, on l'indexe sous la case MUR (là où il est physiquement)
+    // plutôt que sous sa case technique réelle — c'est le slot mur qui est "occupé temporairement".
     if (k.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(k.statutVie)
         && k.profilChoisi && ct && effRoles.length > 0) {
+      const oneShotCt = (murCt && murCt !== ct) ? murCt : ct;
       effRoles.forEach(r => {
-        const key = k.profilChoisi + '|' + ct + '|' + r;
+        const key = k.profilChoisi + '|' + oneShotCt + '|' + r;
         (oneShotsBySlot[key] = oneShotsBySlot[key] || []).push(k);
       });
     }
-    // Kits avec mur override actif : indexer par le slot MUR (pas le slot réel)
+    // Kits avec mur override actif (NON one-shot) : indexer par le slot MUR (pas le slot réel)
     if (murCt && murCt !== ct && ['DANS_OFFRE','A_RENTRER'].includes(k.statutVie)
         && k.profilChoisi && effRoles.length > 0 && !k.oneShot) {
       effRoles.forEach(r => {
