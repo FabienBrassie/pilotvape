@@ -345,6 +345,9 @@
       <select id="filterRole" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option><option value="LES_DEUX">Les deux</option>
       </select>
+      <select id="kitShopFilter" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
+        <option value="">Toutes boutiques</option><option value="pessac">🏪 Pessac</option><option value="merignac">🏪 Mérignac</option><option value="langon">🏪 Langon</option>
+      </select>
       <div id="statut-multi-kit" style="position:relative; display:inline-block;"></div>
       <select id="kitSort" onchange="renderKits();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="case">⭐ Tri: Case technique</option><option value="tirage">Vue: Par profil</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Marque (blocs)</option><option value="modele">Tri: Nom modèle</option><option value="date">Tri: Date</option><option value="marge">Tri: Marge €</option><option value="note">Tri: Note</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="w">Tri: Puissance W</option><option value="mah">Tri: Batterie mAh</option>
@@ -2186,11 +2189,27 @@ function computeOpShopStepDefs(op, shop) {
       });
     }
   }
-  // Étape de DÉSINSTALLATION : apparaît dès que l'OP est terminée (dateFin passée).
-  // Chaque boutique doit confirmer avoir démonté/retiré le matériel.
-  // L'archivage est bloqué tant que cette étape n'est pas cochée sur toutes les boutiques.
+  // Étapes de FIN D'OP : apparaissent dès que l'OP est terminée (dateFin passée).
+  // — NOUVEAUTÉ / EXCLU / PRIX_ROUGE (hors destockage) : remplacer l'étiquette spéciale
+  //   par l'étiquette FT profil normale → 2 steps (imprimer + poser).
+  // — PRIX_ROUGE (hors destockage) : en plus, remettre le prix initial sur Swappy.
+  // — PRIX_ROUGE destockage (sortirActionId présent) : le produit disparaît, pas besoin
+  //   de ré-étiqueter ni de remettre le prix → simple "OP désinstallée".
+  // — Autres types : "OP désinstallée" classique.
+  // L'archivage est bloqué tant que ces étapes ne sont pas cochées sur toutes les boutiques.
   if (op.dateFin && op.dateFin <= ymd(new Date())) {
-    defs.push({ key: 'desinstallation', label: '🔻 OP désinstallée', kind: 'desinstall' });
+    const _isDestockage = op.type === 'PRIX_ROUGE' && !!op.sortirActionId;
+    const _needFtLabel = !_isDestockage && (op.type === 'NOUVEAUTE' || op.type === 'EXCLU' || op.type === 'PRIX_ROUGE');
+    if (_needFtLabel) {
+      defs.push({ key: 'fin_imprimer_ft', label: '🏷️ Imprimer étiquette FT par profil', kind: 'desinstall' });
+      defs.push({ key: 'fin_poser_ft', label: '🏷️ Poser étiquette FT par profil → Mur libre toucher', kind: 'desinstall' });
+    }
+    if (op.type === 'PRIX_ROUGE' && !_isDestockage) {
+      defs.push({ key: 'fin_prix_swappy', label: '💰 Remettre le prix initial sur Swappy', kind: 'desinstall' });
+    }
+    if (!_needFtLabel) {
+      defs.push({ key: 'desinstallation', label: '🔻 OP désinstallée', kind: 'desinstall' });
+    }
   }
   return defs;
 }
@@ -2838,6 +2857,30 @@ function actionGlobalState(a) {
   if (doneCount === 0) return 'A_FAIRE';
   if (doneCount === SHOPS.length) return 'FAIT';
   return 'EN_COURS';
+}
+
+// ── Présence physique d'un kit dans une boutique ──
+// Retourne true si le kit est physiquement présent dans cette boutique.
+// Logique : on part du statutVie global, puis on regarde les actions SORTIR/RENTRER par shop.
+function isKitPresentAtShop(kit, shop) {
+  if (!kit || !shop) return true;
+  const sv = kit.statutVie;
+  // SORTI globalement → jamais présent
+  if (sv === 'SORTI') return false;
+  // A_SORTIR ou FIN_DE_VIE → présent SAUF si SORTIR est fait à cette boutique
+  if (sv === 'A_SORTIR' || sv === 'FIN_DE_VIE') {
+    const sortirAct = actions.find(a => a.type === 'SORTIR' && a.produitId === kit.id && !a.annulee);
+    if (sortirAct && sortirAct.etats[shop] && sortirAct.etats[shop].done) return false;
+    return true; // pas encore sorti ici
+  }
+  // A_RENTRER → présent SEULEMENT si RENTRER est fait à cette boutique
+  if (sv === 'A_RENTRER' || sv === 'EN_ATTENTE') {
+    const rentrerAct = actions.find(a => a.type === 'RENTRER' && a.produitId === kit.id && !a.annulee);
+    if (rentrerAct && rentrerAct.etats[shop] && rentrerAct.etats[shop].done) return true;
+    return false; // pas encore reçu ici
+  }
+  // DANS_OFFRE, A_REMPLACER → présent partout
+  return true;
 }
 
 // ── Substitution par boutique ──
@@ -5587,6 +5630,7 @@ function saveUiState() {
     kitFilterRole: document.getElementById('filterRole')?.value || '',
     kitFilterStatut: kitStatutFilter,
     kitSort: document.getElementById('kitSort')?.value || 'case',
+    kitShopFilter: document.getElementById('kitShopFilter')?.value || '',
     kitSortCol, kitSortDir,
     kitSubSort: document.getElementById('kitSubSort')?.value || 'case',
     liqExpanded: Object.keys(liqExpanded).filter(k => liqExpanded[k]),
@@ -5626,6 +5670,7 @@ function restoreUiState() {
     if (s.kitFilterRole) { const el = document.getElementById('filterRole'); if (el) el.value = s.kitFilterRole; }
     if (s.kitFilterStatut) { kitStatutFilter = Array.isArray(s.kitFilterStatut) ? s.kitFilterStatut : (s.kitFilterStatut ? [s.kitFilterStatut] : []); }
     if (s.kitSort) { const el = document.getElementById('kitSort'); if (el) el.value = s.kitSort; }
+    if (s.kitShopFilter) { const el = document.getElementById('kitShopFilter'); if (el) el.value = s.kitShopFilter; }
     if (s.kitSortCol) kitSortCol = s.kitSortCol;
     if (typeof s.kitSortDir === 'number') kitSortDir = s.kitSortDir;
     if (s.kitSubSort) { const el = document.getElementById('kitSubSort'); if (el) el.value = s.kitSubSort; }
@@ -8327,6 +8372,7 @@ function renderKits() {
   const fTirage = document.getElementById('filterTirage')?.value || '';
   const fRole = document.getElementById('filterRole')?.value || '';
   const fStatut = kitStatutFilter;
+  const fShopKit = document.getElementById('kitShopFilter')?.value || '';
 
   let filtered = baseKits.filter(k => {
     const matchSearch = !search || k.marque.toLowerCase().includes(search) || k.modele.toLowerCase().includes(search);
@@ -8335,7 +8381,9 @@ function renderKits() {
     // Note: filter uses effective caseTech for autonomie matching
     const matchRole = !fRole || getEffectiveRoles(k).includes(fRole);
     const matchStatut = fStatut.length === 0 || fStatut.includes(k.statutVie);
-    return matchSearch && matchProfil && matchTirage && matchRole && matchStatut;
+    // Filtre boutique : ne garder que les kits physiquement présents dans cette boutique
+    const matchShop = !fShopKit || isKitPresentAtShop(k, fShopKit);
+    return matchSearch && matchProfil && matchTirage && matchRole && matchStatut && matchShop;
   });
 
   const actifs = filtered.filter(k => k.statutVie !== 'SORTI');
@@ -10374,8 +10422,10 @@ function renderWalls() {
       ${lbl && isEnAttente ? `<span style="position:absolute; right:3px; top:2px; font-size:7px; font-weight:700; color:${col}; background:#0f172a; padding:0px 4px; border-radius:2px; border:1px solid ${col}80; letter-spacing:0.2px;">${lbl}</span>` : ''}
     </div>`;
   };
+  const _wallShopFilter = document.getElementById('kitShopFilter')?.value || '';
   const renderCell = (offreKey) => {
-    const all = findAllProductsForSlot(offreKey);
+    const _allRaw = findAllProductsForSlot(offreKey);
+    const all = _wallShopFilter ? _allRaw.filter(k => isKitPresentAtShop(k, _wallShopFilter)) : _allRaw;
     const parsed = parseOffreKey(offreKey);
     const profilColor = parsed ? PROFIL_COLORS[parsed.profil] || '#334155' : '#334155';
     const ctParts = parsed ? parsed.caseTech.split('_') : [];
@@ -10787,7 +10837,27 @@ function renderDashboard() {
     return nx;
   };
   sortir.sort(sortByPair);
-  rentrer.sort(sortByPair);
+  // Tri RENTRER : urgence substitution en tête, puis nb de shops urgents, puis priorité OP
+  const _subUrgencyScore = (a) => {
+    const sub = computeSubstitutionPair(a.produitId);
+    if (!sub) return { rank: 3, urgCount: 0 };
+    const shopsToCheck = fShop ? [fShop] : SHOPS;
+    const urgCount = shopsToCheck.filter(sh => sub.shops[sh] === 'URGENT').length;
+    if (urgCount > 0) return { rank: 0, urgCount }; // trou dans l'offre → top
+    const cmdCount = shopsToCheck.filter(sh => sub.shops[sh] === 'COMMANDE').length;
+    if (cmdCount > 0) return { rank: 1, urgCount: 0 }; // commandé, en route
+    const recuCount = shopsToCheck.filter(sh => sub.shops[sh] === 'REÇU').length;
+    if (recuCount > 0) return { rank: 2, urgCount: 0 }; // reçu, pas urgent
+    return { rank: 3, urgCount: 0 }; // pas de paire ou attente
+  };
+  rentrer.sort((x, y) => {
+    const sx = _subUrgencyScore(x);
+    const sy = _subUrgencyScore(y);
+    if (sx.rank !== sy.rank) return sx.rank - sy.rank;
+    // À rang égal (tous urgents) : plus de shops urgents = plus prioritaire
+    if (sx.urgCount !== sy.urgCount) return sy.urgCount - sx.urgCount;
+    return sortByPair(x, y);
+  });
   meps.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
   prix.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
 
@@ -10826,41 +10896,71 @@ function renderDashboard() {
         background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; cursor:pointer; user-select:none; box-shadow:0 0 0 2px ${col}25;">${init}</span>`;
     }
 
-    // Détection urgence substitution sur RENTRER : le sortant est vendu mais ce remplaçant pas commandé
-    let subUrgent = false;
+    // Détection état substitution pour colorer la pastille (RENTRER et SORTIR)
+    let subUrgent = false;   // RENTRER : sortant vendu, remplaçant pas commandé
+    let subFait = false;     // SORTIR : substitution complète (sortant sorti + remplaçant reçu)
+    let subRecu = false;     // SORTIR : remplaçant reçu, sortant pas encore sorti
+    let subCmd = false;      // SORTIR : remplaçant commandé
     let subTipExtra = '';
-    if (a.type === 'RENTRER' && !done && a.produitId) {
+    if ((a.type === 'RENTRER' || a.type === 'SORTIR') && a.produitId) {
       const _subPair = computeSubstitutionPair(a.produitId);
       if (_subPair) {
         const _shState = _subPair.shops[sh];
-        if (_shState === 'URGENT') {
-          subUrgent = true;
-          subTipExtra = ' ⚠ ' + _subPair.sortant.modele + ' est sorti ici — URGENT à commander !';
-        } else if (_shState === 'REÇU') {
-          subTipExtra = ' · ' + _subPair.sortant.modele + ' pas encore sorti';
+        if (a.type === 'RENTRER') {
+          if (_shState === 'FAIT') {
+            subFait = true;
+            subTipExtra = ' ✓ ' + _subPair.sortant.modele + ' sorti — substitution terminée';
+          } else if (_shState === 'URGENT' && !done) {
+            subUrgent = true;
+            subTipExtra = ' ⚠ ' + _subPair.sortant.modele + ' est sorti ici — URGENT à commander !';
+          } else if (_shState === 'REÇU') {
+            subRecu = true;
+            subTipExtra = ' · ' + _subPair.sortant.modele + ' pas encore sorti';
+          }
+        } else if (a.type === 'SORTIR') {
+          if (_shState === 'FAIT') {
+            subFait = true;
+            subTipExtra = ' ✓ ' + _subPair.remplacant.modele + ' en place';
+          } else if (_shState === 'REÇU') {
+            subRecu = true;
+            subTipExtra = ' · ' + _subPair.remplacant.modele + ' reçu, prêt !';
+          } else if (_shState === 'COMMANDE') {
+            subCmd = true;
+            subTipExtra = ' · ' + _subPair.remplacant.modele + ' commandé';
+          } else if (_shState === 'URGENT' && done) {
+            subTipExtra = ' ⚠ ' + _subPair.remplacant.modele + ' pas encore commandé';
+          }
         }
       }
     }
 
     // Remplissage : 0% = vide, 100% = plein, intermédiaire = conic-gradient partiel (camembert)
+    // Couleur de fond override selon état substitution
     let bg;
+    const subDoneColor = subFait ? '#22c55e' : subRecu ? '#a78bfa' : subCmd ? '#3b82f6' : null;
     if (pct === 0)        bg = subUrgent ? '#f59e0b25' : 'transparent';
-    else if (pct === 1)   bg = col;
+    else if (pct === 1)   bg = subDoneColor || col;
     else                  bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, ${subUrgent ? '#f59e0b15' : 'transparent'} 0)`;
     const txt = done ? '#0f172a' : (subUrgent ? '#f59e0b' : col);
 
     // Tooltip détaillé : liste des sous-étapes avec ✓ / ○
     const stepsTip = defs.map(d => (st.steps && st.steps[d.key] ? '✓' : '○') + ' ' + d.label).join(' · ');
     const tooltip = done
-      ? (SHOP_LABELS[sh] + ' — fait le ' + (st.dateFait||'?') + ' · ' + stepsTip)
+      ? (SHOP_LABELS[sh] + ' — fait le ' + (st.dateFait||'?') + ' · ' + stepsTip + subTipExtra)
       : (SHOP_LABELS[sh] + ' — ' + nbDone + '/' + defs.length + ' · ' + stepsTip + subTipExtra);
 
-    const urgentStyle = subUrgent ? 'border:2px solid #f59e0b; box-shadow:0 0 6px #f59e0b80; animation:_subUrgPulse 1.5s ease-in-out infinite;' : `border:1px solid ${col};`;
+    const urgentStyle = subUrgent ? 'border:2px solid #f59e0b; box-shadow:0 0 6px #f59e0b80; animation:_subUrgPulse 1.5s ease-in-out infinite;'
+      : subFait ? 'border:2px solid #22c55e; box-shadow:0 0 4px #22c55e60;'
+      : subRecu ? 'border:2px solid #a78bfa; box-shadow:0 0 4px #a78bfa60;'
+      : `border:1px solid ${col};`;
+
+    // Contenu : ⚠ si urgent, ✓ si substitution complète, initiale sinon
+    const dotContent = subUrgent ? '⚠' : (subFait && done) ? '✓' : init;
 
     return `<span onclick="event.stopPropagation(); toggleActionShop('${a.id}','${sh}')"
       title="${tooltip}"
       style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700;
-      background:${bg}; color:${txt}; ${urgentStyle} border-radius:50%; cursor:pointer; user-select:none;">${subUrgent ? '⚠' : init}</span>`;
+      background:${bg}; color:${txt}; ${urgentStyle} border-radius:50%; cursor:pointer; user-select:none;">${dotContent}</span>`;
   }
 
   // Rend une ligne de sous-étapes cochables par shop (utilisé dans le panneau déplié)
@@ -11080,6 +11180,32 @@ function renderDashboard() {
         const _pvAvantR = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
         headerExtra += ` <span title="Prix rouge ${_prEcSort ? 'actif' : 'programmé'}${_prDateSort ? ' — dès ' + fmtFR(_prOpSort.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgSort}; color:${_prColorSort}; border:1px solid ${_prBorderSort}; border-radius:3px; white-space:nowrap;${_prOpaSort}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateSort}</span>`;
       }
+      // Badge état du remplaçant côté SORTIR — filtré par boutique
+      const _subSortir = computeSubstitutionPair(a.produitId);
+      if (_subSortir) {
+        const _shopsToCheck = fShop ? [fShop] : SHOPS;
+        const _faitShops = _shopsToCheck.filter(sh => _subSortir.shops[sh] === 'FAIT');
+        const _recuShops = _shopsToCheck.filter(sh => _subSortir.shops[sh] === 'REÇU');
+        const _cmdShops  = _shopsToCheck.filter(sh => _subSortir.shops[sh] === 'COMMANDE');
+        const _attShops  = _shopsToCheck.filter(sh => _subSortir.shops[sh] === 'ATTENTE');
+        if (_recuShops.length > 0) {
+          // Remplaçant reçu mais sortant pas encore sorti → on peut y aller
+          const _lbl = fShop
+            ? `${_subSortir.remplacant.modele} reçu, prêt !`
+            : _recuShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : ' + _subSortir.remplacant.modele + ' reçu';
+          headerExtra += ` <span title="${_subSortir.remplacant.modele} est reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — prêt à prendre le relais" style="font-size:9px; font-weight:700; padding:1px 6px; background:#a78bfa20; color:#a78bfa; border:1px solid #a78bfa60; border-radius:3px; white-space:nowrap;">📦 ${_lbl}</span>`;
+        } else if (_cmdShops.length > 0 && _faitShops.length === 0) {
+          const _lbl = fShop
+            ? `${_subSortir.remplacant.modele} commandé`
+            : _cmdShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : ' + _subSortir.remplacant.modele + ' commandé';
+          headerExtra += ` <span title="${_subSortir.remplacant.modele} commandé à ${_cmdShops.map(sh => SHOP_LABELS[sh]).join(', ')}" style="font-size:9px; padding:1px 6px; background:#3b82f618; color:#3b82f6; border:1px solid #3b82f650; border-radius:3px; white-space:nowrap;">🛒 ${_lbl}</span>`;
+        } else if (_attShops.length > 0 && _faitShops.length === 0 && _recuShops.length === 0 && _cmdShops.length === 0) {
+          const _lbl = fShop
+            ? `${_subSortir.remplacant.modele} pas encore commandé`
+            : _subSortir.remplacant.modele + ' pas commandé';
+          headerExtra += ` <span title="${_subSortir.remplacant.modele} n'est pas encore commandé" style="font-size:9px; padding:1px 6px; background:#f59e0b15; color:#f59e0b; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">⏳ ${_lbl}</span>`;
+        }
+      }
     } else if (a.type === 'RENTRER') {
       // Lookup inverse : y a-t-il une action SORTIR dont replaceParId pointe vers ce produit ?
       const _inverseSortir = actions.find(s => s.type === 'SORTIR' && !s.annulee && s.replaceParId === prod.id);
@@ -11153,18 +11279,24 @@ function renderDashboard() {
         const _pvAvantR = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
         headerExtra += ` <span title="Prix rouge ${_prEcRent ? 'actif' : 'programmé'}${_prDateRent ? ' — dès ' + fmtFR(_prOpRent.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgRent}; color:${_prColorRent}; border:1px solid ${_prBorderRent}; border-radius:3px; white-space:nowrap;${_prOpaRent}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateRent}</span>`;
       }
-      // Badge urgence substitution : le sortant est vendu dans certaines boutiques
+      // Badge urgence substitution : le sortant est vendu — strictement filtré par boutique
       const _subRentrer = computeSubstitutionPair(a.produitId);
       if (_subRentrer) {
-        const _urgShops = SHOPS.filter(sh => _subRentrer.shops[sh] === 'URGENT');
-        const _recuShops = SHOPS.filter(sh => _subRentrer.shops[sh] === 'REÇU');
+        const _shopsToCheck = fShop ? [fShop] : SHOPS;
+        const _urgShops = _shopsToCheck.filter(sh => _subRentrer.shops[sh] === 'URGENT');
+        const _recuShops = _shopsToCheck.filter(sh => _subRentrer.shops[sh] === 'REÇU');
         if (_urgShops.length > 0) {
-          const _urgNames = _urgShops.map(sh => ({pessac:'P', merignac:'M', langon:'L'})[sh] || sh[0]).join('');
-          headerExtra += ` <span title="${_subRentrer.sortant.modele} est sorti à ${_urgShops.map(sh => SHOP_LABELS[sh]).join(', ')} — commander en priorité !" style="font-size:9px; font-weight:700; padding:1px 6px; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b70; border-radius:3px; white-space:nowrap; animation:_subUrgPulse 1.5s ease-in-out infinite;">⚠ ${_urgNames} : ${_subRentrer.sortant.modele} sorti !</span>`;
+          // En vue filtrée : pas besoin d'afficher la lettre, on sait quelle boutique c'est
+          const _urgLabel = fShop
+            ? `${_subRentrer.sortant.modele} sorti !`
+            : _urgShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : ' + _subRentrer.sortant.modele + ' sorti !';
+          headerExtra += ` <span title="${_subRentrer.sortant.modele} est sorti à ${_urgShops.map(sh => SHOP_LABELS[sh]).join(', ')} — commander en priorité !" style="font-size:9px; font-weight:700; padding:1px 6px; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b70; border-radius:3px; white-space:nowrap; animation:_subUrgPulse 1.5s ease-in-out infinite;">⚠ ${_urgLabel}</span>`;
         }
         if (_recuShops.length > 0 && _urgShops.length === 0) {
-          const _recuNames = _recuShops.map(sh => ({pessac:'P', merignac:'M', langon:'L'})[sh] || sh[0]).join('');
-          headerExtra += ` <span title="Reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — en attente que ${_subRentrer.sortant.modele} sorte" style="font-size:9px; padding:1px 6px; background:#a78bfa18; color:#a78bfa; border:1px solid #a78bfa50; border-radius:3px; white-space:nowrap;">📦 ${_recuNames} : reçu, attente sortie</span>`;
+          const _recuLabel = fShop
+            ? 'reçu, attente sortie'
+            : _recuShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : reçu, attente sortie';
+          headerExtra += ` <span title="Reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — en attente que ${_subRentrer.sortant.modele} sorte" style="font-size:9px; padding:1px 6px; background:#a78bfa18; color:#a78bfa; border:1px solid #a78bfa50; border-radius:3px; white-space:nowrap;">📦 ${_recuLabel}</span>`;
         }
       }
     } else if (a.type === 'SWAP_COMPOSANT') {
@@ -11736,8 +11868,15 @@ function renderDashboard() {
     // Helper : rend un sous-accordéon générique (Kits, PD, etc.)
     function _renderSubAccordion(label, icon, actions, subKeyPrefix) {
       if (actions.length === 0) return '';
-      // Tri : priorité d'abord, puis avec remplaçant avant sans remplaçant
+      // Tri : urgence substitution d'abord (RENTRER), puis priorité OP, puis avec remplaçant
       actions.sort((a, b) => {
+        // Urgence substitution (uniquement pour RENTRER) — trou dans l'offre en tête
+        if (a.type === 'RENTRER' || b.type === 'RENTRER') {
+          const sa = typeof _subUrgencyScore === 'function' ? _subUrgencyScore(a) : { rank: 3, urgCount: 0 };
+          const sb = typeof _subUrgencyScore === 'function' ? _subUrgencyScore(b) : { rank: 3, urgCount: 0 };
+          if (sa.rank !== sb.rank) return sa.rank - sb.rank;
+          if (sa.urgCount !== sb.urgCount) return sb.urgCount - sa.urgCount;
+        }
         const pa = _prioRank[effectivePrio(a)] ?? 1;
         const pb = _prioRank[effectivePrio(b)] ?? 1;
         if (pa !== pb) return pa - pb;
