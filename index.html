@@ -5782,32 +5782,40 @@ async function loadData() {
   // ── Fusion au chargement ──
   let saved = null;
   if (remoteData && localData) {
-    // Les deux sources existent → on prend le remote comme base, on merge le local dedans
-    // (last-write-wins par _stepTs comme pour le merge-on-save)
-    console.log('[LOAD-MERGE] Fusion localStorage + Supabase');
-    // Merger les coches actions : local steps avec ts plus récent gagnent
-    remoteData.actions = _mergeEtats(remoteData.actions || [], localData.actions || []);
-    // Merger les coches OPs
-    remoteData.ops = _mergeOpEtats(remoteData.ops || [], localData.ops || []);
+    // ═══════════════════════════════════════════════════════════════════════
+    // IMPORTANT : LOCAL (localStorage) est la BASE, le remote (Supabase)
+    // fournit les steps plus récents + les items créés par une autre session.
+    // Raison : l'utilisateur travaille sur le local — ses changements (dateFin,
+    // suppressions, décisions) ont la priorité. Supabase peut être en retard
+    // si la page a été fermée pendant le debounce 1s du save.
+    // ═══════════════════════════════════════════════════════════════════════
+    console.log('[LOAD-MERGE] Fusion localStorage (base) + Supabase (steps)');
+
+    // ── 0. Peupler _deletedIds AVANT toute fusion (sinon les tombstones
+    //    locaux ne sont pas pris en compte et les items supprimés ressuscitent) ──
+    if (Array.isArray(localData._deletedIds)) localData._deletedIds.forEach(id => _deletedIds.add(id));
+    if (Array.isArray(remoteData._deletedIds)) remoteData._deletedIds.forEach(id => _deletedIds.add(id));
+
+    // ── 1. Actions : LOCAL = base, merge steps depuis remote ──
+    remoteData.actions = _mergeEtats(localData.actions || [], remoteData.actions || []);
+    // ── 2. OPs : LOCAL = base, merge steps depuis remote ──
+    remoteData.ops = _mergeOpEtats(localData.ops || [], remoteData.ops || []);
     // Données structurelles : union (nouveaux items)
-    remoteData.baseKits = _mergeArray(remoteData.baseKits || [], localData.baseKits || [], 'id');
-    remoteData.baseLiq = _mergeLiqDeep(remoteData.baseLiq || [], localData.baseLiq || []);
-    remoteData.basePD = _mergeArray(remoteData.basePD || [], localData.basePD || [], 'id');
-    remoteData.relevesPrix = _mergeArray(remoteData.relevesPrix || [], localData.relevesPrix || [], 'id');
-    remoteData.propositions = _mergeArray(remoteData.propositions || [], localData.propositions || [], 'id');
-    if (localData.propositionsLiq) remoteData.propositionsLiq = _mergeArray(remoteData.propositionsLiq || [], localData.propositionsLiq || [], 'id');
-    if (localData.propositionsPD) remoteData.propositionsPD = _mergeArray(remoteData.propositionsPD || [], localData.propositionsPD || [], 'id');
-    if (localData.campagnes) remoteData.campagnes = _mergeArray(remoteData.campagnes || [], localData.campagnes || [], 'id');
+    remoteData.baseKits = _mergeArray(localData.baseKits || [], remoteData.baseKits || [], 'id');
+    remoteData.baseLiq = _mergeLiqDeep(localData.baseLiq || [], remoteData.baseLiq || []);
+    remoteData.basePD = _mergeArray(localData.basePD || [], remoteData.basePD || [], 'id');
+    remoteData.relevesPrix = _mergeArray(localData.relevesPrix || [], remoteData.relevesPrix || [], 'id');
+    remoteData.propositions = _mergeArray(localData.propositions || [], remoteData.propositions || [], 'id');
+    if (localData.propositionsLiq || remoteData.propositionsLiq) remoteData.propositionsLiq = _mergeArray(localData.propositionsLiq || [], remoteData.propositionsLiq || [], 'id');
+    if (localData.propositionsPD || remoteData.propositionsPD) remoteData.propositionsPD = _mergeArray(localData.propositionsPD || [], remoteData.propositionsPD || [], 'id');
+    if (localData.campagnes || remoteData.campagnes) remoteData.campagnes = _mergeArray(localData.campagnes || [], remoteData.campagnes || [], 'id');
     // Compteurs : max des deux
     if (typeof localData.nextActionId === 'number') remoteData.nextActionId = Math.max(remoteData.nextActionId || 0, localData.nextActionId);
     if (typeof localData.nextOpId === 'number') remoteData.nextOpId = Math.max(remoteData.nextOpId || 0, localData.nextOpId);
     if (typeof localData.nextReleveId === 'number') remoteData.nextReleveId = Math.max(remoteData.nextReleveId || 0, localData.nextReleveId);
     if (typeof localData.nextCampagneId === 'number') remoteData.nextCampagneId = Math.max(remoteData.nextCampagneId || 0, localData.nextCampagneId);
-    // Tombstones : union
-    if (Array.isArray(localData._deletedIds)) {
-      if (!Array.isArray(remoteData._deletedIds)) remoteData._deletedIds = [];
-      localData._deletedIds.forEach(id => { if (remoteData._deletedIds.indexOf(id) < 0) remoteData._deletedIds.push(id); });
-    }
+    // Tombstones : union (déjà peuplé dans _deletedIds global, synchroniser aussi dans le payload)
+    remoteData._deletedIds = Array.from(_deletedIds);
     // AuditLog : fusion + dédup
     if (Array.isArray(localData.auditLog) && localData.auditLog.length > 0) {
       if (!Array.isArray(remoteData.auditLog)) remoteData.auditLog = [];
@@ -6692,6 +6700,10 @@ window.addEventListener('pagehide', _flushPendingSave);
 // Cela évite qu'une boutique écrase les coches d'une autre.
 function _mergeEtats(localActions, remoteActions) {
   if (!remoteActions || !Array.isArray(remoteActions)) return localActions;
+  // Filtrer les actions supprimées (tombstones) de la base avant de commencer
+  if (_deletedIds.size > 0) {
+    localActions = localActions.filter(a => !_deletedIds.has(a.id));
+  }
   const remoteMap = {};
   remoteActions.forEach(a => { if (a && a.id) remoteMap[a.id] = a; });
   let mergeCount = 0;
@@ -6772,6 +6784,10 @@ function _mergeEtats(localActions, remoteActions) {
 
 function _mergeOpEtats(localOps, remoteOps) {
   if (!remoteOps || !Array.isArray(remoteOps)) return localOps;
+  // Filtrer les OPs supprimées (tombstones) de la base avant de commencer
+  if (_deletedIds.size > 0) {
+    localOps = localOps.filter(o => !_deletedIds.has(o.id));
+  }
   const remoteMap = {};
   remoteOps.forEach(o => { if (o && o.id) remoteMap[o.id] = o; });
   localOps.forEach(op => {
@@ -6806,7 +6822,7 @@ function _mergeOpEtats(localOps, remoteOps) {
       }
     });
   });
-  // Ajouter les OPs distantes inconnues localement
+  // Ajouter les OPs distantes inconnues localement (sauf tombstones)
   const localIds = new Set(localOps.map(o => o.id));
   remoteOps.forEach(ro => {
     if (ro && ro.id && !localIds.has(ro.id) && !_deletedIds.has(ro.id)) localOps.push(ro);
@@ -14916,8 +14932,10 @@ async function deleteOp(id) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === id);
   if (!op) return;
-  if (op.auto) { pvAlert('OP auto — non supprimable (gérée par les relevés).'); return; }
-  if (!await pvConfirm('Supprimer cette OP ?')) return;
+  const confirmMsg = op.auto
+    ? 'Cette OP a été créée automatiquement (relevé de prix).\nLa supprimer réinitialisera aussi la décision prix rouge sur l\'action liée.\n\nSupprimer quand même ?'
+    : 'Supprimer cette OP ?';
+  if (!await pvConfirm(confirmMsg)) return;
   _deletedIds.add(id);
   // Nettoyer les actions liées (opId, prixRouge)
   const linkedActionIds = [];
@@ -14929,10 +14947,16 @@ async function deleteOp(id) {
     const a = actions.find(x => x.id === aid);
     if (!a) return;
     if (a.opId === id) a.opId = null;
-    // Si c'était un prix rouge, nettoyer le prix sur l'action
+    // Si c'était un prix rouge, nettoyer le prix ET la décision rouge sur l'action
+    // pour empêcher syncPrixRougeOp de recréer une OP identique au prochain cycle.
     if (op.type === 'PRIX_ROUGE') {
       delete a.prixRouge;
       delete a.prixAvantRouge;
+      // Réinitialiser la décision : passer de 'rouge' à 'recalibrer' (prix aligné, pas de PR)
+      if (a.decisionChoice === 'rouge') {
+        a.decisionChoice = 'recalibrer';
+        logAction('Décision PRIX reset', 'rouge → recalibrer (suite suppression OP ' + id + ')');
+      }
     }
   });
   ops = ops.filter(o => o.id !== id);
@@ -15261,6 +15285,13 @@ function renderOps() {
   const filtered = ops.filter(op => {
     if (op._archived) return false;
     if (opFilterType && op.type !== opFilterType) return false;
+    // Filtre boutique : masquer les OP dont le produit est déjà SORTI pour cette boutique
+    // (ex: PR sur un kit dont le SORTIR est done à Pessac → invisible en vue Pessac)
+    if (opShopFilter && op.produitIds && op.produitIds.length > 0) {
+      const _pid = op.produitIds[0];
+      const _kit = baseKits.find(k => k.id === _pid);
+      if (_kit && typeof isKitPresentAtShop === 'function' && !isKitPresentAtShop(_kit, opShopFilter)) return false;
+    }
     const tstatus = opTimeStatus(op);
     if (opFilterStatus === 'active') {
       if (tstatus !== 'TERMINEE') return true;
