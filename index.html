@@ -1587,24 +1587,19 @@ function ensureLiqModel(g) {
 // Appliquer le modèle au load initial
 baseLiq.forEach(g => ensureLiqModel(g));
 
-// --- SUPABASE ---
-const SUPABASE_URL = 'https://kiwceibnpxzvvzajgfbk.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtpd2NlaWJucHh6dnZ6YWpnZmJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzYxNzYsImV4cCI6MjA5MjExMjE3Nn0.En8OjwCdqt4JkUG5B7dzFdt3en8nGRjs4d-XPJUnUL0';
-const SUPABASE_TABLE = 'pilotvape_data';
+// --- CLOUDFLARE SYNC ---
+// Remplace Supabase. Worker Cloudflare + KV = gratuit, jamais de pause.
+// ⚠️ REMPLACER l'URL ci-dessous par l'URL de votre Worker déployé
+const SYNC_WORKER_URL = 'https://pilotvape-sync.pilotvape.workers.dev';
+const SYNC_API_KEY = 'PilotVape2026Sync!';
 let _supabaseOk = null; // null = pas encore testé, true/false après premier appel
 let _savePending = false;
 let _saveTimer = null;
 
-async function supabaseFetch(method, body) {
-  const url = `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.1`;
-  const headers = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': method === 'GET' ? '' : 'return=minimal' };
-  if (method === 'GET') delete headers['Prefer'];
-  const opts = { method, headers };
-  if (body) opts.body = JSON.stringify(body);
-  const res = await fetch(method === 'GET' ? `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=data&id=eq.1` : url, opts);
-  if (!res.ok) throw new Error(`Supabase ${res.status}`);
-  return method === 'GET' ? await res.json() : null;
-}
+// ── Ancien Supabase (backup, sera supprimé) ──
+const SUPABASE_URL = 'https://kiwceibnpxzvvzajgfbk.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtpd2NlaWJucHh6dnZ6YWpnZmJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzYxNzYsImV4cCI6MjA5MjExMjE3Nn0.En8OjwCdqt4JkUG5B7dzFdt3en8nGRjs4d-XPJUnUL0';
+const SUPABASE_TABLE = 'pilotvape_data';
 
 // --- ACTIONS DASHBOARD ---
 // Chaque action concerne un produit et a un état indépendant par shop
@@ -5814,28 +5809,18 @@ async function loadData() {
   let remoteData = null;
   let localData = null;
   try {
-    const getUrl = `${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=*&id=eq.1`;
-    const getHeaders = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY };
-    const res = await fetch(getUrl, { method: 'GET', headers: getHeaders });
-    console.log('[SUPABASE] GET status:', res.status);
-    if (res.ok) {
-      const rows = await res.json();
-      console.log('[SUPABASE] Rows reçues:', rows.length);
-      if (rows && rows.length > 0 && rows[0].data) {
-        remoteData = rows[0].data;
-        _supabaseOk = true;
-        console.log('[SUPABASE] Données chargées depuis Supabase');
-      } else {
-        console.warn('[SUPABASE] Table vide ou pas de colonne data');
-        _supabaseOk = true;
-      }
+    const remoteResult = await _syncRead();
+    console.log('[SYNC] GET ok');
+    if (remoteResult && remoteResult.data) {
+      remoteData = remoteResult.data;
+      _supabaseOk = true;
+      console.log('[SYNC] Données chargées depuis Cloudflare');
     } else {
-      const errTxt = await res.text();
-      console.warn('[SUPABASE] GET erreur:', res.status, errTxt);
-      _supabaseOk = false;
+      console.warn('[SYNC] KV vide, premier lancement ?');
+      _supabaseOk = true;
     }
   } catch(e) {
-    console.warn('[SUPABASE] Inaccessible, fallback localStorage:', e.message);
+    console.warn('[SYNC] Inaccessible, fallback localStorage:', e.message);
     _supabaseOk = false;
   }
   // Lire aussi le localStorage (peut contenir des coches plus récentes non envoyées)
@@ -6823,15 +6808,14 @@ function _flushPendingSave() {
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
   // Utilise fetch keepalive (fonctionne en beforeunload, contrairement à async)
   try {
-    const headers = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
-    fetch(SUPABASE_URL + '/rest/v1/' + SUPABASE_TABLE + '?id=eq.1', {
-      method: 'PATCH',
-      headers: headers,
-      body: JSON.stringify({ data: _lastPayload, updated_at: new Date().toISOString() }),
+    fetch(SYNC_WORKER_URL + '/data', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': SYNC_API_KEY },
+      body: JSON.stringify({ data: _lastPayload }),
       keepalive: true  // crucial : permet au navigateur d'envoyer même après fermeture
     }).catch(function() {}); // fire-and-forget
     _savePending = false;
-    console.log('[FLUSH] Save Supabase envoyé avant fermeture (keepalive)');
+    console.log('[FLUSH] Save envoyé avant fermeture (keepalive)');
   } catch(e) {
     console.warn('[FLUSH] Échec:', e.message);
   }
@@ -7065,69 +7049,77 @@ function _mergeLiqDeep(localLiq, remoteLiq) {
   return localLiq;
 }
 
+// ── Headers communs pour le Worker Cloudflare ──
+function _syncHeaders() {
+  return { 'Content-Type': 'application/json', 'X-API-Key': SYNC_API_KEY };
+}
+
+// ── Lire les données depuis le Worker Cloudflare ──
+async function _syncRead() {
+  const res = await fetch(SYNC_WORKER_URL + '/data', { method: 'GET', headers: _syncHeaders() });
+  if (!res.ok) throw new Error('Sync read ' + res.status);
+  return await res.json(); // { data, updated_at }
+}
+
+// ── Écrire les données vers le Worker Cloudflare ──
+async function _syncWrite(payload) {
+  const res = await fetch(SYNC_WORKER_URL + '/data', {
+    method: 'PUT', headers: _syncHeaders(),
+    body: JSON.stringify({ data: payload })
+  });
+  if (!res.ok) throw new Error('Sync write ' + res.status);
+  return await res.json(); // { success, updated_at }
+}
+
 async function _saveToSupabase(payload, _retryCount) {
   if (_supabaseOk === false) return;
   const retryCount = _retryCount || 0;
-  const headers = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' };
   try {
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
-    const getHeaders = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY };
-    const getRes = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=data&id=eq.1`, { method: 'GET', headers: getHeaders });
-    if (getRes.ok) {
-      const rows = await getRes.json();
-      if (rows && rows[0] && rows[0].data) {
-        const remote = rows[0].data;
-        // 0. Intégrer les tombstones distants avant fusion
-        if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
-        if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
-        payload._deletedIds = Array.from(_deletedIds);
-        payload._deletedParfumIds = Array.from(_deletedParfumIds);
-        // 1. Fusionner les coches actions (done, steps, responsable)
-        payload.actions = _mergeEtats(payload.actions, remote.actions);
-        // 2. Fusionner les coches OPs
-        payload.ops = _mergeOpEtats(payload.ops, remote.ops);
-        // 3. Fusionner les données structurelles (nouveaux items créés par un autre admin)
-        payload.baseKits = _mergeArray(payload.baseKits, remote.baseKits, 'id');
-        payload.baseLiq = _mergeLiqDeep(payload.baseLiq, remote.baseLiq);
-        payload.basePD = _mergeArray(payload.basePD, remote.basePD, 'id');
-        payload.relevesPrix = _mergeArray(payload.relevesPrix, remote.relevesPrix, 'id');
-        payload.propositions = _mergeArray(payload.propositions, remote.propositions, 'id');
-        if (payload.propositionsLiq) payload.propositionsLiq = _mergeArray(payload.propositionsLiq, remote.propositionsLiq, 'id');
-        if (payload.propositionsPD) payload.propositionsPD = _mergeArray(payload.propositionsPD, remote.propositionsPD, 'id');
-        if (payload.campagnes) payload.campagnes = _mergeArray(payload.campagnes, remote.campagnes, 'id');
-        // 4. Fusionner l'auditLog distant (dédoublonnage par ts+action+detail)
-        if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
-          const _logKeys = new Set(payload.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
-          remote.auditLog.forEach(e => {
-            var k = e.ts + '|' + e.action + '|' + e.detail;
-            if (!_logKeys.has(k)) { payload.auditLog.push(e); _logKeys.add(k); }
-          });
-          payload.auditLog.sort((a, b) => a.ts.localeCompare(b.ts));
-          if (payload.auditLog.length > AUDIT_LOG_MAX) payload.auditLog = payload.auditLog.slice(-AUDIT_LOG_MAX);
-          auditLog = payload.auditLog; // mettre à jour la variable globale aussi
-        }
-        // 5. Prendre le max des compteurs d'ID pour éviter les collisions
-        if (typeof remote.nextActionId === 'number') payload.nextActionId = Math.max(payload.nextActionId || 0, remote.nextActionId);
-        if (typeof remote.nextOpId === 'number') payload.nextOpId = Math.max(payload.nextOpId || 0, remote.nextOpId);
-        if (typeof remote.nextReleveId === 'number') payload.nextReleveId = Math.max(payload.nextReleveId || 0, remote.nextReleveId);
-        if (typeof remote.nextCampagneId === 'number') payload.nextCampagneId = Math.max(payload.nextCampagneId || 0, remote.nextCampagneId);
+    const remoteResult = await _syncRead();
+    if (remoteResult && remoteResult.data) {
+      const remote = remoteResult.data;
+      // 0. Intégrer les tombstones distants avant fusion
+      if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
+      if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+      payload._deletedIds = Array.from(_deletedIds);
+      payload._deletedParfumIds = Array.from(_deletedParfumIds);
+      // 1. Fusionner les coches actions (done, steps, responsable)
+      payload.actions = _mergeEtats(payload.actions, remote.actions);
+      // 2. Fusionner les coches OPs
+      payload.ops = _mergeOpEtats(payload.ops, remote.ops);
+      // 3. Fusionner les données structurelles (nouveaux items créés par un autre admin)
+      payload.baseKits = _mergeArray(payload.baseKits, remote.baseKits, 'id');
+      payload.baseLiq = _mergeLiqDeep(payload.baseLiq, remote.baseLiq);
+      payload.basePD = _mergeArray(payload.basePD, remote.basePD, 'id');
+      payload.relevesPrix = _mergeArray(payload.relevesPrix, remote.relevesPrix, 'id');
+      payload.propositions = _mergeArray(payload.propositions, remote.propositions, 'id');
+      if (payload.propositionsLiq) payload.propositionsLiq = _mergeArray(payload.propositionsLiq, remote.propositionsLiq, 'id');
+      if (payload.propositionsPD) payload.propositionsPD = _mergeArray(payload.propositionsPD, remote.propositionsPD, 'id');
+      if (payload.campagnes) payload.campagnes = _mergeArray(payload.campagnes, remote.campagnes, 'id');
+      // 4. Fusionner l'auditLog distant (dédoublonnage par ts+action+detail)
+      if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
+        const _logKeys = new Set(payload.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
+        remote.auditLog.forEach(e => {
+          var k = e.ts + '|' + e.action + '|' + e.detail;
+          if (!_logKeys.has(k)) { payload.auditLog.push(e); _logKeys.add(k); }
+        });
+        payload.auditLog.sort((a, b) => a.ts.localeCompare(b.ts));
+        if (payload.auditLog.length > AUDIT_LOG_MAX) payload.auditLog = payload.auditLog.slice(-AUDIT_LOG_MAX);
+        auditLog = payload.auditLog; // mettre à jour la variable globale aussi
       }
+      // 5. Prendre le max des compteurs d'ID pour éviter les collisions
+      if (typeof remote.nextActionId === 'number') payload.nextActionId = Math.max(payload.nextActionId || 0, remote.nextActionId);
+      if (typeof remote.nextOpId === 'number') payload.nextOpId = Math.max(payload.nextOpId || 0, remote.nextOpId);
+      if (typeof remote.nextReleveId === 'number') payload.nextReleveId = Math.max(payload.nextReleveId || 0, remote.nextReleveId);
+      if (typeof remote.nextCampagneId === 'number') payload.nextCampagneId = Math.max(payload.nextCampagneId || 0, remote.nextCampagneId);
     }
-    // PATCH avec données fusionnées
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?id=eq.1`, {
-      method: 'PATCH', headers, body: JSON.stringify({ data: payload, updated_at: new Date().toISOString() })
-    });
-    if (res.ok) {
-      _supabaseOk = true; _savePending = false;
-      console.log('[SUPABASE] Sauvegardé (avec merge)');
-    } else {
-      console.warn('[SUPABASE] Erreur sauvegarde:', res.status, await res.text());
-      if (retryCount < 1) {
-        setTimeout(() => _saveToSupabase(payload, retryCount + 1), 5000);
-      }
-    }
+    // Écrire les données fusionnées
+    await _syncWrite(payload);
+    _supabaseOk = true; _savePending = false;
+    console.log('[SYNC] Sauvegardé (avec merge)');
   } catch(e) {
-    console.warn('[SUPABASE] Erreur réseau:', e.message);
+    console.warn('[SYNC] Erreur:', e.message);
     if (retryCount < 1) {
       setTimeout(() => _saveToSupabase(payload, retryCount + 1), 5000);
     }
@@ -7142,16 +7134,13 @@ function _startAutoSync() {
   _syncInterval = setInterval(async () => {
     if (_supabaseOk === false || _savePending) return;
     try {
-      const getHeaders = { 'apikey': SUPABASE_KEY, 'Authorization': 'Bearer ' + SUPABASE_KEY };
-      const res = await fetch(`${SUPABASE_URL}/rest/v1/${SUPABASE_TABLE}?select=data,updated_at&id=eq.1`, { method: 'GET', headers: getHeaders });
-      if (!res.ok) return;
-      const rows = await res.json();
-      if (!rows || !rows[0] || !rows[0].data) return;
+      const remoteResult = await _syncRead();
+      if (!remoteResult || !remoteResult.data) return;
       // Ne traiter que si le timestamp distant est plus récent que notre dernier sync
-      const remoteTs = rows[0].updated_at;
+      const remoteTs = remoteResult.updated_at;
       if (_lastSyncTimestamp && remoteTs <= _lastSyncTimestamp) return;
       _lastSyncTimestamp = remoteTs;
-      const remote = rows[0].data;
+      const remote = remoteResult.data;
       let changed = false;
       // Fusionner coches actions
       const beforeActions = JSON.stringify(actions.map(a => a.etats));
