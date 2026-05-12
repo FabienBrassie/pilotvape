@@ -2491,7 +2491,7 @@ function ensureOpSteps(op) {
     // Auto-complétion : si le produit n'est pas/plus présent dans cette boutique,
     // auto-cocher tous les steps (l'OP n'a pas de sens pour un shop sans stock).
     // Permet à l'OP de se clôturer quand les autres boutiques ont fini.
-    if (_opProd && !isKitPresentAtShop(_opProd, sh)) {
+    if (_opProd && isProductGoneFromShop(_opProd, sh)) {
       const hasUnchecked = defs.some(d => st.steps[d.key] !== true);
       if (hasUnchecked) {
         defs.forEach(d => { st.steps[d.key] = true; });
@@ -2991,6 +2991,22 @@ function isKitPresentAtShop(kit, shop) {
   }
   // DANS_OFFRE, A_REMPLACER → présent partout
   return true;
+}
+
+// ── Produit SORTI d'une boutique (pour auto-complétion OP) ──
+// Contrairement à isKitPresentAtShop, ne retourne true que quand le produit
+// est définitivement PARTI (SORTI global, ou A_SORTIR/FIN_DE_VIE avec SORTIR fait).
+// Un produit A_RENTRER pas encore reçu n'est PAS considéré "gone" : les étapes OP
+// (étiquette, freetouch, etc.) sont la préparation pour son arrivée.
+function isProductGoneFromShop(prod, shop) {
+  if (!prod || !shop) return false;
+  const sv = prod.statutVie;
+  if (sv === 'SORTI') return true;
+  if (sv === 'A_SORTIR' || sv === 'FIN_DE_VIE') {
+    const sortirAct = actions.find(a => a.type === 'SORTIR' && a.produitId === prod.id && !a.annulee);
+    return !!(sortirAct && sortirAct.etats[shop] && sortirAct.etats[shop].done);
+  }
+  return false;
 }
 
 // ── Substitution par boutique ──
@@ -15779,7 +15795,7 @@ function renderOps() {
     const _ovPid = op.produitIds && op.produitIds[0];
     const _ovProd = _ovPid ? (baseKits.find(k => k.id === _ovPid) || baseLiq.find(l => l.id === _ovPid) || basePD.find(p => p.id === _ovPid)) : null;
     const shopDots = SHOPS.map(sh => {
-      const _abs = _ovProd && !isKitPresentAtShop(_ovProd, sh);
+      const _abs = _ovProd && isProductGoneFromShop(_ovProd, sh);
       const col = _abs ? '#64748b' : SHOP_COLORS[sh];
       const init = SHOP_LABELS[sh][0];
       const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
@@ -16914,7 +16930,7 @@ function renderOpCardHtml(op, options) {
   const _cardProd = _cardPid ? (baseKits.find(k => k.id === _cardPid) || baseLiq.find(l => l.id === _cardPid) || basePD.find(p => p.id === _cardPid)) : null;
   const shopDots = SHOPS.map(sh => {
     if (shopFilter && sh !== shopFilter) return '';
-    const _abs = _cardProd && !isKitPresentAtShop(_cardProd, sh);
+    const _abs = _cardProd && isProductGoneFromShop(_cardProd, sh);
     const col = _abs ? '#64748b' : SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
     const shopDefsAll = computeOpShopStepDefs(op, sh);
@@ -17067,7 +17083,7 @@ function renderOpCardHtml(op, options) {
     const col = SHOP_COLORS[sh];
     const label = SHOP_LABELS[sh];
     // Produit absent de cette boutique → section grisée, steps auto-cochés
-    const _absentShop = _detailProd && !isKitPresentAtShop(_detailProd, sh);
+    const _absentShop = _detailProd && isProductGoneFromShop(_detailProd, sh);
     const nbDone = defs.filter(d => st && st.steps && st.steps[d.key] === true).length;
     const allDone = defs.length > 0 && nbDone === defs.length;
     const _absentBadge = _absentShop
@@ -17249,7 +17265,7 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   const _cProd = _cPid ? (baseKits.find(k => k.id === _cPid) || baseLiq.find(l => l.id === _cPid) || basePD.find(p => p.id === _cPid)) : null;
   const shopDots = SHOPS.map(sh => {
     if (shopFilter && sh !== shopFilter) return '';
-    const _absent = _cProd && !isKitPresentAtShop(_cProd, sh);
+    const _absent = _cProd && isProductGoneFromShop(_cProd, sh);
     const col = _absent ? '#64748b' : SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
     const shopDefs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
