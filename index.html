@@ -2477,12 +2477,33 @@ function ensureOpSteps(op) {
   if (!op) return;
   ensureOpModel(op);
   // Migration steps par-shop : on garantit la présence des clés dynamiques, on purge les orphelins
+  // Résoudre le produit pour vérifier sa présence par boutique
+  const _opPid = op.produitIds && op.produitIds[0];
+  const _opProd = _opPid ? (baseKits.find(k => k.id === _opPid)
+                         || baseLiq.find(l => l.id === _opPid)
+                         || basePD.find(p => p.id === _opPid)) : null;
   SHOPS.forEach(sh => {
     const st = op.etats[sh];
     const defs = computeOpShopStepDefs(op, sh);
     if (!st.steps || typeof st.steps !== 'object') st.steps = {};
     defs.forEach(d => { if (typeof st.steps[d.key] !== 'boolean') st.steps[d.key] = false; });
     Object.keys(st.steps).forEach(k => { if (!defs.some(d => d.key === k)) delete st.steps[k]; });
+    // Auto-complétion : si le produit n'est pas/plus présent dans cette boutique,
+    // auto-cocher tous les steps (l'OP n'a pas de sens pour un shop sans stock).
+    // Permet à l'OP de se clôturer quand les autres boutiques ont fini.
+    if (_opProd && !isKitPresentAtShop(_opProd, sh)) {
+      const hasUnchecked = defs.some(d => st.steps[d.key] !== true);
+      if (hasUnchecked) {
+        defs.forEach(d => { st.steps[d.key] = true; });
+        if (!st._autoCompleted) {
+          st._autoCompleted = true;
+          console.log('[OP-AUTO-COMPLETE]', op.id, op.type, '— produit absent de', sh, '→ steps auto-cochés');
+        }
+      }
+    } else if (st._autoCompleted) {
+      // Le produit est revenu dans cette boutique → retirer le flag (les coches restent, l'équipe peut les gérer)
+      delete st._autoCompleted;
+    }
   });
   // Migration steps globaux : présence des clés + purge orphelins
   const gdefs = computeOpGlobalStepDefs(op);
