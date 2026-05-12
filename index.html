@@ -1592,14 +1592,9 @@ baseLiq.forEach(g => ensureLiqModel(g));
 // ⚠️ REMPLACER l'URL ci-dessous par l'URL de votre Worker déployé
 const SYNC_WORKER_URL = 'https://pilotvape-sync.pilotvape.workers.dev';
 const SYNC_API_KEY = 'PilotVape2026Sync!';
-let _supabaseOk = null; // null = pas encore testé, true/false après premier appel
+let _syncOk = null; // null = pas encore testé, true/false après premier appel
 let _savePending = false;
 let _saveTimer = null;
-
-// ── Ancien Supabase (backup, sera supprimé) ──
-const SUPABASE_URL = 'https://kiwceibnpxzvvzajgfbk.supabase.co';
-const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtpd2NlaWJucHh6dnZ6YWpnZmJrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY1MzYxNzYsImV4cCI6MjA5MjExMjE3Nn0.En8OjwCdqt4JkUG5B7dzFdt3en8nGRjs4d-XPJUnUL0';
-const SUPABASE_TABLE = 'pilotvape_data';
 
 // --- ACTIONS DASHBOARD ---
 // Chaque action concerne un produit et a un état indépendant par shop
@@ -5813,15 +5808,15 @@ async function loadData() {
     console.log('[SYNC] GET ok');
     if (remoteResult && remoteResult.data) {
       remoteData = remoteResult.data;
-      _supabaseOk = true;
+      _syncOk = true;
       console.log('[SYNC] Données chargées depuis Cloudflare');
     } else {
       console.warn('[SYNC] KV vide, premier lancement ?');
-      _supabaseOk = true;
+      _syncOk = true;
     }
   } catch(e) {
     console.warn('[SYNC] Inaccessible, fallback localStorage:', e.message);
-    _supabaseOk = false;
+    _syncOk = false;
   }
   // Lire aussi le localStorage (peut contenir des coches plus récentes non envoyées)
   try {
@@ -5929,6 +5924,25 @@ async function loadData() {
         if (p.s === 'OK') p.s = 'DANS_OFFRE';
       });
     });
+    // ── Migration : dédoublonner les actions (doublons créés par le merge multi-sources) ──
+    {
+      const _actionKey = (a) => a.produitId + '|' + (a.produitParfumId || '') + '|' + a.type + '|' + (a.annulee ? 'X' : 'O');
+      const _seen = {};
+      const _before = actions.length;
+      actions = actions.filter(a => {
+        // Ne dédoublonner que les actions ouvertes (pas annulées, pas terminées)
+        if (a.annulee || a.dateCloture) return true;
+        const k = _actionKey(a);
+        if (_seen[k]) {
+          console.log('[DEDUP-ACTION] Doublon supprimé:', a.type, a.produitId, a.produitParfumId || '');
+          _deletedIds.add(a.id); // tombstone pour empêcher résurrection
+          return false;
+        }
+        _seen[k] = a;
+        return true;
+      });
+      if (actions.length < _before) console.log('[DEDUP-ACTION] ' + (_before - actions.length) + ' actions doublons supprimées');
+    }
     propositions = data.propositions || propositions;
     // ── Déduplication propositions kits ──
     {
@@ -6804,7 +6818,7 @@ function saveData() {
 // Empêche la perte de données si la page est fermée pendant le debounce 1s.
 var _lastPayload = null;
 function _flushPendingSave() {
-  if (!_savePending || !_lastPayload || _supabaseOk === false) return;
+  if (!_savePending || !_lastPayload || _syncOk === false) return;
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
   // Utilise fetch keepalive (fonctionne en beforeunload, contrairement à async)
   try {
@@ -7072,7 +7086,7 @@ async function _syncWrite(payload) {
 }
 
 async function _saveToSupabase(payload, _retryCount) {
-  if (_supabaseOk === false) return;
+  if (_syncOk === false) return;
   const retryCount = _retryCount || 0;
   try {
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
@@ -7116,7 +7130,7 @@ async function _saveToSupabase(payload, _retryCount) {
     }
     // Écrire les données fusionnées
     await _syncWrite(payload);
-    _supabaseOk = true; _savePending = false;
+    _syncOk = true; _savePending = false;
     console.log('[SYNC] Sauvegardé (avec merge)');
   } catch(e) {
     console.warn('[SYNC] Erreur:', e.message);
@@ -7132,7 +7146,7 @@ let _syncInterval = null;
 function _startAutoSync() {
   if (_syncInterval) return;
   _syncInterval = setInterval(async () => {
-    if (_supabaseOk === false || _savePending) return;
+    if (_syncOk === false || _savePending) return;
     try {
       const remoteResult = await _syncRead();
       if (!remoteResult || !remoteResult.data) return;
