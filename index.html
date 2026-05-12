@@ -1714,16 +1714,6 @@ const OP_TYPES = [
     ]
   },
   {
-    key: 'LANCEMENT', label: 'Lancement', color: '#22c55e', auto: false,
-    steps: [
-      { key: 'stock',      label: 'Stock reçu',                hint: 'Quantité dédiée au lancement' },
-      { key: 'facing',     label: 'Facing dédié',              hint: 'Emplacement premium sur le mur' },
-      { key: 'plv',        label: 'PLV / étiquette lancement', hint: 'Signalétique « nouveau »' },
-      { key: 'formation',  label: 'Équipe briefée',            hint: 'Argumentaire produit partagé' },
-      { key: 'com',        label: 'Com clients',               hint: 'Insta / comptoir' }
-    ]
-  },
-  {
     key: 'NOUVEAUTE', label: 'Nouveauté', color: '#22d3ee', auto: false,
     steps: [
       { key: 'etiquette', label: 'Étiquette nouveauté posée', hint: 'Signalétique « nouveau »' },
@@ -1737,14 +1727,6 @@ const OP_TYPES = [
       { key: 'signaletique', label: 'Signalétique exclu',  hint: 'PLV « exclu Cigusto »' },
       { key: 'facing',       label: 'Facing mis en avant', hint: 'Emplacement visible' },
       { key: 'com',          label: 'Com clients',         hint: 'Argument différenciateur' }
-    ]
-  },
-  {
-    key: 'MISE_EN_AVANT', label: 'Mise en avant', color: '#f59e0b', auto: false,
-    steps: [
-      { key: 'emplacement',   label: 'Emplacement premium',   hint: 'Tête de gondole, endcap, stop-rayon…' },
-      { key: 'signaletique',  label: 'Signalétique',          hint: 'PLV / étiquette mise en avant' },
-      { key: 'com',           label: 'Com clients',           hint: 'Insta / comptoir / briefing' }
     ]
   },
   {
@@ -1795,7 +1777,6 @@ const OP_TYPE_META = Object.fromEntries(OP_TYPES.map(t => [t.key, t]));
 // à la création d'une OP (les pieces sont pré-remplies, l'utilisateur ajuste).
 
 const MECA_TYPES = [
-  { key: 'LANCEMENT',     label: 'Lancement',              desc: 'Nouveauté sans promo spécifique' },
   { key: 'PRIX_ROUGE',    label: 'Prix rouge',             desc: 'Prix agressif pour s\'aligner' },
   { key: 'REMISE_SECHE',  label: 'Remise directe',         desc: '-X% sur le produit' },
   { key: 'SECOND_REMISE', label: 'Nième à -X%',            desc: 'Le 2e / 3e à -20%, -50%...' },
@@ -2044,10 +2025,8 @@ function defaultMecaFromOpType(opType) {
   switch (opType) {
     case 'PRIX_ROUGE':    return 'PRIX_ROUGE';
     case 'NATIONALE':     return 'AUTRE';
-    case 'LANCEMENT':
     case 'NOUVEAUTE':
-    case 'EXCLU':
-    case 'MISE_EN_AVANT': return 'LANCEMENT';
+    case 'EXCLU':         return 'AUTRE';
     default:              return 'AUTRE';
   }
 }
@@ -2096,14 +2075,7 @@ function seedOpDefaults(op) {
     case 'EXCLU':
       op.pieces.push(makePiece('ETIQUETTE_SPECIALE', 'freetouch', 'MUR_LIBRE_TOUCHER', 'Étiquette Exclu'));
       break;
-    case 'LANCEMENT':
-      op.pieces.push(makePiece('ETIQUETTE_SPECIALE', 'freetouch', 'MUR_LIBRE_TOUCHER', 'Étiquette Lancement'));
-      op.pieces.push(makePiece('AFFICHE_A3',         'custom',    'COMPTOIR'));
-      break;
-    case 'MISE_EN_AVANT':
-      op.pieces.push(makePiece('AFFICHE_A3',   'custom',    'COMPTOIR'));
-      op.pieces.push(makePiece('VIDEO_ECRAN',  'custom',    'ECRAN'));
-      break;
+    // LANCEMENT et MISE_EN_AVANT fusionnés dans NOUVEAUTE (migration mai 2026)
     case 'NATIONALE':
       // Pas de défaut prescriptif ; souvent la centrale envoie le kit
       op.prep.commanderProduits = false;
@@ -2188,6 +2160,16 @@ function computeOpShopStepDefs(op, shop) {
       (ACTION_STEPS.RENTRER || []).forEach(s => {
         defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'coup_rentrer', actionStep: s.key });
       });
+    }
+    // Steps prix rouge : entre RENTRER et SORTIR (on reçoit → on étiquette PR → on sort)
+    const _coupHasPR = (typeof op.prixRouge === 'number') || (aR && typeof aR.prixRouge === 'number');
+    if (_coupHasPR) {
+      const _coupPid = (op.produitIds || [])[0];
+      const _isKit = _coupPid && baseKits.some(k => k.id === _coupPid);
+      const _etiqLabel = _isKit ? 'Étiquette FT prix rouge imprimée' : 'Étiquette prix rouge imprimée';
+      defs.push({ key: 'pr_etiquette', label: '🔴 ' + _etiqLabel, kind: 'coup_pr' });
+      defs.push({ key: 'pr_posee',     label: '🔴 Étiquette prix rouge posée', kind: 'coup_pr' });
+      defs.push({ key: 'pr_swappy',    label: '🔴 Prix modifié sur Swappy', kind: 'coup_pr' });
     }
     if (aS) {
       (ACTION_STEPS.SORTIR || []).forEach(s => {
@@ -2325,13 +2307,13 @@ function pushOpTraced(op, source) {
 }
 
 // Détecte les OPs "orphelines" / zombies :
-//  - fanfare (NOUVEAUTE/LANCEMENT/EXCLU/MISE_EN_AVANT) non liée à une RENTRER valide
+//  - fanfare (NOUVEAUTE/EXCLU) non liée à une RENTRER valide
 //  - fanfare dont l'action RENTRER liée a un fanfareOpType différent ou null
 //  - plusieurs fanfares pour le même produit → on ne garde qu'une canonique
 //  - PRIX_ROUGE auto sans prixActionId / action annulée
 //  - PRIX_ROUGE (destockage) avec sortirActionId pointant sur action annulée
 function findOrphanOps() {
-  const FANFARE = ['NOUVEAUTE','LANCEMENT','EXCLU','MISE_EN_AVANT'];
+  const FANFARE = ['NOUVEAUTE','EXCLU'];
 
   // Étape 1 : pour chaque produit, trouver l'action RENTRER active et son fanfareOpType.
   // On calcule la liste des OPs fanfare à GARDER (canoniques) : une seule par produit.
@@ -2949,52 +2931,67 @@ function computeSubstitutionPair(kitId) {
 }
 
 // Crée (si pas déjà existante) une action ouverte pour un kit
-function ensureActionForKit(kit, type) {
-  // Existe déjà une action ouverte du même type pour ce produit ?
-  const existing = actions.find(a => a.produitId === kit.id && a.type === type && actionGlobalState(a) !== 'FAIT' && !a.annulee && (!a.produitType || a.produitType === 'kit'));
-  if (existing) return existing;
+// ── Fonction unifiée de création d'action ──────────────────────────────
+// ensureAction(produitId, type, produitType, opts)
+//   opts.parfumId     — pour les actions au niveau parfum (liq uniquement)
+//   opts.parfumNom    — nom du parfum pour affichage fallback
+//   opts.extraFields  — champs supplémentaires à fusionner (ex: sortirActionId, rentrerActionId)
+// Retourne l'action existante ou en crée une nouvelle.
+function ensureAction(produitId, type, produitType, opts) {
+  opts = opts || {};
+  // Recherche d'une action ouverte existante du même type pour ce produit
+  const existing = actions.find(a =>
+    a.produitId === produitId &&
+    a.type === type &&
+    actionGlobalState(a) !== 'FAIT' &&
+    !a.annulee &&
+    (produitType === 'kit' ? (!a.produitType || a.produitType === 'kit') : a.produitType === produitType) &&
+    (opts.parfumId ? a.produitParfumId === opts.parfumId : !a.produitParfumId)
+  );
+  if (existing) {
+    // Garder le nom du parfum à jour si applicable
+    if (opts.parfumNom && opts.parfumId) existing._parfumNom = opts.parfumNom;
+    return existing;
+  }
+  const isManual = (type === 'PRIX');
   const a = {
     id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
-    type, // SORTIR | RENTRER | PRIX | MISE_EN_PLACE
-    produitId: kit.id,
-    produitType: 'kit',
-    priorite: 'AUTO', // calculée dynamiquement dans effectivePrio
+    type,
+    produitId,
+    produitType,
+    priorite: isManual ? 'NORMALE' : 'AUTO',
     dateCreation: ymd(new Date()),
-    auteur: 'Auto',
+    auteur: isManual ? 'Manuel' : 'Auto',
     etats: makeShopStates(type),
     dateCloture: null,
     annulee: false,
     lienOP: null,
-    // Pour MISE_EN_PLACE uniquement :
-    sortirActionId: null,
-    rentrerActionId: null,
     _ts: new Date().toISOString()
   };
+  if (opts.parfumId) {
+    a.produitParfumId = opts.parfumId;
+    a._parfumNom = opts.parfumNom || null;
+  }
+  if (opts.extraFields) Object.assign(a, opts.extraFields);
   actions.push(a);
   return a;
 }
 
-// Crée (si pas déjà existante) une action ouverte pour un liquide (SORTIR/RENTRER/PRIX)
+// ── Wrappers rétrocompatibles (délèguent à ensureAction) ──────────────
+function ensureActionForKit(kit, type) {
+  return ensureAction(kit.id, type, 'kit', {
+    extraFields: { sortirActionId: null, rentrerActionId: null }
+  });
+}
 function ensureActionForLiq(gamme, type) {
-  // Existe déjà une action ouverte du même type pour ce produit ?
-  const existing = actions.find(a => a.produitId === gamme.id && a.type === type && actionGlobalState(a) !== 'FAIT' && !a.annulee && a.produitType === 'liq');
-  if (existing) return existing;
-  const a = {
-    id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
-    type, // SORTIR | RENTRER | PRIX
-    produitId: gamme.id,
-    produitType: 'liq',
-    priorite: type === 'PRIX' ? 'NORMALE' : 'AUTO',
-    dateCreation: ymd(new Date()),
-    auteur: type === 'PRIX' ? 'Manuel' : 'Auto',
-    etats: makeShopStates(type),
-    dateCloture: null,
-    annulee: false,
-    lienOP: null,
-    _ts: new Date().toISOString()
-  };
-  actions.push(a);
-  return a;
+  return ensureAction(gamme.id, type, 'liq');
+}
+
+// ── Helpers communs pour cleanup ──────────────────────────────────────
+function _cancelAction(a) {
+  a.dateCloture = ymd(new Date());
+  a.annulee = true;
+  SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
 }
 
 // Clôture auto les actions d'un kit si son statut ne nécessite plus l'action
@@ -3013,18 +3010,13 @@ function cleanupActionsForKit(kit) {
       (a.type === 'SORTIR' && (kit.statutVie === 'A_SORTIR' || isOneShotActif)) ||
       (a.type === 'RENTRER' && (kit.statutVie === 'A_RENTRER' || isOneShotActif));
     if (!stillValid && a.type !== 'PRIX' && a.type !== 'SWAP_COMPOSANT') {
-      // Marquer comme annulée (auteur système)
-      a.dateCloture = ymd(new Date());
-      a.annulee = true;
-      SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
+      _cancelAction(a);
     }
   });
 }
 
 // Clôture auto les actions d'un liquide si son statut ne nécessite plus l'action
-// Version simplifiée : pas de one-shot, MISE_EN_PLACE, ou PRIX pour les liquides
 function cleanupActionsForLiq(gamme) {
-  // One-shot actif : les actions SORTIR/RENTRER doivent rester ouvertes
   const isOneShotActif = gamme.oneShot === true && ['DANS_OFFRE','A_RENTRER','OK'].includes(gamme.statutVie);
   actions.forEach(a => {
     if (a._archived) return;
@@ -3032,66 +3024,27 @@ function cleanupActionsForLiq(gamme) {
     if (a.produitType !== 'liq') return;
     if (a.produitParfumId) return; // Actions parfum gérées par cleanupActionsForParfum
     if (actionGlobalState(a) === 'FAIT') return;
-    // PRIX est une action manuelle — on ne l'annule pas automatiquement
     if (a.type === 'PRIX') {
-      if (gamme.statutVie === 'SORTI') {
-        a.dateCloture = ymd(new Date());
-        a.annulee = true;
-        SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
-      }
+      if (gamme.statutVie === 'SORTI') _cancelAction(a);
       return;
     }
     const stillValid =
       (a.type === 'SORTIR' && (gamme.statutVie === 'A_SORTIR' || isOneShotActif)) ||
       (a.type === 'RENTRER' && (gamme.statutVie === 'A_RENTRER' || isOneShotActif));
-    if (!stillValid) {
-      a.dateCloture = ymd(new Date());
-      a.annulee = true;
-      SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
-    }
+    if (!stillValid) _cancelAction(a);
   });
 }
 
 // --- Actions au niveau PARFUM INDIVIDUEL ---
 
-// Crée (si pas déjà existante) une action ouverte pour un parfum individuel
 function ensureActionForParfum(gamme, parfumId, type) {
-  const existing = actions.find(a =>
-    a.produitId === gamme.id &&
-    a.produitParfumId === parfumId &&
-    a.type === type &&
-    actionGlobalState(a) !== 'FAIT' &&
-    !a.annulee &&
-    a.produitType === 'liq'
-  );
-  if (existing) {
-    // Garder le nom du parfum à jour (utile en fallback si l'ID change)
-    const _pf = (gamme.parfums || []).find(p => p.id === parfumId);
-    if (_pf && _pf.n) existing._parfumNom = _pf.n;
-    return existing;
-  }
-  // Résoudre le nom du parfum pour l'affichage fallback
   const _pfObj = (gamme.parfums || []).find(p => p.id === parfumId);
-  const a = {
-    id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
-    type,
-    produitId: gamme.id,
-    produitParfumId: parfumId,
-    _parfumNom: _pfObj ? _pfObj.n : null,
-    produitType: 'liq',
-    priorite: type === 'PRIX' ? 'NORMALE' : 'AUTO',
-    dateCreation: ymd(new Date()),
-    auteur: type === 'PRIX' ? 'Manuel' : 'Auto',
-    etats: makeShopStates(type),
-    dateCloture: null,
-    annulee: false,
-    lienOP: null
-  };
-  actions.push(a);
-  return a;
+  return ensureAction(gamme.id, type, 'liq', {
+    parfumId,
+    parfumNom: _pfObj ? _pfObj.n : null
+  });
 }
 
-// Clôture auto les actions d'un parfum si son statut ne nécessite plus l'action
 function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
   actions.forEach(a => {
     if (a._archived) return;
@@ -3099,50 +3052,23 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
     if (a.produitParfumId !== parfumId) return;
     if (a.produitType !== 'liq') return;
     if (actionGlobalState(a) === 'FAIT') return;
-    // PRIX : annuler seulement si le parfum est SORTI
     if (a.type === 'PRIX') {
-      if (parfumStatus === 'SORTI') {
-        a.dateCloture = ymd(new Date());
-        a.annulee = true;
-        SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
-      }
+      if (parfumStatus === 'SORTI') _cancelAction(a);
       return;
     }
     const stillValid =
       (a.type === 'SORTIR' && parfumStatus === 'A_SORTIR') ||
       (a.type === 'RENTRER' && parfumStatus === 'A_RENTRER');
-    if (!stillValid) {
-      a.dateCloture = ymd(new Date());
-      a.annulee = true;
-      SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
-    }
+    if (!stillValid) _cancelAction(a);
   });
 }
 
 // --- Actions pour PIÈCES DÉTACHÉES ---
 
-// Crée (si pas déjà existante) une action ouverte pour une pièce détachée
 function ensureActionForPd(pd, type) {
-  const existing = actions.find(a => a.produitId === pd.id && a.type === type && actionGlobalState(a) !== 'FAIT' && !a.annulee && a.produitType === 'pd');
-  if (existing) return existing;
-  const a = {
-    id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
-    type, // SORTIR | RENTRER | PRIX
-    produitId: pd.id,
-    produitType: 'pd',
-    priorite: type === 'PRIX' ? 'NORMALE' : 'AUTO',
-    dateCreation: ymd(new Date()),
-    auteur: type === 'PRIX' ? 'Manuel' : 'Auto',
-    etats: makeShopStates(type),
-    dateCloture: null,
-    annulee: false,
-    lienOP: null
-  };
-  actions.push(a);
-  return a;
+  return ensureAction(pd.id, type, 'pd');
 }
 
-// Clôture auto les actions d'une PD si son statut ne nécessite plus l'action
 function cleanupActionsForPd(pd) {
   const isOneShotActif = pd.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(pd.statutVie);
   actions.forEach(a => {
@@ -3151,21 +3077,13 @@ function cleanupActionsForPd(pd) {
     if (a.produitType !== 'pd') return;
     if (actionGlobalState(a) === 'FAIT') return;
     if (a.type === 'PRIX') {
-      if (pd.statutVie === 'SORTI') {
-        a.dateCloture = ymd(new Date());
-        a.annulee = true;
-        SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
-      }
+      if (pd.statutVie === 'SORTI') _cancelAction(a);
       return;
     }
     const stillValid =
       (a.type === 'SORTIR' && (pd.statutVie === 'A_SORTIR' || isOneShotActif)) ||
       (a.type === 'RENTRER' && (pd.statutVie === 'A_RENTRER' || isOneShotActif));
-    if (!stillValid) {
-      a.dateCloture = ymd(new Date());
-      a.annulee = true;
-      SHOPS.forEach(sh => { a.etats[sh].done = true; a.etats[sh].dateFait = a.dateCloture; });
-    }
+    if (!stillValid) _cancelAction(a);
   });
 }
 
@@ -3363,8 +3281,13 @@ function syncAutoActions() {
   // Actions auto pour les pièces détachées (même logique que kits)
   basePD.forEach(pd => {
     if (pd.statutVie === 'A_SORTIR') ensureActionForPd(pd, 'SORTIR');
-    // FIN_DE_VIE : pas d'action SORTIR, le produit s'écoule. Apparaît dans Besoins à combler.
     if (pd.statutVie === 'A_RENTRER') ensureActionForPd(pd, 'RENTRER');
+    // One-shot PD : même logique que kits/liq
+    if (pd.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(pd.statutVie)) {
+      ensureOneShotOpPd(pd);
+    } else {
+      closeOneShotOpPd(pd);
+    }
     cleanupActionsForPd(pd);
   });
   // Auto-lien remplaceId : un kit A_RENTRER sans remplaceId qui partage exactement
@@ -3389,146 +3312,121 @@ function syncAutoActions() {
   syncOpsFromVerdicts();
 }
 
-// Crée (ou rafraîchit) l'OP "COUP" commune d'un kit one-shot actif, ainsi que ses 2
-// actions liées (RENTRER + SORTIR). Idempotent : s'il existe déjà une OP COUP liée au
-// kit (via kit.oneShotOpId ou via rentrerActionId/sortirActionId), on la réutilise.
+// ── One-shot unifié (kit, liq, pd) ────────────────────────────────────
+// Crée/maintient une OP COUP avec RENTRER+SORTIR simultanés.
+// produit : l'objet kit/gamme/pd
+// produitType : 'kit' | 'liq' | 'pd'
+// label : commentaire lisible pour l'OP (ex: 'One-shot — occupation temporaire')
+function _ensureOneShotOpGeneric(produit, produitType, label) {
+  if (!produit) return null;
+  const ensureFn = produitType === 'kit' ? ensureActionForKit
+                 : produitType === 'liq' ? ensureActionForLiq
+                 : ensureActionForPd;
+  const aRentrer = ensureFn(produit, 'RENTRER');
+  const aSortir  = ensureFn(produit, 'SORTIR');
+  let op = produit.oneShotOpId ? ops.find(o => o.id === produit.oneShotOpId) : null;
+  if (!op) {
+    op = ops.find(o => o.type === 'COUP' && !o.dateFin
+      && ((aRentrer && o.rentrerActionId === aRentrer.id) || (aSortir && o.sortirActionId === aSortir.id)));
+  }
+  const today = ymd(new Date());
+  if (!op) {
+    op = {
+      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+      type: 'COUP',
+      produitIds: [produit.id],
+      dateDebut: today,
+      dateFin: null,
+      commentaire: label,
+      rentrerActionId: aRentrer ? aRentrer.id : null,
+      sortirActionId:  aSortir  ? aSortir.id  : null,
+      auto: true,
+      etats: {},
+      pieces: []
+    };
+    seedOpDefaults(op);
+    ensureOpSteps(op);
+    pushOpTraced(op, '_ensureOneShotOp_' + produitType);
+    produit.oneShotOpId = op.id;
+    if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
+    if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
+    if (aRentrer) syncActionStepsToOp(aRentrer);
+    if (aSortir)  syncActionStepsToOp(aSortir);
+    // Prix rouge intégré directement dans l'OP COUP (pas d'OP PRIX_ROUGE séparée)
+    _syncCoupPrixRouge(op, aRentrer, produit);
+    return op;
+  }
+  // OP existe : garantir les liens
+  if (aRentrer && op.rentrerActionId !== aRentrer.id) op.rentrerActionId = aRentrer.id;
+  if (aSortir  && op.sortirActionId  !== aSortir.id)  op.sortirActionId  = aSortir.id;
+  if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
+  if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
+  produit.oneShotOpId = op.id;
+  ensureOpSteps(op);
+  if (aRentrer || aSortir) _syncOneShotStepsBidi(op, aRentrer, aSortir);
+  // Prix rouge intégré directement dans l'OP COUP (pas d'OP PRIX_ROUGE séparée)
+  _syncCoupPrixRouge(op, aRentrer, produit);
+  return op;
+}
+
+// Clôt l'OP "COUP" d'un produit (kit/liq/pd)
+function _closeOneShotOpGeneric(produit) {
+  if (!produit) return;
+  const today = ymd(new Date());
+  if (produit.oneShotOpId) {
+    const op = ops.find(o => o.id === produit.oneShotOpId);
+    if (op && op.type === 'COUP' && !op.dateFin) op.dateFin = today;
+  }
+  ops.filter(o => o.type === 'COUP' && !o.dateFin && o.produitIds && o.produitIds[0] === produit.id)
+     .forEach(o => { o.dateFin = today; });
+  produit.oneShotOpId = null;
+}
+
+// ── Wrappers rétrocompatibles ──
 function ensureOneShotOp(kit) {
-  if (!kit) return null;
-  const aRentrer = ensureActionForKit(kit, 'RENTRER');
-  const aSortir  = ensureActionForKit(kit, 'SORTIR');
-  // 1) Cherche par id stocké sur le kit
-  let op = kit.oneShotOpId ? ops.find(o => o.id === kit.oneShotOpId) : null;
-  // 2) Sinon cherche une OP COUP active déjà liée à l'une des actions
-  if (!op) {
-    op = ops.find(o => o.type === 'COUP' && !o.dateFin
-      && ((aRentrer && o.rentrerActionId === aRentrer.id) || (aSortir && o.sortirActionId === aSortir.id)));
-  }
-  const today = ymd(new Date());
-  if (!op) {
-    op = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
-      type: 'COUP',
-      produitIds: [kit.id],
-      dateDebut: today,
-      dateFin: null,
-      commentaire: 'One-shot — occupation temporaire',
-      rentrerActionId: aRentrer ? aRentrer.id : null,
-      sortirActionId:  aSortir  ? aSortir.id  : null,
-      auto: true,
-      etats: {},
-      pieces: []
-    };
-    seedOpDefaults(op);
-    ensureOpSteps(op);
-    pushOpTraced(op, 'ensureOneShotOp');
-    kit.oneShotOpId = op.id;
-    if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
-    if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
-    // Synchro initiale des cochages existants côté actions → OP.
-    if (aRentrer) syncActionStepsToOp(aRentrer);
-    if (aSortir)  syncActionStepsToOp(aSortir);
-    // S'assurer que le PRIX_ROUGE one-shot existe si l'action RENTRER porte un prixRouge
-    if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
-    return op;
-  }
-  // OP existe : on garantit les liens. Ne PAS réouvrir si dateFin posée manuellement.
-  // if (op.dateFin) op.dateFin = null;  — retiré : l'admin peut poser une dateFin volontaire
-  if (aRentrer && op.rentrerActionId !== aRentrer.id) op.rentrerActionId = aRentrer.id;
-  if (aSortir  && op.sortirActionId  !== aSortir.id)  op.sortirActionId  = aSortir.id;
-  if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
-  if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
-  kit.oneShotOpId = op.id;
-  ensureOpSteps(op);
-  // ── Sync bidirectionnel respectant les timestamps ──
-  // Remplace l'ancien syncActionStepsToOp inconditionnel qui écrasait les coches
-  // OP par les valeurs action (potentiellement stale après un merge).
-  if (aRentrer || aSortir) _syncOneShotStepsBidi(op, aRentrer, aSortir);
-  // S'assurer que le PRIX_ROUGE one-shot existe si l'action RENTRER porte un prixRouge
-  // (filet de sécurité : recrée l'OP si elle a été purgée ou supprimée par erreur).
-  if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
-  return op;
+  return _ensureOneShotOpGeneric(kit, 'kit', 'One-shot — occupation temporaire');
 }
+function closeOneShotOp(kit) { _closeOneShotOpGeneric(kit); }
 
-// Clôt l'OP "COUP" d'un kit (si existante et encore ouverte). Appelée quand le flag
-// one-shot est retiré ou quand le kit sort de l'état DANS_OFFRE/A_RENTRER.
-function closeOneShotOp(kit) {
-  if (!kit) return;
-  const today = ymd(new Date());
-  // Via id stocké
-  if (kit.oneShotOpId) {
-    const op = ops.find(o => o.id === kit.oneShotOpId);
-    if (op && op.type === 'COUP' && !op.dateFin) op.dateFin = today;
-  }
-  // Filet de sécurité : toute OP COUP ouverte dont le produit est ce kit
-  ops.filter(o => o.type === 'COUP' && !o.dateFin && o.produitIds && o.produitIds[0] === kit.id)
-     .forEach(o => { o.dateFin = today; });
-  kit.oneShotOpId = null;
-}
-
-// --- One-shot pour LIQUIDES ---
-// Même logique que les kits : crée une OP COUP avec RENTRER+SORTIR simultanés
 function ensureOneShotOpLiq(gamme) {
-  if (!gamme) return null;
-  const aRentrer = ensureActionForLiq(gamme, 'RENTRER');
-  const aSortir  = ensureActionForLiq(gamme, 'SORTIR');
-  let op = gamme.oneShotOpId ? ops.find(o => o.id === gamme.oneShotOpId) : null;
-  if (!op) {
-    op = ops.find(o => o.type === 'COUP' && !o.dateFin
-      && ((aRentrer && o.rentrerActionId === aRentrer.id) || (aSortir && o.sortirActionId === aSortir.id)));
-  }
-  const today = ymd(new Date());
-  if (!op) {
-    op = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
-      type: 'COUP',
-      produitIds: [gamme.id],
-      dateDebut: today,
-      dateFin: null,
-      commentaire: 'One-shot liquide — ' + gamme.marque + ' ' + gamme.gamme,
-      rentrerActionId: aRentrer ? aRentrer.id : null,
-      sortirActionId:  aSortir  ? aSortir.id  : null,
-      auto: true,
-      etats: {},
-      pieces: []
-    };
-    seedOpDefaults(op);
-    ensureOpSteps(op);
-    pushOpTraced(op, 'ensureOneShotOpLiq');
-    gamme.oneShotOpId = op.id;
-    if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
-    if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
-    if (aRentrer) syncActionStepsToOp(aRentrer);
-    if (aSortir)  syncActionStepsToOp(aSortir);
-    if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
-    return op;
-  }
-  // OP existe : garantir les liens (ne PAS réinitialiser dateFin pour respecter les dates admin)
-  // if (op.dateFin) op.dateFin = null;  // Retiré — même fix que ensureOneShotOp (kit)
-  if (aRentrer && op.rentrerActionId !== aRentrer.id) op.rentrerActionId = aRentrer.id;
-  if (aSortir  && op.sortirActionId  !== aSortir.id)  op.sortirActionId  = aSortir.id;
-  if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
-  if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
-  gamme.oneShotOpId = op.id;
-  ensureOpSteps(op);
-  // ── Sync bidirectionnel respectant les timestamps ──
-  // Remplace l'ancien syncActionStepsToOp inconditionnel qui écrasait les coches
-  // OP par les valeurs action (potentiellement stale après un merge).
-  if (aRentrer || aSortir) _syncOneShotStepsBidi(op, aRentrer, aSortir);
-  // S'assurer que le PRIX_ROUGE one-shot existe si l'action RENTRER porte un prixRouge
-  if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
-  return op;
+  const label = 'One-shot liquide — ' + (gamme ? gamme.marque + ' ' + gamme.gamme : '');
+  return _ensureOneShotOpGeneric(gamme, 'liq', label);
 }
+function closeOneShotOpLiq(gamme) { _closeOneShotOpGeneric(gamme); }
 
-function closeOneShotOpLiq(gamme) {
-  if (!gamme) return;
-  const today = ymd(new Date());
-  if (gamme.oneShotOpId) {
-    const op = ops.find(o => o.id === gamme.oneShotOpId);
-    if (op && op.type === 'COUP' && !op.dateFin) op.dateFin = today;
+// PD : nouvelle prise en charge one-shot (était manquante)
+function ensureOneShotOpPd(pd) {
+  const label = 'One-shot PD — ' + (pd ? (pd.marque || '') + ' ' + (pd.modele || '') : '');
+  return _ensureOneShotOpGeneric(pd, 'pd', label);
+}
+function closeOneShotOpPd(pd) { _closeOneShotOpGeneric(pd); }
+
+// Synchronise le prix rouge depuis l'action RENTRER vers l'OP COUP.
+// Remplace l'ancien syncRentrerPrixRougeOp qui créait une OP PRIX_ROUGE séparée.
+function _syncCoupPrixRouge(op, aRentrer, produit) {
+  if (!aRentrer) return;
+  if (typeof aRentrer.prixRouge === 'number') {
+    op.prixRouge = aRentrer.prixRouge;
+    if (typeof aRentrer.prixAvantRouge === 'number') {
+      op.prixAvantRouge = aRentrer.prixAvantRouge;
+    } else if (!op.prixAvantRouge && produit && typeof produit.pv === 'number') {
+      op.prixAvantRouge = produit.pv;
+    }
+  } else {
+    // Pas de prix rouge sur l'action → retirer du COUP si présent
+    if (op.prixRouge) { delete op.prixRouge; delete op.prixAvantRouge; }
   }
-  ops.filter(o => o.type === 'COUP' && !o.dateFin && o.produitIds && o.produitIds[0] === gamme.id)
-     .forEach(o => { o.dateFin = today; });
-  gamme.oneShotOpId = null;
+  // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe encore (migration ou résurrection par merge)
+  // Recherche élargie : par rentrerPrixActionId OU par produit commun
+  const _prProdId = op.produitIds && op.produitIds[0];
+  const oldPrOps = ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin && o.id !== op.id &&
+    (o.rentrerPrixActionId === aRentrer.id || (_prProdId && o.produitIds && o.produitIds[0] === _prProdId && o.source === 'rentrer_action')));
+  oldPrOps.forEach(oldPrOp => {
+    oldPrOp.dateFin = ymd(new Date());
+    oldPrOp._ts = new Date().toISOString();
+    _deletedIds.add(oldPrOp.id); // tombstone anti-résurrection sync
+    console.log('[SYNC] Clôture OP PRIX_ROUGE séparée ' + oldPrOp.id + ' — fusionnée dans COUP ' + op.id + ' (tombstone posé)');
+  });
 }
 
 function toggleLiqOneShot(gammeId) {
@@ -4080,7 +3978,7 @@ function actionnerOpFromPrix(actionId) {
 }
 
 // Définit/retire le type "entrée en fanfare" pour une action RENTRER.
-// opType ∈ { null, 'NOUVEAUTE', 'LANCEMENT', 'EXCLU', 'MISE_EN_AVANT' }
+// opType ∈ { null, 'NOUVEAUTE', 'EXCLU' }
 // Création/remplacement d'une OP liée au RENTRER. null => clôture l'OP existante.
 function setRentrerFanfare(actionId, opType) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
@@ -4146,7 +4044,7 @@ function setRentrerFanfare(actionId, opType) {
 
 // Promotion générique : crée une OP d'un type donné liée à une action du dashboard.
 // - SORTIR → opType 'PRIX_ROUGE' (destockage = prix rouge, distinction via sortirActionId)
-// - PRIX non-rouge → opType libre (MISE_EN_AVANT, EXCLU, etc.)
+// - PRIX non-rouge → opType libre (NOUVEAUTE, EXCLU, etc.)
 // - RENTRER passe toujours par setRentrerFanfare() pour compat (fanfareOpType).
 // Idempotent : si une OP active du même type est déjà liée à l'action, on la renvoie.
 function promoteActionToOp(actionId, opType, commentaire) {
@@ -4503,23 +4401,39 @@ function updateActionPrixRouge(actionId, val) {
     }
     a.prixRouge = prix;
   }
-  // Propager sur l'OP liée (SORTIR, RENTRER ou PRIX)
-  const op = ops.find(o =>
-    o.type === 'PRIX_ROUGE' &&
-    (o.sortirActionId === a.id || o.rentrerPrixActionId === a.id || o.prixActionId === a.id)
-  );
-  if (op) {
-    var newPrix = a.prixRouge || a.prixCible;
-    var newAvant = a.prixAvantRouge || a.prixAvant;
-    if (typeof newPrix === 'number') {
-      op.prixRouge = newPrix;
-      if (typeof newAvant === 'number') op.prixAvantRouge = newAvant;
+  // Propager sur l'OP liée
+  // Pour les RENTRER one-shot : propager vers l'OP COUP (pas d'OP PRIX_ROUGE séparée)
+  const coupOp = (a.type === 'RENTRER') ? ops.find(o => o.type === 'COUP' && !o.dateFin && o.rentrerActionId === a.id) : null;
+  if (coupOp) {
+    // One-shot : prix rouge intégré dans le COUP
+    if (typeof a.prixRouge === 'number') {
+      coupOp.prixRouge = a.prixRouge;
+      if (typeof a.prixAvantRouge === 'number') coupOp.prixAvantRouge = a.prixAvantRouge;
     } else {
-      op.prixRouge = null;
+      delete coupOp.prixRouge; delete coupOp.prixAvantRouge;
     }
+    // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe encore
+    const oldPrOp = ops.find(o => o.rentrerPrixActionId === a.id && o.type === 'PRIX_ROUGE' && !o.dateFin);
+    if (oldPrOp) { oldPrOp.dateFin = ymd(new Date()); _deletedIds.add(oldPrOp.id); }
+  } else {
+    // Cas non-oneshot : propager sur l'OP PRIX_ROUGE standard
+    const op = ops.find(o =>
+      o.type === 'PRIX_ROUGE' &&
+      (o.sortirActionId === a.id || o.rentrerPrixActionId === a.id || o.prixActionId === a.id)
+    );
+    if (op) {
+      var newPrix = a.prixRouge || a.prixCible;
+      var newAvant = a.prixAvantRouge || a.prixAvant;
+      if (typeof newPrix === 'number') {
+        op.prixRouge = newPrix;
+        if (typeof newAvant === 'number') op.prixAvantRouge = newAvant;
+      } else {
+        op.prixRouge = null;
+      }
+    }
+    // Auto-créer/clore l'OP PRIX_ROUGE pour les RENTRER non-oneshot
+    if (a.type === 'RENTRER') syncRentrerPrixRougeOp(a);
   }
-  // Auto-créer/clore l'OP PRIX_ROUGE pour les RENTRER
-  if (a.type === 'RENTRER') syncRentrerPrixRougeOp(a);
   saveData();
   renderDashboard();
   if (typeof renderOps === 'function') renderOps();
@@ -4593,7 +4507,16 @@ function initRentrerPrixRouge(actionId) {
   if (isNaN(prix) || prix <= 0) return;
   a.prixAvantRouge = pvRef;
   a.prixRouge = prix;
-  syncRentrerPrixRougeOp(a);
+  // One-shot : propager vers le COUP ; sinon : OP PRIX_ROUGE séparée
+  const _coupOp = ops.find(o => o.type === 'COUP' && !o.dateFin && o.rentrerActionId === a.id);
+  if (_coupOp) {
+    _coupOp.prixRouge = prix;
+    _coupOp.prixAvantRouge = pvRef;
+    const _oldPr = ops.find(o => o.rentrerPrixActionId === a.id && o.type === 'PRIX_ROUGE' && !o.dateFin);
+    if (_oldPr) { _oldPr.dateFin = ymd(new Date()); _deletedIds.add(_oldPr.id); }
+  } else {
+    syncRentrerPrixRougeOp(a);
+  }
   saveData();
   renderDashboard();
   if (typeof renderOps === 'function') renderOps();
@@ -5161,14 +5084,14 @@ function checkOneShotAutoClose(a) {
   ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(_pid) >= 0)
      .forEach(o => { o.dateFin = today; });
   prod.oneShotOpId = null;
-  // 3) Clôturer les OP PRIX_ROUGE liées
+  // 3) Clôturer les OP PRIX_ROUGE liées + tombstone
   ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin && (o.produitIds || []).indexOf(_pid) >= 0)
-     .forEach(o => { o.dateFin = today; });
+     .forEach(o => { o.dateFin = today; _deletedIds.add(o.id); });
   // Aussi via sortirActionId ou rentrerPrixActionId
   ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin &&
      (o.sortirActionId === sortirAction.id ||
       (o.rentrerPrixActionId && actions.some(ra => ra.id === o.rentrerPrixActionId && ra.produitId === _pid))))
-     .forEach(o => { o.dateFin = today; });
+     .forEach(o => { o.dateFin = today; _deletedIds.add(o.id); });
   // 4) Re-synchro actions : cleanupActionsForKit va clôturer les actions orphelines
   // et closeOneShotOp va fermer toute COUP OP résiduelle (puisque statutVie !== DANS_OFFRE/A_RENTRER)
   try { syncAutoActions(); } catch(e) { console.error('[autoClose] syncAutoActions:', e); }
@@ -6126,6 +6049,64 @@ async function loadData() {
         op.pieces = op.pieces.filter(p => p.type !== 'BAC_A_FOUILLE');
       }
     });
+    // Migration (mai 2026) : LANCEMENT + MISE_EN_AVANT fusionnés dans NOUVEAUTE.
+    // Seuls NOUVEAUTE et EXCLU restent comme types fanfare non-prix.
+    ops.forEach(op => {
+      if (op.type === 'LANCEMENT' || op.type === 'MISE_EN_AVANT') {
+        op.type = 'NOUVEAUTE';
+      }
+    });
+    // Idem pour les fanfareOpType stockés sur les actions RENTRER
+    actions.forEach(a => {
+      if (a.fanfareOpType === 'LANCEMENT' || a.fanfareOpType === 'MISE_EN_AVANT') {
+        a.fanfareOpType = 'NOUVEAUTE';
+      }
+    });
+    // Migration (mai 2026) : OP PRIX_ROUGE séparée des one-shots → fusionnée dans le COUP.
+    // Stratégie élargie : cherche par rentrerPrixActionId OU par source='rentrer_action' OU par produit commun.
+    // On traite aussi les OP déjà fermées pour poser le tombstone (anti-résurrection sync).
+    ops.forEach(prOp => {
+      if (prOp.type !== 'PRIX_ROUGE') return;
+      // Si déjà fermée ET déjà tombstonée, rien à faire
+      if (prOp.dateFin && _deletedIds.has(prOp.id)) return;
+      // Si déjà fermée mais pas tombstonée → poser le tombstone et passer
+      if (prOp.dateFin && prOp.source === 'rentrer_action') {
+        _deletedIds.add(prOp.id);
+        return;
+      }
+      if (prOp.dateFin) return; // OP PRIX_ROUGE fermée non-oneshot → garder dans l'historique
+      // Trouver le COUP lié au même produit
+      const prProdId = (prOp.produitIds || [])[0];
+      let coupOp = null;
+      // 1) Via rentrerPrixActionId → COUP.rentrerActionId
+      if (prOp.rentrerPrixActionId) {
+        coupOp = ops.find(o => o.type === 'COUP' && !o.dateFin && o.rentrerActionId === prOp.rentrerPrixActionId);
+      }
+      // 2) Fallback : même produitId
+      if (!coupOp && prProdId) {
+        coupOp = ops.find(o => o.type === 'COUP' && !o.dateFin && o.produitIds && o.produitIds[0] === prProdId);
+      }
+      // 3) Fallback : source = rentrer_action (marquée par l'ancien syncRentrerPrixRougeOp)
+      if (!coupOp && prOp.source === 'rentrer_action' && prProdId) {
+        // Pas de COUP → c'est un orphelin one-shot, on le ferme quand même
+        console.log('[Migration] OP PRIX_ROUGE orpheline ' + prOp.id + ' (source=rentrer_action, pas de COUP) — clôturée');
+        prOp.dateFin = ymd(new Date());
+        _deletedIds.add(prOp.id); // tombstone anti-résurrection sync
+        return;
+      }
+      if (!coupOp) return; // Pas un one-shot
+      if (typeof prOp.prixRouge === 'number') coupOp.prixRouge = prOp.prixRouge;
+      if (typeof prOp.prixAvantRouge === 'number') coupOp.prixAvantRouge = prOp.prixAvantRouge;
+      coupOp._ts = new Date().toISOString();
+      prOp.dateFin = ymd(new Date());
+      prOp._ts = new Date().toISOString();
+      _deletedIds.add(prOp.id); // tombstone anti-résurrection sync
+      console.log('[Migration] OP PRIX_ROUGE ' + prOp.id + ' fusionnée dans COUP ' + coupOp.id + ' (tombstone posé)');
+    });
+    // Purger les OPs tombstonées de l'array en mémoire
+    const _opsBefore = ops.length;
+    ops = ops.filter(o => !_deletedIds.has(o.id));
+    if (ops.length < _opsBefore) console.log('[Migration] ' + (_opsBefore - ops.length) + ' OP(s) tombstonées retirées de la mémoire');
     // Migration one-shot (avril 2026) : DÉJÀ APPLIQUÉE — ne plus ré-exécuter.
     // L'ancienne migration forçait op.dateDebut = '2026-05-04' sur toutes les OPs ouvertes,
     // ce qui écrasait les dates posées manuellement si localStorage était vidé.
@@ -11433,7 +11414,7 @@ function renderDashboard() {
       }
       // Prix rouge (destockage) : badgePrix
       if (a.prixRouge) {
-        const _prOpSort = ops.find(o => o.type === 'PRIX_ROUGE' && isOpOuverte(o) && (o.sortirActionId === a.id || (o.groupActionIds || []).includes(a.id)));
+        const _prOpSort = ops.find(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && isOpOuverte(o) && (o.sortirActionId === a.id || (o.groupActionIds || []).includes(a.id)));
         const _prEcSort = _prOpSort ? isPrixRougeEnCours(_prOpSort) : true;
         const _prColorSort = _prEcSort ? '#fca5a5' : '#94a3b8';
         const _prBgSort = _prEcSort ? '#ef444425' : '#94a3b815';
@@ -11531,7 +11512,7 @@ function renderDashboard() {
       }
       // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
       if (a.prixRouge) {
-        const _prOpRent = ops.find(o => o.type === 'PRIX_ROUGE' && isOpOuverte(o) && (o.rentrerPrixActionId === a.id || (o.produitIds || []).includes(prod.id)));
+        const _prOpRent = ops.find(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && isOpOuverte(o) && (o.rentrerPrixActionId === a.id || o.rentrerActionId === a.id || (o.produitIds || []).includes(prod.id)));
         const _prEcRent = _prOpRent ? isPrixRougeEnCours(_prOpRent) : true;
         const _prColorRent = _prEcRent ? '#fca5a5' : '#94a3b8';
         const _prBgRent = _prEcRent ? '#ef444425' : '#94a3b815';
@@ -11541,9 +11522,9 @@ function renderDashboard() {
         const _pvAvantR = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
         badgePrix += `<span title="Prix rouge ${_prEcRent ? 'actif' : 'programmé'}${_prDateRent ? ' — dès ' + fmtFR(_prOpRent.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgRent}; color:${_prColorRent}; border:1px solid ${_prBorderRent}; border-radius:3px; white-space:nowrap;${_prOpaRent}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateRent}</span>`;
       }
-      // Badge "entrée en fanfare" : OP NOUVEAUTE/EXCLU/LANCEMENT/MISE_EN_AVANT liée → badgeTag
+      // Badge "entrée en fanfare" : OP NOUVEAUTE/EXCLU liée → badgeTag
       {
-        const _fanfareTypes = ['NOUVEAUTE','EXCLU','LANCEMENT','MISE_EN_AVANT'];
+        const _fanfareTypes = ['NOUVEAUTE','EXCLU'];
         const _fanOp = ops.find(o => _fanfareTypes.includes(o.type) && isOpOuverte(o) && o.rentrerActionId === a.id);
         if (_fanOp) {
           const _fMeta = OP_TYPE_META[_fanOp.type];
@@ -11637,7 +11618,7 @@ function renderDashboard() {
       const opMeta = OP_TYPE_META[opLink.op.type];
       const isDestockage = opLink.op.type === 'PRIX_ROUGE' && opLink.linkField === 'sortirActionId';
       const isCoup = opLink.op.type === 'COUP';
-      const _fanfareInBadge = a.type === 'RENTRER' && ['NOUVEAUTE','EXCLU','LANCEMENT','MISE_EN_AVANT'].includes(opLink.op.type) && opLink.linkField === 'rentrerActionId';
+      const _fanfareInBadge = a.type === 'RENTRER' && ['NOUVEAUTE','EXCLU'].includes(opLink.op.type) && opLink.linkField === 'rentrerActionId';
       const skipOpChip = (opLink.op.type === 'PRIX_ROUGE' && a.prixRouge) || _fanfareInBadge;
       if (!skipOpChip) {
         const _opEc = opLink.op.type === 'PRIX_ROUGE' ? isPrixRougeEnCours(opLink.op)
@@ -11738,7 +11719,7 @@ function renderDashboard() {
         // Picker OP complémentaire (uniquement si la décision n'est pas rouge — rouge est déjà auto)
         const prixOpPicker = (a.decisionChoice && a.decisionChoice !== 'rouge')
           ? `<span style="flex-basis:100%; height:0;"></span>` + renderOpPromotionPicker(a, 'OP associée ?', [
-              { key: 'MISE_EN_AVANT', label: 'Mise en avant', color: '#f59e0b' },
+              { key: 'NOUVEAUTE',     label: 'Nouveauté',     color: '#22d3ee' },
               { key: 'EXCLU',         label: 'Exclu',         color: '#a855f7' }
             ])
           : '';
@@ -11830,9 +11811,7 @@ function renderDashboard() {
         const fanfareOptions = [
           { key: '', label: 'Non', color: '#64748b' },
           { key: 'NOUVEAUTE',     label: 'Nouveauté',    color: '#22d3ee' },
-          { key: 'LANCEMENT',     label: 'Lancement',    color: '#22c55e' },
-          { key: 'EXCLU',         label: 'Exclu',        color: '#a855f7' },
-          { key: 'MISE_EN_AVANT', label: 'Mise en avant',color: '#f59e0b' }
+          { key: 'EXCLU',         label: 'Exclu',        color: '#a855f7' }
         ];
         const fanfareChips = fanfareOptions.map(o => {
           const active = (o.key || null) === (currentFanfare || null);
@@ -11956,9 +11935,7 @@ function renderDashboard() {
         // (Kits uniquement — les liquides n'ont pas de MISE_EN_PLACE)
         const picker = renderOpPromotionPicker(a, 'OP d\'accompagnement ?', [
           { key: 'NOUVEAUTE',     label: 'Nouveauté',     color: '#22d3ee' },
-          { key: 'LANCEMENT',     label: 'Lancement',     color: '#22c55e' },
-          { key: 'EXCLU',         label: 'Exclu',         color: '#a855f7' },
-          { key: 'MISE_EN_AVANT', label: 'Mise en avant', color: '#f59e0b' }
+          { key: 'EXCLU',         label: 'Exclu',         color: '#a855f7' }
         ]);
         return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
           ${picker}
@@ -13666,11 +13643,9 @@ async function promptOneShotPrixRouge(produitId, produitType) {
   if (!a) a = actions.find(x => x.produitId === produitId && (!x.produitType || x.produitType === produitType) && x.type === 'RENTRER' && !x.annulee);
   if (!a) a = actions.find(x => x.produitId === produitId && (!x.produitType || x.produitType === produitType) && x.type === 'SORTIR' && !x.annulee);
   if (!a) return; // Pas d'action liée, pas de PR possible
-  // Si le prix rouge est déjà sur l'action (réactivation), on s'assure que l'OP PRIX_ROUGE
-  // existe (elle a pu être clôturée lors de la désactivation du one-shot).
+  // Si le prix rouge est déjà sur l'action (réactivation), propager vers le COUP
   if (typeof a.prixRouge === 'number') {
-    if (a.type === 'RENTRER') syncRentrerPrixRougeOp(a);
-    else if (a.type === 'SORTIR') syncPrixRougeOp(a);
+    _propagateOneShotPrixRouge(a);
     return;
   }
 
@@ -13690,9 +13665,24 @@ async function promptOneShotPrixRouge(produitId, produitType) {
 
   a.prixAvantRouge = pvRef;
   a.prixRouge = prix;
-  // Créer l'OP auto
-  if (a.type === 'RENTRER') syncRentrerPrixRougeOp(a);
-  else if (a.type === 'SORTIR') syncPrixRougeOp(a);
+  _propagateOneShotPrixRouge(a);
+}
+
+// Propage le prixRouge d'une action vers l'OP COUP (one-shot unifié)
+function _propagateOneShotPrixRouge(a) {
+  if (a.type === 'RENTRER') {
+    const coupOp = ops.find(o => o.type === 'COUP' && !o.dateFin && o.rentrerActionId === a.id);
+    if (coupOp) {
+      coupOp.prixRouge = a.prixRouge;
+      if (typeof a.prixAvantRouge === 'number') coupOp.prixAvantRouge = a.prixAvantRouge;
+      // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe + tombstone
+      const oldPrOp = ops.find(o => o.rentrerPrixActionId === a.id && o.type === 'PRIX_ROUGE' && !o.dateFin);
+      if (oldPrOp) { oldPrOp.dateFin = ymd(new Date()); _deletedIds.add(oldPrOp.id); }
+      return;
+    }
+  }
+  // Fallback : action SORTIR ou pas de COUP trouvé
+  if (a.type === 'SORTIR') syncPrixRougeOp(a);
 }
 
 // Flag MANUEL par concurrent : "ce produit n'existe pas chez ce concurrent".
@@ -15092,7 +15082,7 @@ async function quickAttachCampagne(opId) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
   // Lister les campagnes existantes
-  const campList = campagnes.slice().sort((a, b) => a.nom.localeCompare(b.nom));
+  const campList = campagnes.filter(c => !isCampagneTerminee(c)).slice().sort((a, b) => a.nom.localeCompare(b.nom));
   let choix;
   if (campList.length > 0) {
     const listeTxt = campList.map((c, i) => `  ${i + 1}. ${c.nom}`).join('\n');
@@ -15307,8 +15297,9 @@ function renderOps() {
 
   const typeOptions = OP_TYPES.filter(t => !t.auto).map(t => `<option value="${t.key}">${t.label}</option>`).join('');
   const familleOptions = PRODUIT_LIBRE_FAMILLES.map(f => `<option value="${f.key}">${f.icon} ${f.label}</option>`).join('');
-  // Options campagnes : — aucune —, liste existante triée, + nouvelle
+  // Options campagnes : — aucune —, campagnes actives triées, + nouvelle (terminées masquées)
   const campagneOptions = campagnes
+    .filter(c => !isCampagneTerminee(c))
     .slice()
     .sort((a, b) => a.nom.localeCompare(b.nom))
     .map(c => {
@@ -15643,8 +15634,8 @@ function renderOps() {
     // Les campagnes non-NATIONALE sont affichées dans leur propre section de type.
     const _hasCampOps = false;
     // Ordre d'affichage des sections (indépendant de l'ordre de OP_TYPES)
-    const _displayOrder = ['LIQUIDE_DU_MOMENT', 'NATIONALE', 'PRIX_ROUGE', 'LANCEMENT', 'NOUVEAUTE', 'COUP'];
-    // Ajouter les types restants (EXCLU, MISE_EN_AVANT, etc.) à la fin
+    const _displayOrder = ['LIQUIDE_DU_MOMENT', 'NATIONALE', 'PRIX_ROUGE', 'NOUVEAUTE', 'COUP'];
+    // Ajouter les types restants (EXCLU, etc.) à la fin
     OP_TYPES.forEach(t => { if (!_displayOrder.includes(t.key)) _displayOrder.push(t.key); });
     _displayOrder.forEach(tKey => {
       const t = OP_TYPES.find(x => x.key === tKey);
@@ -16084,7 +16075,7 @@ function toggleOpClosure(opId) {
 //     tag SORTI_DESTOCKAGE pour trace) et pose dateFin.
 //   - annuler : pose dateFin sans toucher le kit ni l'action.
 //
-// Fanfares (NOUVEAUTE/LANCEMENT/EXCLU/MISE_EN_AVANT/NATIONALE) :
+// Fanfares (NOUVEAUTE/EXCLU/NATIONALE) :
 //   - fin_periode : retire les pièces PLV de op.pieces, pose dateFin,
 //     kit reste DANS_OFFRE (la fanfare s'arrête, pas le produit).
 //   - annuler : pose dateFin sans retirer les pièces.
@@ -16243,7 +16234,7 @@ function renderOpClosurePanel(op) {
   const kit = baseKits.find(k => k.id === (op.produitIds || [])[0]);
   const isPrixRougeReleve = op.type === 'PRIX_ROUGE' && op.prixActionId && !op.sortirActionId;
   const isPrixRougeDestock = op.type === 'PRIX_ROUGE' && op.sortirActionId;
-  const isFanfare = !op.prixActionId && !op.sortirActionId; // NOUVEAUTE, LANCEMENT, EXCLU, MISE_EN_AVANT, NATIONALE
+  const isFanfare = !op.prixActionId && !op.sortirActionId; // NOUVEAUTE, EXCLU, NATIONALE
 
   // Cas particulier : clôture déjà lancée (returnActionId posé, action de retour pas encore FAIT partout)
   // → afficher l'état + options "Forcer" / "Annuler la clôture en cours"
@@ -16426,6 +16417,18 @@ function opTimeStatus(op) {
   }
   return 'EN_COURS';
 }
+// Campagne terminée = soit dateFin passée, soit toutes ses OPs sont terminées
+function isCampagneTerminee(c) {
+  if (!c) return false;
+  const today = ymd(new Date());
+  // Si la campagne a une dateFin passée → terminée
+  if (c.dateFin && c.dateFin < today) return true;
+  // Si la campagne a des OPs, vérifier qu'elles sont toutes terminées
+  const campOps = ops.filter(o => o.campagneId === c.id);
+  if (campOps.length === 0) return false; // pas d'OPs → pas terminée
+  return campOps.every(o => opTimeStatus(o) === 'TERMINEE');
+}
+
 // Rend une phrase courte décrivant l'état temporel : "démarre dans 3 j", "depuis 12 j", "terminée le X", etc.
 function opTimePhrase(op) {
   const today = new Date(); today.setHours(0,0,0,0);
@@ -16646,6 +16649,11 @@ function renderOpCardHtml(op, options) {
     tagsBandeau.push(`<span onclick="event.stopPropagation(); toggleOpClosure('${op.id}')" style="cursor:pointer; font-size:9.5px; padding:2px 7px; background:#22d3ee25; color:#67e8f9; border:1px solid #22d3ee60; border-radius:3px; font-weight:600;" title="Suggestion basée sur le dernier relevé (${cs.date})${minTxt}. Cliquer pour clôturer.">💡 Clôture suggérée — ${reasonLbl}</span>`);
   }
   // Prix rouge (destockage) : affiché si renseigné sur l'OP ou sur l'action source — éditable inline
+  // Auto-heal : si l'action a le PR mais pas l'OP (perdu par merge sync), on le recopie
+  if (op.type === 'COUP' && !op.prixRouge && sourceAction && typeof sourceAction.prixRouge === 'number') {
+    op.prixRouge = sourceAction.prixRouge;
+    if (typeof sourceAction.prixAvantRouge === 'number') op.prixAvantRouge = sourceAction.prixAvantRouge;
+  }
   const _prRouge = op.prixRouge || (sourceAction && sourceAction.prixRouge);
   const _prAvant = op.prixAvantRouge || (sourceAction && sourceAction.prixAvantRouge);
   // Prix initial : prixAvantRouge ou PV actuel du produit (commun aux deux branches)
@@ -16658,8 +16666,8 @@ function renderOpCardHtml(op, options) {
   const initialTxt = typeof prixInitial === 'number' ? `<span style="text-decoration:line-through; color:#94a3b8; font-weight:400;">${prixInitial.toFixed(2)}€</span> → ` : '';
   if (_prRouge) {
     tagsBandeau.push(`<span style="font-size:9.5px; padding:2px 7px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-weight:700; display:inline-flex; align-items:center; gap:4px;" title="Prix rouge destockage — cliquer pour modifier">🔴 ${initialTxt}<input type="number" step="0.01" min="0" value="${_prRouge.toFixed(2)}" onchange="updateOpPrixRouge('${op.id}', this.value)" onclick="event.stopPropagation()" style="width:62px; padding:1px 4px; font-size:10px; background:#1e293b; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; font-weight:700; text-align:right;">€</span>`);
-  } else if (op.type === 'PRIX_ROUGE' && !op.dateFin) {
-    // OP Prix Rouge active sans prix renseigné : proposer de le saisir
+  } else if ((op.type === 'PRIX_ROUGE' || op.type === 'COUP') && !op.dateFin) {
+    // OP Prix Rouge ou COUP active sans prix renseigné : proposer de le saisir
     tagsBandeau.push(`<span style="font-size:9.5px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; display:inline-flex; align-items:center; gap:4px;">🔴 ${initialTxt}Prix rouge : <input type="number" step="0.01" min="0" value="" placeholder="Saisir" onchange="updateOpPrixRouge('${op.id}', this.value)" onclick="event.stopPropagation()" style="width:62px; padding:1px 4px; font-size:10px; background:#1e293b; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; text-align:right;">€</span>`);
   }
   const tagsHtml = tagsBandeau.length > 0
@@ -16676,8 +16684,8 @@ function renderOpCardHtml(op, options) {
 
   // Boutons "Étiquette Freetouch" : accès direct depuis la carte OP.
   // Affiché si le type est supporté par generateEtiquetteFromOp.
-  // Couvre : PRIX_ROUGE, NOUVEAUTE/LANCEMENT/MISE_EN_AVANT (→ Nouveauté), EXCLU, COUP (one-shot).
-  const ETIQ_OP_TYPES = ['PRIX_ROUGE','NOUVEAUTE','LANCEMENT','MISE_EN_AVANT','EXCLU','COUP'];
+  // Couvre : PRIX_ROUGE, NOUVEAUTE, EXCLU, COUP (one-shot).
+  const ETIQ_OP_TYPES = ['PRIX_ROUGE','NOUVEAUTE','EXCLU','COUP'];
   const canGenerateEtiq = ETIQ_OP_TYPES.includes(op.type);
   const freetouchBtnsHtml = (canGenerateEtiq && !shopFilter)
     ? `<div style="margin-top:6px; padding:6px 8px; background:#0f172a; border:1px solid #22d3ee30; border-radius:4px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
@@ -17264,10 +17272,12 @@ function updateOpPrixRouge(opId, val) {
     }
     op.prixRouge = prix;
   }
-  // Propager sur les actions liées (sortirActionId, prixActionId, groupActionIds)
+  ensureOpSteps(op); // Recalculer les steps (ajout/retrait des étapes PR)
+  // Propager sur les actions liées (sortirActionId, prixActionId, rentrerActionId, groupActionIds)
   const linkedIds = [];
   if (op.sortirActionId) linkedIds.push(op.sortirActionId);
   if (op.prixActionId) linkedIds.push(op.prixActionId);
+  if (op.type === 'COUP' && op.rentrerActionId) linkedIds.push(op.rentrerActionId);
   if (op.groupActionIds) linkedIds.push(...op.groupActionIds);
   linkedIds.forEach(aid => {
     const a = actions.find(x => x.id === aid);
@@ -18104,7 +18114,6 @@ function pickEtiquetteTemplate(op) {
 //   PRIX_ROUGE               → template "Prix Rouge" (inclut destockage, cf. sortirActionId)
 //   NOUVEAUTE                → template "Nouveauté"
 //   EXCLU                    → template "Exclu"
-//   LANCEMENT / MISE_EN_AVANT → template "Nouveauté" (fallback cohérent, libre de raffinage)
 //   COUP (one-shot)          → l'utilisateur choisit via pickEtiquetteTemplate()
 // Prix affiché = prix cible de l'action PRIX liée si dispo, sinon PV courant du kit.
 async function generateEtiquetteFromOp(opId, shop) {
@@ -18132,14 +18141,18 @@ async function generateEtiquetteFromOp(opId, shop) {
   // Choix du template selon le type d'OP
   let opOverride = null;
   if (op.type === 'PRIX_ROUGE') opOverride = 'PRIX_ROUGE';
-  else if (op.type === 'NOUVEAUTE' || op.type === 'LANCEMENT' || op.type === 'MISE_EN_AVANT') opOverride = 'NOUVEAUTE';
+  else if (op.type === 'NOUVEAUTE') opOverride = 'NOUVEAUTE';
   else if (op.type === 'EXCLU') opOverride = 'EXCLU';
   else if (op.type === 'COUP') {
-    // One-shot : laisser le choix du template à l'utilisateur
-    opOverride = await pickEtiquetteTemplate(op);
-    if (!opOverride) return; // annulé
-    // Pour les COUPs, re-vérifier le prixRouge si template PR choisi
-    if (opOverride === 'PRIX_ROUGE' && typeof op.prixRouge === 'number') price = op.prixRouge;
+    if (typeof op.prixRouge === 'number') {
+      // One-shot avec prix rouge → template prix rouge directement
+      opOverride = 'PRIX_ROUGE';
+      price = op.prixRouge;
+    } else {
+      // One-shot sans prix rouge → laisser le choix
+      opOverride = await pickEtiquetteTemplate(op);
+      if (!opOverride) return; // annulé
+    }
   }
   const date = new Date().toISOString().slice(0, 10);
   const safeName = (kit.marque + '_' + kit.modele).replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40);
