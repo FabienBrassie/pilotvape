@@ -2366,6 +2366,20 @@ function findOrphanOps() {
       // Les OPs manuelles sans produit base (produit libre ou sans produit) ne sont jamais orphelines
       const pid = op.produitIds && op.produitIds[0];
       if (!pid || op.produitLibre) return false;
+      // Si l'OP a un rentrerActionId valide (action non annulée), elle n'est PAS orpheline
+      // même si fanfareOpType est null (peut avoir été perdu par merge sync).
+      // On la garde et on re-synchro le fanfareOpType.
+      if (op.rentrerActionId) {
+        const _rA = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
+        if (_rA) {
+          // Auto-heal : si fanfareOpType est perdu sur l'action, on le restaure
+          if (!_rA.fanfareOpType && FANFARE.includes(op.type)) {
+            _rA.fanfareOpType = op.type;
+            console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _rA.id + ' depuis OP ' + op.id);
+          }
+          return false; // pas orpheline
+        }
+      }
       // Règle : une OP fanfare n'est légitime QUE si elle est la canonique pour son produit
       return !canonicalIds.has(op.id);
     }
@@ -2469,6 +2483,10 @@ function ensureOpSteps(op) {
   Object.keys(op.progress.global).forEach(k => { if (!gdefs.some(d => d.key === k)) delete op.progress.global[k]; });
 }
 
+// Steps de « fin d'OP » : SORTIR d'un COUP et désinstallation.
+// Ces étapes ne font PAS partie de la préparation / mise en place.
+const _POST_OP_KINDS = new Set(['coup_sortir', 'desinstall']);
+
 function opAllStepsDone(op, sh) {
   if (!op) return false;
   ensureOpModel(op);
@@ -2478,6 +2496,18 @@ function opAllStepsDone(op, sh) {
   if (defs.length === 0) return !!st.done;
   return defs.every(d => st.steps[d.key] === true);
 }
+// Version "readiness" : exclut les steps de sortie et de désinstallation.
+// Utilisée pour le badge « Prête / Pas prête » : une OP COUP est "prête"
+// dès que RENTRER + PR sont cochés, même si SORTIR n'est pas encore fait.
+function opReadyStepsDone(op, sh) {
+  if (!op) return false;
+  ensureOpModel(op);
+  const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
+  const st = op.etats && op.etats[sh];
+  if (!st || !st.steps) return false;
+  if (defs.length === 0) return true;
+  return defs.every(d => st.steps[d.key] === true);
+}
 function opStepsProgress(op, sh) {
   if (!op) return 0;
   ensureOpModel(op);
@@ -2485,6 +2515,17 @@ function opStepsProgress(op, sh) {
   const st = op.etats && op.etats[sh];
   if (!st || !st.steps) return 0;
   if (defs.length === 0) return st.done ? 1 : 0;
+  const done = defs.filter(d => st.steps[d.key] === true).length;
+  return done / defs.length;
+}
+// Version "readiness" de la progression (exclut sortie + désinstallation)
+function opReadyProgress(op, sh) {
+  if (!op) return 0;
+  ensureOpModel(op);
+  const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
+  const st = op.etats && op.etats[sh];
+  if (!st || !st.steps) return 0;
+  if (defs.length === 0) return 1;
   const done = defs.filter(d => st.steps[d.key] === true).length;
   return done / defs.length;
 }
@@ -2511,6 +2552,16 @@ function opGlobalState(op) {
   if (doneCount === SHOPS.length && opGlobalStepsAllDone(op)) return 'FAIT';
   return 'EN_COURS';
 }
+// Version "readiness" : est-ce que la mise en place est terminée ?
+// Exclut les steps de sortie (coup_sortir) et de désinstallation (desinstall).
+function opReadyState(op) {
+  if (!op || !op.etats) return 'A_FAIRE';
+  const doneCount = SHOPS.filter(sh => opReadyStepsDone(op, sh)).length;
+  if (doneCount === 0 && !opGlobalStepsAllDone(op)) return 'A_FAIRE';
+  if (doneCount === 0) return 'A_FAIRE';
+  if (doneCount === SHOPS.length && opGlobalStepsAllDone(op)) return 'FAIT';
+  return 'EN_COURS';
+}
 
 // Progression globale d'une OP (source unique de vérité pour tous les %).
 // Combine les steps amont (op.progress.global) ET les steps par shop
@@ -2525,6 +2576,25 @@ function opOverallProgress(op) {
   let totalShop = 0, doneShop = 0;
   SHOPS.forEach(sh => {
     const defs = computeOpShopStepDefs(op, sh);
+    totalShop += defs.length;
+    const st = op.etats && op.etats[sh];
+    if (!st || !st.steps) return;
+    doneShop += defs.filter(d => st.steps[d.key] === true).length;
+  });
+  const total = gDefs.length + totalShop;
+  const done  = gDone + doneShop;
+  if (total === 0) return 1;
+  return done / total;
+}
+// Version "readiness" : progression de la mise en place uniquement (exclut sortie + désinstallation)
+function opReadyOverallProgress(op) {
+  if (!op) return 0;
+  ensureOpModel(op);
+  const gDefs = computeOpGlobalStepDefs(op);
+  const gDone = gDefs.filter(d => op.progress && op.progress.global && op.progress.global[d.key] === true).length;
+  let totalShop = 0, doneShop = 0;
+  SHOPS.forEach(sh => {
+    const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
     totalShop += defs.length;
     const st = op.etats && op.etats[sh];
     if (!st || !st.steps) return;
@@ -3329,6 +3399,34 @@ function syncAutoActions() {
       if (sortirA && !sortirA.replaceParId) sortirA.replaceParId = kR.id;
     }
   });
+  // Auto-heal fanfare : si une action RENTRER a fanfareOpType défini mais qu'aucune OP
+  // fanfare correspondante n'existe (purgée par erreur ou tombstone), on la recrée.
+  actions.forEach(a => {
+    if (a.type !== 'RENTRER' || a.annulee || !a.fanfareOpType) return;
+    const FANFARE_TYPES = ['NOUVEAUTE','EXCLU'];
+    if (!FANFARE_TYPES.includes(a.fanfareOpType)) return;
+    const existingOp = ops.find(o => o.rentrerActionId === a.id && FANFARE_TYPES.includes(o.type) && !o._archived);
+    if (existingOp) return; // OP existe déjà
+    // Recréer l'OP fanfare
+    const today = ymd(new Date());
+    const newOp = {
+      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+      type: a.fanfareOpType,
+      produitIds: [a.produitId],
+      dateDebut: today,
+      dateFin: null,
+      commentaire: 'Entrée en fanfare (auto-restaurée)',
+      rentrerActionId: a.id,
+      auto: false,
+      etats: {},
+      pieces: []
+    };
+    seedOpDefaults(newOp);
+    ensureOpSteps(newOp);
+    pushOpTraced(newOp, 'syncAutoActions_fanfareHeal');
+    a.opId = newOp.id;
+    console.log('[FANFARE-HEAL] Recréée OP ' + newOp.id + ' type=' + a.fanfareOpType + ' pour action ' + a.id);
+  });
   syncMiseEnPlaceActions();
   syncPriceActions();
   syncOpsFromVerdicts();
@@ -3718,7 +3816,13 @@ function syncOpsFromVerdicts() {
     }
   }
   // ── Helper : auto-close pour action disparue/annulée (+ sévère : même manuelle) ──
-  function _autoCloseOrphan(op, raison) {
+  function _autoCloseOrphan(op, action, raison) {
+    // Si l'action est introuvable (pas encore arrivée par sync ?), ne pas fermer l'OP.
+    // On ne ferme que si l'action existe ET est explicitement annulée.
+    if (!action) {
+      console.log('[SYNC-ORPHAN-SKIP]', op.id, op.type, '— action introuvable, attente sync —', raison);
+      return;
+    }
     if (!op.dateFin) {
       console.log('[SYNC-ORPHAN]', op.id, op.type, '→ dateFin =', today, '—', raison);
       op.dateFin = today;
@@ -3733,7 +3837,7 @@ function syncOpsFromVerdicts() {
   // court-circuitées par une fermeture auto.
   ops.filter(o => o.prixActionId && !o.dateFin).forEach(op => {
     const a = actions.find(x => x.id === op.prixActionId);
-    if (!a || a.annulee) { _autoCloseOrphan(op, 'action PRIX supprimée/annulée'); return; }
+    if (!a || a.annulee) { _autoCloseOrphan(op, a, 'action PRIX supprimée/annulée'); return; }
     // PRIX_ROUGE relevé/manuelle (pas destockage) → PAS d'auto-close, l'admin gère la dateFin
     if (op.type === 'PRIX_ROUGE' && !op.sortirActionId) return;
     if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action PRIX terminée');
@@ -3742,7 +3846,7 @@ function syncOpsFromVerdicts() {
   // car elles sont liées aux DEUX actions : entrée + sortie).
   ops.filter(o => o.rentrerActionId && !o.dateFin && o.type !== 'COUP').forEach(op => {
     const a = actions.find(x => x.id === op.rentrerActionId);
-    if (!a || a.annulee) { _autoCloseOrphan(op, 'action RENTRER supprimée/annulée'); return; }
+    if (!a || a.annulee) { _autoCloseOrphan(op, a, 'action RENTRER supprimée/annulée'); return; }
     // Une entrée en fanfare se clôt quand le produit est actif partout
     // SAUF si l'OP fait partie d'une campagne avec une dateFin future → la campagne dicte la durée
     if (actionGlobalState(a) === 'FAIT') {
@@ -3766,7 +3870,7 @@ function syncOpsFromVerdicts() {
   // SORTIR → OP PRIX_ROUGE destockage liée (sortirActionId). Exclut COUP idem.
   ops.filter(o => o.sortirActionId && !o.dateFin && o.type !== 'COUP').forEach(op => {
     const a = actions.find(x => x.id === op.sortirActionId);
-    if (!a || a.annulee) { _autoCloseOrphan(op, 'action SORTIR supprimée/annulée'); return; }
+    if (!a || a.annulee) { _autoCloseOrphan(op, a, 'action SORTIR supprimée/annulée'); return; }
     if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action SORTIR terminée (destockage)');
   });
   // COUP → OP commune liée aux 2 actions (entrée + sortie). Clôt uniquement quand
@@ -3791,7 +3895,7 @@ function syncOpsFromVerdicts() {
   // MISE_EN_PLACE → OP liée (mepActionId)
   ops.filter(o => o.mepActionId && !o.dateFin).forEach(op => {
     const a = actions.find(x => x.id === op.mepActionId);
-    if (!a || a.annulee) { _autoCloseOrphan(op, 'action MEP supprimée/annulée'); return; }
+    if (!a || a.annulee) { _autoCloseOrphan(op, a, 'action MEP supprimée/annulée'); return; }
     if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action MEP terminée');
   });
   // RETOUR DE PRIX (clôture PRIX_ROUGE type 'retour_prix') → returnActionId
@@ -6156,7 +6260,8 @@ async function loadData() {
         if (_aR && typeof _aR.prixRouge === 'number') {
           op.prixRouge = _aR.prixRouge;
           if (typeof _aR.prixAvantRouge === 'number') op.prixAvantRouge = _aR.prixAvantRouge;
-          op._ts = new Date().toISOString();
+          // PAS de bump _ts ici : le prixRouge est protégé par _mergeArray (null-overwrite guard)
+          // Bumper _ts ferait "gagner" TOUS les champs locaux (dont dateFin potentiellement stale)
           console.log('[AUTO-HEAL] Restauré prixRouge=' + _aR.prixRouge + ' sur COUP ' + op.id + ' depuis action ' + _aR.id);
         }
       }
@@ -7052,8 +7157,25 @@ function _mergeArray(localArr, remoteArr, idField) {
       Object.keys(rx).forEach(k => {
         // Ne pas écraser les sous-structures complexes qui ont leur propre merge
         if (k === 'parfums' || k === 'etats' || k === 'steps' || k === '_stepTs' || k === 'progress') return;
-        // Ne pas écraser un prixRouge local défini avec un null/undefined distant
-        if ((k === 'prixRouge' || k === 'prixAvantRouge') && lx[k] != null && rx[k] == null) return;
+        // Ne pas écraser un champ local défini avec un null/undefined distant.
+        // Protège contre la perte de données quand un ordi distant a une version plus ancienne
+        // qui n'a pas encore ce champ. Sans ça, le merge last-write-wins écraserait silencieusement.
+        if (lx[k] != null && rx[k] == null) {
+          // Liste des champs protégés (ajoutés progressivement, jamais retirés)
+          const _nullGuard = new Set([
+            'prixRouge', 'prixAvantRouge', 'fanfareOpType',    // prix + fanfare
+            '_dateFinManuelle', 'motifCloture',                 // clôture manuelle
+            'campagneId',                                       // lien campagne
+            'rentrerActionId', 'sortirActionId',                // liens OP ↔ actions (purge-critical)
+            'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId',
+            'groupActionIds',                                   // actions groupées
+            'oneShotOpId',                                      // lien produit ↔ OP one-shot
+            'decisionChoice',                                   // décision prix (recalibrer/remonter)
+            'produitParfumId', 'parfumNom',                     // actions parfum
+            'replaceParId'                                      // lien remplacement
+          ]);
+          if (_nullGuard.has(k)) return;
+        }
         lx[k] = rx[k];
       });
       updated++;
@@ -7259,7 +7381,7 @@ function _startAutoSync() {
           if (_aR && typeof _aR.prixRouge === 'number') {
             _op.prixRouge = _aR.prixRouge;
             if (typeof _aR.prixAvantRouge === 'number') _op.prixAvantRouge = _aR.prixAvantRouge;
-            _op._ts = new Date().toISOString();
+            // PAS de bump _ts : évite que des champs stale locaux (dateFin etc.) écrasent le remote
             changed = true;
           }
         }
@@ -11166,7 +11288,7 @@ function renderDashboard() {
     for (const o of linkedOps) {
       const ts = opTimeStatus(o);
       if (ts === 'IMMINENTE') return true;
-      if (ts === 'EN_COURS' && opOverallProgress(o) < 0.5) return true;
+      if (ts === 'EN_COURS' && opReadyOverallProgress(o) < 0.5) return true;
       if (ts === 'A_VENIR') {
         const d = new Date(o.dateDebut + 'T00:00:00');
         const today = new Date(); today.setHours(0,0,0,0);
@@ -12830,8 +12952,8 @@ function renderDashboard() {
     const dFin = op.dateFin || op.dateDebut;
     return dFin < _today && !op.auto && op.type !== 'NATIONALE';
   });
-  const _opsImmNotReady = _opsInWindowActive.filter(op => opTimeStatus(op) === 'IMMINENTE' && opOverallProgress(op) < 0.5);
-  const _opsIncomplete  = _opsInWindowActive.filter(op => opTimeStatus(op) === 'EN_COURS'  && opOverallProgress(op) < 1);
+  const _opsImmNotReady = _opsInWindowActive.filter(op => opTimeStatus(op) === 'IMMINENTE' && opReadyOverallProgress(op) < 0.5);
+  const _opsIncomplete  = _opsInWindowActive.filter(op => opTimeStatus(op) === 'EN_COURS'  && opReadyOverallProgress(op) < 1);
   const _nbClotureSug  = ops.filter(op => op.closureSuggested).length;
 
   // Helper : chip cliquable — si 1 seule OP, clic direct ; sinon clic sur la première + tooltip listant toutes
@@ -12914,7 +13036,7 @@ function renderDashboard() {
         const entry = {
           id: op.id, label: d.label,
           color: meta.color, dateDebut: dDeb, dateFin: dFin,
-          isCamp: false, campId: cId, campNom: nom, ops: [op], pct: opOverallProgress(op),
+          isCamp: false, campId: cId, campNom: nom, ops: [op], pct: opReadyOverallProgress(op),
           type: op.type, clickId: op.id,
           typeLbl: meta.label, noEndDate: _noEnd,
           _campGroup: cId,
@@ -12942,7 +13064,7 @@ function renderDashboard() {
         return (!m || f > m) ? f : m;
       }, null);
       const cFin = cFinRaw < cDeb ? cDeb : cFinRaw;
-      const avgPct = cOps.reduce((s, o) => s + opOverallProgress(o), 0) / cOps.length;
+      const avgPct = cOps.reduce((s, o) => s + opReadyOverallProgress(o), 0) / cOps.length;
       // Type dominant (pour la couleur)
       const tc = {}; cOps.forEach(o => { tc[o.type] = (tc[o.type]||0)+1; });
       const domType = Object.entries(tc).sort((a,b) => b[1]-a[1])[0][0];
@@ -12973,7 +13095,7 @@ function renderDashboard() {
     _ganttEntries.push({
       id: op.id, label: d.label,
       color: meta.color, dateDebut: dDeb, dateFin: dFin,
-      isCamp: false, ops: [op], pct: opOverallProgress(op),
+      isCamp: false, ops: [op], pct: opReadyOverallProgress(op),
       type: op.type, clickId: op.id,
       typeLbl: meta.label, noEndDate: _noEnd
     });
@@ -13089,7 +13211,7 @@ function renderDashboard() {
     // Alertes
     const _fOps = entry.ops;
     const nbLate = _fOps.filter(o => { const f = o.dateFin || o.dateDebut; return f < _today && !o.auto && o.type !== 'NATIONALE'; }).length;
-    const nbUrg  = _fOps.filter(o => opTimeStatus(o) === 'IMMINENTE' && opOverallProgress(o) < 0.5).length;
+    const nbUrg  = _fOps.filter(o => opTimeStatus(o) === 'IMMINENTE' && opReadyOverallProgress(o) < 0.5).length;
     let alertIcon = '';
     if (nbLate) alertIcon = '<span style="font-size:9px; margin-left:2px;">⏰</span>';
     else if (nbUrg) alertIcon = '<span style="font-size:9px; margin-left:2px;">⚠</span>';
@@ -13227,7 +13349,7 @@ function renderDashboard() {
     const dFinRaw = op.dateFin || op.dateDebut;
     const dFin = dFinRaw < dDeb ? dDeb : dFinRaw; // garde-fou dateFin inversée
     const durDays = _daysBetween(dDeb, dFin) + 1;
-    const pct = opOverallProgress(op);
+    const pct = opReadyOverallProgress(op);
     const pctNum = Math.round(pct * 100);
     const status = opTimeStatus(op);
     const isLate   = dFin < _today && !op.auto && op.type !== 'NATIONALE' && status !== 'TERMINEE';
@@ -13269,13 +13391,13 @@ function renderDashboard() {
     const dFin = campOps.reduce((m, o) => { const f = o.dateFin || o.dateDebut; return (!m || f > m) ? f : m; }, null);
     const durDays = dDeb && dFin ? _daysBetween(dDeb, dFin) + 1 : 1;
     // Progression moyenne
-    const avgPct = campOps.reduce((s, o) => s + opOverallProgress(o), 0) / nbOps;
+    const avgPct = campOps.reduce((s, o) => s + opReadyOverallProgress(o), 0) / nbOps;
     const pctNum = Math.round(avgPct * 100);
     const pctCol = avgPct >= 1 ? '#22c55e' : avgPct >= 0.5 ? '#8b5cf6' : avgPct > 0 ? '#f59e0b' : '#64748b';
     // Alertes
     const nbLate = campOps.filter(o => { const f = o.dateFin || o.dateDebut; return f < _today && !o.auto; }).length;
-    const nbUrg  = campOps.filter(o => opTimeStatus(o) === 'IMMINENTE' && opOverallProgress(o) < 0.5).length;
-    const nbInc  = campOps.filter(o => opTimeStatus(o) === 'EN_COURS' && opOverallProgress(o) < 1).length;
+    const nbUrg  = campOps.filter(o => opTimeStatus(o) === 'IMMINENTE' && opReadyOverallProgress(o) < 0.5).length;
+    const nbInc  = campOps.filter(o => opTimeStatus(o) === 'EN_COURS' && opReadyOverallProgress(o) < 1).length;
     let badge = '';
     if (nbLate)     badge = `<span style="color:#ef4444;">⏰${nbLate > 1 ? nbLate : ''}</span>`;
     else if (nbUrg) badge = `<span style="color:#f59e0b;">⚠${nbUrg > 1 ? nbUrg : ''}</span>`;
@@ -15610,7 +15732,7 @@ function renderOps() {
     });
   // Pourcentage GLOBAL réel = étapes amont + étapes par boutique (toutes cumulées)
   // Délégation à la source unique de vérité (cf. opOverallProgress en haut du script).
-  const _opOverallPct = (op) => opOverallProgress(op);
+  const _opOverallPct = (op) => opReadyOverallProgress(op);
   const _overviewRows = _overviewOps.map(op => {
     const tMeta  = OP_TYPES.find(t => t.key === op.type) || { color: '#94a3b8', label: op.type };
     const tsKey  = opTimeStatus(op);
@@ -15621,7 +15743,7 @@ function renderOps() {
     const shopDots = SHOPS.map(sh => {
       const col = SHOP_COLORS[sh];
       const init = SHOP_LABELS[sh][0];
-      const defs = computeOpShopStepDefs(op, sh);
+      const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
       const st = op.etats && op.etats[sh];
       const nbDone = defs.filter(d => st && st.steps && st.steps[d.key] === true).length;
       const total = defs.length || 1;
@@ -15637,8 +15759,8 @@ function renderOps() {
     }).join('');
     // Badge "prête" / "pas prête" (signal fort pour imminente/en_cours) — largeur fixe pour alignement
     const _badgeBase = 'font-size:9px; padding:2px 6px; border-radius:3px; font-weight:700; white-space:nowrap; display:inline-block; min-width:96px; text-align:center; box-sizing:border-box;';
-    const gstate = opGlobalState(op);
-    const nShopsDone = SHOPS.filter(sh => opAllStepsDone(op, sh)).length;
+    const gstate = opReadyState(op);
+    const nShopsDone = SHOPS.filter(sh => opReadyStepsDone(op, sh)).length;
     let readyBadge;
     if (gstate === 'FAIT') {
       readyBadge = `<span title="Toutes les boutiques ont fini leur préparation" style="${_badgeBase} background:#22c55e25; color:#86efac; border:1px solid #22c55e60;">✓ Prête · ${SHOPS.length}/${SHOPS.length}</span>`;
@@ -16753,10 +16875,11 @@ function renderOpCardHtml(op, options) {
     if (shopFilter && sh !== shopFilter) return '';
     const col = SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
-    const shopDefs = computeOpShopStepDefs(op, sh);
+    const shopDefsAll = computeOpShopStepDefs(op, sh);
+    const shopDefs = shopDefsAll.filter(d => !_POST_OP_KINDS.has(d.kind));
     const st = op.etats[sh];
     const nbShopDone = shopDefs.filter(d => st && st.steps && st.steps[d.key] === true).length;
-    // Progression combinée (global + shop) pondérée par nb de steps
+    // Progression combinée (global + shop readiness) pondérée par nb de steps
     const total = globalDefsCount + shopDefs.length;
     const doneCombined = (globalPct * globalDefsCount) + nbShopDone;
     const pct = total === 0 ? 1 : (doneCombined / total);
@@ -16766,7 +16889,7 @@ function renderOpCardHtml(op, options) {
     else if (done)      bg = col;
     else                bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, transparent 0)`;
     const txt = done ? '#0f172a' : col;
-    const stepsTip = shopDefs.map(d => (st && st.steps && st.steps[d.key] ? '✓' : '○') + ' ' + d.label).join(' · ');
+    const stepsTip = shopDefsAll.map(d => (st && st.steps && st.steps[d.key] ? '✓' : '○') + ' ' + d.label).join(' · ');
     const tip = SHOP_LABELS[sh] + ' — ' + nbShopDone + '/' + shopDefs.length + ' local · ' + stepsTip;
     return `<span title="${tip}" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700; background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
   }).join('');
@@ -16775,8 +16898,8 @@ function renderOpCardHtml(op, options) {
   const tagsBandeau = [];
   // Readiness — signal fort surtout pour imminente/en_cours non prête
   if (!op.dateFin) {
-    const _gstate = opGlobalState(op);
-    const _nShopsDone = SHOPS.filter(sh => opAllStepsDone(op, sh)).length;
+    const _gstate = opReadyState(op);
+    const _nShopsDone = SHOPS.filter(sh => opReadyStepsDone(op, sh)).length;
     if (_gstate === 'FAIT') {
       tagsBandeau.push(`<span style="font-size:9.5px; padding:2px 7px; background:#22c55e25; color:#86efac; border:1px solid #22c55e60; border-radius:3px; font-weight:700;" title="Toutes les boutiques ont fini leur préparation (${SHOPS.length}/${SHOPS.length}). L'OP reste active jusqu'à sa date de fin.">✓ Prête · ${SHOPS.length}/${SHOPS.length} boutiques</span>`);
     } else if (timeStatus === 'EN_COURS') {
@@ -16831,7 +16954,7 @@ function renderOpCardHtml(op, options) {
   if (op.type === 'COUP' && !op.prixRouge && sourceAction && typeof sourceAction.prixRouge === 'number') {
     op.prixRouge = sourceAction.prixRouge;
     if (typeof sourceAction.prixAvantRouge === 'number') op.prixAvantRouge = sourceAction.prixAvantRouge;
-    op._ts = new Date().toISOString(); // Protéger la restauration contre re-merge
+    // PAS de bump _ts : protégé par _mergeArray null-guard, évite régression dateFin
   }
   const _prRouge = op.prixRouge || (sourceAction && sourceAction.prixRouge);
   const _prAvant = op.prixAvantRouge || (sourceAction && sourceAction.prixAvantRouge);
@@ -17038,7 +17161,7 @@ function renderAveragedShopDots(opsList, shopFilter) {
     opsList.forEach(op => {
       const globalPct = opGlobalStepsProgress(op);
       const globalDefsCount = computeOpGlobalStepDefs(op).length;
-      const shopDefs = computeOpShopStepDefs(op, sh);
+      const shopDefs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
       const st = op.etats[sh];
       const nbShopDone = shopDefs.filter(d => st && st.steps && st.steps[d.key] === true).length;
       const total = globalDefsCount + shopDefs.length;
@@ -17071,7 +17194,7 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
     if (shopFilter && sh !== shopFilter) return '';
     const col = SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
-    const shopDefs = computeOpShopStepDefs(op, sh);
+    const shopDefs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
     const st = op.etats[sh];
     const nbShopDone = shopDefs.filter(d => st && st.steps && st.steps[d.key] === true).length;
     const total = globalDefsCount + shopDefs.length;
