@@ -15775,8 +15775,12 @@ function renderOps() {
     const prod   = getOpProductDisplay(op);
     const pct    = Math.round(_opOverallPct(op) * 100);
     // Dots boutiques aux COULEURS DE BOUTIQUE : rempli = prête, camembert = partiel, vide = rien
+    // Grisé si produit hors stock
+    const _ovPid = op.produitIds && op.produitIds[0];
+    const _ovProd = _ovPid ? (baseKits.find(k => k.id === _ovPid) || baseLiq.find(l => l.id === _ovPid) || basePD.find(p => p.id === _ovPid)) : null;
     const shopDots = SHOPS.map(sh => {
-      const col = SHOP_COLORS[sh];
+      const _abs = _ovProd && !isKitPresentAtShop(_ovProd, sh);
+      const col = _abs ? '#64748b' : SHOP_COLORS[sh];
       const init = SHOP_LABELS[sh][0];
       const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
       const st = op.etats && op.etats[sh];
@@ -15789,7 +15793,7 @@ function renderOps() {
       else if (done)    bg = col;
       else              bg = `conic-gradient(${col} ${(p*360).toFixed(0)}deg, transparent 0)`;
       const txt = done ? '#0f172a' : col;
-      const tip = `${SHOP_LABELS[sh]} — ${nbDone}/${total} étape${total > 1 ? 's' : ''}`;
+      const tip = _abs ? `${SHOP_LABELS[sh]} — hors stock` : `${SHOP_LABELS[sh]} — ${nbDone}/${total} étape${total > 1 ? 's' : ''}`;
       return `<span title="${tip}" style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; font-size:8px; font-weight:700; background:${bg}; color:${txt}; border:1.5px solid ${col}; border-radius:50%; margin-right:3px; user-select:none;">${init}</span>`;
     }).join('');
     // Badge "prête" / "pas prête" (signal fort pour imminente/en_cours) — largeur fixe pour alignement
@@ -16906,9 +16910,12 @@ function renderOpCardHtml(op, options) {
   // Dots par shop — progression combinée : shop steps + quote-part proportionnelle des globals
   const globalPct = opGlobalStepsProgress(op);
   const globalDefsCount = computeOpGlobalStepDefs(op).length;
+  const _cardPid = op.produitIds && op.produitIds[0];
+  const _cardProd = _cardPid ? (baseKits.find(k => k.id === _cardPid) || baseLiq.find(l => l.id === _cardPid) || basePD.find(p => p.id === _cardPid)) : null;
   const shopDots = SHOPS.map(sh => {
     if (shopFilter && sh !== shopFilter) return '';
-    const col = SHOP_COLORS[sh];
+    const _abs = _cardProd && !isKitPresentAtShop(_cardProd, sh);
+    const col = _abs ? '#64748b' : SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
     const shopDefsAll = computeOpShopStepDefs(op, sh);
     const shopDefs = shopDefsAll.filter(d => !_POST_OP_KINDS.has(d.kind));
@@ -16925,7 +16932,7 @@ function renderOpCardHtml(op, options) {
     else                bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, transparent 0)`;
     const txt = done ? '#0f172a' : col;
     const stepsTip = shopDefsAll.map(d => (st && st.steps && st.steps[d.key] ? '✓' : '○') + ' ' + d.label).join(' · ');
-    const tip = SHOP_LABELS[sh] + ' — ' + nbShopDone + '/' + shopDefs.length + ' local · ' + stepsTip;
+    const tip = _abs ? SHOP_LABELS[sh] + ' — hors stock (auto-complété)' : SHOP_LABELS[sh] + ' — ' + nbShopDone + '/' + shopDefs.length + ' local · ' + stepsTip;
     return `<span title="${tip}" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700; background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
   }).join('');
 
@@ -17238,9 +17245,12 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   // Dots shop (mêmes règles que la version complète mais sans tooltip verbeux)
   const globalPct = opGlobalStepsProgress(op);
   const globalDefsCount = computeOpGlobalStepDefs(op).length;
+  const _cPid = op.produitIds && op.produitIds[0];
+  const _cProd = _cPid ? (baseKits.find(k => k.id === _cPid) || baseLiq.find(l => l.id === _cPid) || basePD.find(p => p.id === _cPid)) : null;
   const shopDots = SHOPS.map(sh => {
     if (shopFilter && sh !== shopFilter) return '';
-    const col = SHOP_COLORS[sh];
+    const _absent = _cProd && !isKitPresentAtShop(_cProd, sh);
+    const col = _absent ? '#64748b' : SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
     const shopDefs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
     const st = op.etats[sh];
@@ -17254,7 +17264,9 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
     else if (done)      bg = col;
     else                bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, transparent 0)`;
     const txt = done ? '#0f172a' : col;
-    const tip = `${SHOP_LABELS[sh]} — ${nbShopDone}/${shopDefs.length} local · ${Math.round(pct*100)}% total`;
+    const tip = _absent
+      ? `${SHOP_LABELS[sh]} — hors stock (auto-complété)`
+      : `${SHOP_LABELS[sh]} — ${nbShopDone}/${shopDefs.length} local · ${Math.round(pct*100)}% total`;
     return `<span title="${tip}" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700; background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
   }).join('');
 
