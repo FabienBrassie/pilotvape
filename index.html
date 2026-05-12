@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>PilotVape - Pilotage Commercial</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -2172,7 +2175,12 @@ function computeOpShopStepDefs(op, shop) {
       });
     }
     // Steps prix rouge : entre RENTRER et SORTIR (on reçoit → on étiquette PR → on sort)
-    const _coupHasPR = (typeof op.prixRouge === 'number') || (aR && typeof aR.prixRouge === 'number');
+    // Vérifier aussi si des steps PR existent déjà (évite de les purger si prixRouge perdu par merge)
+    const _existingPrSteps = SHOPS.some(sh => {
+      const _st = op.etats && op.etats[sh] && op.etats[sh].steps;
+      return _st && (_st.pr_etiquette === true || _st.pr_posee === true || _st.pr_swappy === true);
+    });
+    const _coupHasPR = (typeof op.prixRouge === 'number') || (aR && typeof aR.prixRouge === 'number') || _existingPrSteps;
     if (_coupHasPR) {
       const _coupPid = (op.produitIds || [])[0];
       const _isKit = _coupPid && baseKits.some(k => k.id === _coupPid);
@@ -6139,6 +6147,20 @@ async function loadData() {
     // On la désactive définitivement (gardée en commentaire pour historique).
     // if (!localStorage.getItem('pilotVape_migration_dateDebut_20260504_done')) { ... }
     localStorage.setItem('pilotVape_migration_dateDebut_20260504_done', '1');
+    // Auto-heal prixRouge sur les COUP OPs AVANT ensureOpSteps :
+    // Si op.prixRouge a été perdu par merge mais que l'action RENTRER liée l'a encore,
+    // on le restaure. Sans ça, ensureOpSteps purge les steps PR car _coupHasPR est false.
+    ops.forEach(op => {
+      if (op.type === 'COUP' && typeof op.prixRouge !== 'number' && op.rentrerActionId) {
+        const _aR = actions.find(x => x.id === op.rentrerActionId);
+        if (_aR && typeof _aR.prixRouge === 'number') {
+          op.prixRouge = _aR.prixRouge;
+          if (typeof _aR.prixAvantRouge === 'number') op.prixAvantRouge = _aR.prixAvantRouge;
+          op._ts = new Date().toISOString();
+          console.log('[AUTO-HEAL] Restauré prixRouge=' + _aR.prixRouge + ' sur COUP ' + op.id + ' depuis action ' + _aR.id);
+        }
+      }
+    });
     // Idem pour les OPs : chaque OP doit avoir etats[shop].steps cohérent avec son type.
     ops.forEach(op => ensureOpSteps(op));
     // Migration : aligner la source des pièces au défaut sémantique de leur type.
@@ -7230,6 +7252,18 @@ function _startAutoSync() {
         if (auditLog.length > AUDIT_LOG_MAX) auditLog = auditLog.slice(-AUDIT_LOG_MAX);
         if (auditLog.length !== _prevLogLen) changed = true;
       }
+      // Auto-heal prixRouge sur les COUP OPs après merge (évite perte par sync)
+      ops.forEach(_op => {
+        if (_op.type === 'COUP' && typeof _op.prixRouge !== 'number' && _op.rentrerActionId) {
+          const _aR = actions.find(x => x.id === _op.rentrerActionId);
+          if (_aR && typeof _aR.prixRouge === 'number') {
+            _op.prixRouge = _aR.prixRouge;
+            if (typeof _aR.prixAvantRouge === 'number') _op.prixAvantRouge = _aR.prixAvantRouge;
+            _op._ts = new Date().toISOString();
+            changed = true;
+          }
+        }
+      });
       // Max des compteurs
       if (typeof remote.nextActionId === 'number') nextActionId = Math.max(nextActionId, remote.nextActionId);
       if (typeof remote.nextOpId === 'number') nextOpId = Math.max(nextOpId, remote.nextOpId);
@@ -7259,6 +7293,45 @@ function _startAutoSync() {
 }
 // Démarrer l'auto-sync après le chargement initial
 setTimeout(_startAutoSync, 5000);
+
+// ── Auto-update : vérifie toutes les 5min si le fichier HTML a changé ──
+// Compare un hash léger (taille du fichier) pour détecter une mise à jour.
+// Si une nouvelle version est détectée, recharge la page automatiquement
+// (sauf si l'utilisateur est en train d'éditer quelque chose).
+const _APP_BUILD = Date.now(); // timestamp de CE chargement
+let _lastHtmlSize = null;
+function _checkForUpdate() {
+  fetch(location.href.split('?')[0].split('#')[0] + '?_nocache=' + Date.now(), { method: 'HEAD', cache: 'no-store' })
+    .then(r => {
+      const size = r.headers.get('content-length');
+      if (!size) return;
+      const sizeNum = parseInt(size);
+      if (_lastHtmlSize === null) { _lastHtmlSize = sizeNum; return; }
+      if (sizeNum !== _lastHtmlSize) {
+        console.log('[AUTO-UPDATE] Nouvelle version détectée (' + _lastHtmlSize + ' → ' + sizeNum + ')');
+        // Ne pas recharger si un modal, une saisie ou un formulaire est actif
+        const activeEl = document.activeElement;
+        const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable);
+        const hasModal = document.querySelector('.pvModal, [id*="modal"], [id*="Modal"]');
+        if (isEditing || hasModal) {
+          // Afficher un bandeau discret au lieu de recharger
+          if (!document.getElementById('updateBanner')) {
+            const b = document.createElement('div');
+            b.id = 'updateBanner';
+            b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#0ea5e9;color:white;text-align:center;padding:6px 12px;font-size:12px;font-weight:600;';
+            b.innerHTML = '🔄 Mise à jour disponible — <a href="#" onclick="location.reload();return false;" style="color:white;text-decoration:underline;">Recharger maintenant</a> <span onclick="this.parentElement.remove()" style="cursor:pointer;margin-left:12px;">✕</span>';
+            document.body.prepend(b);
+          }
+        } else {
+          // Reload automatique silencieux
+          location.reload();
+        }
+      }
+    })
+    .catch(() => {}); // réseau indisponible → on ignore
+}
+setInterval(_checkForUpdate, 5 * 60 * 1000); // toutes les 5 minutes
+setTimeout(_checkForUpdate, 30000); // premier check à 30s
 
 // Export complet : on inclut AUSSI actions + nextActionId pour préserver l'historique et
 // l'état d'avancement terrain (sinon un import écraserait tout ce travail).
