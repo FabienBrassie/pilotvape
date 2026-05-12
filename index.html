@@ -17051,17 +17051,26 @@ function renderOpCardHtml(op, options) {
     : '';
 
   // Steps par shop
+  // Résoudre le produit pour détecter absence par boutique
+  const _detailPid = op.produitIds && op.produitIds[0];
+  const _detailProd = _detailPid ? (baseKits.find(k => k.id === _detailPid) || baseLiq.find(l => l.id === _detailPid) || basePD.find(p => p.id === _detailPid)) : null;
   const stepsPerShop = SHOPS.filter(sh => !shopFilter || sh === shopFilter).map(sh => {
     const defs = computeOpShopStepDefs(op, sh);
     const st = op.etats[sh];
     const col = SHOP_COLORS[sh];
     const label = SHOP_LABELS[sh];
+    // Produit absent de cette boutique → section grisée, steps auto-cochés
+    const _absentShop = _detailProd && !isKitPresentAtShop(_detailProd, sh);
     const nbDone = defs.filter(d => st && st.steps && st.steps[d.key] === true).length;
     const allDone = defs.length > 0 && nbDone === defs.length;
+    const _absentBadge = _absentShop
+      ? `<span style="font-size:8px; padding:1px 5px; background:#64748b20; color:#64748b; border:1px solid #64748b40; border-radius:3px; font-weight:600;">hors stock</span>`
+      : '';
     const header = `<div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
-      <span style="width:6px; height:14px; background:${col}; border-radius:2px;"></span>
-      <span style="font-size:11px; font-weight:700; color:${col};">${label}</span>
-      <span style="font-size:9px; padding:1px 6px; background:${col}22; color:${col}; border-radius:999px; font-weight:700;">${nbDone}/${defs.length}</span>
+      <span style="width:6px; height:14px; background:${_absentShop ? '#64748b' : col}; border-radius:2px;"></span>
+      <span style="font-size:11px; font-weight:700; color:${_absentShop ? '#64748b' : col};">${label}</span>
+      ${_absentBadge}
+      <span style="font-size:9px; padding:1px 6px; background:${_absentShop ? '#64748b' : col}22; color:${_absentShop ? '#64748b' : col}; border-radius:999px; font-weight:700;">${nbDone}/${defs.length}</span>
       ${allDone && st && st.dateFait ? `<span style="font-size:9px; color:#64748b;">fait le ${st.dateFait}</span>` : ''}
     </div>`;
     const rows = defs.length === 0
@@ -17069,19 +17078,23 @@ function renderOpCardHtml(op, options) {
       : defs.map(d => {
         const checked = st && st.steps && st.steps[d.key] === true;
         const isDesinstall = d.kind === 'desinstall';
-        const _stepGrey = (_isTerminee && !isDesinstall) ? 'opacity:0.35; filter:saturate(0.3);' : '';
+        const _stepGrey = (_isTerminee && !isDesinstall) || _absentShop ? 'opacity:0.35; filter:saturate(0.3);' : '';
         const _stepHighlight = (_isTerminee && isDesinstall && !checked) ? 'background:#1c1117; border:1px solid #ef444460; border-radius:4px; padding:5px 6px; margin:2px -6px;' : '';
         const box = checked
-          ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:${col}; color:#0f172a; border:1px solid ${col}; border-radius:3px; font-size:${isDesinstall ? '11' : '10'}px; font-weight:700;">✓</span>`
+          ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:${_absentShop ? '#64748b' : col}; color:#0f172a; border:1px solid ${_absentShop ? '#64748b' : col}; border-radius:3px; font-size:${isDesinstall ? '11' : '10'}px; font-weight:700;">✓</span>`
           : `<span style="display:inline-block; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:transparent; border:${isDesinstall ? '2' : '1'}px solid ${isDesinstall ? col : col + '80'}; border-radius:3px;"></span>`;
-        return `<div onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"
-          style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; cursor:pointer; font-size:${isDesinstall ? '12' : '11'}px; color:${isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8')}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${_stepGrey} ${_stepHighlight}"
-          onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'">
+        // Si produit absent → pas de clic (les steps sont auto-cochés par ensureOpSteps)
+        const clickAttr = _absentShop
+          ? `title="Produit hors stock à ${label} — auto-complété"`
+          : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"`;
+        return `<div ${clickAttr}
+          style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_absentShop ? '' : 'cursor:pointer;'} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${_stepGrey} ${_stepHighlight}"
+          ${_absentShop ? '' : `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'"`}>
           ${box}
           <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}</span>
         </div>`;
       }).join('');
-    return `<div style="padding:6px 8px; background:#0f172a; border:1px solid ${col}30; border-radius:4px;">${header}${rows}</div>`;
+    return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${rows}</div>`;
   }).join('');
 
   // Panneau d'édition (si ouvert, et si l'édition est autorisée)
