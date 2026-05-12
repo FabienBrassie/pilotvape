@@ -3441,10 +3441,10 @@ function ensureOneShotOp(kit) {
   if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
   kit.oneShotOpId = op.id;
   ensureOpSteps(op);
-  // Re-synchro initiale : si les actions RENTRER/SORTIR portaient déjà des cochages
-  // (actions pré-existantes au moment du toggle one-shot), on les reflète sur l'OP.
-  if (aRentrer) syncActionStepsToOp(aRentrer);
-  if (aSortir)  syncActionStepsToOp(aSortir);
+  // ── Sync bidirectionnel respectant les timestamps ──
+  // Remplace l'ancien syncActionStepsToOp inconditionnel qui écrasait les coches
+  // OP par les valeurs action (potentiellement stale après un merge).
+  if (aRentrer || aSortir) _syncOneShotStepsBidi(op, aRentrer, aSortir);
   // S'assurer que le PRIX_ROUGE one-shot existe si l'action RENTRER porte un prixRouge
   // (filet de sécurité : recrée l'OP si elle a été purgée ou supprimée par erreur).
   if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
@@ -3512,8 +3512,10 @@ function ensureOneShotOpLiq(gamme) {
   if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
   gamme.oneShotOpId = op.id;
   ensureOpSteps(op);
-  if (aRentrer) syncActionStepsToOp(aRentrer);
-  if (aSortir)  syncActionStepsToOp(aSortir);
+  // ── Sync bidirectionnel respectant les timestamps ──
+  // Remplace l'ancien syncActionStepsToOp inconditionnel qui écrasait les coches
+  // OP par les valeurs action (potentiellement stale après un merge).
+  if (aRentrer || aSortir) _syncOneShotStepsBidi(op, aRentrer, aSortir);
   // S'assurer que le PRIX_ROUGE one-shot existe si l'action RENTRER porte un prixRouge
   if (aRentrer && typeof aRentrer.prixRouge === 'number') syncRentrerPrixRougeOp(aRentrer);
   return op;
@@ -4235,6 +4237,49 @@ function _opActionStepMirror(a, op) {
     return { a_to_o: a_to_o2, o_to_a: o_to_a2 };
   }
   return null;
+}
+
+// ── Sync bidirectionnel one-shot : action ↔ OP avec respect des timestamps ──
+// Appelé par ensureOneShotOp / ensureOneShotOpLiq pour les OPs EXISTANTES.
+// Contrairement à syncActionStepsToOp (qui écrase inconditionnellement OP ← action),
+// cette fonction compare les _stepTs des deux côtés et garde la valeur la plus récente.
+// Cela empêche les coches posées côté OP d'être effacées par des steps action stale.
+function _syncOneShotStepsBidi(op, aRentrer, aSortir) {
+  [aRentrer, aSortir].forEach(a => {
+    if (!a) return;
+    ensureActionSteps(a);
+    const m = _opActionStepMirror(a, op);
+    if (!m) return;
+    SHOPS.forEach(sh => {
+      const ast = a.etats && a.etats[sh];
+      const ost = op.etats && op.etats[sh];
+      if (!ast || !ast.steps || !ost || !ost.steps) return;
+      Object.entries(m.a_to_o).forEach(([ak, ok]) => {
+        if (typeof ast.steps[ak] !== 'boolean' || typeof ost.steps[ok] !== 'boolean') return;
+        const aTs = (ast._stepTs && ast._stepTs[ak]) || '';
+        const oTs = (ost._stepTs && ost._stepTs[ok]) || '';
+        if (aTs > oTs) {
+          // Action plus récente → copier vers OP
+          ost.steps[ok] = ast.steps[ak];
+          if (!ost._stepTs) ost._stepTs = {};
+          ost._stepTs[ok] = aTs;
+        } else if (oTs > aTs) {
+          // OP plus récente → copier vers action
+          ast.steps[ak] = ost.steps[ok];
+          if (!ast._stepTs) ast._stepTs = {};
+          ast._stepTs[ak] = oTs;
+        }
+        // Si égaux (ou les deux vides) → on ne touche à rien
+      });
+      // Recalculer done des deux côtés
+      ost.done = opAllStepsDone(op, sh);
+      if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
+      if (!ost.done) ost.dateFait = null;
+      ast.done = allStepsDone(a, sh);
+      if (ast.done && !ast.dateFait) ast.dateFait = ymd(new Date());
+      if (!ast.done) ast.dateFait = null;
+    });
+  });
 }
 
 // Recopie l'état des sous-étapes de l'action → OP liée (PRIX_ROUGE auto OU COUP).
@@ -15063,6 +15108,17 @@ async function deleteOp(id) {
       }
     }
   });
+  // ── COUP one-shot : désactiver le flag oneShot sur le produit lié ──
+  // Sinon ensureOneShotOp/ensureOneShotOpLiq recrée l'OP au prochain chargement.
+  if (op.type === 'COUP') {
+    const _coupPids = op.produitIds || [];
+    _coupPids.forEach(pid => {
+      const _kit = baseKits.find(k => k.id === pid);
+      if (_kit && _kit.oneShot) { _kit.oneShot = false; _kit.oneShotOpId = null; console.log('[DELETE-OP] oneShot désactivé sur kit', _kit.modele); }
+      const _liq = baseLiq.find(l => l.id === pid);
+      if (_liq && _liq.oneShot) { _liq.oneShot = false; _liq.oneShotOpId = null; console.log('[DELETE-OP] oneShot désactivé sur gamme', _liq.gamme); }
+    });
+  }
   ops = ops.filter(o => o.id !== id);
   saveData();
   renderDashboard();
