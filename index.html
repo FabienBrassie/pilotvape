@@ -3379,6 +3379,10 @@ function _closeOneShotOpGeneric(produit) {
   }
   ops.filter(o => o.type === 'COUP' && !o.dateFin && o.produitIds && o.produitIds[0] === produit.id)
      .forEach(o => { o.dateFin = today; });
+  // Clôturer les OP PRIX_ROUGE résiduelles liées au même produit + tombstone
+  ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin && o.source === 'rentrer_action'
+    && o.produitIds && o.produitIds[0] === produit.id)
+     .forEach(o => { o.dateFin = today; _deletedIds.add(o.id); });
   produit.oneShotOpId = null;
 }
 
@@ -3412,9 +3416,10 @@ function _syncCoupPrixRouge(op, aRentrer, produit) {
     } else if (!op.prixAvantRouge && produit && typeof produit.pv === 'number') {
       op.prixAvantRouge = produit.pv;
     }
+    op._ts = new Date().toISOString(); // Protéger le prixRouge contre merge sync
   } else {
     // Pas de prix rouge sur l'action → retirer du COUP si présent
-    if (op.prixRouge) { delete op.prixRouge; delete op.prixAvantRouge; }
+    if (op.prixRouge) { delete op.prixRouge; delete op.prixAvantRouge; op._ts = new Date().toISOString(); }
   }
   // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe encore (migration ou résurrection par merge)
   // Recherche élargie : par rentrerPrixActionId OU par produit commun
@@ -4412,6 +4417,8 @@ function updateActionPrixRouge(actionId, val) {
     } else {
       delete coupOp.prixRouge; delete coupOp.prixAvantRouge;
     }
+    coupOp._ts = new Date().toISOString(); // Protéger contre merge sync
+    ensureOpSteps(coupOp); // Recalculer steps PR
     // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe encore
     const oldPrOp = ops.find(o => o.rentrerPrixActionId === a.id && o.type === 'PRIX_ROUGE' && !o.dateFin);
     if (oldPrOp) { oldPrOp.dateFin = ymd(new Date()); _deletedIds.add(oldPrOp.id); }
@@ -6982,6 +6989,8 @@ function _mergeArray(localArr, remoteArr, idField) {
       Object.keys(rx).forEach(k => {
         // Ne pas écraser les sous-structures complexes qui ont leur propre merge
         if (k === 'parfums' || k === 'etats' || k === 'steps' || k === '_stepTs' || k === 'progress') return;
+        // Ne pas écraser un prixRouge local défini avec un null/undefined distant
+        if ((k === 'prixRouge' || k === 'prixAvantRouge') && lx[k] != null && rx[k] == null) return;
         lx[k] = rx[k];
       });
       updated++;
@@ -15618,8 +15627,52 @@ function renderOps() {
         sec.ops.sort((a, b) => (a.dateDebut || '').localeCompare(b.dateDebut || ''));
       }
       const isCollapsed = opTypeCollapsed.has('_tl_' + sec.key);
-      const cards = isCollapsed ? '' : sec.ops.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('');
       const secDotsHtml = renderAveragedShopDots(sec.ops, opShopFilter);
+      // Sous-regroupement par campagne dans chaque section timeline
+      let secInner = '';
+      if (!isCollapsed) {
+        const byCamp = {};
+        const noCamp = [];
+        sec.ops.forEach(op => {
+          if (op.campagneId) {
+            if (!byCamp[op.campagneId]) byCamp[op.campagneId] = [];
+            byCamp[op.campagneId].push(op);
+          } else {
+            noCamp.push(op);
+          }
+        });
+        const campIds = Object.keys(byCamp).sort((a, b) => {
+          const ca = getCampagne(a), cb = getCampagne(b);
+          return (ca ? ca.nom : '').localeCompare(cb ? cb.nom : '');
+        });
+        campIds.forEach(cid => {
+          const c = getCampagne(cid);
+          if (!c) return;
+          const opsInC = byCamp[cid];
+          opsInC.sort((a, b) => (a.dateDebut || '').localeCompare(b.dateDebut || ''));
+          const isCampCol = opCampagneCollapsed.has(cid);
+          const cnb = opsInC.length;
+          const cnbAct = opsInC.filter(o => opTimeStatus(o) !== 'TERMINEE').length;
+          const datesL = (c.dateDebut || c.dateFin)
+            ? `<span style="font-size:9.5px; color:#fbbf24; padding:1px 6px; background:#f59e0b15; border:1px solid #f59e0b40; border-radius:3px;">${fmtFR(c.dateDebut) || '?'} → ${fmtFR(c.dateFin) || '?'}</span>`
+            : '';
+          const campDots = renderAveragedShopDots(opsInC, opShopFilter);
+          secInner += `<div style="margin:4px 8px; background:#020617; border:1px solid #f59e0b40; border-left:3px solid #f59e0b; border-radius:5px; overflow:hidden;">
+            <div onclick="toggleCampagneCollapse('${cid}')" style="padding:5px 10px; cursor:pointer; display:flex; align-items:center; gap:8px; background:#f59e0b08;">
+              <span style="color:#f59e0b; font-size:11px; font-weight:700;">${isCampCol ? '▸' : '▾'}</span>
+              <span style="font-size:11px; color:#fbbf24; font-weight:700; letter-spacing:0.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;">📣 ${c.nom}</span>
+              ${datesL || ''}
+              <span style="font-size:9.5px; color:#94a3b8; white-space:nowrap;">${cnb} OP${cnb > 1 ? 's' : ''}${cnbAct > 0 ? ` · <span style="color:#a78bfa; font-weight:700;">${cnbAct} active${cnbAct > 1 ? 's' : ''}</span>` : ''}</span>
+              <span style="display:inline-flex; gap:3px;">${campDots}</span>
+            </div>
+            ${isCampCol ? '' : `<div style="padding:4px 0;">${opsInC.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('')}</div>`}
+          </div>`;
+        });
+        // OPs sans campagne — affichées à plat
+        if (noCamp.length) {
+          secInner += noCamp.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('');
+        }
+      }
       opsHtml += `<div style="margin-bottom:8px; background:#1e293b; border:1px solid ${sec.color}30; border-radius:6px; overflow:hidden;">
         <div onclick="toggleOpTypeCollapse('_tl_${sec.key}')" style="padding:6px 10px; cursor:pointer; display:grid; grid-template-columns:14px minmax(0,1fr) 130px 66px; align-items:center; gap:6px; background:${sec.color}12;">
           <span style="color:${sec.color}; font-size:12px; font-weight:700;">${isCollapsed ? '▸' : '▾'}</span>
@@ -15627,7 +15680,7 @@ function renderOps() {
           <span style="font-size:10px; color:#94a3b8;">${sec.ops.length} OP${sec.ops.length > 1 ? 's' : ''}</span>
           <span style="display:inline-flex; gap:3px; justify-content:center;">${secDotsHtml}</span>
         </div>
-        ${isCollapsed ? '' : `<div style="padding:6px 0;">${cards}</div>`}
+        ${isCollapsed ? '' : `<div style="padding:6px 0;">${secInner}</div>`}
       </div>`;
     });
   } else {
@@ -16653,6 +16706,7 @@ function renderOpCardHtml(op, options) {
   if (op.type === 'COUP' && !op.prixRouge && sourceAction && typeof sourceAction.prixRouge === 'number') {
     op.prixRouge = sourceAction.prixRouge;
     if (typeof sourceAction.prixAvantRouge === 'number') op.prixAvantRouge = sourceAction.prixAvantRouge;
+    op._ts = new Date().toISOString(); // Protéger la restauration contre re-merge
   }
   const _prRouge = op.prixRouge || (sourceAction && sourceAction.prixRouge);
   const _prAvant = op.prixAvantRouge || (sourceAction && sourceAction.prixAvantRouge);
@@ -17272,6 +17326,7 @@ function updateOpPrixRouge(opId, val) {
     }
     op.prixRouge = prix;
   }
+  op._ts = new Date().toISOString(); // Protéger contre écrasement merge sync
   ensureOpSteps(op); // Recalculer les steps (ajout/retrait des étapes PR)
   // Propager sur les actions liées (sortirActionId, prixActionId, rentrerActionId, groupActionIds)
   const linkedIds = [];
@@ -18144,10 +18199,12 @@ async function generateEtiquetteFromOp(opId, shop) {
   else if (op.type === 'NOUVEAUTE') opOverride = 'NOUVEAUTE';
   else if (op.type === 'EXCLU') opOverride = 'EXCLU';
   else if (op.type === 'COUP') {
-    if (typeof op.prixRouge === 'number') {
+    // Fallback : prixRouge peut être sur l'action RENTRER si perdu par merge
+    const _coupPR = op.prixRouge || (op.rentrerActionId && (() => { const _a = actions.find(x => x.id === op.rentrerActionId); return _a && _a.prixRouge; })());
+    if (typeof _coupPR === 'number') {
       // One-shot avec prix rouge → template prix rouge directement
       opOverride = 'PRIX_ROUGE';
-      price = op.prixRouge;
+      price = _coupPR;
     } else {
       // One-shot sans prix rouge → laisser le choix
       opOverride = await pickEtiquetteTemplate(op);
