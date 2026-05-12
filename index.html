@@ -1040,6 +1040,17 @@ const TIRAGE_SHORT = { MTL_RDL: 'MTL/RDL', DL: 'DL', 'DL+': 'DL+' };
 const LIQ_FORMATS = ['10mL', '10mL_SDN', '50mL', '100mL', '+150mL'];
 const LIQ_FORMAT_LABELS = { '10mL': '10 mL', '10mL_SDN': '10 mL SdN', '50mL': '50 mL', '100mL': '100 mL', '+150mL': '+150 mL' };
 const LIQ_FORMAT_COLORS = { '10mL': '#06b6d4', '10mL_SDN': '#0891b2', '50mL': '#8b5cf6', '100mL': '#ec4899', '+150mL': '#f43f5e' };
+// Badge colors for format labels in dashboard (bg + text)
+const LIQ_FORMAT_BADGE = {
+  '10mL':     { bg: '#475569', text: '#94a3b8' },
+  '10mL_SDN': { bg: '#14532d', text: '#4ade80' },
+  '50mL':     { bg: '#1e3a5f', text: '#60a5fa' },
+  '100mL':    { bg: '#3b1f63', text: '#c084fc' },
+  '+150mL':   { bg: '#475569', text: '#94a3b8' },
+};
+function _liqFormatBadge(formatKey) {
+  return LIQ_FORMAT_BADGE[formatKey] || { bg: '#475569', text: '#94a3b8' };
+}
 // PROFILS déjà déclaré plus haut (ligne 266)
 // Rôles liquides : les mêmes que kits + NOTORIETE
 const LIQ_ROLES = ['PRIX_D_APPEL', 'MEILLEURE_MARGE', 'COMPLEMENT', 'NOTORIETE', 'COUP'];
@@ -5219,7 +5230,7 @@ function toggleActionExpand(id) {
   const el = document.getElementById('action-detail-' + id);
   if (el) {
     el.style.display = expandedActions.has(id) ? 'block' : 'none';
-  } else if (id.startsWith('grp_') || id.startsWith('mrq_') || id.startsWith('sub_') || id.startsWith('besoins_')) {
+  } else if (id.startsWith('grp_') || id.startsWith('grplvl_') || id.startsWith('mrq_') || id.startsWith('sub_') || id.startsWith('besoins_')) {
     // Groupe de parfums, marque, sous-accordéon kits/liq ou besoins : re-render le dashboard
     renderDashboard();
   }
@@ -5847,12 +5858,61 @@ async function loadData() {
       });
     });
     propositions = data.propositions || propositions;
+    // ── Déduplication propositions kits ──
+    {
+      const _pc = {};
+      propositions.forEach(p => { _pc[p.id] = (_pc[p.id] || 0) + 1; });
+      const _dp = Object.keys(_pc).filter(id => _pc[id] > 1);
+      if (_dp.length > 0) {
+        console.warn('[DEDUP-PROP] Propositions en doublon:', _dp.join(', '));
+        const _rank = { 'RETENU': 2, 'REFUSE': 1 };
+        _dp.forEach(id => {
+          const ms = propositions.filter(p => p.id === id);
+          ms.sort((a, b) => (_rank[b.decision] || 0) - (_rank[a.decision] || 0));
+          const keeper = ms[0];
+          ms.slice(1).forEach(p => { const i = propositions.indexOf(p); if (i !== -1) propositions.splice(i, 1); });
+        });
+        console.warn('[DEDUP-PROP] Après purge:', propositions.length, 'propositions');
+      }
+    }
     propositionsLiq = Array.isArray(data.propositionsLiq) ? data.propositionsLiq : [];
+    // ── Déduplication propositions liquides ──
+    {
+      const _pc = {};
+      propositionsLiq.forEach(p => { _pc[p.id] = (_pc[p.id] || 0) + 1; });
+      const _dp = Object.keys(_pc).filter(id => _pc[id] > 1);
+      if (_dp.length > 0) {
+        console.warn('[DEDUP-PROPLIQ] Propositions liq en doublon:', _dp.join(', '));
+        const _rank = { 'RETENU': 2, 'REFUSE': 1 };
+        _dp.forEach(id => {
+          const ms = propositionsLiq.filter(p => p.id === id);
+          ms.sort((a, b) => (_rank[b.decision] || 0) - (_rank[a.decision] || 0));
+          ms.slice(1).forEach(p => { const i = propositionsLiq.indexOf(p); if (i !== -1) propositionsLiq.splice(i, 1); });
+        });
+        console.warn('[DEDUP-PROPLIQ] Après purge:', propositionsLiq.length, 'propositions liq');
+      }
+    }
     // Pièces détachées
     if (Array.isArray(data.basePD) && data.basePD.length > 10) { basePD = data.basePD; }
     else { basePD = JSON.parse(JSON.stringify(INIT_BASE_PD)); console.log('[MIGRATION-LS] Base PD réinitialisée avec', basePD.length, 'produits'); }
     basePD.forEach(pd => ensurePdModel(pd));
     propositionsPD = Array.isArray(data.propositionsPD) ? data.propositionsPD : [];
+    // ── Déduplication propositions PD ──
+    {
+      const _pc = {};
+      propositionsPD.forEach(p => { _pc[p.id] = (_pc[p.id] || 0) + 1; });
+      const _dp = Object.keys(_pc).filter(id => _pc[id] > 1);
+      if (_dp.length > 0) {
+        console.warn('[DEDUP-PROPPD] Propositions PD en doublon:', _dp.join(', '));
+        const _rank = { 'RETENU': 2, 'REFUSE': 1 };
+        _dp.forEach(id => {
+          const ms = propositionsPD.filter(p => p.id === id);
+          ms.sort((a, b) => (_rank[b.decision] || 0) - (_rank[a.decision] || 0));
+          ms.slice(1).forEach(p => { const i = propositionsPD.indexOf(p); if (i !== -1) propositionsPD.splice(i, 1); });
+        });
+        console.warn('[DEDUP-PROPPD] Après purge:', propositionsPD.length, 'propositions PD');
+      }
+    }
     actions = data.actions || [];
     // ── Déduplication : si deux actions partagent le même id, garder la non-annulée ──
     {
@@ -10460,8 +10520,10 @@ function renderWalls() {
     </div>`;
   };
   const _wallShopFilter = document.getElementById('kitShopFilter')?.value || '';
+  const _wallStatutFilter = kitStatutFilter || [];
   const renderCell = (offreKey) => {
-    const _allRaw = findAllProductsForSlot(offreKey);
+    let _allRaw = findAllProductsForSlot(offreKey);
+    if (_wallStatutFilter.length > 0) _allRaw = _allRaw.filter(k => _wallStatutFilter.includes(k.statutVie));
     const all = _wallShopFilter ? _allRaw.filter(k => isKitPresentAtShop(k, _wallShopFilter)) : _allRaw;
     const parsed = parseOffreKey(offreKey);
     const profilColor = parsed ? PROFIL_COLORS[parsed.profil] || '#334155' : '#334155';
@@ -11089,7 +11151,7 @@ function renderDashboard() {
     return `<span style="font-size:10px; color:#64748b;">${promptLabel}</span>${chips}${opLink}`;
   }
 
-  function renderActionCard(a) {
+  function renderActionCard(a, _opts) {
     // Cherche le produit : liquide, kit ou PD
     const isLiq = a.produitType === 'liq';
     const isPd = a.produitType === 'pd';
@@ -11111,7 +11173,7 @@ function renderDashboard() {
     // Calcul des labels selon type de produit (kit, liquide ou PD)
     let caseLabel, profColor, profShort;
     if (isLiq) {
-      caseLabel = prod.format || '—';
+      caseLabel = LIQ_FORMAT_LABELS[prod.format] || prod.format || '—';
       profColor = prod.profilChoisi ? PROFIL_COLORS[prod.profilChoisi] : '#64748b';
       profShort = prod.profilChoisi ? PROFIL_SHORT[prod.profilChoisi] : '—';
     } else if (isPd) {
@@ -11153,15 +11215,17 @@ function renderDashboard() {
       }
     }
 
-    let headerExtra = '';
+    let badgeTag = '';   // étiquette type : À sortir / Fin de vie / Nouveauté / One-shot / Swap / PRÊT
+    let badgePrix = '';  // prix rouge / OP chip restant
+    let badgeSub = '';   // substitution / logistique
 
     if (a.type === 'SORTIR') {
       // Pastille raison de sortie : Fin de vie vs À sortir
       const _sortProd = isLiq ? prod : (isPd ? prod : kit);
       if (_sortProd && _sortProd.statutVie === 'FIN_DE_VIE') {
-        headerExtra += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#78350f40; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">☠️ Fin de vie</span>`;
+        badgeTag += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#78350f40; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">☠️ Fin de vie</span>`;
       } else if (_sortProd && !_sortProd.oneShot) {
-        headerExtra += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#1e293b; color:#94a3b8; border:1px solid #47556940; border-radius:3px; white-space:nowrap;">📦 À sortir</span>`;
+        badgeTag += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#1e293b; color:#94a3b8; border:1px solid #47556940; border-radius:3px; white-space:nowrap;">📦 À sortir</span>`;
       }
       const contKit = continuityMap[a.id];
       // Lien explicite "remplacé par" posé par l'utilisateur sur l'action SORTIR
@@ -11205,10 +11269,10 @@ function renderDashboard() {
         if (prod.oneShot) {
           subtitleRow2 = `<span style="color:#fcd34d; font-style:italic;">⚡ One-shot — destockage</span>`;
         } else {
-          subtitleRow2 = `<span style="color:#64748b; font-style:italic;">fin de vie${a.produitParfumId ? ' (parfum)' : ''}</span>`;
+          subtitleRow2 = `<span style="color:#64748b; font-style:italic;">fin de vie${(a.produitParfumId || (_opts && _opts.parfumId)) ? ' (parfum)' : ''}</span>`;
         }
       }
-      // Prix rouge (destockage) : afficher sur la ligne principale (headerExtra) plutôt qu'en sous-titre
+      // Prix rouge (destockage) : badgePrix
       if (a.prixRouge) {
         const _prOpSort = ops.find(o => o.type === 'PRIX_ROUGE' && isOpOuverte(o) && (o.sortirActionId === a.id || (o.groupActionIds || []).includes(a.id)));
         const _prEcSort = _prOpSort ? isPrixRougeEnCours(_prOpSort) : true;
@@ -11218,7 +11282,7 @@ function renderDashboard() {
         const _prOpaSort = _prEcSort ? '' : ' opacity:0.7;';
         const _prDateSort = (!_prEcSort && _prOpSort && _prOpSort.dateDebut) ? ' · ' + fmtFR(_prOpSort.dateDebut) : '';
         const _pvAvantR = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
-        headerExtra += ` <span title="Prix rouge ${_prEcSort ? 'actif' : 'programmé'}${_prDateSort ? ' — dès ' + fmtFR(_prOpSort.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgSort}; color:${_prColorSort}; border:1px solid ${_prBorderSort}; border-radius:3px; white-space:nowrap;${_prOpaSort}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateSort}</span>`;
+        badgePrix += `<span title="Prix rouge ${_prEcSort ? 'actif' : 'programmé'}${_prDateSort ? ' — dès ' + fmtFR(_prOpSort.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgSort}; color:${_prColorSort}; border:1px solid ${_prBorderSort}; border-radius:3px; white-space:nowrap;${_prOpaSort}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateSort}</span>`;
       }
       // Badge état du remplaçant côté SORTIR — filtré par boutique
       const _subSortir = computeSubstitutionPair(a.produitId);
@@ -11229,21 +11293,20 @@ function renderDashboard() {
         const _cmdShops  = _shopsToCheck.filter(sh => _subSortir.shops[sh] === 'COMMANDE');
         const _attShops  = _shopsToCheck.filter(sh => _subSortir.shops[sh] === 'ATTENTE');
         if (_recuShops.length > 0) {
-          // Remplaçant reçu mais sortant pas encore sorti → on peut y aller
           const _lbl = fShop
             ? `${_subSortir.remplacant.modele} reçu, prêt !`
             : _recuShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : ' + _subSortir.remplacant.modele + ' reçu';
-          headerExtra += ` <span title="${_subSortir.remplacant.modele} est reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — prêt à prendre le relais" style="font-size:9px; font-weight:700; padding:1px 6px; background:#a78bfa20; color:#a78bfa; border:1px solid #a78bfa60; border-radius:3px; white-space:nowrap;">📦 ${_lbl}</span>`;
+          badgeSub += `<span title="${_subSortir.remplacant.modele} est reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — prêt à prendre le relais" style="font-size:9px; font-weight:700; padding:1px 6px; background:#a78bfa20; color:#a78bfa; border:1px solid #a78bfa60; border-radius:3px; white-space:nowrap;">📦 ${_lbl}</span>`;
         } else if (_cmdShops.length > 0 && _faitShops.length === 0) {
           const _lbl = fShop
             ? `${_subSortir.remplacant.modele} commandé`
             : _cmdShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : ' + _subSortir.remplacant.modele + ' commandé';
-          headerExtra += ` <span title="${_subSortir.remplacant.modele} commandé à ${_cmdShops.map(sh => SHOP_LABELS[sh]).join(', ')}" style="font-size:9px; padding:1px 6px; background:#3b82f618; color:#3b82f6; border:1px solid #3b82f650; border-radius:3px; white-space:nowrap;">🛒 ${_lbl}</span>`;
+          badgeSub += `<span title="${_subSortir.remplacant.modele} commandé à ${_cmdShops.map(sh => SHOP_LABELS[sh]).join(', ')}" style="font-size:9px; padding:1px 6px; background:#3b82f618; color:#3b82f6; border:1px solid #3b82f650; border-radius:3px; white-space:nowrap;">🛒 ${_lbl}</span>`;
         } else if (_attShops.length > 0 && _faitShops.length === 0 && _recuShops.length === 0 && _cmdShops.length === 0) {
           const _lbl = fShop
             ? `${_subSortir.remplacant.modele} pas encore commandé`
             : _subSortir.remplacant.modele + ' pas commandé';
-          headerExtra += ` <span title="${_subSortir.remplacant.modele} n'est pas encore commandé" style="font-size:9px; padding:1px 6px; background:#f59e0b15; color:#f59e0b; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">⏳ ${_lbl}</span>`;
+          badgeSub += `<span title="${_subSortir.remplacant.modele} n'est pas encore commandé" style="font-size:9px; padding:1px 6px; background:#f59e0b15; color:#f59e0b; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">⏳ ${_lbl}</span>`;
         }
       }
     } else if (a.type === 'RENTRER') {
@@ -11307,7 +11370,7 @@ function renderDashboard() {
           subtitleRow2 = `<span style="color:#64748b; font-style:italic;">${a.produitParfumId ? 'nouveau parfum' : 'nouvelle gamme'}</span>`;
         }
       }
-      // Prix rouge sur RENTRER (one-shot bradé, etc.)
+      // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
       if (a.prixRouge) {
         const _prOpRent = ops.find(o => o.type === 'PRIX_ROUGE' && isOpOuverte(o) && (o.rentrerPrixActionId === a.id || (o.produitIds || []).includes(prod.id)));
         const _prEcRent = _prOpRent ? isPrixRougeEnCours(_prOpRent) : true;
@@ -11317,7 +11380,22 @@ function renderDashboard() {
         const _prOpaRent = _prEcRent ? '' : ' opacity:0.7;';
         const _prDateRent = (!_prEcRent && _prOpRent && _prOpRent.dateDebut) ? ' · ' + fmtFR(_prOpRent.dateDebut) : '';
         const _pvAvantR = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
-        headerExtra += ` <span title="Prix rouge ${_prEcRent ? 'actif' : 'programmé'}${_prDateRent ? ' — dès ' + fmtFR(_prOpRent.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgRent}; color:${_prColorRent}; border:1px solid ${_prBorderRent}; border-radius:3px; white-space:nowrap;${_prOpaRent}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateRent}</span>`;
+        badgePrix += `<span title="Prix rouge ${_prEcRent ? 'actif' : 'programmé'}${_prDateRent ? ' — dès ' + fmtFR(_prOpRent.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgRent}; color:${_prColorRent}; border:1px solid ${_prBorderRent}; border-radius:3px; white-space:nowrap;${_prOpaRent}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateRent}</span>`;
+      }
+      // Badge "entrée en fanfare" : OP NOUVEAUTE/EXCLU/LANCEMENT/MISE_EN_AVANT liée → badgeTag
+      {
+        const _fanfareTypes = ['NOUVEAUTE','EXCLU','LANCEMENT','MISE_EN_AVANT'];
+        const _fanOp = ops.find(o => _fanfareTypes.includes(o.type) && isOpOuverte(o) && o.rentrerActionId === a.id);
+        if (_fanOp) {
+          const _fMeta = OP_TYPE_META[_fanOp.type];
+          const _fEc = !_fanOp.dateDebut || _fanOp.dateDebut <= ymd(new Date());
+          const _fColor = _fEc ? _fMeta.color : '#94a3b8';
+          const _fBg = _fColor + '22';
+          const _fBorder = _fColor + '60';
+          const _fOpa = _fEc ? '' : ' opacity:0.7;';
+          const _fDateLbl = (!_fEc && _fanOp.dateDebut) ? ' · ' + fmtFR(_fanOp.dateDebut) : '';
+          badgeTag += `<span title="OP ${_fMeta.label} ${_fEc ? 'en cours' : 'programmée'}${!_fEc && _fanOp.dateDebut ? ' — dès ' + fmtFR(_fanOp.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_fBg}; color:${_fColor}; border:1px solid ${_fBorder}; border-radius:3px; white-space:nowrap;${_fOpa}">🎯 ${_fMeta.label}${_fDateLbl}</span>`;
+        }
       }
       // Badge urgence substitution : le sortant est vendu — strictement filtré par boutique
       const _subRentrer = computeSubstitutionPair(a.produitId);
@@ -11326,30 +11404,29 @@ function renderDashboard() {
         const _urgShops = _shopsToCheck.filter(sh => _subRentrer.shops[sh] === 'URGENT');
         const _recuShops = _shopsToCheck.filter(sh => _subRentrer.shops[sh] === 'REÇU');
         if (_urgShops.length > 0) {
-          // En vue filtrée : pas besoin d'afficher la lettre, on sait quelle boutique c'est
           const _urgLabel = fShop
             ? `${_subRentrer.sortant.modele} sorti !`
             : _urgShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : ' + _subRentrer.sortant.modele + ' sorti !';
-          headerExtra += ` <span title="${_subRentrer.sortant.modele} est sorti à ${_urgShops.map(sh => SHOP_LABELS[sh]).join(', ')} — commander en priorité !" style="font-size:9px; font-weight:700; padding:1px 6px; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b70; border-radius:3px; white-space:nowrap; animation:_subUrgPulse 1.5s ease-in-out infinite;">⚠ ${_urgLabel}</span>`;
+          badgeSub += `<span title="${_subRentrer.sortant.modele} est sorti à ${_urgShops.map(sh => SHOP_LABELS[sh]).join(', ')} — commander en priorité !" style="font-size:9px; font-weight:700; padding:1px 6px; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b70; border-radius:3px; white-space:nowrap; animation:_subUrgPulse 1.5s ease-in-out infinite;">⚠ ${_urgLabel}</span>`;
         }
         if (_recuShops.length > 0 && _urgShops.length === 0) {
           const _recuLabel = fShop
             ? 'reçu, attente sortie'
             : _recuShops.map(sh => SHOP_LABELS[sh]).join(', ') + ' : reçu, attente sortie';
-          headerExtra += ` <span title="Reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — en attente que ${_subRentrer.sortant.modele} sorte" style="font-size:9px; padding:1px 6px; background:#a78bfa18; color:#a78bfa; border:1px solid #a78bfa50; border-radius:3px; white-space:nowrap;">📦 ${_recuLabel}</span>`;
+          badgeSub += `<span title="Reçu à ${_recuShops.map(sh => SHOP_LABELS[sh]).join(', ')} — en attente que ${_subRentrer.sortant.modele} sorte" style="font-size:9px; padding:1px 6px; background:#a78bfa18; color:#a78bfa; border:1px solid #a78bfa50; border-radius:3px; white-space:nowrap;">📦 ${_recuLabel}</span>`;
         }
       }
     } else if (a.type === 'SWAP_COMPOSANT') {
       const _compLabel = a.componentLabel || 'composant';
       const _oldName = a.oldPdName || '?';
       const _newName = a.newPdName || '?';
-      headerExtra = `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#6366f125; color:#a5b4fc; border:1px solid #6366f160; border-radius:3px; white-space:nowrap;">🔄 Swap ${_compLabel}</span>`;
+      badgeTag = `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#6366f125; color:#a5b4fc; border:1px solid #6366f160; border-radius:3px; white-space:nowrap;">🔄 Swap ${_compLabel}</span>`;
       subtitleRow2 = `<span style="color:#f87171;">${_oldName}</span> <span style="color:#64748b;">→</span> <span style="color:#4ade80; font-weight:600;">${_newName}</span>`;
     } else if (a.type === 'MISE_EN_PLACE') {
       const nbPret    = SHOPS.filter(sh => mepShopStatus(a, sh) === 'A_FAIRE').length;
       const nbAttente = SHOPS.filter(sh => mepShopStatus(a, sh) === 'EN_ATTENTE').length;
       if (nbPret > 0) {
-        headerExtra = `<span style="font-size:9px; padding:1px 6px; background:#8b5cf6; color:#fff; border-radius:3px; font-weight:700; letter-spacing:0.3px;">PRÊT ×${nbPret}</span>`;
+        badgeTag = `<span style="font-size:9px; padding:1px 6px; background:#8b5cf6; color:#fff; border-radius:3px; font-weight:700; letter-spacing:0.3px;">PRÊT ×${nbPret}</span>`;
       }
       const bits = [];
       if (nbPret)    bits.push(`<span style="color:#c4b5fd;">${nbPret} shop(s) prête(s)</span>`);
@@ -11368,9 +11445,10 @@ function renderDashboard() {
     const _modeleColor = _isSortir ? 'color:#f87171;' : (_isRentrer ? 'color:#4ade80;' : (_isBesoin ? 'color:#fb923c;' : ''));
 
     if (isLiq) {
-      // Parfum individuel vs gamme entière
-      if (a.produitParfumId) {
-        const _pf = prod.parfums ? prod.parfums.find(p => p.id === a.produitParfumId) : null;
+      // Parfum individuel vs gamme entière (ou parfum virtuel via _opts)
+      const _effectiveParfumId = (_opts && _opts.parfumId) || a.produitParfumId;
+      if (_effectiveParfumId) {
+        const _pf = prod.parfums ? prod.parfums.find(p => p.id === _effectiveParfumId) : null;
         const _pfName = _pf ? (_pf.n || '(sans nom)') : (a._parfumNom || '⚠ parfum introuvable');
         titleMain = `<span style="font-weight:400; color:${_marqueColor};">${prod.marque}</span> — <strong style="${_modeleColor}">${prod.gamme}</strong> <span style="color:#94a3b8; font-weight:400;">·</span> <em style="color:#e2e8f0;">${_pfName}</em> <span style="font-size:9px; padding:1px 6px; background:#6366f122; color:#a5b4fc; border:1px solid #6366f150; border-radius:3px; font-weight:600; white-space:nowrap;">Parfum</span>`;
       } else {
@@ -11394,16 +11472,14 @@ function renderDashboard() {
     const prioDot = prio === 'HAUTE' ? `<span title="Priorité haute (OP imminente)" style="width:6px; height:6px; background:${pc}; border-radius:50%; flex-shrink:0; margin-right:4px;"></span>`
       : prio === 'BASSE' ? `<span title="Priorité basse (pas d'OP)" style="width:6px; height:6px; background:${pc}; border-radius:50%; flex-shrink:0; margin-right:4px; opacity:0.5;"></span>` : '';
 
-    // Chip "OP en cours" : si une OP ouverte est liée à cette action → indicateur visuel dans l'en-tête.
-    // Code couleur selon le type d'OP (rouge pour PRIX_ROUGE, orange MISE_EN_AVANT, cyan NOUVEAUTE, etc.)
+    // Chip "OP en cours" : si une OP ouverte est liée → badgeTag (type OP) ou badgePrix (prix)
     const opLink = activeOpForAction(a.id);
-    let opChip = '';
     if (opLink) {
       const opMeta = OP_TYPE_META[opLink.op.type];
       const isDestockage = opLink.op.type === 'PRIX_ROUGE' && opLink.linkField === 'sortirActionId';
       const isCoup = opLink.op.type === 'COUP';
-      // Si PRIX_ROUGE et que headerExtra affiche déjà le prix barré → pas de doublon
-      const skipOpChip = opLink.op.type === 'PRIX_ROUGE' && a.prixRouge;
+      const _fanfareInBadge = a.type === 'RENTRER' && ['NOUVEAUTE','EXCLU','LANCEMENT','MISE_EN_AVANT'].includes(opLink.op.type) && opLink.linkField === 'rentrerActionId';
+      const skipOpChip = (opLink.op.type === 'PRIX_ROUGE' && a.prixRouge) || _fanfareInBadge;
       if (!skipOpChip) {
         const _opEc = opLink.op.type === 'PRIX_ROUGE' ? isPrixRougeEnCours(opLink.op)
                      : (!opLink.op.dateDebut || opLink.op.dateDebut <= ymd(new Date()));
@@ -11417,28 +11493,34 @@ function renderDashboard() {
           const _prx = opLink.op.prixRouge;
           chipLabel = typeof _prx === 'number' ? _prx.toFixed(2) + '€' : 'Prix rouge';
         }
-        // Ajouter la date prévue si OP pas encore en cours
         const _opDateLabel = (!_opEc && opLink.op.dateDebut) ? ' · ' + fmtFR(opLink.op.dateDebut) : '';
         const chipIcon = opLink.op.type === 'PRIX_ROUGE' ? '🔴' : (isCoup ? '⚡' : '🎯');
-        opChip = `<span title="Opération ${_opEc ? 'en cours' : 'programmée'}${!_opEc && opLink.op.dateDebut ? ' — dès ' + fmtFR(opLink.op.dateDebut) : ''} : ${opLabel}${isDestockage ? ' (destockage)' : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${opBg}; color:${opColor}; border:1px solid ${opBorder}; border-radius:3px; white-space:nowrap;${opOpa}">${chipIcon} ${chipLabel}${_opDateLabel}</span>`;
+        const _chipHtml = `<span title="Opération ${_opEc ? 'en cours' : 'programmée'}${!_opEc && opLink.op.dateDebut ? ' — dès ' + fmtFR(opLink.op.dateDebut) : ''} : ${opLabel}${isDestockage ? ' (destockage)' : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${opBg}; color:${opColor}; border:1px solid ${opBorder}; border-radius:3px; white-space:nowrap;${opOpa}">${chipIcon} ${chipLabel}${_opDateLabel}</span>`;
+        // Prix rouge → badgePrix, sinon badgeTag (One-shot, etc.)
+        if (opLink.op.type === 'PRIX_ROUGE') { badgePrix += _chipHtml; }
+        else { badgeTag += _chipHtml; }
       }
     }
 
     const isExpanded = expandedActions.has(a.id);
 
+    const _collapsedOnly = _opts && _opts.collapsedOnly;
+    const _acFb = isLiq ? _liqFormatBadge(prod.format) : null;
+    const _caseCellStyle = isLiq && _acFb ? `font-size:10px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:1px 4px; background:${_acFb.bg}; color:${_acFb.text}; border-radius:2px;` : `font-size:10px; color:#64748b; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;`;
     return `<div data-action-id="${a.id}" onclick="toggleActionExpand('${a.id}')" style="background:#1e293b; border-radius:3px; margin-bottom:1px; opacity:${stateOpacity}; cursor:pointer; border:1px solid #33415580; font-size:11px; padding:2px 10px;">
-      <div style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) auto 36px 56px auto 66px; gap:4px; align-items:center;">
+      <div style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px 220px 110px 200px 66px; gap:4px; align-items:center;">
         <div style="width:18px; height:18px; background:${T.color}; border-radius:3px; display:flex; align-items:center; justify-content:center; color:white; font-size:10px; font-weight:700; flex-shrink:0;">${T.icon}</div>
         <div style="font-weight:700; color:${T.color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${prioDot}${T.verb}</div>
         <div style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#f1f5f9;" title="${isLiq ? (prod.marque + ' — ' + prod.gamme) : isPd ? (prod.marque + ' ' + prod.modele) : (kit.marque + ' ' + kit.modele)}">${titleMain}</div>
-        <div style="display:flex; gap:3px; align-items:center; flex-wrap:nowrap;">${headerExtra}</div>
         <div style="font-size:10.5px; font-weight:600; color:${profColor}; text-align:center;">${profShort}</div>
-        <div style="font-size:10px; color:#64748b; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${caseLabel}">${caseLabel}</div>
-        <div style="display:flex; gap:3px; align-items:center; flex-wrap:nowrap;">${opChip}${commentIcon}</div>
-        <div style="display:flex; gap:3px; justify-content:flex-end; flex-shrink:0;">${SHOPS.map(sh => renderShopDot(a, sh)).join('')}</div>
+        <div style="${_caseCellStyle}" title="${caseLabel}">${caseLabel}</div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${badgeSub}</div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${badgeTag}</div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${badgePrix}</div>
+        <div style="display:flex; gap:3px; justify-content:flex-end; flex-shrink:0;">${commentIcon}${SHOPS.map(sh => renderShopDot(a, sh)).join('')}</div>
       </div>
       ${subtitleRow2 ? `<div style="margin-top:0; padding-left:108px; font-size:9px; line-height:1.15;">${subtitleRow2}</div>` : ''}
-    </div>
+    </div>` + ((_opts && _opts.collapsedOnly) ? '' : `
     <div id="action-detail-${a.id}" data-action-id="${a.id}" style="display:${isExpanded ? 'block' : 'none'}; margin:-2px 0 6px 10px; padding:7px 10px; background:#0f172a; border-radius:0 0 4px 4px; border:1px solid #33415580; border-top:none;" onclick="event.stopPropagation()">
       ${a.type === 'PRIX' ? (() => {
         // --- Version LIQUIDE (simplifiée — gamme ou parfum) ---
@@ -11752,7 +11834,7 @@ function renderDashboard() {
           ✕ Annuler cette action
         </button>
       </div>
-    </div>`;
+    </div>`);
   }
 
   function emptyState(txt, color) {
@@ -11767,7 +11849,7 @@ function renderDashboard() {
     const defLine = definition
       ? `<div style="margin:-4px 0 8px 26px; font-size:10px; color:#64748b; font-style:italic;">${definition}</div>`
       : '';
-    return `<div id="dashSection-${key}" style="margin-bottom:14px; scroll-margin-top:12px;">
+    return `<div id="dashSection-${key}" style="margin-bottom:14px; scroll-margin-top:12px; background:${color}12; border:1px solid ${color}25; border-radius:8px; padding:10px 10px 6px;">
       <div onclick="toggleDashSection('${key}')" style="display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer; user-select:none; padding:4px 2px; border-radius:4px;" onmouseover="this.style.background='#1e293b80'" onmouseout="this.style.background='transparent'">
         <span style="color:${color}; font-size:11px; width:14px; text-align:center; font-weight:700;">${chevron}</span>
         <span style="width:4px; height:16px; background:${color}; border-radius:2px;"></span>
@@ -11784,7 +11866,6 @@ function renderDashboard() {
   // sous un en-tête dépliable. Les actions non-parfum (gamme entière, kits) restent des cartes individuelles.
   // Rend un groupe de parfums d'une même gamme (accordéon gamme)
   function _renderGammeParfumGroup(grp) {
-    if (grp.length === 1) return renderActionCard(grp[0]);
     const gammeId = grp[0].produitId;
     const g = baseLiq.find(l => l.id === gammeId);
     if (!g) return grp.map(renderActionCard).join('');
@@ -11803,17 +11884,22 @@ function renderDashboard() {
     const someRouge = rougeCount > 0 && !allRouge;
     let prixRougeChip = '';
     if (isSortir && (allRouge || someRouge)) {
-      // Vérifier si l'OP liée est en cours ou future
+      // Vérifier si l'OP liée est en cours ou future (même format que kits)
       const _grpOp = (() => { const ol = activeOpForAction(grp[0].id); return ol ? ol.op : null; })();
       const _grpEc = _grpOp ? isPrixRougeEnCours(_grpOp) : true;
-      const _grpCol = _grpEc ? '#ef4444' : '#94a3b8';
-      const _grpOpa = _grpEc ? '' : ' opacity:0.55;';
+      const _grpColor = _grpEc ? '#fca5a5' : '#94a3b8';
+      const _grpBg = _grpEc ? '#ef444425' : '#94a3b815';
+      const _grpBorder = _grpEc ? '#ef444460' : '#94a3b840';
+      const _grpOpa = _grpEc ? '' : ' opacity:0.7;';
+      const _grpDateStr = (!_grpEc && _grpOp && _grpOp.dateDebut) ? ' · ' + fmtFR(_grpOp.dateDebut) : '';
       if (allRouge) {
         const prSample = grp[0].prixRouge;
         const allSame = grp.every(a => a.prixRouge === prSample);
-        prixRougeChip = `<span style="font-size:9px; padding:1px 6px; background:${_grpCol}22; color:${_grpCol}; border:1px solid ${_grpCol}50; border-radius:3px; font-weight:600; white-space:nowrap;${_grpOpa}">🔴 ${allSame ? prSample.toFixed(2) + '€' : 'prix rouge'}</span>`;
+        const _pvAvantGrp = allSame && typeof grp[0].prixAvantRouge === 'number' ? grp[0].prixAvantRouge.toFixed(2) + '€' : '';
+        const _prLabel = allSame ? prSample.toFixed(2) + '€' : 'prix rouge';
+        prixRougeChip = `<span title="Prix rouge ${_grpEc ? 'actif' : 'programmé'}${_grpDateStr ? ' — dès ' + (_grpOp ? fmtFR(_grpOp.dateDebut) : '') : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_grpBg}; color:${_grpColor}; border:1px solid ${_grpBorder}; border-radius:3px; white-space:nowrap;${_grpOpa}">🔴 ${_pvAvantGrp ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantGrp + '</s> → ' : ''}${_prLabel}${_grpDateStr}</span>`;
       } else {
-        prixRougeChip = `<span style="font-size:9px; padding:1px 6px; background:${_grpCol}15; color:${_grpEc ? '#f87171' : '#94a3b8'}; border:1px solid ${_grpCol}30; border-radius:3px; font-weight:500; white-space:nowrap;${_grpOpa}">🔴 ${rougeCount}/${grp.length}</span>`;
+        prixRougeChip = `<span title="Prix rouge partiel (${rougeCount}/${grp.length})" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_grpBg}; color:${_grpColor}; border:1px solid ${_grpBorder}; border-radius:3px; white-space:nowrap;${_grpOpa}">🔴 ${rougeCount}/${grp.length}${_grpDateStr}</span>`;
       }
     }
     let prixRougeBtn = '';
@@ -11821,7 +11907,7 @@ function renderDashboard() {
       // Masquer le bouton si un PR groupé est déjà actif pour ces actions
       const _hasActiveGroupPr = grp.some(a => {
         const ol = activeOpForAction(a.id);
-        return ol && ol.op.type === 'PRIX_ROUGE' && !ol.op.dateFin;
+        return ol && ol.op.type === 'PRIX_ROUGE';
       });
       if (!_hasActiveGroupPr) {
         const grpIdsAttr = grp.map(a => a.id).join('|');
@@ -11849,23 +11935,104 @@ function renderDashboard() {
         background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
     }).join('');
 
-    return `<div style="margin-bottom:3px;">
-      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 1fr auto; gap:8px; align-items:center; padding:5px 10px; background:#1e293b; border-radius:4px; cursor:pointer; border:1px solid #33415580;">
-        <div style="width:22px; height:22px; background:#334155; border-radius:5px; display:flex; align-items:center; justify-content:center; color:#94a3b8; font-size:11px; flex-shrink:0;">${isExpanded ? '▾' : '▸'}</div>
-        <div style="min-width:0;">
-          <div style="font-size:12px; color:#f1f5f9; display:flex; align-items:center; gap:5px; flex-wrap:wrap; line-height:1.25;">
-            <span style="font-weight:600;">${g.gamme}</span>
-            <span style="font-size:9px; padding:1px 5px; background:#33415580; color:#94a3b8; border-radius:2px;">${grp.length} parfums</span>
-            ${prixRougeChip}
-          </div>
-          <div style="font-size:10.5px; margin-top:1px; line-height:1.25;">
-            <span style="color:${profColor}; font-weight:600;">${profShort}</span>
-            <span style="color:#64748b;">· ${formatLabel}</span>${progressLabel}
-          </div>
-        </div>
-        <div style="display:flex; align-items:center; gap:6px;">${prixRougeBtn}<span style="display:flex; gap:3px;">${_grpShopDots}</span></div>
+    const _gfb = _liqFormatBadge(g.format);
+    return `<div style="margin-bottom:1px;">
+      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px 220px 110px 200px 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
+        <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
+        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span><span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${grp.length} parfum${grp.length>1?'s':''}</span>${progressLabel}</div>
+        <div style="font-size:9px; color:${profColor}; font-weight:600; text-align:center;">${profShort}</div>
+        <div style="font-size:9px; text-align:center;"><span style="padding:1px 5px; background:${_gfb.bg}; color:${_gfb.text}; border-radius:2px; white-space:nowrap;">${formatLabel}</span></div>
+        <div></div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeBtn}</div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeChip}</div>
+        <div style="display:flex; gap:3px; justify-content:flex-end;">${_grpShopDots}</div>
       </div>
-      ${isExpanded ? `<div style="margin:0 0 2px 12px; border-left:2px solid ${T.color}30; padding-left:8px;">` + grp.map(renderActionCard).join('') + `</div>` : ''}
+      ${isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">` + grp.map(renderActionCard).join('') + `</div>` : ''}
+    </div>`;
+  }
+
+  // Rend une action gamme-level comme un groupe de parfums (même format que _renderGammeParfumGroup)
+  function _renderGammeLevelAsParfumGroup(a) {
+    const g = baseLiq.find(l => l.id === a.produitId);
+    if (!g || !g.parfums || g.parfums.length === 0) return renderActionCard(a);
+    const T = TYPE_META[a.type] || TYPE_META.SORTIR;
+    // Filtrer parfums pertinents
+    const parfums = (g.parfums || []).filter(p => {
+      if (a.type === 'SORTIR' && p.s === 'SORTI') return false;
+      return p.s !== 'SORTI' || a.type !== 'SORTIR';
+    });
+    if (parfums.length === 0) return renderActionCard(a);
+    const groupKey = 'grplvl_' + a.id;
+    const isExpanded = expandedActions.has(groupKey);
+    const profColor = g.profilChoisi ? PROFIL_COLORS[g.profilChoisi] : '#64748b';
+    const profShort = g.profilChoisi ? PROFIL_SHORT[g.profilChoisi] : '—';
+    const formatLabel = LIQ_FORMAT_LABELS[g.format] || g.format;
+    const globalState = actionGlobalState(a);
+    const doneLabel = globalState === 'FAIT' ? ` <span style="color:#4ade80; font-size:9px;">✓</span>` : '';
+    // Prix rouge chip (gamme-level — même format que kits)
+    let prixRougeChip = '';
+    if (a.type === 'SORTIR' && a.prixRouge) {
+      const _glOp = (() => { const ol = activeOpForAction(a.id); return ol ? ol.op : null; })();
+      const _glEc = _glOp ? isPrixRougeEnCours(_glOp) : true;
+      const _glColor = _glEc ? '#fca5a5' : '#94a3b8';
+      const _glBg = _glEc ? '#ef444425' : '#94a3b815';
+      const _glBorder = _glEc ? '#ef444460' : '#94a3b840';
+      const _glOpa = _glEc ? '' : ' opacity:0.7;';
+      const _glDateStr = (!_glEc && _glOp && _glOp.dateDebut) ? ' · ' + fmtFR(_glOp.dateDebut) : '';
+      const _glPvAvant = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
+      prixRougeChip = `<span title="Prix rouge ${_glEc ? 'actif' : 'programmé'}${_glDateStr ? ' — dès ' + fmtFR(_glOp.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_glBg}; color:${_glColor}; border:1px solid ${_glBorder}; border-radius:3px; white-space:nowrap;${_glOpa}">🔴 ${_glPvAvant ? '<s style="color:#64748b; font-weight:400;">' + _glPvAvant + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_glDateStr}</span>`;
+    }
+    // Prix rouge bouton groupé
+    let prixRougeBtn = '';
+    if (a.type === 'SORTIR' && !a.prixRouge) {
+      const _glHasPr = (() => { const ol = activeOpForAction(a.id); return ol && ol.op.type === 'PRIX_ROUGE'; })();
+      if (!_glHasPr) {
+        prixRougeBtn = `<button onclick="event.stopPropagation(); setGroupPrixRouge('${a.id}')" style="font-size:9px; padding:2px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444450; border-radius:3px; cursor:pointer; font-weight:600; white-space:nowrap;" title="Appliquer un prix rouge">🔴 Prix rouge ?</button>`;
+      }
+    }
+    // Shop dots agrégés
+    const _glShopDots = SHOPS.map(sh => {
+      if (fShop && sh !== fShop) return '';
+      const col = SHOP_COLORS[sh]; const init = SHOP_LABELS[sh][0];
+      ensureActionSteps(a);
+      const pct = stepsProgress(a, sh);
+      let bg;
+      if (pct === 0) bg = 'transparent'; else if (pct === 1) bg = col;
+      else bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, transparent 0)`;
+      return `<span title="${SHOP_LABELS[sh]} — ${Math.round(pct*100)}%" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700; background:${bg}; color:${pct===1?'#0f172a':col}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
+    }).join('');
+
+    // Parfum lines (même format action card, cliquables → toggle section détail partagée)
+    let parfumLinesHtml = '';
+    if (isExpanded) {
+      // Toutes les lignes parfum en collapsedOnly (pas de section détail individuelle)
+      parfumLinesHtml = parfums.map(p => renderActionCard(a, { parfumId: p.id, collapsedOnly: true })).join('');
+      // Section détail partagée unique (étapes par shop, remplacé par, etc.)
+      // Cliquer sur n'importe quel parfum toggle a.id → affiche/masque cette section
+      const _detailExpanded = expandedActions.has(a.id);
+      const _fullCard = renderActionCard(a);
+      const _detailTag = 'id="action-detail-' + a.id + '"';
+      const _idx = _fullCard.indexOf(_detailTag);
+      if (_idx !== -1) {
+        // Extraire la section détail du rendu complet (tout depuis <div id="action-detail-...">)
+        const _start = _fullCard.lastIndexOf('<div', _idx);
+        parfumLinesHtml += _fullCard.substring(_start);
+      }
+    }
+
+    const _glFb = _liqFormatBadge(g.format);
+    return `<div style="margin-bottom:1px;">
+      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px 220px 110px 200px 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
+        <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
+        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span><span style="font-size:9px; padding:1px 5px; background:#f5970b22; color:#fbbf24; border:1px solid #f5970b50; border-radius:2px; white-space:nowrap;">gamme entière</span><span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${parfums.length} parfum${parfums.length>1?'s':''}</span>${doneLabel}</div>
+        <div style="font-size:9px; color:${profColor}; font-weight:600; text-align:center;">${profShort}</div>
+        <div style="font-size:9px; text-align:center;"><span style="padding:1px 5px; background:${_glFb.bg}; color:${_glFb.text}; border-radius:2px; white-space:nowrap;">${formatLabel}</span></div>
+        <div></div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeBtn}</div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeChip}</div>
+        <div style="display:flex; gap:3px; justify-content:flex-end;">${_glShopDots}</div>
+      </div>
+      ${isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">${parfumLinesHtml}</div>` : ''}
     </div>`;
   }
 
@@ -11883,7 +12050,8 @@ function renderDashboard() {
       if (!groups[key]) groups[key] = [];
       groups[key].push(a);
     });
-    let html = gammeActions.map(renderActionCard).join('');
+    // Gamme-level actions → rendu en groupe de parfums (même format)
+    let html = gammeActions.map(a => _renderGammeLevelAsParfumGroup(a)).join('');
     // Trier les groupes par meilleure priorité
     const groupKeys = Object.keys(groups).sort((a, b) => {
       const pa = Math.min(...groups[a].map(x => _prioRank[effectivePrio(x)] ?? 1));
@@ -11920,6 +12088,10 @@ function renderDashboard() {
         const pa = _prioRank[effectivePrio(a)] ?? 1;
         const pb = _prioRank[effectivePrio(b)] ?? 1;
         if (pa !== pb) return pa - pb;
+        // Actions avec OP liée avant celles sans OP (même prio)
+        const oa = activeOpForAction(a.id) ? 0 : 1;
+        const ob = activeOpForAction(b.id) ? 0 : 1;
+        if (oa !== ob) return oa - ob;
         const ra = (a.replaceParId || linkMap[a.id]) ? 0 : 1;
         const rb = (b.replaceParId || linkMap[b.id]) ? 0 : 1;
         return ra - rb;
@@ -11943,9 +12115,9 @@ function renderDashboard() {
       const doneCount = actions.filter(a => actionGlobalState(a) === 'FAIT').length;
       const progress = doneCount > 0 ? ` <span style="font-size:9px; color:#64748b;">(${doneCount}/${actions.length} fait${doneCount>1?'s':''})</span>` : '';
       return `<div style="margin-bottom:4px;">
-        <div onclick="toggleActionExpand('${subKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px auto 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
+        <div onclick="toggleActionExpand('${subKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px 220px 110px 200px 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
           <div style="width:22px; height:22px; background:#1e293b; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;">${isExpanded ? '▾' : icon}</div>
-          <div style="font-size:12px; color:#f1f5f9; font-weight:700; grid-column:2/6;">${label} <span style="font-size:9px; padding:1px 6px; background:#33415580; color:#94a3b8; border-radius:2px; font-weight:400;">${actions.length} action${actions.length>1?'s':''}</span> ${progress}</div>
+          <div style="font-size:12px; color:#f1f5f9; font-weight:700; grid-column:2/8;">${label} <span style="font-size:9px; padding:1px 6px; background:#33415580; color:#94a3b8; border-radius:2px; font-weight:400;">${actions.length} action${actions.length>1?'s':''}</span> ${progress}</div>
           <div></div>
           <div style="display:flex; gap:3px; justify-content:flex-end;">${_shopDots}</div>
         </div>
@@ -11982,7 +12154,7 @@ function renderDashboard() {
     const liqDoneCount = liqActions.filter(a => actionGlobalState(a) === 'FAIT').length;
     const liqProgress = liqDoneCount > 0 ? ` <span style="font-size:9px; color:#64748b;">(${liqDoneCount}/${liqActions.length} fait${liqDoneCount>1?'s':''})</span>` : '';
 
-    // Contenu liquides : regrouper par marque → accordéon
+    // Contenu liquides : regrouper par marque → séparateur léger (pas d'accordéon)
     const byMarque = {};
     liqActions.forEach(a => {
       const g = baseLiq.find(l => l.id === a.produitId);
@@ -11991,7 +12163,6 @@ function renderDashboard() {
       byMarque[marque].push(a);
     });
     const marques = Object.keys(byMarque).sort((a, b) => {
-      // Tri par meilleure priorité de la marque (HAUTE → NORMALE → BASSE), puis alphabétique
       const bestPrio = (acts) => Math.min(...acts.map(x => _prioRank[effectivePrio(x)] ?? 1));
       const pa = bestPrio(byMarque[a]);
       const pb = bestPrio(byMarque[b]);
@@ -12000,99 +12171,32 @@ function renderDashboard() {
     });
 
     let liqInnerHtml = '';
-    // Si une seule marque → pas d'accordéon marque, juste le contenu
-    if (marques.length === 1) {
-      liqInnerHtml = _renderLiqActionsInner(byMarque[marques[0]]);
-    } else {
-    let _liqMarquesHtml = '';
-    marques.forEach(marque => {
+    const _showMarqueHeaders = marques.length > 1;
+    marques.forEach((marque, mIdx) => {
       const marqueActions = byMarque[marque];
-      const marqueKey = 'mrq_' + marque + '_' + (marqueActions[0] ? marqueActions[0].type : '');
-      const isExpanded = expandedActions.has(marqueKey);
-      const totalCount = marqueActions.length;
-      const doneCount = marqueActions.filter(a => actionGlobalState(a) === 'FAIT').length;
-      // Compter gammes distinctes
-      const gammeIds = new Set(marqueActions.map(a => a.produitId));
-      const gammeLabel = gammeIds.size === 1 ? '1 gamme' : gammeIds.size + ' gammes';
-      const progressBadge = doneCount > 0 ? `<span style="font-size:9px; color:#64748b;">(${doneCount}/${totalCount} fait${doneCount>1?'s':''})</span>` : '';
-      // Prix rouge groupé marque : seulement pour les SORTIR
-      const isSortirMarque = marqueActions[0] && marqueActions[0].type === 'SORTIR';
-      const marqueSortirActions = isSortirMarque ? marqueActions.filter(a => a.produitParfumId || !a.produitParfumId) : [];
-      const marqueRougeCount = marqueSortirActions.filter(a => a.prixRouge).length;
-      const marqueAllRouge = marqueRougeCount === marqueSortirActions.length && marqueRougeCount > 0;
-      const marqueSomeRouge = marqueRougeCount > 0 && !marqueAllRouge;
-      let marquePrixRougeChip = '';
-      if (isSortirMarque && (marqueAllRouge || marqueSomeRouge)) {
-        const _mqOp = (() => { const ol = activeOpForAction(marqueSortirActions[0].id); return ol ? ol.op : null; })();
-        const _mqEc = _mqOp ? isPrixRougeEnCours(_mqOp) : true;
-        const _mqCol = _mqEc ? '#ef4444' : '#94a3b8';
-        const _mqOpa = _mqEc ? '' : ' opacity:0.55;';
-        if (marqueAllRouge) {
-          marquePrixRougeChip = `<span style="font-size:9px; padding:1px 6px; background:${_mqCol}22; color:${_mqCol}; border:1px solid ${_mqCol}50; border-radius:3px; font-weight:600; white-space:nowrap;${_mqOpa}">🔴 prix rouge</span>`;
-        } else {
-          marquePrixRougeChip = `<span style="font-size:9px; padding:1px 6px; background:${_mqCol}15; color:${_mqEc ? '#f87171' : '#94a3b8'}; border:1px solid ${_mqCol}30; border-radius:3px; font-weight:500; white-space:nowrap;${_mqOpa}">🔴 ${marqueRougeCount}/${marqueSortirActions.length}</span>`;
-        }
+      if (_showMarqueHeaders) {
+        const gammeIds = new Set(marqueActions.map(a => a.produitId));
+        const gammeLabel = gammeIds.size === 1 ? '1 gamme' : gammeIds.size + ' gammes';
+        const actionLabel = marqueActions.length === 1 ? '1 action' : marqueActions.length + ' actions';
+        // Séparateur marque discret (non-cliquable)
+        liqInnerHtml += `<div style="display:flex; align-items:center; gap:8px; padding:${mIdx > 0 ? '8' : '4'}px 6px 3px;">
+          <span style="font-size:10px; font-weight:700; color:#94a3b8; letter-spacing:0.5px; text-transform:uppercase; white-space:nowrap;">${marque}</span>
+          <span style="font-size:9px; color:#475569; white-space:nowrap;">${gammeLabel} · ${actionLabel}</span>
+          <div style="flex:1; height:1px; background:#33415560;"></div>
+        </div>`;
       }
-      let marquePrixRougeBtn = '';
-      if (isSortirMarque && marqueSortirActions.length > 1) {
-        const _hasActiveMarquePr = marqueSortirActions.some(a => {
-          const ol = activeOpForAction(a.id);
-          return ol && ol.op.type === 'PRIX_ROUGE' && !ol.op.dateFin;
-        });
-        if (!_hasActiveMarquePr) {
-          const marqueIdsAttr = marqueSortirActions.map(a => a.id).join('|');
-          marquePrixRougeBtn = `<button onclick="event.stopPropagation(); setGroupPrixRouge('${marqueIdsAttr}')" style="font-size:9px; padding:2px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444450; border-radius:3px; cursor:pointer; font-weight:600; white-space:nowrap;" title="Appliquer un prix rouge à toutes les actions SORTIR de ${marque}">🔴 Prix rouge groupé ?</button>`;
-        }
-      }
-
-      // Ronds de progression agrégée par boutique (moyenne de toutes les actions de la marque)
-      const _marqueShopDots = SHOPS.map(sh => {
-        if (fShop && sh !== fShop) return '';
-        const col = SHOP_COLORS[sh];
-        const init = SHOP_LABELS[sh][0];
-        // Moyenne des progressions de toutes les actions non-annulées de cette marque
-        const activeActions = marqueActions.filter(a => !a.annulee);
-        if (activeActions.length === 0) return '';
-        let totalPct = 0;
-        activeActions.forEach(a => {
-          ensureActionSteps(a);
-          totalPct += stepsProgress(a, sh);
-        });
-        const avgPct = totalPct / activeActions.length;
-        const allDone = avgPct === 1;
-        let bg;
-        if (avgPct === 0)      bg = 'transparent';
-        else if (avgPct === 1) bg = col;
-        else                   bg = `conic-gradient(${col} ${(avgPct*360).toFixed(0)}deg, transparent 0)`;
-        const txt = allDone ? '#0f172a' : col;
-        const pctLabel = Math.round(avgPct * 100) + '%';
-        return `<span title="${SHOP_LABELS[sh]} — ${pctLabel} (${activeActions.length} action${activeActions.length>1?'s':''})"
-          style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700;
-          background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
-      }).join('');
-
-      _liqMarquesHtml += `<div style="margin-bottom:4px;">
-        <div onclick="toggleActionExpand('${marqueKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px auto 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
-          <div style="width:22px; height:22px; background:#1e293b; border-radius:5px; display:flex; align-items:center; justify-content:center; color:#64748b; font-size:11px; flex-shrink:0;">${isExpanded ? '▾' : '▸'}</div>
-          <div style="font-size:12px; color:#f1f5f9; font-weight:700; grid-column:2/5;">${marque} <span style="font-size:9px; padding:1px 6px; background:#33415580; color:#94a3b8; border-radius:2px; font-weight:400;">${gammeLabel} · ${totalCount} action${totalCount>1?'s':''}</span> ${marquePrixRougeChip} ${progressBadge}</div>
-          <div></div>
-          <div style="display:flex; align-items:center; gap:4px;">${marquePrixRougeBtn}</div>
-          <div style="display:flex; gap:3px; justify-content:flex-end;">${_marqueShopDots}</div>
-        </div>
-        ${isExpanded ? `<div style="margin:2px 0 2px 10px; padding-left:8px; border-left:2px solid #33415560;">` + _renderLiqActionsInner(marqueActions) + `</div>` : ''}
-      </div>`;
-      });
-      liqInnerHtml = _liqMarquesHtml;
-    }
+      // Contenu marque : gammes directement (pas d'accordéon)
+      liqInnerHtml += _renderLiqActionsInner(marqueActions);
+    });
 
     // Nombre de gammes distinctes pour le badge
     const _liqGammeIds = new Set(liqActions.map(a => a.produitId));
     const _liqGammeLabel = _liqGammeIds.size === 1 ? '1 gamme' : _liqGammeIds.size + ' gammes';
 
     html += `<div style="margin-bottom:4px;">
-      <div onclick="toggleActionExpand('${liqSubKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px auto 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
+      <div onclick="toggleActionExpand('${liqSubKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px 220px 110px 200px 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
         <div style="width:22px; height:22px; background:#1e293b; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;">${liqExpanded ? '▾' : '🧪'}</div>
-        <div style="font-size:12px; color:#f1f5f9; font-weight:700; grid-column:2/6;">Liquides <span style="font-size:9px; padding:1px 6px; background:#33415580; color:#94a3b8; border-radius:2px; font-weight:400;">${_liqGammeLabel} · ${liqActions.length} action${liqActions.length>1?'s':''}</span> ${liqProgress}</div>
+        <div style="font-size:12px; color:#f1f5f9; font-weight:700; grid-column:2/8;">Liquides <span style="font-size:9px; padding:1px 6px; background:#33415580; color:#94a3b8; border-radius:2px; font-weight:400;">${_liqGammeLabel} · ${liqActions.length} action${liqActions.length>1?'s':''}</span> ${liqProgress}</div>
         <div></div>
         <div style="display:flex; gap:3px; justify-content:flex-end;">${_liqShopDots}</div>
       </div>
@@ -15286,11 +15390,14 @@ function renderOps() {
     if (op._archived) return false;
     if (opFilterType && op.type !== opFilterType) return false;
     // Filtre boutique : masquer les OP dont le produit est déjà SORTI pour cette boutique
-    // (ex: PR sur un kit dont le SORTIR est done à Pessac → invisible en vue Pessac)
+    // (ex: PR sur un kit dont le SORTIR est done à Pessac → invisible en vue Pessac).
+    // Fonctionne pour kits, liquides et PD — isKitPresentAtShop utilise statutVie + actions.
     if (opShopFilter && op.produitIds && op.produitIds.length > 0) {
       const _pid = op.produitIds[0];
-      const _kit = baseKits.find(k => k.id === _pid);
-      if (_kit && typeof isKitPresentAtShop === 'function' && !isKitPresentAtShop(_kit, opShopFilter)) return false;
+      const _prod = baseKits.find(k => k.id === _pid)
+                 || baseLiq.find(l => l.id === _pid)
+                 || basePD.find(p => p.id === _pid);
+      if (_prod && typeof isKitPresentAtShop === 'function' && !isKitPresentAtShop(_prod, opShopFilter)) return false;
     }
     const tstatus = opTimeStatus(op);
     if (opFilterStatus === 'active') {
