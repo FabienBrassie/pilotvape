@@ -11709,7 +11709,7 @@ function renderDashboard() {
     const _acFb = isLiq ? _liqFormatBadge(prod.format) : null;
     const _caseCellStyle = isLiq && _acFb ? `font-size:10px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; padding:1px 4px; background:${_acFb.bg}; color:${_acFb.text}; border-radius:2px;` : `font-size:10px; color:#64748b; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;`;
     return `<div data-action-id="${a.id}" onclick="toggleActionExpand('${a.id}')" style="background:#1e293b; border-radius:3px; margin-bottom:1px; opacity:${stateOpacity}; cursor:pointer; border:1px solid #33415580; font-size:11px; padding:2px 10px;">
-      <div style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px minmax(0,180px) minmax(0,110px) minmax(0,180px) 66px; gap:4px; align-items:center;">
+      <div style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center;">
         <div style="width:18px; height:18px; background:${T.color}; border-radius:3px; display:flex; align-items:center; justify-content:center; color:white; font-size:10px; font-weight:700; flex-shrink:0;">${T.icon}</div>
         <div style="font-weight:700; color:${T.color}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${prioDot}${T.verb}</div>
         <div style="min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#f1f5f9;" title="${isLiq ? (prod.marque + ' — ' + prod.gamme) : isPd ? (prod.marque + ' ' + prod.modele) : (kit.marque + ' ' + kit.modele)}">${titleMain}</div>
@@ -12134,7 +12134,7 @@ function renderDashboard() {
 
     const _gfb = _liqFormatBadge(g.format);
     return `<div style="margin-bottom:1px;">
-      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px minmax(0,180px) minmax(0,110px) minmax(0,180px) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
+      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
         <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
         <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span><span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${grp.length} parfum${grp.length>1?'s':''}</span>${progressLabel}</div>
         <div style="font-size:9px; color:${profColor}; font-weight:600; text-align:center;">${profShort}</div>
@@ -12219,7 +12219,7 @@ function renderDashboard() {
 
     const _glFb = _liqFormatBadge(g.format);
     return `<div style="margin-bottom:1px;">
-      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px minmax(0,180px) minmax(0,110px) minmax(0,180px) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
+      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
         <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
         <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span><span style="font-size:9px; padding:1px 5px; background:#f5970b22; color:#fbbf24; border:1px solid #f5970b50; border-radius:2px; white-space:nowrap;">gamme entière</span><span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${parfums.length} parfum${parfums.length>1?'s':''}</span>${doneLabel}</div>
         <div style="font-size:9px; color:${profColor}; font-weight:600; text-align:center;">${profShort}</div>
@@ -12312,7 +12312,7 @@ function renderDashboard() {
       const doneCount = actions.filter(a => actionGlobalState(a) === 'FAIT').length;
       const progress = doneCount > 0 ? ` <span style="font-size:9px; color:#64748b;">(${doneCount}/${actions.length} fait${doneCount>1?'s':''})</span>` : '';
       return `<div style="margin-bottom:4px;">
-        <div onclick="toggleActionExpand('${subKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px minmax(0,180px) minmax(0,110px) minmax(0,180px) 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
+        <div onclick="toggleActionExpand('${subKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
           <div style="width:22px; height:22px; background:#1e293b; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;">${isExpanded ? '▾' : icon}</div>
           <div style="font-size:12px; color:#f1f5f9; font-weight:700; grid-column:2/8;">${label} <span style="font-size:9px; padding:1px 6px; background:#33415580; color:#94a3b8; border-radius:2px; font-weight:400;">${actions.length} action${actions.length>1?'s':''}</span> ${progress}</div>
           <div></div>
@@ -12391,7 +12391,7 @@ function renderDashboard() {
     const _liqGammeLabel = _liqGammeIds.size === 1 ? '1 gamme' : _liqGammeIds.size + ' gammes';
 
     html += `<div style="margin-bottom:4px;">
-      <div onclick="toggleActionExpand('${liqSubKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1fr) 36px 56px minmax(0,180px) minmax(0,110px) minmax(0,180px) 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
+      <div onclick="toggleActionExpand('${liqSubKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
         <div style="width:22px; height:22px; background:#1e293b; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:13px; flex-shrink:0;">${liqExpanded ? '▾' : '🧪'}</div>
         <div style="font-size:12px; color:#f1f5f9; font-weight:700; grid-column:2/8;">Liquides <span style="font-size:9px; padding:1px 6px; background:#33415580; color:#94a3b8; border-radius:2px; font-weight:400;">${_liqGammeLabel} · ${liqActions.length} action${liqActions.length>1?'s':''}</span> ${liqProgress}</div>
         <div></div>
