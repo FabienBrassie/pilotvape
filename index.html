@@ -3400,20 +3400,26 @@ function syncAutoActions() {
     }
   });
   // Auto-heal fanfare : si une action RENTRER a fanfareOpType défini mais qu'aucune OP
-  // fanfare correspondante n'existe (purgée par erreur ou tombstone), on la recrée.
+  // fanfare correspondante n'existe, on recliquer le bouton fanfare pour recréer l'OP.
+  // NOTE : on ne recrée PAS silencieusement car les pièces personnalisées seraient perdues.
+  // Les protections amont (null-guard merge, orphan-guard, autoCloseOrphan-skip) doivent
+  // empêcher la perte. Ce code ne fait que re-déclencher setRentrerFanfare qui recrée l'OP
+  // avec les pièces par défaut (seedOpDefaults). Mieux que rien, mais les pièces custom
+  // ajoutées manuellement ne peuvent pas être restaurées.
   actions.forEach(a => {
     if (a.type !== 'RENTRER' || a.annulee || !a.fanfareOpType) return;
     const FANFARE_TYPES = ['NOUVEAUTE','EXCLU'];
     if (!FANFARE_TYPES.includes(a.fanfareOpType)) return;
     const existingOp = ops.find(o => o.rentrerActionId === a.id && FANFARE_TYPES.includes(o.type) && !o._archived);
     if (existingOp) return; // OP existe déjà
-    // Recréer l'OP fanfare
-    const today = ymd(new Date());
-    const newOp = {
+    // Recréer l'OP avec la date de l'action (pas aujourd'hui)
+    console.warn('[FANFARE-HEAL] OP ' + a.fanfareOpType + ' manquante pour action ' + a.id + ' — recréation auto');
+    const _healDate = a._ts ? a._ts.slice(0, 10) : ymd(new Date());
+    const _healOp = {
       id: 'OP-' + String(nextOpId++).padStart(4, '0'),
       type: a.fanfareOpType,
       produitIds: [a.produitId],
-      dateDebut: today,
+      dateDebut: _healDate,
       dateFin: null,
       commentaire: 'Entrée en fanfare (auto-restaurée)',
       rentrerActionId: a.id,
@@ -3421,11 +3427,11 @@ function syncAutoActions() {
       etats: {},
       pieces: []
     };
-    seedOpDefaults(newOp);
-    ensureOpSteps(newOp);
-    pushOpTraced(newOp, 'syncAutoActions_fanfareHeal');
-    a.opId = newOp.id;
-    console.log('[FANFARE-HEAL] Recréée OP ' + newOp.id + ' type=' + a.fanfareOpType + ' pour action ' + a.id);
+    seedOpDefaults(_healOp);
+    ensureOpSteps(_healOp);
+    pushOpTraced(_healOp, 'syncAutoActions_fanfareHeal');
+    a.opId = _healOp.id;
+    a.fanfareOpType = a.fanfareOpType; // confirmer le type
   });
   syncMiseEnPlaceActions();
   syncPriceActions();
