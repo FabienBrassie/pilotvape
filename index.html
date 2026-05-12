@@ -2324,6 +2324,7 @@ function isOpOutsideCampagne(op) {
 // Log léger sur chaque création d'OP (sans stack trace — pas de coût perceptible).
 function pushOpTraced(op, source) {
   try { console.log('[OP]', source || '?', '→', op.id, op.type); } catch(e) {}
+  if (!op._ts) op._ts = new Date().toISOString();
   ops.push(op);
   return op;
 }
@@ -2971,7 +2972,8 @@ function ensureActionForKit(kit, type) {
     lienOP: null,
     // Pour MISE_EN_PLACE uniquement :
     sortirActionId: null,
-    rentrerActionId: null
+    rentrerActionId: null,
+    _ts: new Date().toISOString()
   };
   actions.push(a);
   return a;
@@ -2993,7 +2995,8 @@ function ensureActionForLiq(gamme, type) {
     etats: makeShopStates(type),
     dateCloture: null,
     annulee: false,
-    lienOP: null
+    lienOP: null,
+    _ts: new Date().toISOString()
   };
   actions.push(a);
   return a;
@@ -4414,6 +4417,7 @@ function syncOpStepsToAction(op) {
 function toggleOpStep(opId, shop, stepKey, checked) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
+  op._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   ensureOpSteps(op);
   const st = op.etats[shop];
   if (!st) return;
@@ -6936,40 +6940,58 @@ function _mergeOpEtats(localOps, remoteOps) {
 }
 
 // ── Fusion structurelle pour données admin (produits, relevés, campagnes) ──
-// Stratégie : union. Les items distants inconnus localement sont ajoutés.
-// Les champs modifiés localement sont conservés (last-write-wins par session).
+// Stratégie : union + mise à jour par _ts (last-write-wins).
+// 1) Items distants inconnus localement → ajoutés.
+// 2) Items existants des deux côtés : si remote._ts > local._ts → on met à jour
+//    les champs scalaires du local avec le remote (sauf parfums/etats qui ont leur
+//    propre merge). Ça permet de synchroniser un renommage ou un changement de prix
+//    fait sur un autre ordinateur.
 function _mergeArray(localArr, remoteArr, idField) {
   if (!remoteArr || !Array.isArray(remoteArr)) return localArr;
   if (!localArr) localArr = [];
-  const localIds = new Set(localArr.map(x => x[idField]));
-  let added = 0;
+  const localMap = {};
+  localArr.forEach(x => { if (x && x[idField]) localMap[x[idField]] = x; });
+  let added = 0, updated = 0;
   remoteArr.forEach(rx => {
-    if (rx && rx[idField] && !localIds.has(rx[idField]) && !_deletedIds.has(rx[idField])) {
+    if (!rx || !rx[idField] || _deletedIds.has(rx[idField])) return;
+    const lx = localMap[rx[idField]];
+    if (!lx) {
+      // Nouvel item distant → ajouter
       localArr.push(rx);
       added++;
+    } else if (rx._ts && (!lx._ts || rx._ts > lx._ts)) {
+      // Item existant avec remote plus récent → mettre à jour les champs scalaires
+      Object.keys(rx).forEach(k => {
+        // Ne pas écraser les sous-structures complexes qui ont leur propre merge
+        if (k === 'parfums' || k === 'etats' || k === 'steps' || k === '_stepTs' || k === 'progress') return;
+        lx[k] = rx[k];
+      });
+      updated++;
     }
   });
   if (added > 0) console.log('[MERGE] +' + added + ' items distants ajoutés');
+  if (updated > 0) console.log('[MERGE] ~' + updated + ' items mis à jour depuis remote (_ts)');
+  localArr._mergeStats = { added, updated };
   return localArr;
 }
 
 // ── Fusion profonde pour baseLiq : merge des parfums au sein de chaque gamme ──
-// Quand la même gamme existe côté local ET distant, on fusionne les listes de parfums
-// par nom (union). Ça empêche un nouveau parfum ajouté localement de disparaître si
-// le remote n'avait pas encore reçu le save. Les champs modifiés du parfum prennent
-// la version la plus récente (local gagne pour les champs non-null).
+// Quand la même gamme existe côté local ET distant :
+// 1) Si remote._ts > local._ts → mettre à jour les champs scalaires (nom, prix, statut…)
+// 2) Fusionner les parfums par nom (union) — jamais de suppression
 function _mergeLiqDeep(localLiq, remoteLiq) {
   if (!remoteLiq || !Array.isArray(remoteLiq)) return localLiq;
   if (!localLiq) localLiq = [];
-  // 1) Ajouter gammes distantes inconnues localement
+  // 1) Ajouter gammes distantes inconnues localement + MAJ champs scalaires via _ts
   localLiq = _mergeArray(localLiq, remoteLiq, 'id');
-  // 2) Pour les gammes présentes des deux côtés, fusionner les parfums
+  // 2) Pour les gammes présentes des deux côtés, fusionner les parfums (union)
   const remoteMap = {};
   remoteLiq.forEach(g => { if (g && g.id) remoteMap[g.id] = g; });
   let parfumsMerged = 0;
   localLiq.forEach(lg => {
     const rg = remoteMap[lg.id];
-    if (!rg || !rg.parfums || !lg.parfums) return;
+    if (!rg || !rg.parfums) return;
+    if (!lg.parfums) lg.parfums = [];
     // Index des parfums locaux par nom (normalisé en minuscule pour éviter les doublons)
     const localNames = new Set(lg.parfums.map(p => (p.n || '').toLowerCase().trim()));
     // Ajouter les parfums distants absents localement
@@ -6981,8 +7003,6 @@ function _mergeLiqDeep(localLiq, remoteLiq) {
         parfumsMerged++;
       }
     });
-    // Index inversé : parfums locaux absents du remote (= ajoutés localement, à conserver)
-    // On ne supprime JAMAIS un parfum local absent du remote : il a été créé localement.
     // Recalculer nbRefs après fusion
     lg.nbRefs = lg.parfums.filter(p => p.s !== 'SORTI').length;
   });
@@ -7088,7 +7108,19 @@ function _startAutoSync() {
       _mergeArray(basePD, remote.basePD, 'id');
       _mergeArray(actions, remote.actions, 'id'); // nouvelles actions distantes
       _mergeArray(ops, remote.ops, 'id'); // nouvelles OPs distantes
+      // Données structurelles complémentaires (campagnes, propositions, relevés)
+      const _prevCamp = campagnes.length, _prevProp = propositions.length, _prevRel = relevesPrix.length;
+      if (Array.isArray(remote.campagnes)) _mergeArray(campagnes, remote.campagnes, 'id');
+      if (Array.isArray(remote.propositions)) _mergeArray(propositions, remote.propositions, 'id');
+      if (Array.isArray(remote.propositionsLiq)) _mergeArray(propositionsLiq, remote.propositionsLiq, 'id');
+      if (Array.isArray(remote.propositionsPD)) _mergeArray(propositionsPD, remote.propositionsPD, 'id');
+      if (Array.isArray(remote.relevesPrix)) _mergeArray(relevesPrix, remote.relevesPrix, 'id');
+      if (campagnes.length !== _prevCamp || propositions.length !== _prevProp || relevesPrix.length !== _prevRel) changed = true;
       if (baseKits.length !== bk || baseLiq.length !== bl || basePD.length !== bp) changed = true;
+      // Détecter aussi les mises à jour _ts (pas seulement les ajouts)
+      [baseKits, baseLiq, basePD, actions, ops, campagnes, propositions, propositionsLiq, propositionsPD, relevesPrix].forEach(arr => {
+        if (arr && arr._mergeStats && (arr._mergeStats.added > 0 || arr._mergeStats.updated > 0)) changed = true;
+      });
       // Fusionner auditLog distant
       if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
         const _prevLogLen = auditLog.length;
@@ -7105,6 +7137,7 @@ function _startAutoSync() {
       if (typeof remote.nextActionId === 'number') nextActionId = Math.max(nextActionId, remote.nextActionId);
       if (typeof remote.nextOpId === 'number') nextOpId = Math.max(nextOpId, remote.nextOpId);
       if (typeof remote.nextReleveId === 'number') nextReleveId = Math.max(nextReleveId, remote.nextReleveId);
+      if (typeof remote.nextCampagneId === 'number') nextCampagneId = Math.max(nextCampagneId, remote.nextCampagneId);
       if (changed) {
         console.log('[AUTO-SYNC] Changements distants intégrés');
         // Sauvegarder localement (données fusionnées en mémoire)
@@ -8028,6 +8061,7 @@ async function updateKitField(id, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const kit = baseKits.find(k => k.id === id);
   if (kit) {
+    kit._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
     // Champs numériques : convertir
     const _pvAvant = kit.pv; // Mémoriser le PV avant modification
     if (['pa','pv','w','mah'].includes(field)) {
@@ -9245,6 +9279,7 @@ async function updateLiqField(id, field, val) {
   console.log('[updateLiqField]', id, field, val);
   const g = baseLiq.find(l => l.id === id);
   if (!g) { console.warn('[updateLiqField] Gamme introuvable:', id); return; }
+  g._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   const _oldStatutLiq = g.statutVie; // snapshot avant modification
   if (['pa','pv','marge'].includes(field)) {
     const _pvAvant = g.pv; // Mémoriser le PV avant modification
@@ -9324,6 +9359,7 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const g = baseLiq.find(l => l.id === gId);
   if (!g || !g.parfums[pIdx]) return;
+  g._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   const p = g.parfums[pIdx];
   // Assurer un ID stable
   if (!p.id) p.id = g.id + '_p' + String(pIdx).padStart(3, '0');
@@ -14891,7 +14927,8 @@ function submitNewOp() {
         nom,
         dateDebut:   document.getElementById('opCampagneNewDebut').value   || '',
         dateFin:     document.getElementById('opCampagneNewFin').value     || '',
-        commentaire: document.getElementById('opCampagneNewComment').value || ''
+        commentaire: document.getElementById('opCampagneNewComment').value || '',
+        _ts: new Date().toISOString()
       };
       campagnes.push(c);
     }
@@ -14957,6 +14994,7 @@ function closeOp(id) {
   logAction('Clôture OP', _logOpLabel(id) + ' (manuelle)');
   op.dateFin = ymd(new Date());
   op._dateFinManuelle = true; // protège contre la réouverture auto
+  op._ts = new Date().toISOString();
   saveData();
   renderOps();
 }
@@ -14966,6 +15004,7 @@ function reopenOp(id) {
   if (!op) return;
   op.dateFin = null;
   op._dateFinManuelle = false; // réouverture explicite → le cycle auto peut reprendre
+  op._ts = new Date().toISOString();
   saveData();
   renderOps();
 }
@@ -14994,12 +15033,13 @@ async function quickAttachCampagne(opId) {
     if (!campagne) {
       // Créer une nouvelle campagne
       const newId = 'CAMP-' + String(nextCampagneId++).padStart(4, '0');
-      campagne = { id: newId, nom: choix.trim(), dateDebut: op.dateDebut || ymd(new Date()), dateFin: null, commentaire: '' };
+      campagne = { id: newId, nom: choix.trim(), dateDebut: op.dateDebut || ymd(new Date()), dateFin: null, commentaire: '', _ts: new Date().toISOString() };
       if (typeof ensureCampagneModel === 'function') ensureCampagneModel(campagne);
       campagnes.push(campagne);
     }
   }
   op.campagneId = campagne.id;
+  op._ts = new Date().toISOString();
   logAction('OP rattachée campagne', _logOpLabel(opId) + ' → 📣 ' + campagne.nom);
   // Proposer d'aligner les dates de l'OP sur celles de la campagne
   if (campagne.dateDebut || campagne.dateFin) {
@@ -15025,6 +15065,7 @@ async function editCampagne(campagneId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const c = getCampagne(campagneId);
   if (!c) return;
+  c._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   const newNom = prompt(`Nom de la campagne :`, c.nom);
   if (newNom === null) return;
   if (newNom.trim()) c.nom = newNom.trim();
@@ -18652,6 +18693,11 @@ loadData().then(async () => {
   } catch (e) {}
   _normalizePrixRougeOps();
   syncAutoActions();
+  // ── Push post-merge vers Supabase ──
+  // Après le merge local+remote + syncAutoActions, pousser le résultat fusionné
+  // vers Supabase pour que les autres ordinateurs voient les données à jour.
+  // Sans ça, un keepalive échoué au beforeunload = données perdues côté remote.
+  saveData();
   restoreUiState();
   // Initialize multi-select dropdowns
   renderStatutMultiSelect('kit');
@@ -18733,6 +18779,7 @@ async function updatePdField(id, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const pd = basePD.find(p => p.id === id);
   if (!pd) return;
+  pd._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   const _pvAvant = pd.pv; // Mémoriser le PV avant modification
   if (['pa','pv','w','mah','contenance'].includes(field)) {
     const n = parseFloat(String(val).replace(',', '.'));
