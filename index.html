@@ -1494,6 +1494,7 @@ let propositionsPD = JSON.parse(JSON.stringify(INIT_PROPOSITIONS_PD));
 // Tombstones : IDs des items supprimés volontairement.
 // Empêche le merge-on-save de les ressusciter depuis Supabase.
 let _deletedIds = new Set();
+let _deletedParfumIds = new Set(); // tombstones parfums liquides (empêche résurrection au merge)
 
 // =====================================================================
 // PIÈCES DÉTACHÉES — Modèle de données (normalisation + ensure)
@@ -1576,6 +1577,10 @@ function ensureLiqModel(g) {
     // ID stable pour chaque parfum (migration + nouvelles créations)
     if (!p.id) p.id = g.id + '_p' + String(idx).padStart(3, '0');
   });
+  // Purger les parfums supprimés (tombstones)
+  if (_deletedParfumIds.size > 0) {
+    g.parfums = g.parfums.filter(p => !p.id || !_deletedParfumIds.has(p.id));
+  }
   return g;
 }
 
@@ -5855,6 +5860,8 @@ async function loadData() {
     //    locaux ne sont pas pris en compte et les items supprimés ressuscitent) ──
     if (Array.isArray(localData._deletedIds)) localData._deletedIds.forEach(id => _deletedIds.add(id));
     if (Array.isArray(remoteData._deletedIds)) remoteData._deletedIds.forEach(id => _deletedIds.add(id));
+    if (Array.isArray(localData._deletedParfumIds)) localData._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+    if (Array.isArray(remoteData._deletedParfumIds)) remoteData._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
 
     // ── 1. Actions : LOCAL = base, merge steps depuis remote ──
     remoteData.actions = _mergeEtats(localData.actions || [], remoteData.actions || []);
@@ -5876,6 +5883,7 @@ async function loadData() {
     if (typeof localData.nextCampagneId === 'number') remoteData.nextCampagneId = Math.max(remoteData.nextCampagneId || 0, localData.nextCampagneId);
     // Tombstones : union (déjà peuplé dans _deletedIds global, synchroniser aussi dans le payload)
     remoteData._deletedIds = Array.from(_deletedIds);
+    remoteData._deletedParfumIds = Array.from(_deletedParfumIds);
     // AuditLog : fusion + dédup
     if (Array.isArray(localData.auditLog) && localData.auditLog.length > 0) {
       if (!Array.isArray(remoteData.auditLog)) remoteData.auditLog = [];
@@ -5898,6 +5906,36 @@ async function loadData() {
     baseKits = data.baseKits || baseKits;
     baseLiq = data.baseLiq || baseLiq;
     baseLiq.forEach(g => ensureLiqModel(g));
+    // ── Migration : dédoublonner les parfums par nom dans chaque gamme ──
+    // Résout les doublons créés par l'ancien merge par nom (union-only)
+    baseLiq.forEach(g => {
+      if (!g.parfums || g.parfums.length < 2) return;
+      const seen = {};
+      const deduped = [];
+      g.parfums.forEach(p => {
+        const key = (p.n || '').toLowerCase().trim();
+        if (!key) { deduped.push(p); return; } // garder les parfums sans nom
+        if (seen[key]) {
+          // Doublon détecté : garder celui avec le _ts le plus récent, ou le premier
+          const existing = seen[key];
+          if (p._ts && (!existing._ts || p._ts > existing._ts)) {
+            // Le nouveau est plus récent → remplacer
+            const idx = deduped.indexOf(existing);
+            if (idx >= 0) deduped[idx] = p;
+            seen[key] = p;
+          }
+          // Sinon on ignore p (l'ancien est gardé)
+          console.log('[DEDUP] Parfum doublon supprimé dans ' + g.gamme + ': ' + p.n);
+        } else {
+          seen[key] = p;
+          deduped.push(p);
+        }
+      });
+      if (deduped.length < g.parfums.length) {
+        g.parfums = deduped;
+        g.nbRefs = g.parfums.filter(pf => pf.s !== 'SORTI').length;
+      }
+    });
     // Migration statuts liq → alignement sur statuts kit
     baseLiq.forEach(g => {
       if (g.statutVie === 'OK') g.statutVie = 'DANS_OFFRE';
@@ -6008,6 +6046,7 @@ async function loadData() {
     }
     // Tombstones : IDs supprimés volontairement (empêche le merge de les ressusciter)
     if (Array.isArray(data._deletedIds)) data._deletedIds.forEach(id => _deletedIds.add(id));
+    if (Array.isArray(data._deletedParfumIds)) data._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
     // Migration : op.campagne (string) → op.campagneId (ref). Crée une entité
     // campagne par nom unique, fenêtre = [min dateDebut, max dateFin] des OPs.
     const legacyByName = {};
@@ -6741,7 +6780,7 @@ async function loadData() {
 }
 
 function saveData() {
-  const payload = {baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)};
+  const payload = {baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)};
   const jsonStr = JSON.stringify(payload);
   // Contrôle quota localStorage (~5MB max)
   const sizeMB = (jsonStr.length * 2) / (1024 * 1024); // UTF-16 = 2 bytes/char
@@ -6975,38 +7014,54 @@ function _mergeArray(localArr, remoteArr, idField) {
   return localArr;
 }
 
-// ── Fusion profonde pour baseLiq : merge des parfums au sein de chaque gamme ──
-// Quand la même gamme existe côté local ET distant :
-// 1) Si remote._ts > local._ts → mettre à jour les champs scalaires (nom, prix, statut…)
-// 2) Fusionner les parfums par nom (union) — jamais de suppression
+// ── Fusion profonde pour baseLiq ──
+// Merge par ID (pas par nom) avec tombstones et last-write-wins par _ts.
+// 1) Gammes : via _mergeArray (id + _ts)
+// 2) Parfums au sein de chaque gamme : merge par parfum.id
+//    - parfum absent localement + non supprimé → ajouté
+//    - parfum présent des deux côtés → remote._ts > local._ts → MAJ champs
+//    - parfum supprimé (tombstone dans _deletedParfumIds) → retiré des deux côtés
 function _mergeLiqDeep(localLiq, remoteLiq) {
   if (!remoteLiq || !Array.isArray(remoteLiq)) return localLiq;
   if (!localLiq) localLiq = [];
-  // 1) Ajouter gammes distantes inconnues localement + MAJ champs scalaires via _ts
+  // 1) Gammes : ajouter/MAJ via _mergeArray
   localLiq = _mergeArray(localLiq, remoteLiq, 'id');
-  // 2) Pour les gammes présentes des deux côtés, fusionner les parfums (union)
+  // 2) Parfums : merge par ID au sein de chaque gamme
   const remoteMap = {};
   remoteLiq.forEach(g => { if (g && g.id) remoteMap[g.id] = g; });
-  let parfumsMerged = 0;
+  let parfumsAdded = 0, parfumsUpdated = 0, parfumsPurged = 0;
   localLiq.forEach(lg => {
-    const rg = remoteMap[lg.id];
-    if (!rg || !rg.parfums) return;
     if (!lg.parfums) lg.parfums = [];
-    // Index des parfums locaux par nom (normalisé en minuscule pour éviter les doublons)
-    const localNames = new Set(lg.parfums.map(p => (p.n || '').toLowerCase().trim()));
-    // Ajouter les parfums distants absents localement
+    // ── Purger les parfums supprimés (tombstones) du local ──
+    const beforeLen = lg.parfums.length;
+    lg.parfums = lg.parfums.filter(p => !p.id || !_deletedParfumIds.has(p.id));
+    parfumsPurged += (beforeLen - lg.parfums.length);
+    // ── Merger les parfums distants ──
+    const rg = remoteMap[lg.id];
+    if (!rg || !rg.parfums) { lg.nbRefs = lg.parfums.filter(p => p.s !== 'SORTI').length; return; }
+    const localById = {};
+    lg.parfums.forEach(p => { if (p.id) localById[p.id] = p; });
     rg.parfums.forEach(rp => {
-      const key = (rp.n || '').toLowerCase().trim();
-      if (key && !localNames.has(key)) {
+      // Ignorer les parfums supprimés
+      if (!rp.id || _deletedParfumIds.has(rp.id)) return;
+      const lp = localById[rp.id];
+      if (!lp) {
+        // Parfum distant inconnu localement → ajouter
         lg.parfums.push(rp);
-        localNames.add(key);
-        parfumsMerged++;
+        localById[rp.id] = rp;
+        parfumsAdded++;
+      } else if (rp._ts && (!lp._ts || rp._ts > lp._ts)) {
+        // Parfum existant des deux côtés, remote plus récent → MAJ
+        Object.keys(rp).forEach(k => { lp[k] = rp[k]; });
+        parfumsUpdated++;
       }
     });
     // Recalculer nbRefs après fusion
     lg.nbRefs = lg.parfums.filter(p => p.s !== 'SORTI').length;
   });
-  if (parfumsMerged > 0) console.log('[MERGE-LIQ] +' + parfumsMerged + ' parfums distants ajoutés dans gammes existantes');
+  if (parfumsAdded > 0) console.log('[MERGE-LIQ] +' + parfumsAdded + ' parfums distants ajoutés');
+  if (parfumsUpdated > 0) console.log('[MERGE-LIQ] ~' + parfumsUpdated + ' parfums mis à jour (remote _ts)');
+  if (parfumsPurged > 0) console.log('[MERGE-LIQ] -' + parfumsPurged + ' parfums purgés (tombstones)');
   return localLiq;
 }
 
@@ -7022,6 +7077,11 @@ async function _saveToSupabase(payload, _retryCount) {
       const rows = await getRes.json();
       if (rows && rows[0] && rows[0].data) {
         const remote = rows[0].data;
+        // 0. Intégrer les tombstones distants avant fusion
+        if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
+        if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+        payload._deletedIds = Array.from(_deletedIds);
+        payload._deletedParfumIds = Array.from(_deletedParfumIds);
         // 1. Fusionner les coches actions (done, steps, responsable)
         payload.actions = _mergeEtats(payload.actions, remote.actions);
         // 2. Fusionner les coches OPs
@@ -7101,6 +7161,9 @@ function _startAutoSync() {
       const beforeOps = JSON.stringify(ops.map(o => o.etats));
       _mergeOpEtats(ops, remote.ops);
       if (JSON.stringify(ops.map(o => o.etats)) !== beforeOps) changed = true;
+      // Intégrer les tombstones distants (pour ne pas ressusciter des items supprimés)
+      if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
+      if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
       // Fusionner nouveaux items structurels
       const bk = baseKits.length, bl = baseLiq.length, bp = basePD.length;
       _mergeArray(baseKits, remote.baseKits, 'id');
@@ -7141,7 +7204,7 @@ function _startAutoSync() {
       if (changed) {
         console.log('[AUTO-SYNC] Changements distants intégrés');
         // Sauvegarder localement (données fusionnées en mémoire)
-        localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
+        localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
         // Pas de re-render automatique pour ne pas interrompre la navigation.
         // Afficher un bandeau discret invitant l'utilisateur à rafraîchir quand il est prêt.
         if (!document.getElementById('syncBanner')) {
@@ -9333,7 +9396,8 @@ async function updateLiqField(id, field, val) {
       const nbDiff = diffParfums.length;
       const nbTotal = g.parfums.length;
       if (await pvConfirm(`Passer la gamme ${g.gamme} en « ${statutLabel} ».\n\n${nbDiff} parfum${nbDiff > 1 ? 's' : ''} sur ${nbTotal} ${nbDiff > 1 ? 'ne sont' : 'n\'est'} pas encore « ${statutLabel} ».\nAppliquer ce statut à tous les parfums ?`)) {
-        g.parfums.forEach(p => { p.s = val; });
+        const _tsNow = new Date().toISOString();
+        g.parfums.forEach(p => { p.s = val; p._ts = _tsNow; });
       }
     }
   }
@@ -9341,7 +9405,8 @@ async function updateLiqField(id, field, val) {
   if (field === 'ct' && g.parfums && g.parfums.length > 0) {
     const diffParfums = g.parfums.filter(p => p.ct !== val);
     if (diffParfums.length > 0 && await pvConfirm(`Appliquer le goût « ${val || 'aucun'} » aux ${diffParfums.length} parfum${diffParfums.length > 1 ? 's' : ''} de ${g.gamme} ?`)) {
-      g.parfums.forEach(p => { p.ct = val; });
+      const _tsNow = new Date().toISOString();
+      g.parfums.forEach(p => { p.ct = val; p._ts = _tsNow; });
     }
   }
   // Sync statutVie → proposition liquide decision
@@ -9359,10 +9424,12 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const g = baseLiq.find(l => l.id === gId);
   if (!g || !g.parfums[pIdx]) return;
-  g._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
+  const _now = new Date().toISOString();
+  g._ts = _now; // timestamp gamme pour sync multi-ordi
   const p = g.parfums[pIdx];
   // Assurer un ID stable
   if (!p.id) p.id = g.id + '_p' + String(pIdx).padStart(3, '0');
+  p._ts = _now; // timestamp parfum pour merge par ID
   if (['pa','pv'].includes(field)) {
     const _pvAvant = p.pv;
     p[field] = parseFloat(val) || 0;
@@ -9388,7 +9455,9 @@ function addLiqParfum(gId) {
   const g = baseLiq.find(l => l.id === gId);
   if (!g) return;
   const pId = g.id + '_p' + String(Date.now()).slice(-6) + Math.random().toString(36).slice(2,5);
-  g.parfums.push({ id: pId, n: '', pa: g.pa, pv: g.pv, ct: g.ct || '', s: 'OK' });
+  const _now = new Date().toISOString();
+  g.parfums.push({ id: pId, n: '', pa: g.pa, pv: g.pv, ct: g.ct || '', s: 'OK', _ts: _now });
+  g._ts = _now;
   g.nbRefs = g.parfums.filter(p => p.s !== 'SORTI').length;
   saveData(); renderLiqAll();
 }
@@ -9397,8 +9466,13 @@ function removeLiqParfum(gId, pIdx) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const g = baseLiq.find(l => l.id === gId);
   if (!g || !g.parfums[pIdx]) return;
+  const p = g.parfums[pIdx];
+  // Assurer un ID stable avant suppression (pour le tombstone)
+  if (!p.id) p.id = g.id + '_p' + String(pIdx).padStart(3, '0');
+  const pId = p.id;
+  // Tombstone : empêche le merge de ressusciter ce parfum
+  _deletedParfumIds.add(pId);
   // Annuler les actions ouvertes liées à ce parfum
-  const pId = g.parfums[pIdx].id;
   if (pId) {
     actions.forEach(a => {
       if (a.produitParfumId === pId && !a.annulee && actionGlobalState(a) !== 'FAIT') {
@@ -9410,6 +9484,7 @@ function removeLiqParfum(gId, pIdx) {
   }
   g.parfums.splice(pIdx, 1);
   g.nbRefs = g.parfums.filter(p => p.s !== 'SORTI').length;
+  g._ts = new Date().toISOString();
   saveData(); renderLiqAll();
 }
 
