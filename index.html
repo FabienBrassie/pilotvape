@@ -2115,8 +2115,9 @@ function computeOpGlobalStepDefs(op) {
       // les steps Commander/Réceptionner sont déjà gérés par-shop (Commandé sur Swappy / Reçu en boutique).
       // On ne les duplique pas en amont global.
       if (!(p.type === 'PRODUIT' && produitDejaGere)) {
+        // Commander = global (on commande une fois pour toutes les boutiques)
         defs.push({ key: 'plv_' + p.id + '_commandee', label: 'Commander ' + pieceLabel(p),    pieceId: p.id });
-        defs.push({ key: 'plv_' + p.id + '_recue',     label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id });
+        // Réceptionner = par shop (chaque boutique reçoit indépendamment) → voir computeOpShopStepDefs
       }
     } else if (p.source === 'custom') {
       defs.push({ key: 'plv_' + p.id + '_visuelCree', label: 'Créer le visuel ' + pieceLabel(p), pieceId: p.id });
@@ -2140,6 +2141,13 @@ function computeOpShopStepDefs(op, shop) {
     defs.push({ key: 'prod_commandee', label: 'Commandé sur Swappy', kind: 'prod' });
     defs.push({ key: 'prod_recue',     label: 'Reçu en boutique',    kind: 'prod' });
   }
+  // Réceptionner les pièces fournies : chaque boutique reçoit indépendamment
+  // (Commander est en global, Réceptionner est par shop)
+  (op.pieces || []).forEach(p => {
+    if (p.source !== 'fournie') return;
+    if (p.type === 'PRODUIT' && op.prep && op.prep.commanderProduits) return; // géré par prod_recue
+    defs.push({ key: 'plv_' + p.id + '_recue', label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id, kind: 'reception' });
+  });
   (op.pieces || []).forEach(p => {
     if (!pieceIsPerShop(p)) return;
     const aff = p.affectations && p.affectations[shop];
