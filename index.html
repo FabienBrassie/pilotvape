@@ -2061,20 +2061,30 @@ function seedOpDefaults(op) {
   if (op.pieces.length > 0) return; // déjà custom-isé, on n'écrase pas
   switch (op.type) {
     case 'PRIX_ROUGE': {
-      // Étiquette Prix Rouge FT : uniquement pour les kits (mur libre toucher).
-      // Les liquides n'ont pas d'étiquette FT individuelle.
-      const _isLiqOp = (op.produitIds || []).some(id => baseLiq.find(l => l.id === id));
-      if (!_isLiqOp) {
+      // Étiquette Prix Rouge FT : UNIQUEMENT pour les kits (seuls produits sur le Freetouch).
+      // Accessoires, liquides et PD ne sont pas sur le Freetouch → pas d'étiquette FT.
+      const _isKitOp = (op.produitIds || []).some(id => baseKits.find(k => k.id === id));
+      if (_isKitOp) {
         op.pieces.push(makePiece('ETIQUETTE_PRIX_BARRE', 'freetouch', 'MUR_LIBRE_TOUCHER'));
       }
       break;
     }
-    case 'NOUVEAUTE':
-      op.pieces.push(makePiece('ETIQUETTE_SPECIALE', 'freetouch', 'MUR_LIBRE_TOUCHER', 'Étiquette Nouveauté'));
+    case 'NOUVEAUTE': {
+      // Étiquette Nouveauté FT : uniquement pour les kits (Freetouch)
+      const _isKitOpN = (op.produitIds || []).some(id => baseKits.find(k => k.id === id));
+      if (_isKitOpN) {
+        op.pieces.push(makePiece('ETIQUETTE_SPECIALE', 'freetouch', 'MUR_LIBRE_TOUCHER', 'Étiquette Nouveauté'));
+      }
       break;
-    case 'EXCLU':
-      op.pieces.push(makePiece('ETIQUETTE_SPECIALE', 'freetouch', 'MUR_LIBRE_TOUCHER', 'Étiquette Exclu'));
+    }
+    case 'EXCLU': {
+      // Étiquette Exclu FT : uniquement pour les kits (Freetouch)
+      const _isKitOpE = (op.produitIds || []).some(id => baseKits.find(k => k.id === id));
+      if (_isKitOpE) {
+        op.pieces.push(makePiece('ETIQUETTE_SPECIALE', 'freetouch', 'MUR_LIBRE_TOUCHER', 'Étiquette Exclu'));
+      }
       break;
+    }
     // LANCEMENT et MISE_EN_AVANT fusionnés dans NOUVEAUTE (migration mai 2026)
     case 'NATIONALE':
       // Pas de défaut prescriptif ; souvent la centrale envoie le kit
@@ -2187,7 +2197,11 @@ function computeOpShopStepDefs(op, shop) {
   // L'archivage est bloqué tant que ces étapes ne sont pas cochées sur toutes les boutiques.
   if (op.dateFin && op.dateFin <= ymd(new Date())) {
     const _isDestockage = op.type === 'PRIX_ROUGE' && !!op.sortirActionId;
-    const _needFtLabel = !_isDestockage && (op.type === 'NOUVEAUTE' || op.type === 'EXCLU' || op.type === 'PRIX_ROUGE');
+    // Étiquettes FT par profil : UNIQUEMENT pour les kits (seuls produits sur le Freetouch).
+    // Les accessoires, liquides et PD ne sont pas sur le Freetouch → pas de ré-étiquetage FT.
+    const _finPid = (op.produitIds || [])[0];
+    const _finIsKit = _finPid && baseKits.some(k => k.id === _finPid);
+    const _needFtLabel = !_isDestockage && _finIsKit && (op.type === 'NOUVEAUTE' || op.type === 'EXCLU' || op.type === 'PRIX_ROUGE');
     if (_needFtLabel) {
       defs.push({ key: 'fin_imprimer_ft', label: '🏷️ Imprimer étiquette FT par profil', kind: 'desinstall' });
       defs.push({ key: 'fin_poser_ft', label: '🏷️ Poser étiquette FT par profil → Mur libre toucher', kind: 'desinstall' });
@@ -4881,11 +4895,13 @@ function _applyActionShopChange(a, shop) {
   if (isFaitNow && !a.dateCloture) a.dateCloture = ymd(new Date());
   if (!isFaitNow) a.dateCloture = null;
 
-  // Résoudre le produit (kit OU liquide)
+  // Résoudre le produit (kit, liquide OU PD)
   const isLiq = a.produitType === 'liq';
-  const kit = !isLiq ? baseKits.find(k => k.id === a.produitId) : null;
+  const isPd  = a.produitType === 'pd';
+  const kit = (!isLiq && !isPd) ? baseKits.find(k => k.id === a.produitId) : null;
   const liq = isLiq ? baseLiq.find(g => g.id === a.produitId) : null;
-  const prod = kit || liq;
+  const pd  = isPd  ? basePD.find(p => p.id === a.produitId) : null;
+  const prod = kit || liq || pd;
   if (!prod) return;
 
   // Résoudre le parfum ciblé (si action au niveau parfum)
@@ -4908,6 +4924,7 @@ function _applyActionShopChange(a, shop) {
           prod.statutVie = 'SORTI';
           if (kit) syncKitToProp(kit);
           if (liq) syncLiqToPropLiq(liq);
+          // PD : pas de sync prop, mais statutVie est mis à jour directement
         }
       }
     } else if (a.type === 'RENTRER') {
@@ -4919,6 +4936,7 @@ function _applyActionShopChange(a, shop) {
           prod.statutVie = 'DANS_OFFRE';
           if (kit) syncKitToProp(kit);
           if (liq) syncLiqToPropLiq(liq);
+          // PD : statutVie mis à jour directement via prod.statutVie
         }
       }
     } else if (a.type === 'PRIX' && typeof a.prixCible === 'number') {
@@ -4931,6 +4949,7 @@ function _applyActionShopChange(a, shop) {
           prod.lastPvChange = { from: prod.pv, to: a.prixCible, date: ymd(new Date()), actionId: a.id };
           prod.pv = a.prixCible;
           if (kit) syncKitToProp(kit);
+          // PD : pv mis à jour directement via prod.pv (pas de sync prop)
           if (liq) {
             const _m = computeMarge(liq.pa, liq.pv);
             liq.marge = _m.marge;
@@ -6764,6 +6783,28 @@ async function loadData() {
     localStorage.setItem('pilotVape_migration_v14_bankizSdn', '1');
     saveData();
   }
+
+  // ── Migration v15 : retirer les pièces FT incorrectement ajoutées sur des non-kits ──
+  // Les étiquettes Freetouch (source='freetouch') ne concernent que les kits.
+  // Les OP sur accessoires/liquides/PD qui en ont hérité par erreur doivent être nettoyées.
+  if (!localStorage.getItem('pilotVape_migration_v15_ftKitsOnly')) {
+    let _cleanCount = 0;
+    ops.forEach(op => {
+      if (!op.pieces || op.pieces.length === 0) return;
+      const _pid = (op.produitIds || [])[0];
+      const _isKit = _pid && baseKits.some(k => k.id === _pid);
+      if (_isKit) return; // kit → OK, garder les pièces FT
+      const before = op.pieces.length;
+      op.pieces = op.pieces.filter(p => p.source !== 'freetouch');
+      if (op.pieces.length < before) {
+        _cleanCount += (before - op.pieces.length);
+        ensureOpSteps(op); // recalculer les steps sans les pièces FT
+      }
+    });
+    if (_cleanCount > 0) console.log('[MIGRATION v15] Retiré', _cleanCount, 'pièce(s) FT de non-kits');
+    localStorage.setItem('pilotVape_migration_v15_ftKitsOnly', '1');
+    saveData();
+  }
 }
 
 function saveData() {
@@ -7146,17 +7187,17 @@ function _startAutoSync() {
       _lastSyncTimestamp = remoteTs;
       const remote = remoteResult.data;
       let changed = false;
-      // Fusionner coches actions
-      const beforeActions = JSON.stringify(actions.map(a => a.etats));
-      _mergeEtats(actions, remote.actions);
-      if (JSON.stringify(actions.map(a => a.etats)) !== beforeActions) changed = true;
-      // Fusionner coches OPs
-      const beforeOps = JSON.stringify(ops.map(o => o.etats));
-      _mergeOpEtats(ops, remote.ops);
-      if (JSON.stringify(ops.map(o => o.etats)) !== beforeOps) changed = true;
-      // Intégrer les tombstones distants (pour ne pas ressusciter des items supprimés)
+      // Intégrer les tombstones distants AVANT le merge (pour ne pas ressusciter des items supprimés)
       if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
       if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+      // Fusionner coches actions (capturer le retour car .filter() crée un nouveau tableau)
+      const beforeActions = JSON.stringify(actions.map(a => a.etats));
+      actions = _mergeEtats(actions, remote.actions);
+      if (JSON.stringify(actions.map(a => a.etats)) !== beforeActions) changed = true;
+      // Fusionner coches OPs (idem)
+      const beforeOps = JSON.stringify(ops.map(o => o.etats));
+      ops = _mergeOpEtats(ops, remote.ops);
+      if (JSON.stringify(ops.map(o => o.etats)) !== beforeOps) changed = true;
       // Fusionner nouveaux items structurels
       const bk = baseKits.length, bl = baseLiq.length, bp = basePD.length;
       _mergeArray(baseKits, remote.baseKits, 'id');
@@ -7224,7 +7265,7 @@ setTimeout(_startAutoSync, 5000);
 function exportData() {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const bom = '\ufeff';
-  const payload = { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, exportedAt: new Date().toISOString() };
+  const payload = { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX), exportedAt: new Date().toISOString() };
   const json = JSON.stringify(payload, null, 2);
   const blob = new Blob([bom + json], {type: 'application/json;charset=utf-8'});
   const link = document.createElement('a');
@@ -7284,6 +7325,17 @@ document.getElementById('importFile').addEventListener('change', async (e) => {
           : (ops.length ? Math.max(...ops.map(o => parseInt(String(o.id).replace('OP-',''))||0)) + 1 : 1);
         ops.forEach(op => ensureOpSteps(op));
       }
+      // Campagnes
+      if (Array.isArray(data.campagnes)) {
+        campagnes = data.campagnes;
+        nextCampagneId = typeof data.nextCampagneId === 'number' ? data.nextCampagneId
+          : (campagnes.length ? Math.max(...campagnes.map(c => parseInt(String(c.id).replace('CAMP-',''))||0)) + 1 : 1);
+      }
+      // Tombstones
+      if (Array.isArray(data._deletedIds)) data._deletedIds.forEach(id => _deletedIds.add(id));
+      if (Array.isArray(data._deletedParfumIds)) data._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+      // Audit log
+      if (Array.isArray(data.auditLog)) auditLog = data.auditLog;
       saveData();
       if (typeof renderKits === 'function') renderKits();
       if (typeof renderWalls === 'function') renderWalls();
@@ -16737,10 +16789,12 @@ function renderOpCardHtml(op, options) {
     : `<div style="margin-top:8px; padding:6px 8px; background:#0f172a; border:1px dashed #334155; border-radius:4px; font-size:10px; color:#64748b; font-style:italic;">Aucune pièce · Clique "Éditer" pour en ajouter</div>`;
 
   // Boutons "Étiquette Freetouch" : accès direct depuis la carte OP.
-  // Affiché si le type est supporté par generateEtiquetteFromOp.
-  // Couvre : PRIX_ROUGE, NOUVEAUTE, EXCLU, COUP (one-shot).
+  // Affiché si le type est supporté par generateEtiquetteFromOp ET que le produit est un kit
+  // (seuls les kits sont sur le Freetouch → seuls à avoir des étiquettes FT).
   const ETIQ_OP_TYPES = ['PRIX_ROUGE','NOUVEAUTE','EXCLU','COUP'];
-  const canGenerateEtiq = ETIQ_OP_TYPES.includes(op.type);
+  const _etiqPid = (op.produitIds || [])[0];
+  const _etiqIsKit = _etiqPid && baseKits.some(k => k.id === _etiqPid);
+  const canGenerateEtiq = ETIQ_OP_TYPES.includes(op.type) && _etiqIsKit;
   const freetouchBtnsHtml = (canGenerateEtiq && !shopFilter)
     ? `<div style="margin-top:6px; padding:6px 8px; background:#0f172a; border:1px solid #22d3ee30; border-radius:4px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
          <span style="font-size:9.5px; color:#22d3ee; text-transform:uppercase; letter-spacing:0.4px; font-weight:700;">🏷️ Générer étiquette</span>
