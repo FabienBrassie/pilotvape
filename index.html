@@ -13269,7 +13269,9 @@ function renderDashboard() {
     const d = _mkDate(_windowStart); d.setDate(d.getDate() + day);
     _weekTicks.push(`<span style="position:absolute; left:${leftPct}%; font-size:9px; color:#64748b;">${_fmtDay(ymd(d))}</span>`);
   }
-  const _todayPct = (_TIMELINE_DAYS_BEFORE / _totalSpan) * 100;
+  // Position au milieu de la journée (= heure actuelle / 24)
+  const _nowFraction = (new Date().getHours() + new Date().getMinutes() / 60) / 24;
+  const _todayPct = ((_TIMELINE_DAYS_BEFORE + _nowFraction) / _totalSpan) * 100;
   const _todayLine = `<div style="position:absolute; left:${_todayPct.toFixed(2)}%; top:0; bottom:0; width:1.5px; background:#22c55e; opacity:0.7; z-index:2; pointer-events:none;"></div>`;
 
   // 5) Rendu des bandeaux campagne (fond reliant les OPs d'une même campagne éclatée)
