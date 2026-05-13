@@ -6317,6 +6317,27 @@ async function loadData() {
         }
       }
     });
+    // ── TRACEUR TEMPORAIRE : intercepte toute modification de dateFin sur les OPs PROP-010 (Coolfire Z60) ──
+    // À RETIRER une fois le bug identifié.
+    ops.forEach((op, idx) => {
+      if (!op.produitIds || !op.produitIds.includes('PROP-010')) return;
+      const opId = op.id;
+      const origDateFin = op.dateFin;
+      Object.defineProperty(op, 'dateFin', {
+        get() { return this._dateFin; },
+        set(v) {
+          if (v !== this._dateFin) {
+            const stack = new Error().stack.split('\n').slice(1, 6).map(s => s.trim()).join(' ← ');
+            console.warn('[TRACE-DATEFIN]', opId, ':', this._dateFin, '→', v, '|', stack);
+          }
+          this._dateFin = v;
+        },
+        enumerable: true,
+        configurable: true
+      });
+      Object.defineProperty(op, '_dateFin', { value: origDateFin, writable: true, enumerable: false, configurable: true });
+    });
+    // ── FIN TRACEUR ──
     // Idem pour les OPs : chaque OP doit avoir etats[shop].steps cohérent avec son type.
     ops.forEach(op => ensureOpSteps(op));
     // Migration : aligner la source des pièces au défaut sémantique de leur type.
@@ -7216,6 +7237,7 @@ function _mergeArray(localArr, remoteArr, idField) {
           const _nullGuard = new Set([
             'prixRouge', 'prixAvantRouge', 'fanfareOpType',    // prix + fanfare
             '_dateFinManuelle', 'motifCloture',                 // clôture manuelle
+            'dateFin', 'dateDebut',                             // dates OP/action — jamais écraser une date existante avec null
             'campagneId',                                       // lien campagne
             'rentrerActionId', 'sortirActionId',                // liens OP ↔ actions (purge-critical)
             'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId',
@@ -7226,6 +7248,10 @@ function _mergeArray(localArr, remoteArr, idField) {
             'replaceParId'                                      // lien remplacement
           ]);
           if (_nullGuard.has(k)) return;
+        }
+        // TRACE TEMPORAIRE : loguer toute modification de dateFin/dateDebut par le merge
+        if ((k === 'dateFin' || k === 'dateDebut') && lx[k] !== rx[k]) {
+          console.warn('[MERGE-DATE]', lx[idField] || '?', k, ':', lx[k], '→', rx[k], '(remote._ts=' + rx._ts + ', local._ts=' + lx._ts + ')');
         }
         lx[k] = rx[k];
       });
@@ -7437,6 +7463,30 @@ function _startAutoSync() {
           }
         }
       });
+      // ── TRACEUR POST-MERGE : réinstaller le setter dateFin sur les OPs PROP-010 ajoutées/remplacées par le merge ──
+      // Les OPs nouvellement ajoutées par _mergeOpEtats ou _mergeArray n'ont pas le Object.defineProperty.
+      // À RETIRER une fois le bug identifié.
+      ops.forEach(op => {
+        if (!op.produitIds || !op.produitIds.includes('PROP-010')) return;
+        // Skip si le setter est déjà installé (on teste la présence de _dateFin)
+        if (op.hasOwnProperty('_dateFin')) return;
+        const opId = op.id;
+        const origDateFin = op.dateFin;
+        Object.defineProperty(op, 'dateFin', {
+          get() { return this._dateFin; },
+          set(v) {
+            if (v !== this._dateFin) {
+              const stack = new Error().stack.split('\n').slice(1, 6).map(s => s.trim()).join(' ← ');
+              console.warn('[TRACE-DATEFIN-POSTSYNC]', opId, ':', this._dateFin, '→', v, '|', stack);
+            }
+            this._dateFin = v;
+          },
+          enumerable: true,
+          configurable: true
+        });
+        Object.defineProperty(op, '_dateFin', { value: origDateFin, writable: true, enumerable: false, configurable: true });
+      });
+      // ── FIN TRACEUR POST-MERGE ──
       // Max des compteurs
       if (typeof remote.nextActionId === 'number') nextActionId = Math.max(nextActionId, remote.nextActionId);
       if (typeof remote.nextOpId === 'number') nextOpId = Math.max(nextOpId, remote.nextOpId);
