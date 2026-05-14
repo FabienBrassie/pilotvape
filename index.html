@@ -12762,19 +12762,18 @@ function renderDashboard() {
   const _todayInstall = ymd(new Date());
   const _tomorrowD = new Date(); _tomorrowD.setDate(_tomorrowD.getDate() + 1);
   const _tomorrowInstall = ymd(_tomorrowD);
-  // DEBUG TEMPORAIRE — à retirer
-  console.log('[INSTALL-DEBUG] today=' + _todayInstall + ' tomorrow=' + _tomorrowInstall);
-  ops.filter(o => !o._archived && o.dateDebut).forEach(o => {
-    if (o.dateDebut === _todayInstall || o.dateDebut === _tomorrowInstall) {
-      console.log('[INSTALL-DEBUG] candidat:', o.id, o.type, 'debut=' + o.dateDebut, 'fin=' + o.dateFin, 'status=' + opTimeStatus(o));
-    }
-  });
-  // FIN DEBUG
   const opsAInstaller = ops.filter(op => {
     if (!op.dateDebut || op._archived) return false;
     const ts = opTimeStatus(op);
-    if (ts === 'TERMINEE') return false; // déjà finie
-    return op.dateDebut === _todayInstall || op.dateDebut === _tomorrowInstall;
+    if (ts === 'TERMINEE') return false;
+    if (op.dateDebut !== _todayInstall && op.dateDebut !== _tomorrowInstall) return false;
+    // Vérifier qu'il y a du matériel physique à installer (pièces per-shop ou étapes hors post-op)
+    const hasPieces = (op.pieces || []).some(p => pieceIsPerShop(p));
+    const hasPhysicalSteps = SHOPS.some(sh => {
+      const defs = computeOpShopStepDefs(op, sh);
+      return defs.some(d => !_POST_OP_KINDS.has(d.kind));
+    });
+    return hasPieces || hasPhysicalSteps;
   });
   const opsInstallVisibles = fShop
     ? opsAInstaller.filter(op => !opAllStepsDone(op, fShop))
@@ -12786,14 +12785,18 @@ function renderDashboard() {
     'OPs dont l\'installation commence aujourd\'hui ou demain.');
 
   // --- OPs terminées à désinstaller (inclut dernier jour = dateFin aujourd'hui) ---
+  // Uniquement les OPs qui ont effectivement des étapes de désinstallation (matériel physique).
   const opsADesinstaller = ops.filter(op => {
     if (op._archived) return false;
     const ts = opTimeStatus(op);
-    // Classique : terminée et pas encore désinstallée
-    if (ts === 'TERMINEE' && !isOpFullyDesinstalled(op)) return true;
-    // Nouveau : dernier jour (dateFin = aujourd'hui), pas encore terminée mais on prévient
-    if (op.dateFin === _todayInstall && ts === 'EN_COURS') return true;
-    return false;
+    const isCandidate = (ts === 'TERMINEE' && !isOpFullyDesinstalled(op))
+                     || (op.dateFin === _todayInstall && ts === 'EN_COURS');
+    if (!isCandidate) return false;
+    // Vérifier qu'il y a des steps de kind 'desinstall' (matériel à retirer)
+    return SHOPS.some(sh => {
+      const defs = computeOpShopStepDefs(op, sh);
+      return defs.some(d => d.kind === 'desinstall');
+    });
   });
   const opsDesinstVisibles = fShop
     ? opsADesinstaller.filter(op => !(op.etats && op.etats[fShop] && op.etats[fShop].steps && op.etats[fShop].steps.desinstallation))
@@ -17432,13 +17435,20 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   const timeBadge  = `<span style="font-size:9px; padding:1px 6px; background:${timeMeta.color}25; color:${timeMeta.color}; border:1px solid ${timeMeta.color}60; border-radius:3px; font-weight:700;">${timeMeta.label}</span>`;
 
   // Alerte désinstallation : OP terminée OU dernier jour (dateFin = aujourd'hui)
+  // Uniquement si l'OP a du matériel physique (steps de kind 'desinstall')
   const _todayYmd = ymd(new Date());
   const _isLastDay = op.dateFin === _todayYmd && timeStatus === 'EN_COURS';
-  const _needsDesinstall = (timeStatus === 'TERMINEE' && !isOpFullyDesinstalled(op)) || _isLastDay;
+  const _hasDesinstSteps = SHOPS.some(sh => computeOpShopStepDefs(op, sh).some(d => d.kind === 'desinstall'));
+  const _needsDesinstall = _hasDesinstSteps && ((timeStatus === 'TERMINEE' && !isOpFullyDesinstalled(op)) || _isLastDay);
   // Alerte installation : dateDebut = aujourd'hui ou demain
+  // Uniquement si l'OP a des étapes physiques (pièces per-shop ou steps hors post-op)
   const _tomorrowDt = new Date(); _tomorrowDt.setDate(_tomorrowDt.getDate() + 1);
   const _tomorrowYmd = ymd(_tomorrowDt);
-  const _needsInstall = op.dateDebut && timeStatus !== 'TERMINEE' && (op.dateDebut === _todayYmd || op.dateDebut === _tomorrowYmd);
+  const _hasPhysicalInstall = (() => {
+    if ((op.pieces || []).some(p => pieceIsPerShop(p))) return true;
+    return SHOPS.some(sh => computeOpShopStepDefs(op, sh).some(d => !_POST_OP_KINDS.has(d.kind)));
+  })();
+  const _needsInstall = _hasPhysicalInstall && op.dateDebut && timeStatus !== 'TERMINEE' && (op.dateDebut === _todayYmd || op.dateDebut === _tomorrowYmd);
   // (badges installation/désinstallation rendus séparément hors du filtre grisé)
 
   // Opacité : terminée = grisé, à venir = légèrement transparent
