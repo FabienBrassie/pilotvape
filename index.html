@@ -13640,7 +13640,7 @@ function renderDashboard() {
   // Le bloc "MEP" (mise en place) a été retiré : il faisait doublon avec sortir/rentrer.
   // Ordre : À sortir → À rentrer → Prix à modifier → Besoins à combler → Prochaines OP → Historique
   document.getElementById('dashContent').innerHTML =
-    sortirBlock + rentrerBlock + prixBlock + desinstBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    installBlock + desinstBlock + sortirBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
 
   // Summary top right — chips cliquables qui amènent vers la section correspondante
   const chip = (color, label, key) =>
@@ -13649,6 +13649,8 @@ function renderDashboard() {
       onmouseover="this.style.background='${color}22'"
       onmouseout="this.style.background='transparent'">${label}</span>`;
   const summaryParts = [];
+  if (opsInstallVisibles.length) summaryParts.push(chip('#f472b6', `${opsInstallVisibles.length} à installer`, 'install'));
+  if (opsDesinstVisibles.length) summaryParts.push(chip('#f97316', `${opsDesinstVisibles.length} à désinstaller`, 'desinstall'));
   if (sortir.length) summaryParts.push(chip('#ef4444', `${sortir.length} à sortir`, 'sortir'));
   if (rentrer.length) summaryParts.push(chip('#22c55e', `${rentrer.length} à rentrer`, 'rentrer'));
   const mepReady = meps.filter(m => SHOPS.some(sh => mepShopStatus(m, sh) === 'A_FAIRE')).length;
