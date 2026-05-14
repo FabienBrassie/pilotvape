@@ -12763,8 +12763,9 @@ function renderDashboard() {
   const _tomorrowD = new Date(); _tomorrowD.setDate(_tomorrowD.getDate() + 1);
   const _tomorrowInstall = ymd(_tomorrowD);
   const opsAInstaller = ops.filter(op => {
-    if (!op.dateDebut || op.dateFin) return false; // pas de début ou déjà terminée
-    if (op._archived) return false;
+    if (!op.dateDebut || op._archived) return false;
+    const ts = opTimeStatus(op);
+    if (ts === 'TERMINEE') return false; // déjà finie
     return op.dateDebut === _todayInstall || op.dateDebut === _tomorrowInstall;
   });
   const opsInstallVisibles = fShop
@@ -17427,7 +17428,7 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   // Alerte installation : dateDebut = aujourd'hui ou demain
   const _tomorrowDt = new Date(); _tomorrowDt.setDate(_tomorrowDt.getDate() + 1);
   const _tomorrowYmd = ymd(_tomorrowDt);
-  const _needsInstall = !op.dateFin && op.dateDebut && (op.dateDebut === _todayYmd || op.dateDebut === _tomorrowYmd);
+  const _needsInstall = op.dateDebut && timeStatus !== 'TERMINEE' && (op.dateDebut === _todayYmd || op.dateDebut === _tomorrowYmd);
   // (badges installation/désinstallation rendus séparément hors du filtre grisé)
 
   // Opacité : terminée = grisé, à venir = légèrement transparent
