@@ -12762,6 +12762,14 @@ function renderDashboard() {
   const _todayInstall = ymd(new Date());
   const _tomorrowD = new Date(); _tomorrowD.setDate(_tomorrowD.getDate() + 1);
   const _tomorrowInstall = ymd(_tomorrowD);
+  // DEBUG TEMPORAIRE — à retirer
+  console.log('[INSTALL-DEBUG] today=' + _todayInstall + ' tomorrow=' + _tomorrowInstall);
+  ops.filter(o => !o._archived && o.dateDebut).forEach(o => {
+    if (o.dateDebut === _todayInstall || o.dateDebut === _tomorrowInstall) {
+      console.log('[INSTALL-DEBUG] candidat:', o.id, o.type, 'debut=' + o.dateDebut, 'fin=' + o.dateFin, 'status=' + opTimeStatus(o));
+    }
+  });
+  // FIN DEBUG
   const opsAInstaller = ops.filter(op => {
     if (!op.dateDebut || op._archived) return false;
     const ts = opTimeStatus(op);
@@ -12774,7 +12782,7 @@ function renderDashboard() {
   const installBlockInner = opsInstallVisibles.length === 0
     ? ''
     : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('');
-  const installBlock = opsInstallVisibles.length === 0 ? '' : block('install', '🔺 À installer', '#22c55e', opsInstallVisibles.length, installBlockInner,
+  const installBlock = opsInstallVisibles.length === 0 ? '' : block('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, installBlockInner,
     'OPs dont l\'installation commence aujourd\'hui ou demain.');
 
   // --- OPs terminées à désinstaller (inclut dernier jour = dateFin aujourd'hui) ---
@@ -12793,10 +12801,10 @@ function renderDashboard() {
   const desinstBlockInner = opsDesinstVisibles.length === 0
     ? ''
     : opsDesinstVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: false })).join('');
-  const desinstBlock = opsDesinstVisibles.length === 0 ? '' : block('desinstall', '🔻 À désinstaller', '#ef4444', opsDesinstVisibles.length, desinstBlockInner,
+  const desinstBlock = opsDesinstVisibles.length === 0 ? '' : block('desinstall', '🔻 À désinstaller', '#f97316', opsDesinstVisibles.length, desinstBlockInner,
     'OPs terminées ou en dernier jour dont le matériel doit être retiré.');
 
-  const opBlocks = sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock + installBlock + desinstBlock;
+  const opBlocks = installBlock + desinstBlock + sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock;
 
   // --- Bloc Besoins à combler ---
   function renderBesoinTrou(t) {
@@ -17447,13 +17455,13 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
     const _dShops = SHOPS.filter(sh => !(op.etats && op.etats[sh] && op.etats[sh].steps && op.etats[sh].steps.desinstallation));
     const _dLabel = _dShops.map(sh => SHOP_LABELS[sh]).join(', ');
     const _dTiming = _isLastDay ? ' ce soir' : '';
-    _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#ef444430; color:#fca5a5; border:1px solid #ef444480; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller' + _dTiming + ' — ' + _dLabel + '</span>';
+    _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#f9731630; color:#fdba74; border:1px solid #f9731680; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller' + _dTiming + ' — ' + _dLabel + '</span>';
   }
   // Badge installation (aujourd'hui ou demain)
   let _installBadgeHtml = '';
   if (_needsInstall) {
     const _iLabel = op.dateDebut === _todayYmd ? 'aujourd\'hui' : 'demain';
-    _installBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#22c55e30; color:#86efac; border:1px solid #22c55e80; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔺 À installer ' + _iLabel + '</span>';
+    _installBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#f472b630; color:#f9a8d4; border:1px solid #f472b680; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">📦 À installer ' + _iLabel + '</span>';
   }
 
   return `<div id="opCard-${op.id}" onclick="toggleOpExpand('${op.id}')" title="Cliquer pour voir le détail / cocher les étapes"
