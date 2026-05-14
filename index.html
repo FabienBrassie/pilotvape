@@ -12758,8 +12758,34 @@ function renderDashboard() {
   const opsBlock = block('ops', 'Opérations', '#a855f7', opsActivesVisibles.length, opsBlockInner,
     'Groupées par statut temporel. À venir / Imminente (≤3j) / En cours. Les terminées sont masquées.');
 
-  // --- OPs terminées à désinstaller ---
-  const opsADesinstaller = ops.filter(op => opTimeStatus(op) === 'TERMINEE' && !op._archived && !isOpFullyDesinstalled(op));
+  // --- OPs à installer (dateDebut = aujourd'hui ou demain) ---
+  const _todayInstall = ymd(new Date());
+  const _tomorrowD = new Date(); _tomorrowD.setDate(_tomorrowD.getDate() + 1);
+  const _tomorrowInstall = ymd(_tomorrowD);
+  const opsAInstaller = ops.filter(op => {
+    if (!op.dateDebut || op.dateFin) return false; // pas de début ou déjà terminée
+    if (op._archived) return false;
+    return op.dateDebut === _todayInstall || op.dateDebut === _tomorrowInstall;
+  });
+  const opsInstallVisibles = fShop
+    ? opsAInstaller.filter(op => !opAllStepsDone(op, fShop))
+    : opsAInstaller;
+  const installBlockInner = opsInstallVisibles.length === 0
+    ? ''
+    : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('');
+  const installBlock = opsInstallVisibles.length === 0 ? '' : block('install', '🔺 À installer', '#22c55e', opsInstallVisibles.length, installBlockInner,
+    'OPs dont l\'installation commence aujourd\'hui ou demain.');
+
+  // --- OPs terminées à désinstaller (inclut dernier jour = dateFin aujourd'hui) ---
+  const opsADesinstaller = ops.filter(op => {
+    if (op._archived) return false;
+    const ts = opTimeStatus(op);
+    // Classique : terminée et pas encore désinstallée
+    if (ts === 'TERMINEE' && !isOpFullyDesinstalled(op)) return true;
+    // Nouveau : dernier jour (dateFin = aujourd'hui), pas encore terminée mais on prévient
+    if (op.dateFin === _todayInstall && ts === 'EN_COURS') return true;
+    return false;
+  });
   const opsDesinstVisibles = fShop
     ? opsADesinstaller.filter(op => !(op.etats && op.etats[fShop] && op.etats[fShop].steps && op.etats[fShop].steps.desinstallation))
     : opsADesinstaller;
@@ -12767,9 +12793,9 @@ function renderDashboard() {
     ? ''
     : opsDesinstVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: false })).join('');
   const desinstBlock = opsDesinstVisibles.length === 0 ? '' : block('desinstall', '🔻 À désinstaller', '#ef4444', opsDesinstVisibles.length, desinstBlockInner,
-    'OPs terminées dont le matériel n\'a pas encore été retiré. Cocher "OP désinstallée" sur chaque boutique pour archiver.');
+    'OPs terminées ou en dernier jour dont le matériel doit être retiré.');
 
-  const opBlocks = sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock + desinstBlock;
+  const opBlocks = sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock + installBlock + desinstBlock;
 
   // --- Bloc Besoins à combler ---
   function renderBesoinTrou(t) {
@@ -17394,9 +17420,15 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   const timePhrase = opTimePhrase(op);
   const timeBadge  = `<span style="font-size:9px; padding:1px 6px; background:${timeMeta.color}25; color:${timeMeta.color}; border:1px solid ${timeMeta.color}60; border-radius:3px; font-weight:700;">${timeMeta.label}</span>`;
 
-  // Alerte désinstallation : OP terminée mais pas encore désinstallée sur toutes les boutiques
-  const _needsDesinstall = timeStatus === 'TERMINEE' && !isOpFullyDesinstalled(op);
-  // (badge désinstallation rendu séparément hors du filtre grisé)
+  // Alerte désinstallation : OP terminée OU dernier jour (dateFin = aujourd'hui)
+  const _todayYmd = ymd(new Date());
+  const _isLastDay = op.dateFin === _todayYmd && timeStatus === 'EN_COURS';
+  const _needsDesinstall = (timeStatus === 'TERMINEE' && !isOpFullyDesinstalled(op)) || _isLastDay;
+  // Alerte installation : dateDebut = aujourd'hui ou demain
+  const _tomorrowDt = new Date(); _tomorrowDt.setDate(_tomorrowDt.getDate() + 1);
+  const _tomorrowYmd = ymd(_tomorrowDt);
+  const _needsInstall = !op.dateFin && op.dateDebut && (op.dateDebut === _todayYmd || op.dateDebut === _tomorrowYmd);
+  // (badges installation/désinstallation rendus séparément hors du filtre grisé)
 
   // Opacité : terminée = grisé, à venir = légèrement transparent
   let opacity = 1;
@@ -17413,7 +17445,14 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   if (_needsDesinstall) {
     const _dShops = SHOPS.filter(sh => !(op.etats && op.etats[sh] && op.etats[sh].steps && op.etats[sh].steps.desinstallation));
     const _dLabel = _dShops.map(sh => SHOP_LABELS[sh]).join(', ');
-    _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#ef444430; color:#fca5a5; border:1px solid #ef444480; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller — ' + _dLabel + '</span>';
+    const _dTiming = _isLastDay ? ' ce soir' : '';
+    _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#ef444430; color:#fca5a5; border:1px solid #ef444480; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller' + _dTiming + ' — ' + _dLabel + '</span>';
+  }
+  // Badge installation (aujourd'hui ou demain)
+  let _installBadgeHtml = '';
+  if (_needsInstall) {
+    const _iLabel = op.dateDebut === _todayYmd ? 'aujourd\'hui' : 'demain';
+    _installBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#22c55e30; color:#86efac; border:1px solid #22c55e80; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔺 À installer ' + _iLabel + '</span>';
   }
 
   return `<div id="opCard-${op.id}" onclick="toggleOpExpand('${op.id}')" title="Cliquer pour voir le détail / cocher les étapes"
@@ -17427,7 +17466,7 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
       <span style="text-align:center;">${timeBadge}</span>
       <span style="display:inline-flex; gap:3px; justify-content:center;">${shopDots}</span>
     </div>
-    ${_desinstBadgeHtml}
+    ${_installBadgeHtml}${_desinstBadgeHtml}
   </div>`;
 }
 
