@@ -3613,6 +3613,10 @@ function _ensureOneShotOpGeneric(produit, produitType, label) {
   if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
   if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
   produit.oneShotOpId = op.id;
+  // Réparer produitIds si absent ou incomplet (peut arriver après un merge ou code ancien)
+  if (!op.produitIds || !op.produitIds.includes(produit.id)) {
+    op.produitIds = [produit.id];
+  }
   ensureOpSteps(op);
   if (aRentrer || aSortir) _syncOneShotStepsBidi(op, aRentrer, aSortir);
   // Prix rouge intégré directement dans l'OP COUP (pas d'OP PRIX_ROUGE séparée)
@@ -6405,6 +6409,18 @@ async function loadData() {
         }
       }
     });
+    // Auto-heal produitIds sur les COUP OPs : si absent, on le reconstitue depuis
+    // le produit qui a oneShotOpId pointant vers cette OP (kit, liq, ou pd).
+    ops.forEach(op => {
+      if (op.type !== 'COUP' || (op.produitIds && op.produitIds.length > 0)) return;
+      const src = baseKits.find(k => k.oneShotOpId === op.id)
+               || baseLiq.find(l => l.oneShotOpId === op.id)
+               || basePd.find(p => p.oneShotOpId === op.id);
+      if (src) {
+        op.produitIds = [src.id];
+        console.log('[AUTO-HEAL] Restauré produitIds=[' + src.id + '] sur COUP ' + op.id);
+      }
+    });
     // ── TRACEUR TEMPORAIRE : intercepte toute modification de dateFin sur les OPs PROP-010 (Coolfire Z60) ──
     // À RETIRER une fois le bug identifié.
     ops.forEach((op, idx) => {
@@ -7334,7 +7350,8 @@ function _mergeArray(localArr, remoteArr, idField) {
             'decisionChoice',                                   // décision prix (recalibrer/remonter)
             'produitParfumId', 'parfumNom',                     // actions parfum
             'replaceParId',                                     // lien remplacement
-            'caseMurOverride'                                     // affectation forcée kit → case mur
+            'caseMurOverride',                                    // affectation forcée kit → case mur
+            'produitIds'                                          // lien OP → produits
           ]);
           if (_nullGuard.has(k)) return;
         }
