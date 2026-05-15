@@ -914,6 +914,39 @@ function pvConfirm(msg, opts) {
   });
 }
 
+// pvPromptDates : demande dateDebut (obligatoire) et dateFin (optionnelle) via modale.
+// Retourne Promise<{dateDebut, dateFin}> ou null si annulé.
+// options: { title, defaultDebut, defaultFin, requireFin }
+function pvPromptDates(opts) {
+  opts = opts || {};
+  const title = opts.title || 'Dates de l\'opération';
+  const defDebut = opts.defaultDebut || ymd(new Date());
+  const defFin = opts.defaultFin || '';
+  const finLabel = opts.requireFin ? 'Date de fin *' : 'Date de fin (optionnelle)';
+  const html = `<div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:12px;">${title}</div>
+    <div style="display:flex; flex-direction:column; gap:10px;">
+      <label style="color:#94a3b8; font-size:11px;">Date de début *
+        <input type="date" id="_pvDateDebut" value="${defDebut}" style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;">
+      </label>
+      <label style="color:#94a3b8; font-size:11px;">${finLabel}
+        <input type="date" id="_pvDateFin" value="${defFin}" style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;">
+      </label>
+    </div>`;
+  return new Promise(resolve => {
+    const overlay = _pvModal(html,
+      [{ label: 'Valider', color: '#3b82f6' }, { label: 'Annuler' }],
+      idx => {
+        if (idx !== 0) { resolve(null); return; }
+        const debut = overlay.querySelector('#_pvDateDebut').value;
+        const fin = overlay.querySelector('#_pvDateFin').value || null;
+        if (!debut) { pvAlert('La date de début est obligatoire.'); resolve(null); return; }
+        if (opts.requireFin && !fin) { pvAlert('La date de fin est obligatoire.'); resolve(null); return; }
+        resolve({ dateDebut: debut, dateFin: fin });
+      }
+    );
+  });
+}
+
 // Formatte un Date en YYYY-MM-DD *local* (pas UTC). Anciennement on utilisait
 // `ymd(d)` ce qui renvoie la date UTC ; dans un fuseau à
 // offset positif (CEST +2) minuit local = 22h UTC la veille → décalage d'un jour
@@ -2329,11 +2362,54 @@ function isOpOutsideCampagne(op) {
 }
 
 // Log léger sur chaque création d'OP (sans stack trace — pas de coût perceptible).
+// File d'attente des OPs dont la date n'a pas été validée par un humain.
+// Traitée après syncAutoActions / chargement initial.
+const _opsPendingDateConfirm = [];
 function pushOpTraced(op, source) {
   try { console.log('[OP]', source || '?', '→', op.id, op.type); } catch(e) {}
   if (!op._ts) op._ts = new Date().toISOString();
   ops.push(op);
+  // Si la date n'a pas été posée manuellement, ajouter à la file de confirmation
+  if (!op._dateDebutManuelle) {
+    _opsPendingDateConfirm.push(op.id);
+  }
   return op;
+}
+
+// Traite la file : affiche un prompt de dates pour chaque OP en attente (séquentiellement).
+// Ne tourne que pour l'admin. Appelée après syncAutoActions, après chargement initial.
+let _flushingDates = false;
+async function _flushPendingDateConfirm() {
+  if (_flushingDates) return; // déjà en cours
+  _flushingDates = true;
+  if (!isAdmin()) { _opsPendingDateConfirm.length = 0; return; }
+  while (_opsPendingDateConfirm.length > 0) {
+    const opId = _opsPendingDateConfirm.shift();
+    const op = ops.find(o => o.id === opId);
+    if (!op || op._dateDebutManuelle || op.dateFin) continue; // déjà confirmée ou clôturée
+    const meta = OP_TYPE_META[op.type] || { label: op.type };
+    const prodLabel = (() => { const d = getOpProductDisplay(op); return d.label || '?'; })();
+    const dates = await pvPromptDates({
+      title: '📅 Confirmer les dates — ' + meta.label + '\n' + prodLabel,
+      defaultDebut: op.dateDebut || ymd(new Date())
+    });
+    if (dates) {
+      op.dateDebut = dates.dateDebut;
+      if (dates.dateFin) op.dateFin = dates.dateFin;
+      op._dateDebutManuelle = true;
+      if (dates.dateFin) op._dateFinManuelle = true;
+      op._ts = new Date().toISOString();
+      saveData();
+    } else {
+      // L'utilisateur a annulé — on marque quand même pour ne pas re-demander
+      op._dateDebutManuelle = true;
+      op._ts = new Date().toISOString();
+      saveData();
+    }
+  }
+  _flushingDates = false;
+  renderDashboard();
+  if (typeof renderOps === 'function') renderOps();
 }
 
 // Détecte les OPs "orphelines" / zombies :
@@ -3481,6 +3557,10 @@ function syncAutoActions() {
   syncMiseEnPlaceActions();
   syncPriceActions();
   syncOpsFromVerdicts();
+  // Après toutes les créations auto, demander confirmation des dates (non-bloquant)
+  if (_opsPendingDateConfirm.length > 0) {
+    setTimeout(() => _flushPendingDateConfirm(), 200);
+  }
 }
 
 // ── One-shot unifié (kit, liq, pd) ────────────────────────────────────
@@ -4185,24 +4265,30 @@ function setRentrerFanfare(actionId, opType) {
 
   const today = ymd(new Date());
   if (!op) {
-    // Création initiale
-    const newOp = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
-      type: opType,
-      produitIds: [a.produitId],
-      dateDebut: today,
-      dateFin: null,
-      commentaire: 'Entrée en fanfare (depuis RENTRER ' + a.id + ')',
-      rentrerActionId: a.id,
-      auto: false,
-      etats: {},
-      pieces: []
-    };
-    seedOpDefaults(newOp);
-    ensureOpSteps(newOp);
-    ops.push(newOp);
-    a.fanfareOpType = opType;
-    a.opId = newOp.id;
+    // Création initiale — demander les dates
+    pvPromptDates({ title: 'Dates de l\'OP ' + opType, defaultDebut: today }).then(dates => {
+      if (!dates) return; // annulé
+      const newOp = {
+        id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+        type: opType,
+        produitIds: [a.produitId],
+        dateDebut: dates.dateDebut,
+        dateFin: dates.dateFin,
+        _dateDebutManuelle: true,
+        commentaire: 'Entrée en fanfare (depuis RENTRER ' + a.id + ')',
+        rentrerActionId: a.id,
+        auto: false,
+        etats: {},
+        pieces: []
+      };
+      seedOpDefaults(newOp);
+      ensureOpSteps(newOp);
+      ops.push(newOp);
+      a.fanfareOpType = opType;
+      a.opId = newOp.id;
+      saveData(); renderDashboard(); if (typeof renderOps === 'function') renderOps();
+    });
+    return; // async — le reste se fait dans le .then
   } else if (op.type !== opType) {
     // Swap : mutation en place. Reset pieces + meca pour appliquer le nouveau seed.
     op.type = opType;
@@ -4243,26 +4329,31 @@ function promoteActionToOp(actionId, opType, commentaire) {
   if (!linkField) { pvAlert('Type d\'action non promouvable : ' + a.type); return null; }
   // Si une OP active du même type existe déjà pour cette action, on la renvoie
   const existing = ops.find(o => o[linkField] === a.id && o.type === opType && !o.dateFin);
-  if (existing) { ensureOpSteps(existing); return existing; }
-  const op = {
-    id: 'OP-' + String(nextOpId++).padStart(4, '0'),
-    type: opType,
-    produitIds: [a.produitId],
-    dateDebut: today,
-    dateFin: null,
-    commentaire: commentaire || ('Déclenchée depuis ' + a.type + ' ' + a.id),
-    [linkField]: a.id,
-    auto: false,
-    etats: {}
-  };
-  seedOpDefaults(op);
-  ensureOpSteps(op);
-  pushOpTraced(op, 'promoteActionToOp');
-  if (!a.opId) a.opId = op.id;
-  saveData();
-  renderDashboard();
-  renderOps && renderOps();
-  return op;
+  if (existing) { ensureOpSteps(existing); return Promise.resolve(existing); }
+  // Demander les dates
+  return pvPromptDates({ title: 'Dates de l\'OP ' + opType, defaultDebut: today }).then(dates => {
+    if (!dates) return null; // annulé
+    const op = {
+      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+      type: opType,
+      produitIds: [a.produitId],
+      dateDebut: dates.dateDebut,
+      dateFin: dates.dateFin,
+      _dateDebutManuelle: true,
+      commentaire: commentaire || ('Déclenchée depuis ' + a.type + ' ' + a.id),
+      [linkField]: a.id,
+      auto: false,
+      etats: {}
+    };
+    seedOpDefaults(op);
+    ensureOpSteps(op);
+    pushOpTraced(op, 'promoteActionToOp');
+    if (!a.opId) a.opId = op.id;
+    saveData();
+    renderDashboard();
+    renderOps && renderOps();
+    return op;
+  });
 }
 
 // Miroir de sous-étapes entre une action PRIX et son OP PRIX_ROUGE auto liée.
@@ -4868,21 +4959,18 @@ function setActionOpPromotion(actionId, opType) {
         a.prixAvantRouge = pvActuel;
       }
     }
-    // Demander la date de début
-    const _today = ymd(new Date());
-    const saisieDate = prompt(`Date de début du prix rouge ?\n(format JJ/MM/AAAA, laisser vide = aujourd'hui)`, fmtFR(_today));
-    _prDateDebut = parseDateInput(saisieDate) || _today;
+    // Date de début : sera demandée par promoteActionToOp via pvPromptDates
   }
 
   const today = ymd(new Date());
   if (!op) {
-    // Création initiale (délègue à promoteActionToOp qui seed + push)
-    const newOp = promoteActionToOp(actionId, opType);
-    // Propager le prix rouge sur l'OP
-    if (newOp && a.prixRouge) newOp.prixRouge = a.prixRouge;
-    if (newOp && a.prixAvantRouge) newOp.prixAvantRouge = a.prixAvantRouge;
-    if (newOp && _prDateDebut) newOp.dateDebut = _prDateDebut;
-    saveData();
+    // Création initiale (délègue à promoteActionToOp qui seed + push — async avec prompt dates)
+    promoteActionToOp(actionId, opType).then(newOp => {
+      // Propager le prix rouge sur l'OP
+      if (newOp && a.prixRouge) newOp.prixRouge = a.prixRouge;
+      if (newOp && a.prixAvantRouge) newOp.prixAvantRouge = a.prixAvantRouge;
+      saveData();
+    });
     return;
   }
   if (op.type === opType) return; // idempotent
@@ -7236,7 +7324,7 @@ function _mergeArray(localArr, remoteArr, idField) {
           // Liste des champs protégés (ajoutés progressivement, jamais retirés)
           const _nullGuard = new Set([
             'prixRouge', 'prixAvantRouge', 'fanfareOpType',    // prix + fanfare
-            '_dateFinManuelle', 'motifCloture',                 // clôture manuelle
+            '_dateFinManuelle', '_dateDebutManuelle', 'motifCloture',  // flags dates manuelles + clôture
             'dateFin', 'dateDebut',                             // dates OP/action — jamais écraser une date existante avec null
             'campagneId',                                       // lien campagne
             'rentrerActionId', 'sortirActionId',                // liens OP ↔ actions (purge-critical)
@@ -7248,6 +7336,16 @@ function _mergeArray(localArr, remoteArr, idField) {
             'replaceParId'                                      // lien remplacement
           ]);
           if (_nullGuard.has(k)) return;
+        }
+        // Protection des dates posées manuellement : si l'utilisateur a explicitement
+        // choisi une date, le merge ne doit PAS la remplacer par une date auto (today) d'un autre poste.
+        if (k === 'dateDebut' && lx._dateDebutManuelle && lx[k] !== rx[k]) {
+          console.log('[MERGE-PROTECT] dateDebut manuelle protégée sur', lx[idField], ':', lx[k], '(remote voulait', rx[k] + ')');
+          return;
+        }
+        if (k === 'dateFin' && lx._dateFinManuelle && lx[k] !== rx[k]) {
+          console.log('[MERGE-PROTECT] dateFin manuelle protégée sur', lx[idField], ':', lx[k], '(remote voulait', rx[k] + ')');
+          return;
         }
         // TRACE TEMPORAIRE : loguer toute modification de dateFin/dateDebut par le merge
         if ((k === 'dateFin' || k === 'dateDebut') && lx[k] !== rx[k]) {
@@ -15425,6 +15523,8 @@ function submitNewOp() {
     id: 'OP-' + String(nextOpId++).padStart(4, '0'),
     type, produitIds, produitLibre,
     dateDebut, dateFin, commentaire, campagneId,
+    _dateDebutManuelle: true,
+    _dateFinManuelle: !!dateFin,
     partenaire,
     mecanique: mecaType ? { type: mecaType, params: {}, description: mecaDescription } : { type: null, params: {}, description: mecaDescription },
     prixActionId: null, auto: false, etats: {}
@@ -15663,25 +15763,31 @@ function duplicateOp(id) {
   });
   copy.progress = { global: {} };
 
-  // Réinitialisation des dates et des liens vers actions amont.
-  copy.dateDebut    = ymd(new Date());
-  copy.dateFin      = null;
   copy.prixActionId = null;
   copy.rentrerActionId = null;
   copy.sortirActionId  = null;
   copy.mepActionId     = null;
   copy.auto = false;
 
-  // Garantit la cohérence du modèle (au cas où la source aurait des champs legacy).
-  ensureOpModel(copy);
-  ensureOpSteps(copy);
+  // Demander les dates à l'utilisateur
+  pvPromptDates({ title: 'Dates de la copie', defaultDebut: ymd(new Date()) }).then(dates => {
+    if (!dates) return; // annulé
+    copy.dateDebut = dates.dateDebut;
+    copy.dateFin = dates.dateFin;
+    copy._dateDebutManuelle = true;
+    copy._dateFinManuelle = !!dates.dateFin;
 
-  pushOpTraced(copy, 'duplicateOp');
-  saveData();
-  // Ouvre automatiquement l'édition de la copie pour ajuster l'intitulé / la mécanique.
-  if (typeof opEditOpen !== 'undefined' && opEditOpen && opEditOpen.add) opEditOpen.add(copy.id);
-  renderOps();
-  renderDashboard();
+    // Garantit la cohérence du modèle (au cas où la source aurait des champs legacy).
+    ensureOpModel(copy);
+    ensureOpSteps(copy);
+
+    pushOpTraced(copy, 'duplicateOp');
+    saveData();
+    // Ouvre automatiquement l'édition de la copie pour ajuster l'intitulé / la mécanique.
+    if (typeof opEditOpen !== 'undefined' && opEditOpen && opEditOpen.add) opEditOpen.add(copy.id);
+    renderOps();
+    renderDashboard();
+  });
 }
 
 function renderOps() {
