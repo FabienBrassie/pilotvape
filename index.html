@@ -3663,17 +3663,26 @@ function closeOneShotOpPd(pd) { _closeOneShotOpGeneric(pd); }
 // Synchronise le prix rouge depuis l'action RENTRER vers l'OP COUP.
 // Remplace l'ancien syncRentrerPrixRougeOp qui créait une OP PRIX_ROUGE séparée.
 function _syncCoupPrixRouge(op, aRentrer, produit) {
-  if (!aRentrer) return;
-  if (typeof aRentrer.prixRouge === 'number') {
-    op.prixRouge = aRentrer.prixRouge;
-    if (typeof aRentrer.prixAvantRouge === 'number') {
-      op.prixAvantRouge = aRentrer.prixAvantRouge;
+  // Chercher le prixRouge sur l'action RENTRER ou, à défaut, sur l'action SORTIR (destockage)
+  let _prSrc = null;
+  if (aRentrer && typeof aRentrer.prixRouge === 'number') {
+    _prSrc = aRentrer;
+  } else if (op.sortirActionId) {
+    const aSortir = actions.find(x => x.id === op.sortirActionId);
+    if (aSortir && typeof aSortir.prixRouge === 'number') _prSrc = aSortir;
+  }
+  if (_prSrc) {
+    op.prixRouge = _prSrc.prixRouge;
+    if (typeof _prSrc.prixAvantRouge === 'number') {
+      op.prixAvantRouge = _prSrc.prixAvantRouge;
     } else if (!op.prixAvantRouge && produit && typeof produit.pv === 'number') {
       op.prixAvantRouge = produit.pv;
     }
     op._ts = new Date().toISOString(); // Protéger le prixRouge contre merge sync
+  } else if (!aRentrer) {
+    // Pas d'action RENTRER du tout → ne rien toucher (COUP peut avoir prixRouge posé manuellement)
   } else {
-    // Pas de prix rouge sur l'action → retirer du COUP si présent
+    // Action RENTRER sans prix rouge ET pas de SORTIR avec prix rouge → retirer du COUP si présent
     if (op.prixRouge) { delete op.prixRouge; delete op.prixAvantRouge; op._ts = new Date().toISOString(); }
   }
   // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe encore (migration ou résurrection par merge)
@@ -6398,14 +6407,22 @@ async function loadData() {
     // Si op.prixRouge a été perdu par merge mais que l'action RENTRER liée l'a encore,
     // on le restaure. Sans ça, ensureOpSteps purge les steps PR car _coupHasPR est false.
     ops.forEach(op => {
-      if (op.type === 'COUP' && typeof op.prixRouge !== 'number' && op.rentrerActionId) {
-        const _aR = actions.find(x => x.id === op.rentrerActionId);
-        if (_aR && typeof _aR.prixRouge === 'number') {
-          op.prixRouge = _aR.prixRouge;
-          if (typeof _aR.prixAvantRouge === 'number') op.prixAvantRouge = _aR.prixAvantRouge;
+      if (op.type === 'COUP' && typeof op.prixRouge !== 'number') {
+        // Chercher prixRouge sur l'action RENTRER ou SORTIR (destockage)
+        let _src = null, _srcId = '';
+        if (op.rentrerActionId) {
+          const _aR = actions.find(x => x.id === op.rentrerActionId);
+          if (_aR && typeof _aR.prixRouge === 'number') { _src = _aR; _srcId = _aR.id; }
+        }
+        if (!_src && op.sortirActionId) {
+          const _aS = actions.find(x => x.id === op.sortirActionId);
+          if (_aS && typeof _aS.prixRouge === 'number') { _src = _aS; _srcId = _aS.id; }
+        }
+        if (_src) {
+          op.prixRouge = _src.prixRouge;
+          if (typeof _src.prixAvantRouge === 'number') op.prixAvantRouge = _src.prixAvantRouge;
           // PAS de bump _ts ici : le prixRouge est protégé par _mergeArray (null-overwrite guard)
-          // Bumper _ts ferait "gagner" TOUS les champs locaux (dont dateFin potentiellement stale)
-          console.log('[AUTO-HEAL] Restauré prixRouge=' + _aR.prixRouge + ' sur COUP ' + op.id + ' depuis action ' + _aR.id);
+          console.log('[AUTO-HEAL] Restauré prixRouge=' + _src.prixRouge + ' sur COUP ' + op.id + ' depuis action ' + _srcId);
         }
       }
     });
@@ -11003,31 +11020,13 @@ function kitOpChips(k, excludeTypes) {
 function activePrixRougeForKit(kitId) {
   // Parcourir TOUTES les OP PR ouvertes pour ce produit (pas juste la première)
   // isOpOuverte : dateFin null OU dateFin >= aujourd'hui (fin de campagne planifiée ≠ clôture)
-  // Inclut aussi les COUP destockage (prixRouge défini) depuis la fusion PR→COUP
-  const candidates = ops.filter(o => (o.type === 'PRIX_ROUGE'
-                         || (o.type === 'COUP' && typeof o.prixRouge === 'number'))
+  // Inclut aussi les COUP (one-shot destockage) depuis la fusion PR→COUP.
+  // Le prixRouge peut être sur l'OP elle-même OU sur une action liée, donc on filtre
+  // tous les COUP ouverts et on laisse la logique de priorités déterminer s'il y a un PR.
+  const candidates = ops.filter(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP')
                          && isOpOuverte(o)
                          && o.produitIds && o.produitIds.includes(kitId));
-  // DEBUG temporaire — tracer pourquoi un kit n'a pas de badge PR
   if (candidates.length === 0) {
-    const _allForKit = ops.filter(o => o.produitIds && o.produitIds.includes(kitId));
-    const _coupForKit = ops.filter(o => o.type === 'COUP' && o.produitIds && o.produitIds.includes(kitId));
-    const _anyProduit = ops.filter(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && o.produitIds && o.produitIds.includes(kitId));
-    if (_allForKit.length > 0 || _coupForKit.length > 0) {
-      console.warn('[PR-DEBUG] Kit', kitId, '— aucun candidat PR trouvé.');
-      _allForKit.forEach(o => console.warn('  [PR-DEBUG] OP', o.id, 'type=' + o.type, 'prixRouge=' + o.prixRouge, 'dateFin=' + o.dateFin, 'isOpOuverte=' + isOpOuverte(o), 'produitIds=', o.produitIds));
-    }
-    // Chercher aussi les OPs COUP liées au kit via oneShotOpId mais sans produitIds
-    const kit = baseKits.find(k => k.id === kitId);
-    if (kit && kit.oneShotOpId) {
-      const _osOp = ops.find(o => o.id === kit.oneShotOpId);
-      if (_osOp) {
-        console.warn('[PR-DEBUG] Kit', kitId, 'a oneShotOpId=' + kit.oneShotOpId,
-          '→ OP type=' + _osOp.type, 'prixRouge=' + _osOp.prixRouge,
-          'produitIds=', _osOp.produitIds, 'dateFin=' + _osOp.dateFin,
-          'isOpOuverte=' + isOpOuverte(_osOp));
-      }
-    }
     return null;
   }
   for (const op of candidates) {
@@ -11061,10 +11060,16 @@ function activePrixRougeForKit(kitId) {
     if (op.groupActionIds && typeof op.prixRouge === 'number') {
       return { op, action: null, prixCible: op.prixRouge, isDestockage: true };
     }
-    // Priorité 5 (fallback) : OP trouvée mais aucun lien action valide — on renvoie quand même
-    // pour que le badge PR s'affiche (même sans prix)
-    const _fbPrx = typeof op.prixRouge === 'number' ? op.prixRouge : null;
-    return { op, action: null, prixCible: _fbPrx, isDestockage: !!op.sortirActionId };
+    // Priorité 5 (fallback) : OP PRIX_ROUGE sans lien action → on renvoie quand même.
+    // Pour les COUP, on ne renvoie que s'il y a un prixRouge — sinon c'est un COUP normal sans PR.
+    if (op.type === 'PRIX_ROUGE') {
+      const _fbPrx = typeof op.prixRouge === 'number' ? op.prixRouge : null;
+      return { op, action: null, prixCible: _fbPrx, isDestockage: !!op.sortirActionId };
+    }
+    if (op.type === 'COUP' && typeof op.prixRouge === 'number') {
+      return { op, action: null, prixCible: op.prixRouge, isDestockage: !!op.sortirActionId };
+    }
+    // COUP sans prixRouge ni action PR → pas de badge PR
   }
   return null;
 }
