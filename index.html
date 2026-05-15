@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
+  <link rel="icon" href="data:,">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -6116,8 +6117,12 @@ async function loadData() {
             const idx = deduped.indexOf(existing);
             if (idx >= 0) deduped[idx] = p;
             seen[key] = p;
+            // Tombstoner l'ancien pour que le merge ne le re-ajoute pas
+            if (existing.id) _deletedParfumIds.add(existing.id);
+          } else {
+            // On garde l'ancien → tombstoner le nouveau
+            if (p.id) _deletedParfumIds.add(p.id);
           }
-          // Sinon on ignore p (l'ancien est gardé)
           console.log('[DEDUP] Parfum doublon supprimé dans ' + g.gamme + ': ' + p.n);
         } else {
           seen[key] = p;
@@ -6392,6 +6397,22 @@ async function loadData() {
       prOp._ts = new Date().toISOString();
       _deletedIds.add(prOp.id); // tombstone anti-résurrection sync
       console.log('[Migration] OP PRIX_ROUGE ' + prOp.id + ' fusionnée dans COUP ' + coupOp.id + ' (tombstone posé)');
+    });
+    // Nettoyage des COUP orphelines : fermées depuis > 15 jours ET le produit a un oneShotOpId différent
+    // (= l'OP a été remplacée par une nouvelle). On les tombstone pour ne pas encombrer.
+    const _cutoff15 = ymd(new Date(Date.now() - 15 * 86400000));
+    ops.forEach(o => {
+      if (o.type !== 'COUP' || !o.dateFin || o.dateFin >= _cutoff15) return;
+      if (_deletedIds.has(o.id)) return; // déjà tombstonée
+      const prodId = o.produitIds && o.produitIds[0];
+      if (!prodId) { _deletedIds.add(o.id); return; } // pas de produit → poubelle
+      const prod = baseKits.find(k => k.id === prodId) || baseLiq.find(l => l.id === prodId) || basePd.find(p => p.id === prodId);
+      if (!prod) { _deletedIds.add(o.id); return; } // produit disparu → poubelle
+      if (prod.oneShotOpId && prod.oneShotOpId !== o.id) {
+        // Le produit a une OP plus récente → cette ancienne est orpheline
+        _deletedIds.add(o.id);
+        console.log('[CLEANUP] COUP orpheline ' + o.id + ' (dateFin=' + o.dateFin + ') tombstonée — remplacée par ' + prod.oneShotOpId);
+      }
     });
     // Purger les OPs tombstonées de l'array en mémoire
     const _opsBefore = ops.length;
