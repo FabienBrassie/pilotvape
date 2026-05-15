@@ -10986,7 +10986,9 @@ function kitOpChips(k, excludeTypes) {
 function activePrixRougeForKit(kitId) {
   // Parcourir TOUTES les OP PR ouvertes pour ce produit (pas juste la première)
   // isOpOuverte : dateFin null OU dateFin >= aujourd'hui (fin de campagne planifiée ≠ clôture)
-  const candidates = ops.filter(o => o.type === 'PRIX_ROUGE'
+  // Inclut aussi les COUP destockage (prixRouge défini) depuis la fusion PR→COUP
+  const candidates = ops.filter(o => (o.type === 'PRIX_ROUGE'
+                         || (o.type === 'COUP' && typeof o.prixRouge === 'number'))
                          && isOpOuverte(o)
                          && o.produitIds && o.produitIds.includes(kitId));
   if (candidates.length === 0) {
