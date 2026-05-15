@@ -7333,7 +7333,8 @@ function _mergeArray(localArr, remoteArr, idField) {
             'oneShotOpId',                                      // lien produit ↔ OP one-shot
             'decisionChoice',                                   // décision prix (recalibrer/remonter)
             'produitParfumId', 'parfumNom',                     // actions parfum
-            'replaceParId'                                      // lien remplacement
+            'replaceParId',                                     // lien remplacement
+            'caseMurOverride'                                     // affectation forcée kit → case mur
           ]);
           if (_nullGuard.has(k)) return;
         }
