@@ -11008,7 +11008,26 @@ function activePrixRougeForKit(kitId) {
                          || (o.type === 'COUP' && typeof o.prixRouge === 'number'))
                          && isOpOuverte(o)
                          && o.produitIds && o.produitIds.includes(kitId));
+  // DEBUG temporaire — tracer pourquoi un kit n'a pas de badge PR
   if (candidates.length === 0) {
+    const _allForKit = ops.filter(o => o.produitIds && o.produitIds.includes(kitId));
+    const _coupForKit = ops.filter(o => o.type === 'COUP' && o.produitIds && o.produitIds.includes(kitId));
+    const _anyProduit = ops.filter(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && o.produitIds && o.produitIds.includes(kitId));
+    if (_allForKit.length > 0 || _coupForKit.length > 0) {
+      console.warn('[PR-DEBUG] Kit', kitId, '— aucun candidat PR trouvé.');
+      _allForKit.forEach(o => console.warn('  [PR-DEBUG] OP', o.id, 'type=' + o.type, 'prixRouge=' + o.prixRouge, 'dateFin=' + o.dateFin, 'isOpOuverte=' + isOpOuverte(o), 'produitIds=', o.produitIds));
+    }
+    // Chercher aussi les OPs COUP liées au kit via oneShotOpId mais sans produitIds
+    const kit = baseKits.find(k => k.id === kitId);
+    if (kit && kit.oneShotOpId) {
+      const _osOp = ops.find(o => o.id === kit.oneShotOpId);
+      if (_osOp) {
+        console.warn('[PR-DEBUG] Kit', kitId, 'a oneShotOpId=' + kit.oneShotOpId,
+          '→ OP type=' + _osOp.type, 'prixRouge=' + _osOp.prixRouge,
+          'produitIds=', _osOp.produitIds, 'dateFin=' + _osOp.dateFin,
+          'isOpOuverte=' + isOpOuverte(_osOp));
+      }
+    }
     return null;
   }
   for (const op of candidates) {
