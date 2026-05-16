@@ -3448,8 +3448,8 @@ function archiveOldData() {
     countArchived++;
   });
 
-  // Purge définitive : supprimer les actions archivées > 90 jours
-  // SAUF celles encore référencées par une OP ouverte
+  // Comptage des données purgeable (> 90 jours) — PAS DE SUPPRESSION AUTOMATIQUE.
+  // L'utilisateur est notifié et décide via le bandeau.
   const openOpActionIds = new Set();
   ops.filter(o => !o.dateFin).forEach(o => {
     ['prixActionId','sortirActionId','rentrerActionId','rentrerPrixActionId','mepActionId','returnActionId'].forEach(f => {
@@ -3457,29 +3457,21 @@ function archiveOldData() {
     });
     if (o.groupActionIds) o.groupActionIds.forEach(id => openOpActionIds.add(id));
   });
-
-  const beforeActions = actions.length;
-  actions = actions.filter(a => {
-    if (!a._archived) return true;
-    if (!a.dateCloture || a.dateCloture > cutoff90) return true; // pas assez vieux
-    if (openOpActionIds.has(a.id)) return true; // encore référencée
-    return false;
+  actions.forEach(a => {
+    if (!a._archived) return;
+    if (!a.dateCloture || a.dateCloture > cutoff90) return;
+    if (openOpActionIds.has(a.id)) return;
+    countPurged++;
   });
-  countPurged += (beforeActions - actions.length);
-
-  // Purge OPs archivées > 90 jours
-  const beforeOps = ops.length;
-  ops = ops.filter(o => {
-    if (!o._archived) return true;
-    if (!o.dateFin || o.dateFin > cutoff90) return true;
-    // Ne pas purger si la campagne est encore active
+  ops.forEach(o => {
+    if (!o._archived) return;
+    if (!o.dateFin || o.dateFin > cutoff90) return;
     if (o.campagneId) {
       const _cSibs = ops.filter(s => s.id !== o.id && s.campagneId === o.campagneId && !s._archived);
-      if (_cSibs.length > 0) return true;
+      if (_cSibs.length > 0) return;
     }
-    return false;
+    countPurged++;
   });
-  countPurged += (beforeOps - ops.length);
 
   if (countArchived > 0 || countPurged > 0) {
     console.log('[ARCHIVE]', countArchived, 'items archivés,', countPurged, 'items purgés (>90j)');
@@ -6636,18 +6628,39 @@ async function loadData() {
       });
       ensureOpSteps(op);
     });
-    // Purge silencieuse des OPs orphelines / zombies (doublons fanfare, liens rompus).
-    // Tourne UNE SEULE FOIS au chargement pour nettoyer les localStorage legacy.
-    const purged = autoPurgeOps();
-    if (purged > 0) {
-      console.log('[OP-LOAD] ' + purged + ' OP(s) orpheline(s) purgée(s) automatiquement au chargement');
+    // Détection d'OPs orphelines — bandeau NON-BLOQUANT si détectées, l'utilisateur décide.
+    const _orphansAtLoad = findOrphanOps();
+    if (_orphansAtLoad.length > 0) {
+      console.log('[OP-LOAD] ' + _orphansAtLoad.length + ' OP(s) orpheline(s) détectée(s)');
+      setTimeout(() => {
+        if (document.getElementById('orphanBanner')) return; // déjà affiché
+        const _banner = document.createElement('div');
+        _banner.id = 'orphanBanner';
+        _banner.style.cssText = 'position:fixed; bottom:12px; left:50%; transform:translateX(-50%); z-index:9999; background:#1e293b; border:1px solid #f59e0b60; border-radius:8px; padding:10px 18px; display:flex; align-items:center; gap:12px; box-shadow:0 4px 20px #0008; font-size:12px; color:#fbbf24;';
+        _banner.innerHTML = '⚠️ <strong>' + _orphansAtLoad.length + ' OP' + (_orphansAtLoad.length > 1 ? 's' : '') + ' orpheline' + (_orphansAtLoad.length > 1 ? 's' : '') + ' détectée' + (_orphansAtLoad.length > 1 ? 's' : '') + '</strong> — '
+          + '<a href="#" onclick="document.getElementById(\'orphanBanner\').remove(); purgeOrphanOps(); return false;" style="color:#f59e0b; text-decoration:underline; font-weight:700;">Purger</a>'
+          + ' · <a href="#" onclick="document.getElementById(\'orphanBanner\').remove(); return false;" style="color:#94a3b8; text-decoration:underline;">Ignorer</a>';
+        document.body.appendChild(_banner);
+      }, 500);
+    }
+    // Archivage automatique : marque les actions/OPs terminées > 15j (juste du visuel, pas de suppression).
+    // La purge définitive (> 90j) est séparée et nécessite confirmation.
+    const archResult = archiveOldData();
+    if (archResult.archived > 0) {
+      console.log('[OP-LOAD] Archivage:', archResult.archived, 'items archivés');
       saveData();
     }
-    // Archivage automatique : marque les actions/OPs terminées > 15j, purge > 90j
-    const archResult = archiveOldData();
-    if (archResult.archived > 0 || archResult.purged > 0) {
-      console.log('[OP-LOAD] Archivage:', archResult.archived, 'archivés,', archResult.purged, 'purgés');
-      saveData();
+    if (archResult.purged > 0) {
+      console.log('[OP-LOAD] ' + archResult.purged + ' anciennes données (>90j) prêtes à purger');
+      setTimeout(() => {
+        if (document.getElementById('purgeBanner')) return;
+        const _pb = document.createElement('div');
+        _pb.id = 'purgeBanner';
+        _pb.style.cssText = 'position:fixed; bottom:' + (_orphansAtLoad.length > 0 ? '60' : '12') + 'px; left:50%; transform:translateX(-50%); z-index:9998; background:#1e293b; border:1px solid #64748b60; border-radius:8px; padding:10px 18px; display:flex; align-items:center; gap:12px; box-shadow:0 4px 20px #0008; font-size:12px; color:#94a3b8;';
+        _pb.innerHTML = '🗄️ <strong>' + archResult.purged + ' donnée' + (archResult.purged > 1 ? 's' : '') + ' de plus de 90 jours</strong> — '
+          + '<a href="#" onclick="document.getElementById(\'purgeBanner\').remove(); return false;" style="color:#64748b; text-decoration:underline;">OK</a>';
+        document.body.appendChild(_pb);
+      }, 600);
     }
   }
   // Migration marges : PA stocké HT, PV stocké TTC → marge = (PV/1.20) - PA.
