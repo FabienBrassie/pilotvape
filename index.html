@@ -13258,7 +13258,59 @@ function renderDashboard() {
   const desinstBlock = opsDesinstVisibles.length === 0 ? '' : block('desinstall', '🔻 À désinstaller', '#f97316', opsDesinstVisibles.length, desinstBlockInner,
     'OPs terminées ou en dernier jour dont le matériel doit être retiré.');
 
-  const opBlocks = installBlock + desinstBlock + sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock;
+  // --- Bloc « OP en cours » — copie du EN CE MOMENT de la vue timeline, avec regroupement campagne ---
+  const _opEnCoursOps = groups.EN_COURS || [];
+  let _opEnCoursInner = '';
+  if (_opEnCoursOps.length === 0) {
+    _opEnCoursInner = emptyState('Aucune OP en cours ✓');
+  } else {
+    // Sous-regroupement par campagne (identique à la vue timeline)
+    const _oecByCamp = {};
+    const _oecNoCamp = [];
+    _opEnCoursOps.forEach(op => {
+      if (op.campagneId) {
+        if (!_oecByCamp[op.campagneId]) _oecByCamp[op.campagneId] = [];
+        _oecByCamp[op.campagneId].push(op);
+      } else {
+        _oecNoCamp.push(op);
+      }
+    });
+    const _oecCampIds = Object.keys(_oecByCamp).sort((a, b) => {
+      const ca = getCampagne(a), cb = getCampagne(b);
+      return (ca ? ca.nom : '').localeCompare(cb ? cb.nom : '');
+    });
+    _oecCampIds.forEach(cid => {
+      const c = getCampagne(cid);
+      if (!c) return;
+      const opsInC = _oecByCamp[cid];
+      opsInC.sort((a, b) => (a.dateDebut || '').localeCompare(b.dateDebut || ''));
+      const isCampCol = opCampagneCollapsed && opCampagneCollapsed.has(cid);
+      const cnb = opsInC.length;
+      const cnbAct = opsInC.filter(o => opTimeStatus(o) !== 'TERMINEE').length;
+      const datesL = (c.dateDebut || c.dateFin)
+        ? `<span style="font-size:9.5px; color:#fbbf24; padding:1px 6px; background:#f59e0b15; border:1px solid #f59e0b40; border-radius:3px;">${fmtFR(c.dateDebut) || '?'} → ${fmtFR(c.dateFin) || '?'}</span>`
+        : '';
+      const campDots = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInC, fShop) : '';
+      _opEnCoursInner += `<div style="margin:4px 4px; background:#020617; border:1px solid #f59e0b40; border-left:3px solid #f59e0b; border-radius:5px; overflow:hidden;">
+        <div onclick="toggleCampagneCollapse('${cid}')" style="padding:5px 10px; cursor:pointer; display:flex; align-items:center; gap:8px; background:#f59e0b08;">
+          <span style="color:#f59e0b; font-size:11px; font-weight:700;">${isCampCol ? '▸' : '▾'}</span>
+          <span style="font-size:11px; color:#fbbf24; font-weight:700; letter-spacing:0.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;">📣 ${c.nom}</span>
+          ${datesL || ''}
+          <span style="font-size:9.5px; color:#94a3b8; white-space:nowrap;">${cnb} OP${cnb > 1 ? 's' : ''}${cnbAct > 0 ? ` · <span style="color:#a78bfa; font-weight:700;">${cnbAct} active${cnbAct > 1 ? 's' : ''}</span>` : ''}</span>
+          <span style="display:inline-flex; gap:3px;">${campDots}</span>
+        </div>
+        ${isCampCol ? '' : `<div style="padding:4px 0;">${opsInC.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')}</div>`}
+      </div>`;
+    });
+    // OPs sans campagne
+    if (_oecNoCamp.length) {
+      _opEnCoursInner += _oecNoCamp.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('');
+    }
+  }
+  const opEnCoursBlock = _opEnCoursOps.length === 0 ? '' : block('opEnCours', 'OP en cours', '#a855f7', _opEnCoursOps.length, _opEnCoursInner,
+    'Opérations commerciales actuellement actives. Déplier pour voir le détail et l\'avancement par boutique.');
+
+  const opBlocks = installBlock + desinstBlock + opEnCoursBlock + sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock;
 
   // --- Bloc Besoins à combler ---
   function renderBesoinTrou(t) {
@@ -16794,6 +16846,7 @@ function toggleCampagneCollapse(campagne) {
   else opCampagneCollapsed.add(campagne);
   saveUiState();
   renderOps && renderOps();
+  renderDashboard && renderDashboard();
 }
 
 // État UI : types d'OP dont la section est pliée
