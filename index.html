@@ -16397,13 +16397,15 @@ function renderOps() {
     if (opFilterType && op.type !== opFilterType) return false;
     // Filtre boutique : masquer les OP dont le produit est déjà SORTI pour cette boutique
     // (ex: PR sur un kit dont le SORTIR est done à Pessac → invisible en vue Pessac).
-    // Fonctionne pour kits, liquides et PD — isKitPresentAtShop utilise statutVie + actions.
-    if (opShopFilter && op.produitIds && op.produitIds.length > 0) {
+    // EXCEPTION : les NOUVEAUTÉ et EXCLU ne sont JAMAIS filtrées — le produit n'est pas encore
+    // présent, c'est justement le but de l'OP de le rentrer.
+    if (opShopFilter && op.produitIds && op.produitIds.length > 0 &&
+        op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') {
       const _pid = op.produitIds[0];
       const _prod = baseKits.find(k => k.id === _pid)
                  || baseLiq.find(l => l.id === _pid)
                  || basePD.find(p => p.id === _pid);
-      if (_prod && typeof isKitPresentAtShop === 'function' && !isKitPresentAtShop(_prod, opShopFilter)) return false;
+      if (_prod && typeof isProductGoneFromShop === 'function' && isProductGoneFromShop(_prod, opShopFilter)) return false;
     }
     const tstatus = opTimeStatus(op);
     if (opFilterStatus === 'active') {
