@@ -2272,7 +2272,10 @@ function computeOpShopStepDefs(op, shop) {
     if (op.type === 'PRIX_ROUGE' && !_isDestockage) {
       defs.push({ key: 'fin_prix_swappy', label: '💰 Remettre le prix initial sur Swappy', kind: 'desinstall' });
     }
-    if (!_needFtLabel && !_isDestockage) {
+    // "OP désinstallée" uniquement si l'OP a du matériel physique à retirer.
+    // Pas de pièce = rien à désinstaller → l'OP se clôture automatiquement.
+    const _hasPiecesPhysiques = op.pieces && op.pieces.length > 0;
+    if (!_needFtLabel && !_isDestockage && _hasPiecesPhysiques) {
       defs.push({ key: 'desinstallation', label: '🔻 OP désinstallée', kind: 'desinstall' });
     }
   }
@@ -3334,9 +3337,16 @@ function cleanupActionsForPd(pd) {
 function isOpFullyDesinstalled(op) {
   if (!op || !op.dateFin) return false;
   if (op.dateFin >= ymd(new Date())) return false; // dateFin = aujourd'hui → encore active, terminée demain
+  // Vérifier tous les steps de type "desinstall" (desinstallation, fin_imprimer_ft, fin_poser_ft, fin_prix_swappy)
   for (const sh of SHOPS) {
+    const defs = computeOpShopStepDefs(op, sh);
+    const desinstallDefs = defs.filter(d => d.kind === 'desinstall');
+    if (desinstallDefs.length === 0) continue; // Pas de step de désinstallation → shop OK
     const st = op.etats && op.etats[sh];
-    if (!st || !st.steps || !st.steps.desinstallation) return false;
+    if (!st || !st.steps) return false;
+    for (const d of desinstallDefs) {
+      if (!st.steps[d.key]) return false; // step non coché → pas fini
+    }
   }
   return true;
 }
@@ -13126,7 +13136,14 @@ function renderDashboard() {
     });
   });
   const opsDesinstVisibles = fShop
-    ? opsADesinstaller.filter(op => !(op.etats && op.etats[fShop] && op.etats[fShop].steps && op.etats[fShop].steps.desinstallation))
+    ? opsADesinstaller.filter(op => {
+        const defs = computeOpShopStepDefs(op, fShop);
+        const desinstDefs = defs.filter(d => d.kind === 'desinstall');
+        if (desinstDefs.length === 0) return false; // pas de step desinstall pour ce shop
+        const st = op.etats && op.etats[fShop];
+        if (!st || !st.steps) return true; // steps pas initialisés → à faire
+        return desinstDefs.some(d => !st.steps[d.key]); // au moins un step non coché
+      })
     : opsADesinstaller;
   const desinstBlockInner = opsDesinstVisibles.length === 0
     ? ''
@@ -17804,7 +17821,14 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   // Badge désinstallation séparé (hors du filtre grisé, sur la même ligne)
   let _desinstBadgeHtml = '';
   if (_needsDesinstall) {
-    const _dShops = SHOPS.filter(sh => !(op.etats && op.etats[sh] && op.etats[sh].steps && op.etats[sh].steps.desinstallation));
+    const _dShops = SHOPS.filter(sh => {
+      const defs = computeOpShopStepDefs(op, sh);
+      const ddefs = defs.filter(d => d.kind === 'desinstall');
+      if (ddefs.length === 0) return false;
+      const st = op.etats && op.etats[sh];
+      if (!st || !st.steps) return true;
+      return ddefs.some(d => !st.steps[d.key]);
+    });
     const _dLabel = _dShops.map(sh => SHOP_LABELS[sh]).join(', ');
     const _dTiming = _isLastDay ? ' ce soir' : '';
     _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#f9731630; color:#fdba74; border:1px solid #f9731680; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller' + _dTiming + ' — ' + _dLabel + '</span>';
