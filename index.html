@@ -2460,35 +2460,28 @@ function findOrphanOps() {
       // Les OPs manuelles sans produit base (produit libre ou sans produit) ne sont jamais orphelines
       const pid = op.produitIds && op.produitIds[0];
       if (!pid || op.produitLibre) return false;
-      // Protection 1 : si l'OP a un rentrerActionId valide, elle n'est PAS orpheline
-      if (op.rentrerActionId) {
-        const _rA = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
-        if (_rA) {
-          // Auto-heal : restaurer fanfareOpType si perdu
-          if (!_rA.fanfareOpType && FANFARE.includes(op.type)) {
-            _rA.fanfareOpType = op.type;
-            console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _rA.id + ' depuis OP ' + op.id);
+      // ── RÈGLE DÉFENSIVE : une NOUVEAUTÉ/EXCLU n'est orpheline QUE si le produit ──
+      // ── n'existe plus dans la base. Les actions peuvent être annulées/recréées par ──
+      // ── le merge, ce n'est PAS une raison de supprimer l'OP. ──
+      const _prodExists = baseKits.some(k => k.id === pid)
+                       || baseLiq.some(l => l.id === pid)
+                       || basePD.some(p => p.id === pid);
+      if (_prodExists) {
+        // Auto-heal : réparer les liens si possible
+        const _anyRentrer = actions.find(a => a.type === 'RENTRER' && a.produitId === pid && !a.annulee);
+        if (_anyRentrer) {
+          if (!op.rentrerActionId) {
+            op.rentrerActionId = _anyRentrer.id;
+            console.log('[OP-ORPHAN-GUARD] Réparé rentrerActionId sur OP ' + op.id + ' → ' + _anyRentrer.id);
           }
-          return false; // pas orpheline
+          if (!_anyRentrer.fanfareOpType && FANFARE.includes(op.type)) {
+            _anyRentrer.fanfareOpType = op.type;
+            console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _anyRentrer.id);
+          }
         }
+        return false; // produit existe → JAMAIS orpheline
       }
-      // Protection 2 : si une action RENTRER active existe pour ce produit → pas orpheline
-      // (même si rentrerActionId est perdu, l'OP reste tant qu'il y a une RENTRER active)
-      const _anyRentrer = actions.find(a => a.type === 'RENTRER' && a.produitId === pid && !a.annulee);
-      if (_anyRentrer) {
-        // Auto-heal : réparer le lien rentrerActionId si perdu
-        if (!op.rentrerActionId) {
-          op.rentrerActionId = _anyRentrer.id;
-          console.log('[OP-ORPHAN-GUARD] Réparé rentrerActionId sur OP ' + op.id + ' → ' + _anyRentrer.id);
-        }
-        // Auto-heal : restaurer fanfareOpType si perdu
-        if (!_anyRentrer.fanfareOpType && FANFARE.includes(op.type)) {
-          _anyRentrer.fanfareOpType = op.type;
-          console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _anyRentrer.id);
-        }
-        return false; // pas orpheline
-      }
-      // Pas de RENTRER active → vérifier si canonique
+      // Produit supprimé de la base → vérifier si canonique (dedup)
       return !canonicalIds.has(op.id);
     }
     if (op.type === 'PRIX_ROUGE' && op.auto) {
