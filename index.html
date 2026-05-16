@@ -13135,9 +13135,6 @@ function renderDashboard() {
   const rentrerBlock = block('rentrer', 'À rentrer', '#22c55e', rentrer.length,
     rentrer.length === 0 ? emptyState('Rien à rentrer ✓') : renderGroupedActionCards(rentrer),
     'Déplier la ligne → cocher par boutique : 1) commandé · 2) en stock · 3) actif (Swappy)');
-  const mepBlock     = block('mep', 'À mettre en place', '#8b5cf6', meps.length,
-    meps.length === 0 ? emptyState('— se déclenche quand un produit lié est rentré') : meps.map(renderActionCard).join(''),
-    'Cocher par boutique = produit monté physiquement sur le mur');
   // --- Alerte relevés prix : pastille orange sur l'onglet Relevés ---
   const staleAlerts = computeStalePriceAlerts();
   updateRelevesStaleIndicator(staleAlerts);
@@ -13168,23 +13165,6 @@ function renderDashboard() {
   groups.IMMINENTE.sort((a,b) => (a.dateDebut || '').localeCompare(b.dateDebut || ''));
   groups.EN_COURS.sort((a,b) => (b.dateDebut || '').localeCompare(a.dateDebut || ''));
   groups.A_VENIR.sort((a,b) => (a.dateDebut || '').localeCompare(b.dateDebut || ''));
-  const opsBlockInner = opsActivesVisibles.length === 0
-    ? emptyState(fShop ? 'Aucune OP en cours pour cette boutique ✓' : 'Aucune opération commerciale active')
-    : groupOrder.map(st => {
-        const list = groups[st];
-        if (list.length === 0) return '';
-        const sm = OP_TIME_STATUS[st];
-        const header = `<div style="display:flex; align-items:center; gap:8px; margin:6px 0 4px;">
-          <span style="font-size:10px; padding:2px 8px; background:${sm.color}25; color:${sm.color}; border:1px solid ${sm.color}60; border-radius:3px; font-weight:700; letter-spacing:0.3px; text-transform:uppercase;">${sm.label}</span>
-          <span style="font-size:10px; color:${sm.color}; font-weight:700;">${list.length}</span>
-          <span style="flex:1; height:1px; background:${sm.color}30;"></span>
-        </div>`;
-        const cards = list.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('');
-        return header + cards;
-      }).join('');
-  const opsBlock = block('ops', 'Opérations', '#a855f7', opsActivesVisibles.length, opsBlockInner,
-    'Groupées par statut temporel. À venir / Imminente (≤3j) / En cours. Les terminées sont masquées.');
-
   // --- OPs à installer (dateDebut = aujourd'hui ou demain) ---
   const _todayInstall = ymd(new Date());
   const _tomorrowD = new Date(); _tomorrowD.setDate(_tomorrowD.getDate() + 1);
@@ -14129,7 +14109,7 @@ function renderDashboard() {
   // Le bloc "MEP" (mise en place) a été retiré : il faisait doublon avec sortir/rentrer.
   // Ordre : À sortir → À rentrer → Prix à modifier → Besoins à combler → Prochaines OP → Historique
   document.getElementById('dashContent').innerHTML =
-    installBlock + desinstBlock + opEnCoursBlock + sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    installBlock + desinstBlock + opEnCoursBlock + sortirBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
 
   // Summary top right — chips cliquables qui amènent vers la section correspondante
   const chip = (color, label, key) =>
@@ -14142,8 +14122,6 @@ function renderDashboard() {
   if (opsDesinstVisibles.length) summaryParts.push(chip('#f97316', `${opsDesinstVisibles.length} à désinstaller`, 'desinstall'));
   if (sortir.length) summaryParts.push(chip('#ef4444', `${sortir.length} à sortir`, 'sortir'));
   if (rentrer.length) summaryParts.push(chip('#22c55e', `${rentrer.length} à rentrer`, 'rentrer'));
-  const mepReady = meps.filter(m => SHOPS.some(sh => mepShopStatus(m, sh) === 'A_FAIRE')).length;
-  if (mepReady) summaryParts.push(chip('#8b5cf6', `${mepReady} à monter`, 'mep'));
   if (totalBesoins && fProdType !== 'liq') {
     // Si au moins une case pure vide (aucun sortant), on remonte l'urgence en rouge.
     const pureTrous = besoins.trous.filter(t => !(t.sortants && t.sortants.length)).length;
