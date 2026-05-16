@@ -2479,7 +2479,15 @@ function findOrphanOps() {
             console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _anyRentrer.id);
           }
         }
-        return false; // produit existe → JAMAIS orpheline
+        // Exception dedup : si plusieurs OPs fanfare existent pour le même produit,
+        // garder la canonique et marquer les doublons comme orphelins.
+        const _siblings = fanfareByProduit[pid];
+        if (_siblings && _siblings.length > 1 && canonicalIds.size > 0 && !canonicalIds.has(op.id)) {
+          // Il y a un doublon ET cette OP n'est pas la canonique → orpheline
+          console.log('[OP-ORPHAN-GUARD] Doublon fanfare détecté pour produit ' + pid + ' — OP ' + op.id + ' marquée orpheline (canonique = ' + [...canonicalIds].find(id => _siblings.some(s => s.id === id)) + ')');
+          return true;
+        }
+        return false; // produit existe, pas de doublon → JAMAIS orpheline
       }
       // Produit supprimé de la base → vérifier si canonique (dedup)
       return !canonicalIds.has(op.id);
@@ -3581,9 +3589,23 @@ function syncAutoActions() {
     if (a.type !== 'RENTRER' || a.annulee || !a.fanfareOpType) return;
     const FANFARE_TYPES = ['NOUVEAUTE','EXCLU'];
     if (!FANFARE_TYPES.includes(a.fanfareOpType)) return;
+    // Dedup niveau 1 : par rentrerActionId (lien direct)
     const existingOp = ops.find(o => o.rentrerActionId === a.id && FANFARE_TYPES.includes(o.type) && !o._archived);
-    if (existingOp) return; // OP existe déjà
-    // Recréer l'OP avec la date de l'action (pas aujourd'hui)
+    if (existingOp) return; // OP existe déjà avec le bon lien
+    // Dedup niveau 2 : par produit — si une OP fanfare ouverte existe pour le même produit,
+    // ne PAS en créer une nouvelle. Réparer le lien à la place.
+    const _byProduct = ops.find(o =>
+      FANFARE_TYPES.includes(o.type) && !o._archived && !o.dateFin &&
+      o.produitIds && o.produitIds[0] === a.produitId);
+    if (_byProduct) {
+      // Auto-repair : relier l'OP existante à cette action si elle n'a pas de rentrerActionId
+      if (!_byProduct.rentrerActionId) {
+        _byProduct.rentrerActionId = a.id;
+        console.log('[FANFARE-HEAL] Réparé rentrerActionId sur OP existante ' + _byProduct.id + ' → action ' + a.id);
+      }
+      return; // OP existe pour ce produit → pas de doublon
+    }
+    // Aucune OP fanfare pour ce produit → recréer
     console.warn('[FANFARE-HEAL] OP ' + a.fanfareOpType + ' manquante pour action ' + a.id + ' — recréation auto');
     const _healDate = a._ts ? a._ts.slice(0, 10) : ymd(new Date());
     const _healOp = {
@@ -3602,7 +3624,6 @@ function syncAutoActions() {
     ensureOpSteps(_healOp);
     pushOpTraced(_healOp, 'syncAutoActions_fanfareHeal');
     a.opId = _healOp.id;
-    a.fanfareOpType = a.fanfareOpType; // confirmer le type
   });
   // ── Sync fanfare NOUVEAUTE/EXCLU : LECTURE SEULE ──
   // L'OP ne stocke plus les steps rentrer_* — ils sont calculés dynamiquement
@@ -7857,8 +7878,21 @@ function _startAutoSync() {
           if (a.type !== 'RENTRER' || a.annulee || !a.fanfareOpType) return;
           const _FT = ['NOUVEAUTE','EXCLU'];
           if (!_FT.includes(a.fanfareOpType)) return;
+          // Dedup niveau 1 : par rentrerActionId
           const _existOp = ops.find(o => o.rentrerActionId === a.id && _FT.includes(o.type) && !o._archived);
           if (_existOp) return;
+          // Dedup niveau 2 : par produit — réparer le lien au lieu de recréer
+          const _byProd = ops.find(o =>
+            _FT.includes(o.type) && !o._archived && !o.dateFin &&
+            o.produitIds && o.produitIds[0] === a.produitId);
+          if (_byProd) {
+            if (!_byProd.rentrerActionId) {
+              _byProd.rentrerActionId = a.id;
+              console.log('[AUTO-SYNC FANFARE-HEAL] Réparé rentrerActionId sur OP ' + _byProd.id + ' → ' + a.id);
+            }
+            return; // OP existe pour ce produit
+          }
+          // Aucune OP fanfare pour ce produit → recréer
           console.warn('[AUTO-SYNC FANFARE-HEAL] OP ' + a.fanfareOpType + ' manquante pour ' + a.id + ' — recréation');
           var _hDate = a._ts ? a._ts.slice(0, 10) : ymd(new Date());
           var _hOp = {
