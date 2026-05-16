@@ -2246,7 +2246,7 @@ function computeOpShopStepDefs(op, shop) {
   // — Autres types : "OP désinstallée" classique.
   // L'archivage est bloqué tant que ces étapes ne sont pas cochées sur toutes les boutiques.
   if (op.dateFin && op.dateFin <= ymd(new Date())) {
-    const _isDestockage = op.type === 'PRIX_ROUGE' && !!op.sortirActionId;
+    const _isDestockage = (op.type === 'PRIX_ROUGE' || op.type === 'COUP') && !!op.sortirActionId;
     // Étiquettes FT par profil : UNIQUEMENT pour les kits (seuls produits sur le Freetouch).
     // Les accessoires, liquides et PD ne sont pas sur le Freetouch → pas de ré-étiquetage FT.
     const _finPid = (op.produitIds || [])[0];
@@ -2259,7 +2259,7 @@ function computeOpShopStepDefs(op, shop) {
     if (op.type === 'PRIX_ROUGE' && !_isDestockage) {
       defs.push({ key: 'fin_prix_swappy', label: '💰 Remettre le prix initial sur Swappy', kind: 'desinstall' });
     }
-    if (!_needFtLabel) {
+    if (!_needFtLabel && !_isDestockage) {
       defs.push({ key: 'desinstallation', label: '🔻 OP désinstallée', kind: 'desinstall' });
     }
   }
@@ -3077,13 +3077,10 @@ function isKitPresentAtShop(kit, shop) {
 // (étiquette, freetouch, etc.) sont la préparation pour son arrivée.
 function isProductGoneFromShop(prod, shop) {
   if (!prod || !shop) return false;
-  const sv = prod.statutVie;
-  if (sv === 'SORTI') return true;
-  if (sv === 'A_SORTIR' || sv === 'FIN_DE_VIE') {
-    const sortirAct = actions.find(a => a.type === 'SORTIR' && a.produitId === prod.id && !a.annulee);
-    return !!(sortirAct && sortirAct.etats[shop] && sortirAct.etats[shop].done);
-  }
-  return false;
+  // Seul le statut SORTI (final) déclenche l'auto-complétion des steps.
+  // A_SORTIR / FIN_DE_VIE ne suffisent plus : l'action SORTIR done sur UN shop
+  // ne signifie pas que les étapes des AUTRES OPs de ce produit doivent être auto-cochées.
+  return prod.statutVie === 'SORTI';
 }
 
 // ── Substitution par boutique ──
@@ -7295,6 +7292,62 @@ function _mergeEtats(localActions, remoteActions) {
     }
   });
   if (mergeCount > 0) console.log('[MERGE]', mergeCount, 'changements fusionnés depuis le serveur');
+  // ── Dédoublonnage sémantique : deux machines peuvent créer la même action avec des IDs différents.
+  // On détecte les doublons (même produitId + type + produitParfumId, non annulée) et on fusionne
+  // les steps dans le plus avancé, puis on tombstone le doublon.
+  const _semKey = a => (a.produitId || '') + '|' + (a.type || '') + '|' + (a.produitParfumId || '');
+  const _semMap = {};
+  const _toRemove = new Set();
+  localActions.forEach(a => {
+    if (!a || !a.id || a.annulee) return;
+    // Ne dédoublonner que les actions actives (pas faites globalement)
+    const globalDone = SHOPS.every(sh => a.etats && a.etats[sh] && a.etats[sh].done);
+    if (globalDone) return;
+    const sk = _semKey(a);
+    if (!sk || sk === '||') return;
+    if (_semMap[sk]) {
+      const existing = _semMap[sk];
+      // Compter les steps done pour choisir le plus avancé
+      const _countDone = act => SHOPS.reduce((n, sh) => {
+        const st = act.etats && act.etats[sh] && act.etats[sh].steps;
+        return n + (st ? Object.values(st).filter(v => v === true).length : 0);
+      }, 0);
+      const keepA = _countDone(existing) >= _countDone(a) ? existing : a;
+      const dropA = keepA === existing ? a : existing;
+      // Fusionner les steps du doublon dans le gagnant (ne pas perdre de coches)
+      SHOPS.forEach(sh => {
+        const ks = keepA.etats && keepA.etats[sh] && keepA.etats[sh].steps;
+        const ds = dropA.etats && dropA.etats[sh] && dropA.etats[sh].steps;
+        if (ks && ds) {
+          Object.keys(ds).forEach(k => { if (ds[k] === true && ks[k] !== true) ks[k] = true; });
+        }
+      });
+      // Transférer les liens d'OP si le gagnant n'en a pas
+      if (!keepA.opId && dropA.opId) keepA.opId = dropA.opId;
+      _toRemove.add(dropA.id);
+      _deletedIds.add(dropA.id);
+      _semMap[sk] = keepA;
+      // Repointer les OPs qui référençaient le doublon vers le gagnant
+      ops.forEach(o => {
+        if (o.rentrerActionId === dropA.id) o.rentrerActionId = keepA.id;
+        if (o.sortirActionId === dropA.id) o.sortirActionId = keepA.id;
+        if (o.prixActionId === dropA.id) o.prixActionId = keepA.id;
+        if (o.rentrerPrixActionId === dropA.id) o.rentrerPrixActionId = keepA.id;
+        if (o.mepActionId === dropA.id) o.mepActionId = keepA.id;
+        if (o.returnActionId === dropA.id) o.returnActionId = keepA.id;
+        if (o.groupActionIds && Array.isArray(o.groupActionIds)) {
+          const idx = o.groupActionIds.indexOf(dropA.id);
+          if (idx >= 0) o.groupActionIds[idx] = keepA.id;
+        }
+      });
+      console.log('[DEDUP-ACTION] Doublon ' + dropA.id + ' fusionné dans ' + keepA.id + ' (' + sk + ')');
+    } else {
+      _semMap[sk] = a;
+    }
+  });
+  if (_toRemove.size > 0) {
+    localActions = localActions.filter(a => !_toRemove.has(a.id));
+  }
   return localActions;
 }
 
@@ -7455,8 +7508,17 @@ function _mergeLiqDeep(localLiq, remoteLiq) {
         localById[rp.id] = rp;
         parfumsAdded++;
       } else if (rp._ts && (!lp._ts || rp._ts > lp._ts)) {
-        // Parfum existant des deux côtés, remote plus récent → MAJ
+        // Parfum existant des deux côtés, remote plus récent → MAJ champ par champ
+        // Protéger le statut local s'il est "avancé" (A_SORTIR, FIN_DE_VIE, SORTI)
+        // et que le remote tente de le rétrograder (DANS_OFFRE, EN_ATTENTE).
+        const _advancedStatuses = new Set(['A_SORTIR', 'FIN_DE_VIE', 'SORTI']);
+        const _protectS = _advancedStatuses.has(lp.s) && !_advancedStatuses.has(rp.s);
+        const _savedS = lp.s;
         Object.keys(rp).forEach(k => { lp[k] = rp[k]; });
+        if (_protectS) {
+          lp.s = _savedS;
+          console.log('[MERGE-LIQ-PROTECT] Parfum', lp.n || lp.id, ': statut', _savedS, 'protégé (remote voulait', rp.s + ')');
+        }
         parfumsUpdated++;
       }
     });
