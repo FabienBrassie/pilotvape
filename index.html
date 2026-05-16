@@ -1127,10 +1127,6 @@ const LIQ_GOUT_COLORS = { 'Fruité': '#f97316', 'Fruité / Frais': '#22d3ee', 'G
 const LIQ_PARFUM_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'SORTI'];
 // Statuts gamme liq = alignés sur STATUTS_VIE kit
 const LIQ_GAMME_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'SORTI'];
-function liqCaseCouverture(format, profil) { return format + '_' + profil; }
-function liqSlotLabel(format, profil) {
-  return (LIQ_FORMAT_LABELS[format] || format) + ' · ' + (PROFIL_SHORT[profil] || profil);
-}
 function slotCode(tirage, autonomie, profil, role) {
   const t = TIRAGE_SHORT[tirage] || tirage || '?';
   const a = autonomie || '?';
@@ -2520,27 +2516,6 @@ function findOrphanOps() {
 // Purge silencieuse : supprime les OPs orphelines sans confirmation.
 // Appelée au chargement, après chaque création, et dans syncAutoActions.
 // Retourne le nombre d'OPs supprimées.
-function autoPurgeOps() {
-  const orphans = findOrphanOps();
-  if (orphans.length === 0) return 0;
-  const ids = new Set(orphans.map(o => o.id));
-  try {
-    console.log('[OP-AUTO-PURGE] suppression de', orphans.length, 'OP(s)',
-      orphans.map(o => ({ id: o.id, type: o.type, produit: (o.produitIds||[])[0], rentrer: o.rentrerActionId, dateFin: o.dateFin })));
-  } catch(e) {}
-  ids.forEach(id => _deletedIds.add(id));
-  // Nettoyer fanfareOpType sur les actions RENTRER liées aux OPs fanfare purgées
-  orphans.forEach(o => {
-    if ((o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && o.rentrerActionId) {
-      const ra = actions.find(a => a.id === o.rentrerActionId);
-      if (ra && ra.fanfareOpType) { ra.fanfareOpType = null; console.log('[AUTO-PURGE] fanfareOpType effacé sur action ' + ra.id); }
-    }
-  });
-  ops = ops.filter(o => !ids.has(o.id));
-  actions.forEach(a => { if (a.opId && ids.has(a.opId)) a.opId = null; });
-  return orphans.length;
-}
-
 // Purge toutes les OPs orphelines après confirmation utilisateur.
 async function purgeOrphanOps() {
   const orphans = findOrphanOps();
@@ -2653,27 +2628,6 @@ function opReadyStepsDone(op, sh) {
   if (defs.length === 0) return true;
   return defs.every(d => _getOpStepChecked(op, sh, d));
 }
-function opStepsProgress(op, sh) {
-  if (!op) return 0;
-  ensureOpModel(op);
-  const defs = computeOpShopStepDefs(op, sh);
-  const st = op.etats && op.etats[sh];
-  if (!st || !st.steps) return 0;
-  if (defs.length === 0) return st.done ? 1 : 0;
-  const done = defs.filter(d => st.steps[d.key] === true).length;
-  return done / defs.length;
-}
-// Version "readiness" de la progression (exclut sortie + désinstallation)
-function opReadyProgress(op, sh) {
-  if (!op) return 0;
-  ensureOpModel(op);
-  const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
-  const st = op.etats && op.etats[sh];
-  if (!st || !st.steps) return 0;
-  if (defs.length === 0) return 1;
-  const done = defs.filter(d => st.steps[d.key] === true).length;
-  return done / defs.length;
-}
 function opGlobalStepsProgress(op) {
   if (!op) return 0;
   ensureOpModel(op);
@@ -2688,14 +2642,6 @@ function opGlobalStepsAllDone(op) {
   const defs = computeOpGlobalStepDefs(op);
   if (defs.length === 0) return true;
   return defs.every(d => op.progress.global[d.key] === true);
-}
-function opGlobalState(op) {
-  if (!op || !op.etats) return 'A_FAIRE';
-  const doneCount = SHOPS.filter(sh => opAllStepsDone(op, sh)).length;
-  if (doneCount === 0 && !opGlobalStepsAllDone(op)) return 'A_FAIRE';
-  if (doneCount === 0) return 'A_FAIRE';
-  if (doneCount === SHOPS.length && opGlobalStepsAllDone(op)) return 'FAIT';
-  return 'EN_COURS';
 }
 // Version "readiness" : est-ce que la mise en place est terminée ?
 // Exclut les steps de sortie (coup_sortir) et de désinstallation (desinstall).
@@ -3024,11 +2970,6 @@ function allStepsDone(a, sh) {
   const defs = getActionSteps(a);
   if (!st.steps) return !!st.done; // migration fallback
   return defs.every(d => st.steps[d.key] === true);
-}
-function anyStepDone(a, sh) {
-  const st = a.etats[sh];
-  if (!st || !st.steps) return false;
-  return getActionSteps(a).some(d => st.steps[d.key] === true);
 }
 function stepsProgress(a, sh) {
   const defs = getActionSteps(a);
