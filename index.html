@@ -2460,13 +2460,11 @@ function findOrphanOps() {
       // Les OPs manuelles sans produit base (produit libre ou sans produit) ne sont jamais orphelines
       const pid = op.produitIds && op.produitIds[0];
       if (!pid || op.produitLibre) return false;
-      // Si l'OP a un rentrerActionId valide (action non annulée), elle n'est PAS orpheline
-      // même si fanfareOpType est null (peut avoir été perdu par merge sync).
-      // On la garde et on re-synchro le fanfareOpType.
+      // Protection 1 : si l'OP a un rentrerActionId valide, elle n'est PAS orpheline
       if (op.rentrerActionId) {
         const _rA = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
         if (_rA) {
-          // Auto-heal : si fanfareOpType est perdu sur l'action, on le restaure
+          // Auto-heal : restaurer fanfareOpType si perdu
           if (!_rA.fanfareOpType && FANFARE.includes(op.type)) {
             _rA.fanfareOpType = op.type;
             console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _rA.id + ' depuis OP ' + op.id);
@@ -2474,7 +2472,23 @@ function findOrphanOps() {
           return false; // pas orpheline
         }
       }
-      // Règle : une OP fanfare n'est légitime QUE si elle est la canonique pour son produit
+      // Protection 2 : si une action RENTRER active existe pour ce produit → pas orpheline
+      // (même si rentrerActionId est perdu, l'OP reste tant qu'il y a une RENTRER active)
+      const _anyRentrer = actions.find(a => a.type === 'RENTRER' && a.produitId === pid && !a.annulee);
+      if (_anyRentrer) {
+        // Auto-heal : réparer le lien rentrerActionId si perdu
+        if (!op.rentrerActionId) {
+          op.rentrerActionId = _anyRentrer.id;
+          console.log('[OP-ORPHAN-GUARD] Réparé rentrerActionId sur OP ' + op.id + ' → ' + _anyRentrer.id);
+        }
+        // Auto-heal : restaurer fanfareOpType si perdu
+        if (!_anyRentrer.fanfareOpType && FANFARE.includes(op.type)) {
+          _anyRentrer.fanfareOpType = op.type;
+          console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _anyRentrer.id);
+        }
+        return false; // pas orpheline
+      }
+      // Pas de RENTRER active → vérifier si canonique
       return !canonicalIds.has(op.id);
     }
     if (op.type === 'PRIX_ROUGE' && op.auto) {
@@ -7550,19 +7564,21 @@ function _mergeArray(localArr, remoteArr, idField) {
           ]);
           if (_nullGuard.has(k)) return;
         }
-        // Protection des dates posées manuellement : si l'utilisateur a explicitement
-        // choisi une date, le merge ne doit PAS la remplacer par une date auto (today) d'un autre poste.
-        if (k === 'dateDebut' && lx._dateDebutManuelle && lx[k] !== rx[k]) {
-          console.log('[MERGE-PROTECT] dateDebut manuelle protégée sur', lx[idField], ':', lx[k], '(remote voulait', rx[k] + ')');
-          return;
-        }
-        if (k === 'dateFin' && lx._dateFinManuelle && lx[k] !== rx[k]) {
-          console.log('[MERGE-PROTECT] dateFin manuelle protégée sur', lx[idField], ':', lx[k], '(remote voulait', rx[k] + ')');
-          return;
-        }
-        // TRACE TEMPORAIRE : loguer toute modification de dateFin/dateDebut par le merge
-        if ((k === 'dateFin' || k === 'dateDebut') && lx[k] !== rx[k]) {
-          console.warn('[MERGE-DATE]', lx[idField] || '?', k, ':', lx[k], '→', rx[k], '(remote._ts=' + rx._ts + ', local._ts=' + lx._ts + ')');
+        // ── PROTECTION DES DATES OP : les dates ne bougent pas par merge ──
+        // Règle : si une date est définie localement ET le remote a une valeur différente,
+        // on garde la valeur locale SAUF si le remote a explicitement posé le flag manuelle
+        // (= l'utilisateur de l'autre poste a volontairement changé la date).
+        // Cela empêche les dates de "sauter" quand un autre poste enregistre un checkbox.
+        if ((k === 'dateDebut' || k === 'dateFin') && lx[k] != null && rx[k] != null && lx[k] !== rx[k]) {
+          const manuelleFlag = k === 'dateDebut' ? '_dateDebutManuelle' : '_dateFinManuelle';
+          if (rx[manuelleFlag] && !lx[manuelleFlag]) {
+            // Remote a posé le flag manuelle et pas le local → accepter
+            console.log('[MERGE-DATE] ' + k + ' acceptée depuis remote (flag manuelle) sur', lx[idField], ':', lx[k], '→', rx[k]);
+          } else {
+            // Sinon → garder la valeur locale (elle a peut-être été changée ici aussi)
+            console.log('[MERGE-PROTECT] ' + k + ' protégée sur', lx[idField], ':', lx[k], '(remote voulait', rx[k] + ')');
+            return;
+          }
         }
         lx[k] = rx[k];
       });
@@ -15900,12 +15916,13 @@ async function quickAttachCampagne(opId) {
     const opDates = `${op.dateDebut ? fmtFR(op.dateDebut) : '?'} → ${op.dateFin ? fmtFR(op.dateFin) : '?'}`;
     const doAlign = await pvConfirm(`Aligner les dates de l'OP sur la campagne "${campagne.nom}" ?\n\nDates campagne : ${campDates}\nDates OP actuelles : ${opDates}\n\nOui = adopter les dates de la campagne\nNon = garder les dates actuelles`);
     if (doAlign) {
-      if (campagne.dateDebut) op.dateDebut = campagne.dateDebut;
-      if (campagne.dateFin)   op.dateFin = campagne.dateFin;
+      if (campagne.dateDebut) { op.dateDebut = campagne.dateDebut; op._dateDebutManuelle = true; }
+      if (campagne.dateFin)   { op.dateFin = campagne.dateFin; op._dateFinManuelle = true; }
+      op._ts = new Date().toISOString();
       // Garde-fou : si dateFin < dateDebut après alignement, annuler la dateFin
       if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) {
         console.warn('[CAMPAGNE] dateFin', op.dateFin, '< dateDebut', op.dateDebut, '→ dateFin annulée');
-        op.dateFin = null;
+        op.dateFin = null; op._dateFinManuelle = false;
       }
     }
   }
@@ -15944,12 +15961,13 @@ async function editCampagne(campagneId) {
       `\n(Les OPs terminées ne sont pas modifiées)`);
     if (doCascade) {
       campOps.forEach(op => {
-        if (c.dateDebut) op.dateDebut = c.dateDebut;
-        if (c.dateFin)   op.dateFin = c.dateFin;
+        if (c.dateDebut) { op.dateDebut = c.dateDebut; op._dateDebutManuelle = true; }
+        if (c.dateFin)   { op.dateFin = c.dateFin; op._dateFinManuelle = true; }
+        op._ts = new Date().toISOString();
         // Garde-fou : dateFin < dateDebut → annuler dateFin
         if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) {
           console.warn('[CAMPAGNE] dateFin', op.dateFin, '< dateDebut', op.dateDebut, '→ dateFin annulée');
-          op.dateFin = null;
+          op.dateFin = null; op._dateFinManuelle = false;
         }
       });
     }
@@ -18118,7 +18136,7 @@ async function setOpDateDebut(opId, v) {
   if (sibling && v) {
     const sibType = sibling.type === 'PRIX_ROUGE' ? 'Prix Rouge' : sibling.type;
     if (await pvConfirm('Synchroniser la date de début sur l\'OP liée (' + sibling.id + ' — ' + sibType + ') ?')) {
-      sibling.dateDebut = v;
+      sibling.dateDebut = v; sibling._dateDebutManuelle = true; sibling._ts = new Date().toISOString();
       saveData();
       pvAlert('✅ Date de début synchronisée sur ' + sibling.id + ' (' + sibType + ') → ' + v);
     }
