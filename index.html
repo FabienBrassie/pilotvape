@@ -3191,6 +3191,31 @@ function ensureAction(produitId, type, produitType, opts) {
     if (opts.parfumNom && opts.parfumId) existingDone._parfumNom = opts.parfumNom;
     return existingDone;
   }
+  // Priorité 3 : action ANNULÉE récente avec des steps cochés → RÉACTIVER au lieu de recréer.
+  // Cela protège contre la perte de coches quand le merge annule/recrée des actions en boucle.
+  const _matchCancelled = a =>
+    a.produitId === produitId && a.type === type && a.annulee === true &&
+    (produitType === 'kit' ? (!a.produitType || a.produitType === 'kit') : a.produitType === produitType) &&
+    (opts.parfumId ? a.produitParfumId === opts.parfumId : !a.produitParfumId);
+  const _cancelled = actions.filter(a => _matchCancelled(a));
+  // Trouver celle qui a le plus de steps cochés (preuve de travail)
+  const _bestCancelled = _cancelled.reduce((best, a) => {
+    let checked = 0;
+    SHOPS.forEach(sh => { const st = a.etats && a.etats[sh]; if (st && st.steps) Object.values(st.steps).forEach(v => { if (v === true) checked++; }); });
+    if (checked > 0 && (!best || checked > best._checked)) return Object.assign(a, { _checked: checked });
+    return best;
+  }, null);
+  if (_bestCancelled) {
+    console.log('[ENSURE-ACTION] Réactivation action annulée ' + _bestCancelled.id + ' (' + _bestCancelled._checked + ' steps cochés) au lieu de créer une nouvelle');
+    _bestCancelled.annulee = false;
+    _bestCancelled.dateCloture = null;
+    delete _bestCancelled._checked;
+    _bestCancelled._ts = new Date().toISOString();
+    SHOPS.forEach(sh => { const st = _bestCancelled.etats && _bestCancelled.etats[sh]; if (st) { st.done = allStepsDone(_bestCancelled, sh); if (st.done) { if (!st.dateFait) st.dateFait = ymd(new Date()); } else { st.dateFait = null; } } });
+    if (opts.parfumNom && opts.parfumId) _bestCancelled._parfumNom = opts.parfumNom;
+    _deletedIds.delete(_bestCancelled.id);
+    return _bestCancelled;
+  }
   const isManual = (type === 'PRIX');
   const a = {
     id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
@@ -5386,6 +5411,7 @@ function toggleActionStep(actionId, shop, stepKey) {
   st.steps[stepKey] = !st.steps[stepKey];
   if (!st._stepTs) st._stepTs = {};
   st._stepTs[stepKey] = new Date().toISOString();
+  a._ts = new Date().toISOString(); // protège l'action contre l'écrasement par merge
   _applyActionShopChange(a, shop);
   syncActionStepsToOp(a);
   checkOneShotAutoClose(a);
@@ -7631,7 +7657,9 @@ function _mergeLiqDeep(localLiq, remoteLiq) {
         // Parfum existant des deux côtés, remote plus récent → MAJ champ par champ
         // Protéger le statut local s'il est "avancé" (A_SORTIR, FIN_DE_VIE, SORTI)
         // et que le remote tente de le rétrograder (DANS_OFFRE, EN_ATTENTE).
-        const _advancedStatuses = new Set(['A_SORTIR', 'FIN_DE_VIE', 'SORTI']);
+        // Statuts "avancés" qui ne doivent JAMAIS être écrasés par un statut moins avancé venant du remote.
+        // A_RENTRER inclus : un parfum marqué à rentrer ne doit pas revenir à OK par merge.
+        const _advancedStatuses = new Set(['A_RENTRER', 'A_SORTIR', 'FIN_DE_VIE', 'SORTI']);
         const _protectS = _advancedStatuses.has(lp.s) && !_advancedStatuses.has(rp.s);
         const _savedS = lp.s;
         Object.keys(rp).forEach(k => { lp[k] = rp[k]; });
