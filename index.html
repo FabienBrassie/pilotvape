@@ -4697,10 +4697,11 @@ function toggleOpStep(opId, shop, stepKey, checked) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
   // Bloquer les steps du dashboard (lecture seule côté OP)
+  // Exception : les steps 'prod' sont éditables si le produit n'est dans aucune base (ex: accessoires)
   const _defs = computeOpShopStepDefs(op, shop);
   const _def = _defs.find(d => d.key === stepKey);
   const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
-  if (_def && _DASHBOARD_KINDS.includes(_def.kind)) return; // lecture seule
+  if (_def && _DASHBOARD_KINDS.includes(_def.kind) && (_def.kind !== 'prod' || _opProductInBase(op))) return; // lecture seule
   op._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   ensureOpSteps(op);
   const st = op.etats[shop];
@@ -17357,6 +17358,15 @@ function toggleOpDashExpand(opId) { toggleOpExpand(opId); }
 // options.shopFilter : si non vide, ne montre que ce shop.
 
 // ── Calcul dynamique de l'état d'un step OP ──
+// Helper : le produit de l'OP existe-t-il dans une base (kit/liq/PD) ?
+// Si non (ex: accessoires), les steps « prod » sont éditables directement dans l'OP
+// au lieu d'être en lecture seule depuis le dashboard.
+function _opProductInBase(op) {
+  const pid = (op.produitIds || [])[0];
+  if (!pid) return false;
+  return baseKits.some(k => k.id === pid) || baseLiq.some(l => l.id === pid) || basePD.some(p => p.id === pid);
+}
+
 // Pour les steps fanfare_rentrer : calcule depuis les actions RENTRER liées (agrégat parfums).
 // Pour les steps coup_rentrer/coup_sortir : lit l'action liée directement.
 // Pour tout le reste : lit depuis op.etats[sh].steps classique.
@@ -17682,8 +17692,10 @@ function renderOpCardHtml(op, options) {
         const checked = _getOpStepChecked(op, sh, d);
         const isDesinstall = d.kind === 'desinstall';
         // Steps miroir du dashboard : lecture seule dans l'OP (on coche dans le dashboard, pas ici)
+        // Exception : les steps 'prod' sont éditables directement si le produit n'est dans aucune base
+        // (ex: accessoires) — il n'y a pas d'action dashboard pour ces produits.
         const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
-        const isDashboardStep = _DASHBOARD_KINDS.includes(d.kind);
+        const isDashboardStep = _DASHBOARD_KINDS.includes(d.kind) && (d.kind !== 'prod' || _opProductInBase(op));
         const _stepGrey = (_isTerminee && !isDesinstall) || _absentShop ? 'opacity:0.35; filter:saturate(0.3);' : '';
         const _stepHighlight = (_isTerminee && isDesinstall && !checked) ? 'background:#1c1117; border:1px solid #ef444460; border-radius:4px; padding:5px 6px; margin:2px -6px;' : '';
         const _dashCol = isDashboardStep ? '#64748b' : (_absentShop ? '#64748b' : col);
