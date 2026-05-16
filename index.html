@@ -12899,13 +12899,11 @@ function renderDashboard() {
       groups[key].push(a);
     });
     // ── RÈGLE ANTI-DOUBLON : masquer gamme-level si des parfum-level existent ──
-    // Pour chaque gamme+type, si des actions parfum existent, on n'affiche PAS l'action gamme.
-    // Cela s'applique à TOUS les types (RENTRER, SORTIR, etc.) — règle générique.
+    // On regarde TOUTES les actions liq non-annulées (même FAIT/hors section), pas juste celles passées ici.
     const _parfumCoverage = new Set(); // "gammeId::TYPE"
-    parfumActions.forEach(a => { _parfumCoverage.add(a.produitId + '::' + a.type); });
+    actions.forEach(a => { if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfumCoverage.add(a.produitId + '::' + a.type); });
     const gammeActions = liqActions.filter(a => {
-      if (a.produitParfumId) return false; // c'est un parfum, pas gamme
-      // Si des parfum-level existent pour cette gamme+type → masquer la gamme-level
+      if (a.produitParfumId) return false;
       if (_parfumCoverage.has(a.produitId + '::' + a.type)) return false;
       return true;
     });
@@ -12929,11 +12927,13 @@ function renderDashboard() {
     const kitActions = actionList.filter(a => !a.produitType || a.produitType === 'kit');
     const pdActions  = actionList.filter(a => a.produitType === 'pd');
     // ── FILTRE ANTI-DOUBLON LIQUIDES : masquer gamme-level si parfum-level existent ──
+    // On regarde TOUTES les actions liq non-annulées (même FAIT), pas juste celles de la section.
+    // Sinon quand les parfums passent FAIT, la gamme-level réapparaît.
     const _allLiq = actionList.filter(a => a.produitType === 'liq');
-    const _parfCov = new Set();
-    _allLiq.forEach(a => { if (a.produitParfumId) _parfCov.add(a.produitId + '::' + a.type); });
+    const _parfCovGlobal = new Set();
+    actions.forEach(a => { if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfCovGlobal.add(a.produitId + '::' + a.type); });
     const liqActions = _allLiq.filter(a =>
-      a.produitParfumId || !_parfCov.has(a.produitId + '::' + a.type)
+      a.produitParfumId || !_parfCovGlobal.has(a.produitId + '::' + a.type)
     );
 
     let html = '';
