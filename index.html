@@ -12705,6 +12705,45 @@ function renderDashboard() {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:6px; margin-bottom:8px;">
         ${SHOPS.filter(sh => !fShop || sh === fShop).map(sh => renderShopSteps(a, sh)).join('')}
       </div>
+      ${(() => {
+        // ── Miroir OP : afficher les étapes OP liées en lecture seule ──
+        const _linkedOps = ops.filter(o => !o._archived && !o.dateFin &&
+          ((a.type === 'RENTRER' && o.rentrerActionId === a.id) ||
+           (a.type === 'SORTIR' && o.sortirActionId === a.id)));
+        if (_linkedOps.length === 0) return '';
+        return _linkedOps.map(_op => {
+          ensureOpModel(_op);
+          const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
+          const _opLabel = (OP_TYPE_META[_op.type] || {}).label || _op.type;
+          const _opCol = (OP_TYPE_META[_op.type] || {}).color || '#94a3b8';
+          const _opPct = Math.round(opOverallProgress(_op) * 100);
+          const _opPctColor = _opPct >= 100 ? '#22c55e' : _opPct > 0 ? '#f59e0b' : '#64748b';
+          return `<div style="margin:6px 0 8px; padding:6px 8px; border:1px dashed ${_opCol}40; border-radius:4px; background:${_opCol}08;">
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
+              <span style="font-size:10px; color:${_opCol}; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;">OP ${_opLabel} ${_op.id}</span>
+              <span style="font-size:10px; color:${_opPctColor}; font-weight:600;">${_opPct}%</span>
+              <span onclick="switchTabProgrammatic('ops','${_op.id}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline; margin-left:auto;" title="Aller à l'OP">→ voir OP</span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:4px;">
+              ${SHOPS.filter(sh => !fShop || sh === fShop).map(sh => {
+                const _st = _op.etats && _op.etats[sh];
+                if (!_st) return '';
+                const _defs = computeOpShopStepDefs(_op, sh).filter(d => !_DASHBOARD_KINDS.includes(d.kind));
+                if (_defs.length === 0) return '';
+                const _col = SHOP_COLORS[sh];
+                const _rows = _defs.map(d => {
+                  const _checked = _st.steps && _st.steps[d.key] === true;
+                  const _box = _checked
+                    ? '<span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; background:#64748b; color:#0f172a; border:1px solid #64748b; border-radius:2px; font-size:9px; font-weight:700;">✓</span>'
+                    : '<span style="display:inline-block; width:13px; height:13px; background:transparent; border:1px solid #475569; border-radius:2px;"></span>';
+                  return '<div style="display:flex; align-items:center; gap:5px; padding:2px 3px; font-size:10px; color:' + (_checked ? '#64748b' : '#94a3b8') + '; opacity:0.7;">' + _box + '<span style="' + (_checked ? 'text-decoration:line-through; color:#475569;' : '') + '">' + d.label + '</span> <span style="font-size:8px; color:#475569;">← OP</span></div>';
+                }).join('');
+                return '<div style="padding:3px 5px; border-left:2px solid ' + _col + '30; border-radius:2px;"><div style="font-size:9px; color:' + _col + '; font-weight:600; margin-bottom:2px;">' + (SHOP_LABELS[sh] || sh) + '</div>' + _rows + '</div>';
+              }).join('')}
+            </div>
+          </div>`;
+        }).join('');
+      })()}
       <div style="font-size:10px; color:#64748b; margin:2px 0 4px; text-transform:uppercase; letter-spacing:0.4px;">Notes</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:4px;">
         ${SHOPS.filter(sh => !fShop || sh === fShop).map(sh => `
