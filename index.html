@@ -1632,6 +1632,7 @@ const SYNC_API_KEY = 'PilotVape2026Sync!';
 let _syncOk = null; // null = pas encore testé, true/false après premier appel
 let _savePending = false;
 let _saveTimer = null;
+let _saveInFlight = null; // Promise du save en cours (verrou anti-race-condition)
 
 // --- ACTIONS DASHBOARD ---
 // Chaque action concerne un produit et a un état indépendant par shop
@@ -7732,6 +7733,13 @@ async function _syncWrite(payload) {
 async function _saveToSupabase(payload, _retryCount) {
   if (_syncOk === false) return;
   const retryCount = _retryCount || 0;
+  // Verrou : si un save est en vol, attendre qu'il finisse avant de commencer
+  if (_saveInFlight && retryCount === 0) {
+    try { await _saveInFlight; } catch(e) { /* ignorer les erreurs du save précédent */ }
+  }
+  // Marquer ce save comme en vol
+  let _resolveInFlight;
+  _saveInFlight = new Promise(r => { _resolveInFlight = r; });
   try {
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
     const remoteResult = await _syncRead();
@@ -7781,6 +7789,10 @@ async function _saveToSupabase(payload, _retryCount) {
     if (retryCount < 1) {
       setTimeout(() => _saveToSupabase(payload, retryCount + 1), 5000);
     }
+  } finally {
+    // Libérer le verrou dans tous les cas (succès, erreur, retry)
+    if (_resolveInFlight) _resolveInFlight();
+    _saveInFlight = null;
   }
 }
 
