@@ -6126,6 +6126,32 @@ function switchTabProgrammatic(tabName, focusOpId) {
   }
 }
 
+// Navigation : depuis une étape "← dashboard" dans une OP, aller à l'action correspondante
+function goToActionFromOp(opId, stepKind) {
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  const pid = (op.produitIds || [])[0];
+  if (!pid) return;
+  // Déterminer le type d'action à chercher
+  let actionType = null;
+  if (stepKind === 'coup_sortir') actionType = 'SORTIR';
+  else actionType = 'RENTRER'; // fanfare_rentrer, coup_rentrer, prod → RENTRER
+  // Trouver l'action
+  const a = actions.find(x => x.produitId === pid && x.type === actionType && !x.annulee && !x._archived);
+  if (!a) { pvAlert('Action introuvable dans le dashboard.'); return; }
+  // Switch vers le dashboard et scroll vers l'action
+  switchTabProgrammatic('dashboard');
+  setTimeout(() => {
+    const el = document.querySelector('[data-action-id="' + a.id + '"]');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.outline = '2px solid #f59e0b';
+      el.style.outlineOffset = '2px';
+      setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2500);
+    }
+  }, 100);
+}
+
 async function loadData() {
   // Sauvegarder les données initiales AVANT le chargement localStorage
   const initKitsMap = {};
@@ -7632,6 +7658,42 @@ function _mergeArray(localArr, remoteArr, idField) {
           } else {
             // Sinon → garder la valeur locale (elle a peut-être été changée ici aussi)
             console.log('[MERGE-PROTECT] ' + k + ' protégée sur', lx[idField], ':', lx[k], '(remote voulait', rx[k] + ')');
+            return;
+          }
+        }
+        // ── PROTECTION MONOTONE : annulee, dateCloture, _archived ne reviennent jamais à false/null ──
+        // Une fois true (ou rempli pour dateCloture), le merge ne peut pas les "ressusciter".
+        if (k === 'annulee' || k === '_archived') {
+          if (lx[k] === true && !rx[k]) {
+            console.log('[MERGE-MONO] ' + k + ' protégé (true → false interdit) sur', lx[idField]);
+            return;
+          }
+        }
+        if (k === 'dateCloture') {
+          if (lx[k] && !rx[k]) {
+            console.log('[MERGE-MONO] dateCloture protégée sur', lx[idField], ':', lx[k]);
+            return;
+          }
+        }
+        // ── PROTECTION COMMENTAIRE : ne jamais perdre un commentaire plus riche ──
+        if (k === 'commentaire') {
+          const localC = (lx[k] || '').trim();
+          const remoteC = (rx[k] || '').trim();
+          if (localC && !remoteC) {
+            // Local a un commentaire, remote est vide → garder local
+            return;
+          }
+          if (localC && remoteC && localC !== remoteC) {
+            // Les deux ont un contenu différent → concaténer pour ne rien perdre
+            if (!localC.includes(remoteC) && !remoteC.includes(localC)) {
+              lx[k] = localC + ' | ' + remoteC;
+              console.log('[MERGE-COMMENT] Commentaires fusionnés sur', lx[idField]);
+            }
+            // Si l'un contient déjà l'autre, garder le plus long
+            else if (remoteC.length > localC.length) {
+              lx[k] = remoteC;
+            }
+            // Sinon garder local (déjà plus complet)
             return;
           }
         }
@@ -9928,11 +9990,53 @@ function renderKits() {
   _restoreKitDetails();
 }
 
-function updateKitStatus(id, status) {
+// ── Helper : prédit les actions qui seront annulées par un changement de statut ──
+function _previewCancelledActions(produitId, produitType, newStatus, parfumId) {
+  const TYPE_LABELS = { SORTIR: 'SORTIR', RENTRER: 'RENTRER', PRIX: 'PRIX', BESOIN_A_COMBLER: 'BESOIN À COMBLER', MISE_EN_PLACE: 'MISE EN PLACE', SWAP_COMPOSANT: 'SWAP' };
+  const cancelled = [];
+  actions.forEach(a => {
+    if (a._archived || a.annulee) return;
+    if (a.produitId !== produitId) return;
+    if (produitType === 'kit' && a.produitType && a.produitType !== 'kit') return;
+    if (produitType === 'liq' && a.produitType !== 'liq') return;
+    if (produitType === 'liq' && parfumId && a.produitParfumId !== parfumId) return;
+    if (produitType === 'liq' && !parfumId && a.produitParfumId) return;
+    if (produitType === 'pd' && a.produitType !== 'pd') return;
+    if (actionGlobalState(a) === 'FAIT') return;
+    if (a.type === 'PRIX') {
+      if (newStatus === 'SORTI') cancelled.push(TYPE_LABELS[a.type] || a.type);
+      return;
+    }
+    if (a.type === 'SWAP_COMPOSANT') return;
+    // Même logique que cleanupActions* : l'action est-elle encore valide pour le nouveau statut ?
+    const prod = produitType === 'kit' ? baseKits.find(k => k.id === produitId) :
+                 produitType === 'liq' ? baseLiq.find(g => g.id === produitId) :
+                 basePD.find(p => p.id === produitId);
+    const isOneShotActif = prod && prod.oneShot === true && ['DANS_OFFRE','A_RENTRER','OK'].includes(newStatus);
+    const stillValid =
+      (a.type === 'SORTIR' && (newStatus === 'A_SORTIR' || isOneShotActif)) ||
+      (a.type === 'RENTRER' && (newStatus === 'A_RENTRER' || isOneShotActif));
+    if (!stillValid) cancelled.push(TYPE_LABELS[a.type] || a.type);
+  });
+  return cancelled;
+}
+
+async function updateKitStatus(id, status) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const kit = baseKits.find(k => k.id === id);
   if (!kit) return;
   const oldStatus = kit.statutVie;
+  if (oldStatus === status) return;
+  // Prévisualiser les actions qui seront annulées
+  const cancelled = _previewCancelledActions(id, 'kit', status);
+  if (cancelled.length > 0) {
+    const msg = `Changer le statut de « ${kit.marque} ${kit.modele} » va annuler ${cancelled.length} action${cancelled.length > 1 ? 's' : ''} :\n• ${cancelled.join('\n• ')}\n\nContinuer ?`;
+    if (!await pvConfirm(msg)) {
+      // Remettre le select à l'ancienne valeur
+      renderKits(); highlightKit(id);
+      return;
+    }
+  }
   kit.statutVie = status;
   syncKitToProp(kit); syncAutoActions(); saveData();
   renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id);
@@ -10138,6 +10242,17 @@ async function updateLiqField(id, field, val) {
       }
     }
   } else {
+    // Confirmation avant annulation d'actions par changement de statut liquide
+    if (field === 'statutVie' && val !== g.statutVie) {
+      const cancelled = _previewCancelledActions(g.id, 'liq', val);
+      if (cancelled.length > 0) {
+        const msg = `Changer le statut de « ${g.marque} — ${g.gamme} » va annuler ${cancelled.length} action${cancelled.length > 1 ? 's' : ''} :\n• ${cancelled.join('\n• ')}\n\nContinuer ?`;
+        if (!await pvConfirm(msg)) {
+          renderLiqAll();
+          return;
+        }
+      }
+    }
     g[field] = val;
     // Si on change le rôle manuellement, s'assurer que roleCalc est à jour pour la détection d'override
     if (field === 'roleChoisi' && !g.roleCalc) {
@@ -10211,6 +10326,17 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
       }
     }
   } else {
+    // Confirmation avant annulation d'actions par changement de statut parfum
+    if (field === 's' && val !== p.s) {
+      const cancelled = _previewCancelledActions(g.id, 'liq', val, p.id);
+      if (cancelled.length > 0) {
+        const msg = `Changer le statut du parfum « ${p.n || '?'} » va annuler ${cancelled.length} action${cancelled.length > 1 ? 's' : ''} :\n• ${cancelled.join('\n• ')}\n\nContinuer ?`;
+        if (!await pvConfirm(msg)) {
+          renderLiqAll();
+          return;
+        }
+      }
+    }
     p[field] = val;
   }
   // Mise à jour nbRefs
@@ -17786,7 +17912,7 @@ function renderOpCardHtml(op, options) {
           ? `title="${isDashboardStep ? 'Géré dans le dashboard — coche côté action' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
           : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"`;
         const _isClickable = !_absentShop && !isDashboardStep;
-        const _dashLabel = isDashboardStep ? ' <span style="font-size:9px; color:#475569;">← dashboard</span>' : '';
+        const _dashLabel = isDashboardStep ? ` <span onclick="event.stopPropagation(); goToActionFromOp('${op.id}','${d.kind}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à l'action dans le dashboard">← dashboard</span>` : '';
         return `<div ${clickAttr}
           style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_stepGrey} ${_stepHighlight}"
           ${_isClickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'"` : ''}>
@@ -20001,11 +20127,21 @@ async function updatePdField(id, field, val) {
   highlightPd(id);
 }
 
-function updatePdStatus(id, status) {
+async function updatePdStatus(id, status) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const pd = basePD.find(p => p.id === id);
   if (!pd) return;
   const oldStatus = pd.statutVie;
+  if (oldStatus === status) return;
+  // Prévisualiser les actions qui seront annulées
+  const cancelled = _previewCancelledActions(id, 'pd', status);
+  if (cancelled.length > 0) {
+    const msg = `Changer le statut de « ${pd.marque} ${pd.modele} » va annuler ${cancelled.length} action${cancelled.length > 1 ? 's' : ''} :\n• ${cancelled.join('\n• ')}\n\nContinuer ?`;
+    if (!await pvConfirm(msg)) {
+      renderBasePD(); highlightPd(id);
+      return;
+    }
+  }
   pd.statutVie = status;
   syncAutoActions();
   saveData();
