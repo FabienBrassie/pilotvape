@@ -7299,15 +7299,13 @@ function _mergeEtats(localActions, remoteActions) {
   if (mergeCount > 0) console.log('[MERGE]', mergeCount, 'changements fusionnés depuis le serveur');
   // ── Dédoublonnage sémantique : deux machines peuvent créer la même action avec des IDs différents.
   // On détecte les doublons (même produitId + type + produitParfumId, non annulée) et on fusionne
-  // les steps dans le plus avancé, puis on tombstone le doublon.
+  // les steps dans le plus avancé, puis on ANNULE le doublon (pas tombstone pour éviter la boucle
+  // syncAutoActions → recreate → dedup → tombstone → recreate).
   const _semKey = a => (a.produitId || '') + '|' + (a.type || '') + '|' + (a.produitParfumId || '');
   const _semMap = {};
-  const _toRemove = new Set();
+  let _dedupCount = 0;
   localActions.forEach(a => {
     if (!a || !a.id || a.annulee) return;
-    // Ne dédoublonner que les actions actives (pas faites globalement)
-    const globalDone = SHOPS.every(sh => a.etats && a.etats[sh] && a.etats[sh].done);
-    if (globalDone) return;
     const sk = _semKey(a);
     if (!sk || sk === '||') return;
     if (_semMap[sk]) {
@@ -7329,8 +7327,9 @@ function _mergeEtats(localActions, remoteActions) {
       });
       // Transférer les liens d'OP si le gagnant n'en a pas
       if (!keepA.opId && dropA.opId) keepA.opId = dropA.opId;
-      _toRemove.add(dropA.id);
-      _deletedIds.add(dropA.id);
+      // Annuler le doublon (pas de tombstone → syncAutoActions ne le recrée pas)
+      dropA.annulee = true;
+      dropA._dedup = true; // marqueur pour identifier les dédoublonnés
       _semMap[sk] = keepA;
       // Repointer les OPs qui référençaient le doublon vers le gagnant
       ops.forEach(o => {
@@ -7345,14 +7344,14 @@ function _mergeEtats(localActions, remoteActions) {
           if (idx >= 0) o.groupActionIds[idx] = keepA.id;
         }
       });
-      console.log('[DEDUP-ACTION] Doublon ' + dropA.id + ' fusionné dans ' + keepA.id + ' (' + sk + ')');
+      _dedupCount++;
+      if (_dedupCount <= 5) console.log('[DEDUP-ACTION] Doublon ' + dropA.id + ' fusionné dans ' + keepA.id + ' (' + sk + ')');
     } else {
       _semMap[sk] = a;
     }
   });
-  if (_toRemove.size > 0) {
-    localActions = localActions.filter(a => !_toRemove.has(a.id));
-  }
+  if (_dedupCount > 5) console.log('[DEDUP-ACTION] ... et ' + (_dedupCount - 5) + ' autre(s) doublon(s)');
+  if (_dedupCount > 0) console.log('[DEDUP-ACTION] Total : ' + _dedupCount + ' doublon(s) annulé(s)');
   return localActions;
 }
 
