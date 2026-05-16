@@ -12710,7 +12710,7 @@ function renderDashboard() {
         // Cherche toute OP active liée à cette action — par lien direct OU par produit
         const _pid = a.produitId;
         const _linkedOps = ops.filter(o => {
-          if (o._archived || o.dateFin) return false;
+          if (o._archived || !isOpOuverte(o)) return false;
           // Lien direct par ID d'action
           if (o.rentrerActionId === a.id || o.sortirActionId === a.id ||
               o.prixActionId === a.id || o.rentrerPrixActionId === a.id) return true;
@@ -13252,7 +13252,8 @@ function renderDashboard() {
     'OPs terminées ou en dernier jour dont le matériel doit être retiré.');
 
   // --- Bloc « OP en cours » — copie du EN CE MOMENT de la vue timeline, avec regroupement campagne ---
-  const _opEnCoursOps = groups.EN_COURS || [];
+  // Les OPs sont globales : on ne filtre PAS par boutique, toutes les OP en cours sont affichées
+  const _opEnCoursOps = opsNonFinies.filter(op => opTimeStatus(op) === 'EN_COURS');
   let _opEnCoursInner = '';
   if (_opEnCoursOps.length === 0) {
     _opEnCoursInner = emptyState('Aucune OP en cours ✓');
