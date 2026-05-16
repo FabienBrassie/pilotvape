@@ -2169,17 +2169,24 @@ function computeOpGlobalStepDefs(op) {
 // (affectations[shop].emplacement != null).
 function computeOpShopStepDefs(op, shop) {
   const defs = [];
-  // Les steps "Produit commandé / reçu" sont déjà portés, pour une OP COUP, par le
-  // mirror RENTRER (① Commandé / ① En stock) — on évite donc le doublon ici.
-  // Steps produit commandé/reçu : pas pour COUP (géré par rentrer_*) ni pour NOUVEAUTE/EXCLU
-  // avec rentrerActionId (également géré par les steps miroir rentrer_*)
+  // ── ÉTAPE 1 : Commander / Recevoir le produit (en PREMIER car c'est le prérequis) ──
+  // NOUVEAUTE / EXCLU (fanfare) liée à une RENTRER : steps miroir synchro avec le dashboard.
+  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
+    const aRF = actions.find(x => x.id === op.rentrerActionId);
+    if (aRF) {
+      (ACTION_STEPS.RENTRER || []).forEach(s => {
+        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key });
+      });
+    }
+  }
+  // COUP : les rentrer_* / sortir_* sont plus bas (avec PR entre les deux)
+  // Non-COUP avec commanderProduits (sans rentrerActionId fanfare) :
   if (op.prep && op.prep.commanderProduits && op.type !== 'COUP' &&
       !((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId)) {
     defs.push({ key: 'prod_commandee', label: 'Commandé sur Swappy', kind: 'prod' });
     defs.push({ key: 'prod_recue',     label: 'Reçu en boutique',    kind: 'prod' });
   }
-  // Réceptionner les pièces fournies : chaque boutique reçoit indépendamment
-  // (Commander est en global, Réceptionner est par shop)
+  // ── ÉTAPE 2 : Réceptionner et installer le matériel (pièces PLV) ──
   (op.pieces || []).forEach(p => {
     if (p.source !== 'fournie') return;
     if (p.type === 'PRODUIT' && op.prep && op.prep.commanderProduits) return; // géré par prod_recue
@@ -2188,34 +2195,20 @@ function computeOpShopStepDefs(op, shop) {
   (op.pieces || []).forEach(p => {
     if (!pieceIsPerShop(p)) return;
     const aff = p.affectations && p.affectations[shop];
-    if (!aff || !aff.emplacement) return; // pas affectée à ce shop → aucun step
+    if (!aff || !aff.emplacement) return;
     if (p.source === 'custom' || p.source === 'freetouch') {
       defs.push({ key: 'plv_' + p.id + '_imprimee', label: 'Imprimer ' + pieceLabel(p), pieceId: p.id });
     }
-    // stock : pas d'impression, la pièce est déjà physique en boutique → directement "poser"
     const emplLabel = (EMPLACEMENT_META[aff.emplacement] || {}).label || aff.emplacement;
     const verbe = p.source === 'stock' ? 'Installer ' : 'Poser ';
     defs.push({ key: 'plv_' + p.id + '_posee', label: verbe + pieceLabel(p) + ' → ' + emplLabel, pieceId: p.id });
   });
+  // ── ÉTAPE 3 : Configuration Swappy (prix, promo) ──
   if (op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE') {
-    // Label adapté à la mécanique : "prix modifié" pour les remises simples,
-    // "promo configurée" pour les règles (Nième à -X%, X pour Y)
-    // Exception : pour les OPs NATIONALES, le paramétrage Swappy est fait côté HQ
-    // (auto) — on ne génère donc pas de step Swappy à cocher manuellement.
     const mt = op.mecanique.type;
     const isRegleComplexe = (mt === 'SECOND_REMISE' || mt === 'X_POUR_Y');
     const label = isRegleComplexe ? 'Promo configurée sur Swappy' : 'Prix modifié sur Swappy';
     defs.push({ key: 'swappy', label: label, kind: 'swappy' });
-  }
-  // OP NOUVEAUTE / EXCLU (fanfare) liée à une RENTRER : mêmes steps miroir que COUP
-  // pour synchroniser Commandé/Reçu entre le dashboard et l'OP.
-  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
-    const aRF = actions.find(x => x.id === op.rentrerActionId);
-    if (aRF) {
-      (ACTION_STEPS.RENTRER || []).forEach(s => {
-        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key });
-      });
-    }
   }
   // OP COUP : les steps par shop sont dérivés des 2 actions liées (RENTRER + SORTIR),
   // pour que les cases vues côté OP et côté Dashboard soient les mêmes (mirror bidirectionnel,
@@ -3583,13 +3576,70 @@ function syncAutoActions() {
     a.opId = _healOp.id;
     a.fanfareOpType = a.fanfareOpType; // confirmer le type
   });
-  // Sync bidirectionnelle fanfare : aligner les coches OP ↔ action RENTRER
-  // (même logique que _syncOneShotStepsBidi pour les COUP)
+  // Sync bidirectionnelle fanfare : aligner les coches OP ↔ action(s) RENTRER
+  // Pour les liquides avec actions par parfum, on AGRÈGE : OP Commandé = true ssi TOUS les
+  // parfums actifs sont commandés. Pour les non-liquides, sync 1:1 avec rentrerActionId.
   ops.forEach(op => {
     if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return;
     if (!op.rentrerActionId) return;
-    const aR = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
-    if (aR) _syncOneShotStepsBidi(op, aR, null);
+    const gammeId = (op.produitIds || [])[0];
+    if (!gammeId) return;
+    // Trouver toutes les actions RENTRER pour ce produit (gamme + parfum)
+    const allRentrers = actions.filter(a =>
+      a.type === 'RENTRER' && a.produitId === gammeId && !a.annulee && !_deletedIds.has(a.id));
+    const parfumActions = allRentrers.filter(a => a.produitParfumId);
+    if (parfumActions.length > 0) {
+      // Mode agrégat : OP step = true si TOUS les parfums l'ont coché
+      ensureOpSteps(op);
+      parfumActions.forEach(a => ensureActionSteps(a));
+      SHOPS.forEach(sh => {
+        const ost = op.etats && op.etats[sh];
+        if (!ost || !ost.steps) return;
+        (ACTION_STEPS.RENTRER || []).forEach(s => {
+          const opKey = 'rentrer_' + s.key;
+          if (typeof ost.steps[opKey] !== 'boolean') return;
+          const allDone = parfumActions.every(a => {
+            const ast = a.etats && a.etats[sh];
+            return ast && ast.steps && ast.steps[s.key] === true;
+          });
+          if (allDone !== ost.steps[opKey]) {
+            ost.steps[opKey] = allDone;
+            if (!ost._stepTs) ost._stepTs = {};
+            ost._stepTs[opKey] = new Date().toISOString();
+          }
+        });
+        ost.done = opAllStepsDone(op, sh);
+        if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
+        if (!ost.done) ost.dateFait = null;
+      });
+      // Aussi sync la gamme-level RENTRER avec l'agrégat
+      const gammeA = allRentrers.find(a => !a.produitParfumId);
+      if (gammeA) {
+        ensureActionSteps(gammeA);
+        SHOPS.forEach(sh => {
+          const gst = gammeA.etats && gammeA.etats[sh];
+          if (!gst || !gst.steps) return;
+          (ACTION_STEPS.RENTRER || []).forEach(s => {
+            const allDone = parfumActions.every(a => {
+              const ast = a.etats && a.etats[sh];
+              return ast && ast.steps && ast.steps[s.key] === true;
+            });
+            if (allDone !== gst.steps[s.key]) {
+              gst.steps[s.key] = allDone;
+              if (!gst._stepTs) gst._stepTs = {};
+              gst._stepTs[s.key] = new Date().toISOString();
+            }
+          });
+          gst.done = allStepsDone(gammeA, sh);
+          if (gst.done && !gst.dateFait) gst.dateFait = ymd(new Date());
+          if (!gst.done) gst.dateFait = null;
+        });
+      }
+    } else {
+      // Mode 1:1 classique (pas de parfums individuels)
+      const aR = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
+      if (aR) _syncOneShotStepsBidi(op, aR, null);
+    }
   });
   syncMiseEnPlaceActions();
   syncPriceActions();
@@ -4532,9 +4582,15 @@ function syncActionStepsToOp(a) {
         }
       });
     }
-    // NOUVEAUTE/EXCLU (fanfare) liées par rentrerActionId
+    // NOUVEAUTE/EXCLU (fanfare) liées par rentrerActionId OU par produit (parfum-level → gamme OP)
     ops.filter(function(o) {
-      return (o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && !o._archived && o.rentrerActionId === a.id;
+      if (o.type !== 'NOUVEAUTE' && o.type !== 'EXCLU') return false;
+      if (o._archived) return false;
+      // Lien direct
+      if (o.rentrerActionId === a.id) return true;
+      // Lien indirect : action parfum dont la gamme = produit de l'OP
+      if (a.produitParfumId && a.produitId && (o.produitIds || []).indexOf(a.produitId) >= 0) return true;
+      return false;
     }).forEach(function(o) { if (linkedOps.indexOf(o) < 0) linkedOps.push(o); });
     // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit
     ops.filter(function(o) {
@@ -4558,6 +4614,39 @@ function syncActionStepsToOp(a) {
   ensureActionSteps(a); // garantir que a.etats[sh].steps est initialisé
   linkedOps.forEach(op => {
     ensureOpSteps(op);
+    // ── Cas spécial : action parfum RENTRER + OP NOUVEAUTE/EXCLU pour la gamme ──
+    // L'OP est liée à la RENTRER gamme (rentrerActionId), mais le toggle vient d'un parfum.
+    // On agrège : OP step = true si TOUS les parfums actifs ont ce step coché.
+    if (a.type === 'RENTRER' && a.produitParfumId &&
+        (op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
+      const _parfumActions = actions.filter(x =>
+        x.type === 'RENTRER' && x.produitId === a.produitId && x.produitParfumId && !x.annulee);
+      if (_parfumActions.length > 0) {
+        _parfumActions.forEach(pa => ensureActionSteps(pa));
+        SHOPS.forEach(sh => {
+          const ost = op.etats && op.etats[sh];
+          if (!ost || !ost.steps) return;
+          (ACTION_STEPS.RENTRER || []).forEach(s => {
+            const opKey = 'rentrer_' + s.key;
+            if (typeof ost.steps[opKey] !== 'boolean') return;
+            const allDone = _parfumActions.every(pa => {
+              const past = pa.etats && pa.etats[sh];
+              return past && past.steps && past.steps[s.key] === true;
+            });
+            if (allDone !== ost.steps[opKey]) {
+              ost.steps[opKey] = allDone;
+              if (!ost._stepTs) ost._stepTs = {};
+              ost._stepTs[opKey] = new Date().toISOString();
+            }
+          });
+          ost.done = opAllStepsDone(op, sh);
+          if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
+          if (!ost.done) ost.dateFait = null;
+        });
+        return; // agrégat fait, pas de miroir 1:1
+      }
+    }
+    // ── Cas normal : miroir 1:1 ──
     const m = _opActionStepMirror(a, op);
     if (!m) return;
     SHOPS.forEach(sh => {
@@ -4567,7 +4656,6 @@ function syncActionStepsToOp(a) {
       Object.entries(m.a_to_o).forEach(([ak, ok]) => {
         if (typeof ast.steps[ak] === 'boolean' && typeof ost.steps[ok] === 'boolean') {
           ost.steps[ok] = ast.steps[ak];
-          // Propager le timestamp du step source vers le step miroir
           if (!ost._stepTs) ost._stepTs = {};
           ost._stepTs[ok] = (ast._stepTs && ast._stepTs[ak]) || new Date().toISOString();
         }
@@ -4608,10 +4696,17 @@ function syncOpStepsToAction(op) {
       if (a) { op.sortirActionId = a.id; if (!a.opId) a.opId = op.id; targets.push(a); }
     }
   }
-  // NOUVEAUTE/EXCLU (fanfare) → miroir vers RENTRER liée
+  // NOUVEAUTE/EXCLU (fanfare) → miroir vers RENTRER gamme + TOUTES les RENTRER parfum
   if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
     const _raF = actions.find(function(x) { return x.id === op.rentrerActionId; });
     if (_raF && targets.indexOf(_raF) < 0) targets.push(_raF);
+    // Aussi propager vers toutes les actions parfum de la même gamme
+    const _fanfPid = (op.produitIds || [])[0];
+    if (_fanfPid) {
+      actions.filter(function(x) {
+        return x.type === 'RENTRER' && x.produitId === _fanfPid && x.produitParfumId && !x.annulee;
+      }).forEach(function(x) { if (targets.indexOf(x) < 0) targets.push(x); });
+    }
   }
   // Non-COUP avec commanderProduits → miroir vers RENTRER du même produit
   if (op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
