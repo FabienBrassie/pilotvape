@@ -2606,10 +2606,12 @@ function opAllStepsDone(op, sh) {
   if (!op) return false;
   ensureOpModel(op);
   const defs = computeOpShopStepDefs(op, sh);
-  const st = op.etats && op.etats[sh];
-  if (!st || !st.steps) return false;
-  if (defs.length === 0) return !!st.done;
-  return defs.every(d => st.steps[d.key] === true);
+  if (defs.length === 0) {
+    const st = op.etats && op.etats[sh];
+    return st ? !!st.done : false;
+  }
+  // Utilise _getOpStepChecked pour les steps dynamiques (fanfare_rentrer, coup_*, prod)
+  return defs.every(d => _getOpStepChecked(op, sh, d));
 }
 // Version "readiness" : exclut les steps de sortie et de désinstallation.
 // Utilisée pour le badge « Prête / Pas prête » : une OP COUP est "prête"
@@ -2618,10 +2620,8 @@ function opReadyStepsDone(op, sh) {
   if (!op) return false;
   ensureOpModel(op);
   const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
-  const st = op.etats && op.etats[sh];
-  if (!st || !st.steps) return false;
   if (defs.length === 0) return true;
-  return defs.every(d => st.steps[d.key] === true);
+  return defs.every(d => _getOpStepChecked(op, sh, d));
 }
 function opStepsProgress(op, sh) {
   if (!op) return 0;
@@ -2692,9 +2692,7 @@ function opOverallProgress(op) {
   SHOPS.forEach(sh => {
     const defs = computeOpShopStepDefs(op, sh);
     totalShop += defs.length;
-    const st = op.etats && op.etats[sh];
-    if (!st || !st.steps) return;
-    doneShop += defs.filter(d => st.steps[d.key] === true).length;
+    doneShop += defs.filter(d => _getOpStepChecked(op, sh, d)).length;
   });
   const total = gDefs.length + totalShop;
   const done  = gDone + doneShop;
@@ -2711,9 +2709,7 @@ function opReadyOverallProgress(op) {
   SHOPS.forEach(sh => {
     const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
     totalShop += defs.length;
-    const st = op.etats && op.etats[sh];
-    if (!st || !st.steps) return;
-    doneShop += defs.filter(d => st.steps[d.key] === true).length;
+    doneShop += defs.filter(d => _getOpStepChecked(op, sh, d)).length;
   });
   const total = gDefs.length + totalShop;
   const done  = gDone + doneShop;
@@ -3576,66 +3572,20 @@ function syncAutoActions() {
     a.opId = _healOp.id;
     a.fanfareOpType = a.fanfareOpType; // confirmer le type
   });
-  // Sync bidirectionnelle fanfare : aligner les coches OP ↔ action(s) RENTRER
-  // Pour les liquides avec actions par parfum, on AGRÈGE : OP Commandé = true ssi TOUS les
-  // parfums actifs sont commandés. Pour les non-liquides, sync 1:1 avec rentrerActionId.
+  // ── Sync fanfare NOUVEAUTE/EXCLU : LECTURE SEULE ──
+  // L'OP ne stocke plus les steps rentrer_* — ils sont calculés dynamiquement
+  // au rendu à partir des actions RENTRER (parfum ou gamme).
+  // Ici on ne fait que le sync 1:1 classique pour les cas SANS parfums individuels
+  // (ex: kits, PD, ou gamme sans détail par parfum).
   ops.forEach(op => {
     if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return;
     if (!op.rentrerActionId) return;
     const gammeId = (op.produitIds || [])[0];
     if (!gammeId) return;
-    // Trouver toutes les actions RENTRER pour ce produit (gamme + parfum)
-    const allRentrers = actions.filter(a =>
-      a.type === 'RENTRER' && a.produitId === gammeId && !a.annulee && !_deletedIds.has(a.id));
-    const parfumActions = allRentrers.filter(a => a.produitParfumId);
-    if (parfumActions.length > 0) {
-      // Mode agrégat : OP step = true si TOUS les parfums l'ont coché
-      ensureOpSteps(op);
-      parfumActions.forEach(a => ensureActionSteps(a));
-      SHOPS.forEach(sh => {
-        const ost = op.etats && op.etats[sh];
-        if (!ost || !ost.steps) return;
-        (ACTION_STEPS.RENTRER || []).forEach(s => {
-          const opKey = 'rentrer_' + s.key;
-          if (typeof ost.steps[opKey] !== 'boolean') return;
-          const allDone = parfumActions.every(a => {
-            const ast = a.etats && a.etats[sh];
-            return ast && ast.steps && ast.steps[s.key] === true;
-          });
-          if (allDone !== ost.steps[opKey]) {
-            ost.steps[opKey] = allDone;
-            if (!ost._stepTs) ost._stepTs = {};
-            ost._stepTs[opKey] = new Date().toISOString();
-          }
-        });
-        ost.done = opAllStepsDone(op, sh);
-        if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
-        if (!ost.done) ost.dateFait = null;
-      });
-      // Aussi sync la gamme-level RENTRER avec l'agrégat
-      const gammeA = allRentrers.find(a => !a.produitParfumId);
-      if (gammeA) {
-        ensureActionSteps(gammeA);
-        SHOPS.forEach(sh => {
-          const gst = gammeA.etats && gammeA.etats[sh];
-          if (!gst || !gst.steps) return;
-          (ACTION_STEPS.RENTRER || []).forEach(s => {
-            const allDone = parfumActions.every(a => {
-              const ast = a.etats && a.etats[sh];
-              return ast && ast.steps && ast.steps[s.key] === true;
-            });
-            if (allDone !== gst.steps[s.key]) {
-              gst.steps[s.key] = allDone;
-              if (!gst._stepTs) gst._stepTs = {};
-              gst._stepTs[s.key] = new Date().toISOString();
-            }
-          });
-          gst.done = allStepsDone(gammeA, sh);
-          if (gst.done && !gst.dateFait) gst.dateFait = ymd(new Date());
-          if (!gst.done) gst.dateFait = null;
-        });
-      }
-    } else {
+    // Y a-t-il des actions parfum individuelles ? Si oui, l'agrégat est fait au rendu.
+    const hasParfumActions = actions.some(a =>
+      a.type === 'RENTRER' && a.produitId === gammeId && a.produitParfumId && !a.annulee && !_deletedIds.has(a.id));
+    if (!hasParfumActions) {
       // Mode 1:1 classique (pas de parfums individuels)
       const aR = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
       if (aR) _syncOneShotStepsBidi(op, aR, null);
@@ -4582,15 +4532,12 @@ function syncActionStepsToOp(a) {
         }
       });
     }
-    // NOUVEAUTE/EXCLU (fanfare) liées par rentrerActionId OU par produit (parfum-level → gamme OP)
+    // NOUVEAUTE/EXCLU (fanfare) liées par rentrerActionId (lien direct uniquement).
+    // L'OP lit les actions dynamiquement au rendu — pas besoin de lien indirect par produit.
     ops.filter(function(o) {
       if (o.type !== 'NOUVEAUTE' && o.type !== 'EXCLU') return false;
       if (o._archived) return false;
-      // Lien direct
-      if (o.rentrerActionId === a.id) return true;
-      // Lien indirect : action parfum dont la gamme = produit de l'OP
-      if (a.produitParfumId && a.produitId && (o.produitIds || []).indexOf(a.produitId) >= 0) return true;
-      return false;
+      return o.rentrerActionId === a.id;
     }).forEach(function(o) { if (linkedOps.indexOf(o) < 0) linkedOps.push(o); });
     // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit
     ops.filter(function(o) {
@@ -4614,37 +4561,17 @@ function syncActionStepsToOp(a) {
   ensureActionSteps(a); // garantir que a.etats[sh].steps est initialisé
   linkedOps.forEach(op => {
     ensureOpSteps(op);
-    // ── Cas spécial : action parfum RENTRER + OP NOUVEAUTE/EXCLU pour la gamme ──
-    // L'OP est liée à la RENTRER gamme (rentrerActionId), mais le toggle vient d'un parfum.
-    // On agrège : OP step = true si TOUS les parfums actifs ont ce step coché.
-    if (a.type === 'RENTRER' && a.produitParfumId &&
-        (op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
-      const _parfumActions = actions.filter(x =>
-        x.type === 'RENTRER' && x.produitId === a.produitId && x.produitParfumId && !x.annulee);
-      if (_parfumActions.length > 0) {
-        _parfumActions.forEach(pa => ensureActionSteps(pa));
-        SHOPS.forEach(sh => {
-          const ost = op.etats && op.etats[sh];
-          if (!ost || !ost.steps) return;
-          (ACTION_STEPS.RENTRER || []).forEach(s => {
-            const opKey = 'rentrer_' + s.key;
-            if (typeof ost.steps[opKey] !== 'boolean') return;
-            const allDone = _parfumActions.every(pa => {
-              const past = pa.etats && pa.etats[sh];
-              return past && past.steps && past.steps[s.key] === true;
-            });
-            if (allDone !== ost.steps[opKey]) {
-              ost.steps[opKey] = allDone;
-              if (!ost._stepTs) ost._stepTs = {};
-              ost._stepTs[opKey] = new Date().toISOString();
-            }
-          });
-          ost.done = opAllStepsDone(op, sh);
-          if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
-          if (!ost.done) ost.dateFait = null;
-        });
-        return; // agrégat fait, pas de miroir 1:1
-      }
+    // ── NOUVEAUTE/EXCLU : les steps rentrer_* sont calculés dynamiquement au rendu ──
+    // Pas d'écriture dans op.etats[sh].steps pour ces steps. On recalcule ost.done quand même.
+    if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
+      SHOPS.forEach(sh => {
+        const ost = op.etats && op.etats[sh];
+        if (!ost) return;
+        ost.done = opAllStepsDone(op, sh);
+        if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
+        if (!ost.done) ost.dateFait = null;
+      });
+      return; // pas de miroir 1:1 pour les fanfares
     }
     // ── Cas normal : miroir 1:1 ──
     const m = _opActionStepMirror(a, op);
@@ -12964,13 +12891,23 @@ function renderDashboard() {
     liqActions.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
     // Séparer : actions parfum vs actions gamme-level
     const parfumActions = liqActions.filter(a => a.produitParfumId);
-    const gammeActions = liqActions.filter(a => !a.produitParfumId);
-    // Grouper parfums par gammeId
+    // Grouper parfums par gammeId+type
     const groups = {};
     parfumActions.forEach(a => {
       const key = a.produitId;
       if (!groups[key]) groups[key] = [];
       groups[key].push(a);
+    });
+    // ── RÈGLE ANTI-DOUBLON : masquer gamme-level si des parfum-level existent ──
+    // Pour chaque gamme+type, si des actions parfum existent, on n'affiche PAS l'action gamme.
+    // Cela s'applique à TOUS les types (RENTRER, SORTIR, etc.) — règle générique.
+    const _parfumCoverage = new Set(); // "gammeId::TYPE"
+    parfumActions.forEach(a => { _parfumCoverage.add(a.produitId + '::' + a.type); });
+    const gammeActions = liqActions.filter(a => {
+      if (a.produitParfumId) return false; // c'est un parfum, pas gamme
+      // Si des parfum-level existent pour cette gamme+type → masquer la gamme-level
+      if (_parfumCoverage.has(a.produitId + '::' + a.type)) return false;
+      return true;
     });
     // Gamme-level actions → rendu en groupe de parfums (même format)
     let html = gammeActions.map(a => _renderGammeLevelAsParfumGroup(a)).join('');
@@ -12990,8 +12927,14 @@ function renderDashboard() {
     if (actionList.length === 0) return '';
     // Séparer kits vs liquides vs PD
     const kitActions = actionList.filter(a => !a.produitType || a.produitType === 'kit');
-    const liqActions = actionList.filter(a => a.produitType === 'liq');
     const pdActions  = actionList.filter(a => a.produitType === 'pd');
+    // ── FILTRE ANTI-DOUBLON LIQUIDES : masquer gamme-level si parfum-level existent ──
+    const _allLiq = actionList.filter(a => a.produitType === 'liq');
+    const _parfCov = new Set();
+    _allLiq.forEach(a => { if (a.produitParfumId) _parfCov.add(a.produitId + '::' + a.type); });
+    const liqActions = _allLiq.filter(a =>
+      a.produitParfumId || !_parfCov.has(a.produitId + '::' + a.type)
+    );
 
     let html = '';
 
@@ -16340,8 +16283,7 @@ function renderOps() {
       const col = _abs ? '#64748b' : SHOP_COLORS[sh];
       const init = SHOP_LABELS[sh][0];
       const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
-      const st = op.etats && op.etats[sh];
-      const nbDone = defs.filter(d => st && st.steps && st.steps[d.key] === true).length;
+      const nbDone = defs.filter(d => _getOpStepChecked(op, sh, d)).length;
       const total = defs.length || 1;
       const p = nbDone / total;
       const done = p >= 1 - 1e-6;
@@ -17372,6 +17314,63 @@ function toggleOpDashExpand(opId) { toggleOpExpand(opId); }
 //   - Steps par shop : pose pièces, produit commandé/reçu (si prep), swappy (si meca impacte prix)
 //   - Bouton "Éditer" qui déploie un panneau d'édition inline
 // options.shopFilter : si non vide, ne montre que ce shop.
+
+// ── Calcul dynamique de l'état d'un step OP ──
+// Pour les steps fanfare_rentrer : calcule depuis les actions RENTRER liées (agrégat parfums).
+// Pour les steps coup_rentrer/coup_sortir : lit l'action liée directement.
+// Pour tout le reste : lit depuis op.etats[sh].steps classique.
+function _getOpStepChecked(op, sh, stepDef) {
+  const st = op.etats && op.etats[sh];
+  // Steps fanfare_rentrer → lecture dynamique depuis les actions RENTRER
+  if (stepDef.kind === 'fanfare_rentrer' && stepDef.actionStep) {
+    const gammeId = (op.produitIds || [])[0];
+    if (!gammeId) return false;
+    // Chercher les actions parfum-level RENTRER pour cette gamme
+    const parfumRentrers = actions.filter(a =>
+      a.type === 'RENTRER' && a.produitId === gammeId && a.produitParfumId && !a.annulee);
+    if (parfumRentrers.length > 0) {
+      // Mode agrégat : ✓ si TOUS les parfums ont coché ce step
+      return parfumRentrers.every(a => {
+        const ast = a.etats && a.etats[sh];
+        return ast && ast.steps && ast.steps[stepDef.actionStep] === true;
+      });
+    }
+    // Pas de parfums → lire depuis la RENTRER gamme-level (lien direct rentrerActionId)
+    const gammeA = op.rentrerActionId ? actions.find(a => a.id === op.rentrerActionId && !a.annulee) : null;
+    if (gammeA) {
+      const ast = gammeA.etats && gammeA.etats[sh];
+      return ast && ast.steps && ast.steps[stepDef.actionStep] === true;
+    }
+    return false;
+  }
+  // Steps coup_rentrer / coup_sortir → lecture depuis l'action liée
+  if (stepDef.kind === 'coup_rentrer' && stepDef.actionStep) {
+    const aR = op.rentrerActionId ? actions.find(a => a.id === op.rentrerActionId) : null;
+    if (aR) { const ast = aR.etats && aR.etats[sh]; return ast && ast.steps && ast.steps[stepDef.actionStep] === true; }
+    return st && st.steps && st.steps['rentrer_' + stepDef.actionStep] === true;
+  }
+  if (stepDef.kind === 'coup_sortir' && stepDef.actionStep) {
+    const aS = op.sortirActionId ? actions.find(a => a.id === op.sortirActionId) : null;
+    if (aS) { const ast = aS.etats && aS.etats[sh]; return ast && ast.steps && ast.steps[stepDef.actionStep] === true; }
+    return st && st.steps && st.steps['sortir_' + stepDef.actionStep] === true;
+  }
+  // Steps prod (non-COUP avec commanderProduits) → lecture depuis la RENTRER liée
+  if (stepDef.kind === 'prod') {
+    const _pid = (op.produitIds || [])[0];
+    const _ra = op.rentrerActionId
+      ? actions.find(a => a.id === op.rentrerActionId && !a.annulee)
+      : (_pid ? actions.find(a => a.type === 'RENTRER' && a.produitId === _pid && !a.annulee) : null);
+    if (_ra) {
+      const ast = _ra.etats && _ra.etats[sh];
+      if (stepDef.key === 'prod_commandee') return ast && ast.steps && ast.steps.commande === true;
+      if (stepDef.key === 'prod_recue') return ast && ast.steps && ast.steps.recu === true;
+    }
+    return st && st.steps && st.steps[stepDef.key] === true;
+  }
+  // Défaut : lecture classique depuis op.etats
+  return st && st.steps && st.steps[stepDef.key] === true;
+}
+
 function renderOpCardHtml(op, options) {
   ensureOpSteps(op);
   const meta = OP_TYPE_META[op.type] || { label: op.type, color: '#64748b' };
@@ -17476,8 +17475,7 @@ function renderOpCardHtml(op, options) {
     const init = SHOP_LABELS[sh][0];
     const shopDefsAll = computeOpShopStepDefs(op, sh);
     const shopDefs = shopDefsAll.filter(d => !_POST_OP_KINDS.has(d.kind));
-    const st = op.etats[sh];
-    const nbShopDone = shopDefs.filter(d => st && st.steps && st.steps[d.key] === true).length;
+    const nbShopDone = shopDefs.filter(d => _getOpStepChecked(op, sh, d)).length;
     // Progression combinée (global + shop readiness) pondérée par nb de steps
     const total = globalDefsCount + shopDefs.length;
     const doneCombined = (globalPct * globalDefsCount) + nbShopDone;
@@ -17488,7 +17486,7 @@ function renderOpCardHtml(op, options) {
     else if (done)      bg = col;
     else                bg = `conic-gradient(${col} ${(pct*360).toFixed(0)}deg, transparent 0)`;
     const txt = done ? '#0f172a' : col;
-    const stepsTip = shopDefsAll.map(d => (st && st.steps && st.steps[d.key] ? '✓' : '○') + ' ' + d.label).join(' · ');
+    const stepsTip = shopDefsAll.map(d => (_getOpStepChecked(op, sh, d) ? '✓' : '○') + ' ' + d.label).join(' · ');
     const tip = _abs ? SHOP_LABELS[sh] + ' — hors stock (auto-complété)' : SHOP_LABELS[sh] + ' — ' + nbShopDone + '/' + shopDefs.length + ' local · ' + stepsTip;
     return `<span title="${tip}" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:10px; font-weight:700; background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
   }).join('');
@@ -17625,7 +17623,7 @@ function renderOpCardHtml(op, options) {
     const label = SHOP_LABELS[sh];
     // Produit absent de cette boutique → section grisée, steps auto-cochés
     const _absentShop = _detailProd && isProductGoneFromShop(_detailProd, sh);
-    const nbDone = defs.filter(d => st && st.steps && st.steps[d.key] === true).length;
+    const nbDone = defs.filter(d => _getOpStepChecked(op, sh, d)).length;
     const allDone = defs.length > 0 && nbDone === defs.length;
     const _absentBadge = _absentShop
       ? `<span style="font-size:8px; padding:1px 5px; background:#64748b20; color:#64748b; border:1px solid #64748b40; border-radius:3px; font-weight:600;">hors stock</span>`
@@ -17640,7 +17638,7 @@ function renderOpCardHtml(op, options) {
     const rows = defs.length === 0
       ? `<div style="font-size:10px; color:#64748b; font-style:italic; padding:4px 0;">Pas d'action locale (pièces non affectées à ce shop)</div>`
       : defs.map(d => {
-        const checked = st && st.steps && st.steps[d.key] === true;
+        const checked = _getOpStepChecked(op, sh, d);
         const isDesinstall = d.kind === 'desinstall';
         // Steps miroir du dashboard : lecture seule dans l'OP (on coche dans le dashboard, pas ici)
         const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
@@ -17781,7 +17779,7 @@ function renderAveragedShopDots(opsList, shopFilter) {
       const globalDefsCount = computeOpGlobalStepDefs(op).length;
       const shopDefs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
       const st = op.etats[sh];
-      const nbShopDone = shopDefs.filter(d => st && st.steps && st.steps[d.key] === true).length;
+      const nbShopDone = shopDefs.filter(d => _getOpStepChecked(op, sh, d)).length;
       const total = globalDefsCount + shopDefs.length;
       const pct = total === 0 ? 1 : ((globalPct * globalDefsCount) + nbShopDone) / total;
       totalPct += pct;
@@ -17817,7 +17815,7 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
     const init = SHOP_LABELS[sh][0];
     const shopDefs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
     const st = op.etats[sh];
-    const nbShopDone = shopDefs.filter(d => st && st.steps && st.steps[d.key] === true).length;
+    const nbShopDone = shopDefs.filter(d => _getOpStepChecked(op, sh, d)).length;
     const total = globalDefsCount + shopDefs.length;
     const doneCombined = (globalPct * globalDefsCount) + nbShopDone;
     const pct = total === 0 ? 1 : (doneCombined / total);
