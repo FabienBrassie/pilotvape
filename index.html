@@ -12707,9 +12707,17 @@ function renderDashboard() {
       </div>
       ${(() => {
         // ── Miroir OP : afficher les étapes OP liées en lecture seule ──
-        const _linkedOps = ops.filter(o => !o._archived && !o.dateFin &&
-          ((a.type === 'RENTRER' && o.rentrerActionId === a.id) ||
-           (a.type === 'SORTIR' && o.sortirActionId === a.id)));
+        // Cherche toute OP active liée à cette action — par lien direct OU par produit
+        const _pid = a.produitId;
+        const _linkedOps = ops.filter(o => {
+          if (o._archived || o.dateFin) return false;
+          // Lien direct par ID d'action
+          if (o.rentrerActionId === a.id || o.sortirActionId === a.id ||
+              o.prixActionId === a.id || o.rentrerPrixActionId === a.id) return true;
+          // Lien par produit : OP dont produitIds contient le même produit
+          if (_pid && o.produitIds && o.produitIds.includes(_pid)) return true;
+          return false;
+        });
         if (_linkedOps.length === 0) return '';
         return _linkedOps.map(_op => {
           ensureOpModel(_op);
