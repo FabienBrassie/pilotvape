@@ -13295,8 +13295,6 @@ function renderDashboard() {
   const opEnCoursBlock = _opEnCoursOps.length === 0 ? '' : block('opEnCours', 'OP en cours', '#a855f7', _opEnCoursOps.length, _opEnCoursInner,
     'Opérations commerciales actuellement actives. Déplier pour voir le détail et l\'avancement par boutique.');
 
-  const opBlocks = installBlock + desinstBlock + opEnCoursBlock + sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock;
-
   // --- Bloc Besoins à combler ---
   function renderBesoinTrou(t) {
     const hasSortants = t.sortants && t.sortants.length;
@@ -14131,7 +14129,7 @@ function renderDashboard() {
   // Le bloc "MEP" (mise en place) a été retiré : il faisait doublon avec sortir/rentrer.
   // Ordre : À sortir → À rentrer → Prix à modifier → Besoins à combler → Prochaines OP → Historique
   document.getElementById('dashContent').innerHTML =
-    installBlock + desinstBlock + sortirBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    installBlock + desinstBlock + opEnCoursBlock + sortirBlock + rentrerBlock + mepBlock + prixBlock + opsBlock + besoinsBlock + alertesBlock + historiqueBlock;
 
   // Summary top right — chips cliquables qui amènent vers la section correspondante
   const chip = (color, label, key) =>
@@ -14156,7 +14154,7 @@ function renderDashboard() {
   if (prix.length) summaryParts.push(chip('#f59e0b', `${prix.length} prix à modifier`, 'prix'));
   // "En cours" = dateDebut déjà passée ou aujourd'hui, pas des prévisions (IMMINENTE, A_VENIR).
   const opsEnCoursStricte = ops.filter(op => opTimeStatus(op) === 'EN_COURS');
-  if (opsEnCoursStricte.length) summaryParts.push(chip('#a855f7', `${opsEnCoursStricte.length} OP en cours`, 'ops'));
+  if (opsEnCoursStricte.length) summaryParts.push(chip('#a855f7', `${opsEnCoursStricte.length} OP en cours`, 'opEnCours'));
   document.getElementById('dashSummary').innerHTML = summaryParts.length ? summaryParts.join(' <span style="color:#64748b;">·</span> ') : '<span style="color:#22c55e;">Tout est calme ✓</span>';
 
   // Sauvegarder l'état du dashboard (filtres) dans localStorage
