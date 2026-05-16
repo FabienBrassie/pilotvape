@@ -2763,13 +2763,16 @@ function getLatestReleveForKit(kitId) {
 }
 // Dernière date de relevé pour un concurrent donné (toutes shops confondues)
 function getLatestReleveDateByCompetitor(competitorKey) {
-  const list = relevesPrix.filter(r => !r.produitType && r.prix && typeof r.prix[competitorKey] === 'number');
+  // Seuls les vrais relevés comptent (mode 'releve'), pas les quick edits (double-clic).
+  const list = relevesPrix.filter(r => !r.produitType && r.mode === 'releve' && r.prix && typeof r.prix[competitorKey] === 'number');
   if (!list.length) return null;
   return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].date;
 }
 // Dernière date de relevé fait PAR une boutique précise (via le champ "par") — kits uniquement
 function getLatestReleveDateByShop(shop) {
-  const list = relevesPrix.filter(r => !r.produitType && r.par === shop);
+  // Seuls les vrais relevés (mode 'releve' via le bouton "faire mon relevé") comptent.
+  // Les quick edits (double-clic) ne valident pas le relevé.
+  const list = relevesPrix.filter(r => !r.produitType && r.par === shop && r.mode === 'releve');
   if (!list.length) return null;
   return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].date;
 }
@@ -2869,7 +2872,7 @@ function getLatestPriceForPdCompetitor(pdId, compKey) {
 function getLatestPdReleveDateByShop(shop, cat) {
   const compKey = SHOP_COMPETITOR[shop];
   const pdIds = new Set(basePD.filter(p => p.categorie === cat && p.statutVie !== 'SORTI').map(p => p.id));
-  const list = relevesPrix.filter(r => r.produitType === 'pd' && r.par === shop && pdIds.has(r.produitId) && r.prix && typeof r.prix[compKey] === 'number');
+  const list = relevesPrix.filter(r => r.produitType === 'pd' && r.mode === 'releve' && r.par === shop && pdIds.has(r.produitId) && r.prix && typeof r.prix[compKey] === 'number');
   if (!list.length) return null;
   return list.slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''))[0].date;
 }
@@ -6238,6 +6241,8 @@ async function loadData() {
     relevesPrix = (Array.isArray(data.relevesPrix) && data.relevesPrix.length)
       ? data.relevesPrix
       : SEED_RELEVES.slice();
+    // Migration : les anciens relevés sans mode sont considérés comme vrais relevés
+    relevesPrix.forEach(r => { if (!r.mode) r.mode = 'releve'; });
     nextReleveId = typeof data.nextReleveId === 'number' ? data.nextReleveId
       : (relevesPrix.length ? Math.max(...relevesPrix.map(r => parseInt(String(r.id).replace('REL-',''))||0)) + 1 : 1);
     ops = Array.isArray(data.ops) ? data.ops : [];
@@ -14054,6 +14059,7 @@ function commitReleveEdit() {
       if (!same.urls) same.urls = {};
       if (v.url) same.urls[compKey] = v.url; else delete same.urls[compKey];
       if (releveDraftNote) same.note = releveDraftNote;
+      same.mode = 'releve'; // promouvoir en vrai relevé si c'était un quick edit
       return;
     }
     relevesPrix.push({
@@ -14063,7 +14069,8 @@ function commitReleveEdit() {
       prix: { [compKey]: v.prix },
       urls: v.url ? { [compKey]: v.url } : {},
       note: releveDraftNote || '',
-      par: myShop
+      par: myShop,
+      mode: 'releve'
     });
   });
   releveEditMode = false;
@@ -14394,7 +14401,8 @@ function commitQuickReleveEdit() {
       prix: { [compKey]: price },
       urls: url ? { [compKey]: url } : {},
       note: '',
-      par: myShop
+      par: myShop,
+      mode: 'quick'
     });
   }
   // Si le concurrent était marqué N/D mais on vient de saisir un prix → on ré-active automatiquement.
@@ -15121,6 +15129,7 @@ function commitRelevePdEdit() {
       same.prix[compKey] = v.prix;
       if (!same.urls) same.urls = {};
       if (v.url) same.urls[compKey] = v.url; else delete same.urls[compKey];
+      same.mode = 'releve';
       return;
     }
     relevesPrix.push({
@@ -15131,7 +15140,8 @@ function commitRelevePdEdit() {
       prix: { [compKey]: v.prix },
       urls: v.url ? { [compKey]: v.url } : {},
       note: '',
-      par: myShop
+      par: myShop,
+      mode: 'releve'
     });
   });
   relevesPdEditMode = false;
