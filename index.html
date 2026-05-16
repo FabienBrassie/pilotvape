@@ -4696,18 +4696,10 @@ function syncOpStepsToAction(op) {
       if (a) { op.sortirActionId = a.id; if (!a.opId) a.opId = op.id; targets.push(a); }
     }
   }
-  // NOUVEAUTE/EXCLU (fanfare) → miroir vers RENTRER gamme + TOUTES les RENTRER parfum
-  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
-    const _raF = actions.find(function(x) { return x.id === op.rentrerActionId; });
-    if (_raF && targets.indexOf(_raF) < 0) targets.push(_raF);
-    // Aussi propager vers toutes les actions parfum de la même gamme
-    const _fanfPid = (op.produitIds || [])[0];
-    if (_fanfPid) {
-      actions.filter(function(x) {
-        return x.type === 'RENTRER' && x.produitId === _fanfPid && x.produitParfumId && !x.annulee;
-      }).forEach(function(x) { if (targets.indexOf(x) < 0) targets.push(x); });
-    }
-  }
+  // NOUVEAUTE/EXCLU (fanfare) : les steps rentrer_* sont en lecture seule côté OP
+  // → pas de propagation OP→action pour ces steps (c'est le dashboard qui fait foi).
+  // On garde quand même le lien vers la RENTRER gamme pour les steps NON-miroir éventuels.
+  // (Actuellement il n'y en a pas, mais c'est prêt pour l'avenir.)
   // Non-COUP avec commanderProduits → miroir vers RENTRER du même produit
   if (op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
     var _pid = (op.produitIds || [])[0];
@@ -4745,6 +4737,11 @@ function syncOpStepsToAction(op) {
 function toggleOpStep(opId, shop, stepKey, checked) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
+  // Bloquer les steps du dashboard (lecture seule côté OP)
+  const _defs = computeOpShopStepDefs(op, shop);
+  const _def = _defs.find(d => d.key === stepKey);
+  const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
+  if (_def && _DASHBOARD_KINDS.includes(_def.kind)) return; // lecture seule
   op._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   ensureOpSteps(op);
   const st = op.etats[shop];
@@ -17645,20 +17642,26 @@ function renderOpCardHtml(op, options) {
       : defs.map(d => {
         const checked = st && st.steps && st.steps[d.key] === true;
         const isDesinstall = d.kind === 'desinstall';
+        // Steps miroir du dashboard : lecture seule dans l'OP (on coche dans le dashboard, pas ici)
+        const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
+        const isDashboardStep = _DASHBOARD_KINDS.includes(d.kind);
         const _stepGrey = (_isTerminee && !isDesinstall) || _absentShop ? 'opacity:0.35; filter:saturate(0.3);' : '';
         const _stepHighlight = (_isTerminee && isDesinstall && !checked) ? 'background:#1c1117; border:1px solid #ef444460; border-radius:4px; padding:5px 6px; margin:2px -6px;' : '';
+        const _dashCol = isDashboardStep ? '#64748b' : (_absentShop ? '#64748b' : col);
         const box = checked
-          ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:${_absentShop ? '#64748b' : col}; color:#0f172a; border:1px solid ${_absentShop ? '#64748b' : col}; border-radius:3px; font-size:${isDesinstall ? '11' : '10'}px; font-weight:700;">✓</span>`
-          : `<span style="display:inline-block; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:transparent; border:${isDesinstall ? '2' : '1'}px solid ${isDesinstall ? col : col + '80'}; border-radius:3px;"></span>`;
-        // Si produit absent → pas de clic (les steps sont auto-cochés par ensureOpSteps)
-        const clickAttr = _absentShop
-          ? `title="Produit hors stock à ${label} — auto-complété"`
+          ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:${_dashCol}; color:#0f172a; border:1px solid ${_dashCol}; border-radius:3px; font-size:${isDesinstall ? '11' : '10'}px; font-weight:700;">✓</span>`
+          : `<span style="display:inline-block; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:transparent; border:${isDesinstall ? '2' : '1'}px solid ${isDashboardStep ? '#475569' : (isDesinstall ? col : col + '80')}; border-radius:3px;"></span>`;
+        // Pas de clic si : produit absent, ou step du dashboard (lecture seule)
+        const clickAttr = (_absentShop || isDashboardStep)
+          ? `title="${isDashboardStep ? 'Géré dans le dashboard — coche côté action' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
           : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"`;
+        const _isClickable = !_absentShop && !isDashboardStep;
+        const _dashLabel = isDashboardStep ? ' <span style="font-size:9px; color:#475569;">← dashboard</span>' : '';
         return `<div ${clickAttr}
-          style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_absentShop ? '' : 'cursor:pointer;'} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${_stepGrey} ${_stepHighlight}"
-          ${_absentShop ? '' : `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'"`}>
+          style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_stepGrey} ${_stepHighlight}"
+          ${_isClickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'"` : ''}>
           ${box}
-          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}</span>
+          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}</span>
         </div>`;
       }).join('');
     return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${rows}</div>`;
