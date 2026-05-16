@@ -2171,7 +2171,10 @@ function computeOpShopStepDefs(op, shop) {
   const defs = [];
   // Les steps "Produit commandé / reçu" sont déjà portés, pour une OP COUP, par le
   // mirror RENTRER (① Commandé / ① En stock) — on évite donc le doublon ici.
-  if (op.prep && op.prep.commanderProduits && op.type !== 'COUP') {
+  // Steps produit commandé/reçu : pas pour COUP (géré par rentrer_*) ni pour NOUVEAUTE/EXCLU
+  // avec rentrerActionId (également géré par les steps miroir rentrer_*)
+  if (op.prep && op.prep.commanderProduits && op.type !== 'COUP' &&
+      !((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId)) {
     defs.push({ key: 'prod_commandee', label: 'Commandé sur Swappy', kind: 'prod' });
     defs.push({ key: 'prod_recue',     label: 'Reçu en boutique',    kind: 'prod' });
   }
@@ -2203,6 +2206,16 @@ function computeOpShopStepDefs(op, shop) {
     const isRegleComplexe = (mt === 'SECOND_REMISE' || mt === 'X_POUR_Y');
     const label = isRegleComplexe ? 'Promo configurée sur Swappy' : 'Prix modifié sur Swappy';
     defs.push({ key: 'swappy', label: label, kind: 'swappy' });
+  }
+  // OP NOUVEAUTE / EXCLU (fanfare) liée à une RENTRER : mêmes steps miroir que COUP
+  // pour synchroniser Commandé/Reçu entre le dashboard et l'OP.
+  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
+    const aRF = actions.find(x => x.id === op.rentrerActionId);
+    if (aRF) {
+      (ACTION_STEPS.RENTRER || []).forEach(s => {
+        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key });
+      });
+    }
   }
   // OP COUP : les steps par shop sont dérivés des 2 actions liées (RENTRER + SORTIR),
   // pour que les cases vues côté OP et côté Dashboard soient les mêmes (mirror bidirectionnel,
@@ -3560,6 +3573,14 @@ function syncAutoActions() {
     a.opId = _healOp.id;
     a.fanfareOpType = a.fanfareOpType; // confirmer le type
   });
+  // Sync bidirectionnelle fanfare : aligner les coches OP ↔ action RENTRER
+  // (même logique que _syncOneShotStepsBidi pour les COUP)
+  ops.forEach(op => {
+    if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return;
+    if (!op.rentrerActionId) return;
+    const aR = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
+    if (aR) _syncOneShotStepsBidi(op, aR, null);
+  });
   syncMiseEnPlaceActions();
   syncPriceActions();
   syncOpsFromVerdicts();
@@ -4413,6 +4434,14 @@ function _opActionStepMirror(a, op) {
     Object.keys(a_to_o).forEach(k => { o_to_a[a_to_o[k]] = k; });
     return { a_to_o, o_to_a };
   }
+  // Cas NOUVEAUTE / EXCLU (fanfare) : RENTRER ↔ OP.rentrer_* (même mapping que COUP)
+  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && a.type === 'RENTRER' && op.rentrerActionId === a.id) {
+    var a_to_oF = {};
+    (ACTION_STEPS.RENTRER || []).forEach(function(s) { a_to_oF[s.key] = 'rentrer_' + s.key; });
+    var o_to_aF = {};
+    Object.keys(a_to_oF).forEach(function(k) { o_to_aF[a_to_oF[k]] = k; });
+    return { a_to_o: a_to_oF, o_to_a: o_to_aF };
+  }
   // Cas non-COUP : RENTRER ↔ OP avec prep.commanderProduits
   // Synchronise « Commandé / En stock » du dashboard avec « Produit commandé / Produit reçu » de l'OP.
   if (a.type === 'RENTRER' && op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
@@ -4493,6 +4522,10 @@ function syncActionStepsToOp(a) {
         }
       });
     }
+    // NOUVEAUTE/EXCLU (fanfare) liées par rentrerActionId
+    ops.filter(function(o) {
+      return (o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && !o._archived && o.rentrerActionId === a.id;
+    }).forEach(function(o) { if (linkedOps.indexOf(o) < 0) linkedOps.push(o); });
     // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit
     ops.filter(function(o) {
       return o.type !== 'COUP' && !o._archived && o.prep && o.prep.commanderProduits &&
@@ -4564,6 +4597,11 @@ function syncOpStepsToAction(op) {
       const a = actions.find(x => x.type === 'SORTIR' && x.produitId === _coupPid && !x.annulee);
       if (a) { op.sortirActionId = a.id; if (!a.opId) a.opId = op.id; targets.push(a); }
     }
+  }
+  // NOUVEAUTE/EXCLU (fanfare) → miroir vers RENTRER liée
+  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
+    const _raF = actions.find(function(x) { return x.id === op.rentrerActionId; });
+    if (_raF && targets.indexOf(_raF) < 0) targets.push(_raF);
   }
   // Non-COUP avec commanderProduits → miroir vers RENTRER du même produit
   if (op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
@@ -6422,8 +6460,20 @@ async function loadData() {
       }
     });
     // Purger les OPs tombstonées de l'array en mémoire
+    // PROTECTION : ne jamais tombstoner une OP fanfare liée à une action active
     const _opsBefore = ops.length;
-    ops = ops.filter(o => !_deletedIds.has(o.id));
+    ops = ops.filter(o => {
+      if (!_deletedIds.has(o.id)) return true;
+      if ((o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && o.rentrerActionId) {
+        const _refA = actions.find(a => a.id === o.rentrerActionId && a.fanfareOpType && !a.annulee);
+        if (_refA) {
+          _deletedIds.delete(o.id);
+          console.warn('[STARTUP-PROTECT] OP fanfare ' + o.id + ' protégée contre suppression (action ' + _refA.id + ')');
+          return true;
+        }
+      }
+      return false;
+    });
     if (ops.length < _opsBefore) console.log('[Migration] ' + (_opsBefore - ops.length) + ' OP(s) tombstonées retirées de la mémoire');
     // Migration one-shot (avril 2026) : DÉJÀ APPLIQUÉE — ne plus ré-exécuter.
     // L'ancienne migration forçait op.dateDebut = '2026-05-04' sur toutes les OPs ouvertes,
@@ -7366,8 +7416,21 @@ function _mergeEtats(localActions, remoteActions) {
 function _mergeOpEtats(localOps, remoteOps) {
   if (!remoteOps || !Array.isArray(remoteOps)) return localOps;
   // Filtrer les OPs supprimées (tombstones) de la base avant de commencer
+  // PROTECTION : ne jamais tombstoner une OP fanfare (NOUVEAUTE/EXCLU) liée à une action active
   if (_deletedIds.size > 0) {
-    localOps = localOps.filter(o => !_deletedIds.has(o.id));
+    localOps = localOps.filter(o => {
+      if (!_deletedIds.has(o.id)) return true;
+      // Protéger les OPs fanfare référencées par une action RENTRER active
+      if ((o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && o.rentrerActionId) {
+        const _refA = actions.find(a => a.id === o.rentrerActionId && a.fanfareOpType && !a.annulee);
+        if (_refA) {
+          _deletedIds.delete(o.id); // retirer le tombstone erroné
+          console.warn('[MERGE-PROTECT] OP fanfare ' + o.id + ' protégée contre suppression (action ' + _refA.id + ')');
+          return true;
+        }
+      }
+      return false;
+    });
   }
   const remoteMap = {};
   remoteOps.forEach(o => { if (o && o.id) remoteMap[o.id] = o; });
@@ -7722,6 +7785,33 @@ function _startAutoSync() {
       if (typeof remote.nextCampagneId === 'number') nextCampagneId = Math.max(nextCampagneId, remote.nextCampagneId);
       if (changed) {
         console.log('[AUTO-SYNC] Changements distants intégrés');
+        // Auto-heal : si le merge a supprimé une OP fanfare, la recréer immédiatement
+        actions.forEach(a => {
+          if (a.type !== 'RENTRER' || a.annulee || !a.fanfareOpType) return;
+          const _FT = ['NOUVEAUTE','EXCLU'];
+          if (!_FT.includes(a.fanfareOpType)) return;
+          const _existOp = ops.find(o => o.rentrerActionId === a.id && _FT.includes(o.type) && !o._archived);
+          if (_existOp) return;
+          console.warn('[AUTO-SYNC FANFARE-HEAL] OP ' + a.fanfareOpType + ' manquante pour ' + a.id + ' — recréation');
+          var _hDate = a._ts ? a._ts.slice(0, 10) : ymd(new Date());
+          var _hOp = {
+            id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+            type: a.fanfareOpType,
+            produitIds: [a.produitId],
+            dateDebut: _hDate,
+            dateFin: null,
+            commentaire: 'Entrée en fanfare (auto-restaurée sync)',
+            rentrerActionId: a.id,
+            auto: false,
+            etats: {},
+            pieces: []
+          };
+          seedOpDefaults(_hOp);
+          ensureOpSteps(_hOp);
+          if (typeof pushOpTraced === 'function') pushOpTraced(_hOp, 'autoSync_fanfareHeal');
+          else ops.push(_hOp);
+          a.opId = _hOp.id;
+        });
         // Sauvegarder localement (données fusionnées en mémoire)
         localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
         // Pas de re-render automatique pour ne pas interrompre la navigation.
