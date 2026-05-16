@@ -4266,16 +4266,6 @@ function syncPrixRougeOp(a, opts) {
 }
 
 // Wrapper legacy (bouton manuel) — désormais simple déclencheur idempotent.
-function actionnerOpFromPrix(actionId) {
-  const a = actions.find(x => x.id === actionId);
-  if (!a || a.type !== 'PRIX' || a.annulee) return;
-  if (a.decisionChoice !== 'rouge') { pvAlert('Cette action n\'est pas en prix rouge.'); return; }
-  syncPrixRougeOp(a);
-  saveData();
-  renderDashboard();
-  renderOps && renderOps();
-}
-
 // Définit/retire le type "entrée en fanfare" pour une action RENTRER.
 // opType ∈ { null, 'NOUVEAUTE', 'EXCLU' }
 // Création/remplacement d'une OP liée au RENTRER. null => clôture l'OP existante.
@@ -5090,11 +5080,6 @@ async function removePromotedOp(opId) {
 }
 
 // Clé d'appariement (profil + case technique effective) — legacy, conservée pour tri
-function _pairKeyFromKit(k) {
-  const ct = (typeof getEffectiveCaseTech === 'function' ? getEffectiveCaseTech(k) : null) || k.caseTech || '?';
-  return (k.profilChoisi || '?') + '|' + ct;
-}
-
 // Identité de case sur le mur = profil + caseTech effective + rôle(s) effectif(s).
 // Deux kits partagent une case si et seulement si :
 //   - même profil
@@ -5585,14 +5570,6 @@ function toggleKitSection(key) {
   if (typeof renderKits === 'function') renderKits();
 }
 // Aller directement à l'onglet Relevés prix
-function switchToReleves() {
-  const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === 'Relevés prix');
-  if (btn) btn.click();
-}
-function switchToOps() {
-  const btn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.trim() === 'OP');
-  if (btn) btn.click();
-}
 // Amène la section ciblée dans la vue (déplie si nécessaire + scroll + flash visuel)
 function focusDashSection(key) {
   if (isDashCollapsed(key)) {
@@ -5889,28 +5866,6 @@ function getEffectiveRoles(k) {
 }
 const ROLE_POSSIBLE_LABELS = { PRIX_D_APPEL:"Prix d'appel", MEILLEURE_MARGE:"Meilleure marge", LES_DEUX:"Les deux", PA_TROP_HAUT:"PA trop haut", MARGE_TROP_FAIBLE:"Marge trop faible", AUCUN_INTERET:"Aucun intérêt" };
 function parseOffreKey(key) { if (key.endsWith("_PRIX_D_APPEL")) { const prefix = key.slice(0, -"_PRIX_D_APPEL".length); const lastUnderscore = prefix.lastIndexOf("_"); return { caseTech: prefix.slice(0, lastUnderscore), profil: prefix.slice(lastUnderscore+1), role: "PRIX_D_APPEL" }; } else if (key.endsWith("_MEILLEURE_MARGE")) { const prefix = key.slice(0, -"_MEILLEURE_MARGE".length); const lastUnderscore = prefix.lastIndexOf("_"); return { caseTech: prefix.slice(0, lastUnderscore), profil: prefix.slice(lastUnderscore+1), role: "MEILLEURE_MARGE" }; } return null; }
-function findProductForSlot(offreKey) {
-  const parsed = parseOffreKey(offreKey);
-  if (!parsed) return null;
-  // Priorité : ONE_SHOT actif d'abord (trumpe le titulaire), puis DANS_OFFRE, puis autres statuts actifs
-  const candidates = baseKits.filter(k => {
-    if (k.statutVie === 'SORTI') return false;
-    const ect = getEffectiveCaseTech(k);
-    if (ect !== parsed.caseTech) return false;
-    if (k.profilChoisi !== parsed.profil) return false;
-    const roles = getEffectiveRoles(k);
-    return roles.includes(parsed.role);
-  });
-  // One-shot actif prioritaire, puis statut pérenne
-  const prio = ['DANS_OFFRE','A_RENTRER','A_REMPLACER','FIN_DE_VIE','A_SORTIR','SORTI'];
-  candidates.sort((a, b) => {
-    const aOS = (a.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(a.statutVie)) ? 0 : 1;
-    const bOS = (b.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(b.statutVie)) ? 0 : 1;
-    if (aOS !== bOS) return aOS - bOS;
-    return (prio.indexOf(a.statutVie) - prio.indexOf(b.statutVie)) || 0;
-  });
-  return candidates[0] || null;
-}
 function findAllProductsForSlot(offreKey) {
   const parsed = parseOffreKey(offreKey);
   if (!parsed) return [];
@@ -7336,6 +7291,42 @@ window.addEventListener('pagehide', _flushPendingSave);
 // ── Fusion des coches (merge-on-save) ──
 // Principe : une coche cochée (true) gagne toujours sur false.
 // Cela évite qu'une boutique écrase les coches d'une autre.
+
+// ── Helper commun : fusionne les etats[shop].steps par _stepTs + recalcule done ──
+// Utilisé par _mergeEtats (actions) et _mergeOpEtats (OPs).
+function _mergeStepsForItem(localItem, remoteItem) {
+  let changed = 0;
+  SHOPS.forEach(sh => {
+    const ls = localItem.etats && localItem.etats[sh];
+    const rs = remoteItem.etats && remoteItem.etats[sh];
+    if (!ls || !rs) return;
+    if (rs.steps && ls.steps) {
+      var _lTs = ls._stepTs || {};
+      var _rTs = rs._stepTs || {};
+      Object.keys(rs.steps).forEach(k => {
+        if (typeof rs.steps[k] !== 'boolean') return;
+        var localTs  = _lTs[k] || '';
+        var remoteTs = _rTs[k] || '';
+        if (remoteTs > localTs) {
+          if (rs.steps[k] !== ls.steps[k]) {
+            ls.steps[k] = rs.steps[k];
+            if (!ls._stepTs) ls._stepTs = {};
+            ls._stepTs[k] = remoteTs;
+            changed++;
+          }
+        }
+      });
+    }
+    // Recalculer done après merge des steps
+    if (ls.steps) {
+      var _allDone = Object.values(ls.steps).every(function(v) { return v === true; });
+      if (_allDone && !ls.done) { ls.done = true; ls.dateFait = ls.dateFait || ymd(new Date()); changed++; }
+      else if (!_allDone && ls.done) { ls.done = false; ls.dateFait = null; changed++; }
+    }
+  });
+  return changed;
+}
+
 function _mergeEtats(localActions, remoteActions) {
   if (!remoteActions || !Array.isArray(remoteActions)) return localActions;
   // Filtrer les actions supprimées (tombstones) de la base avant de commencer
@@ -7348,46 +7339,13 @@ function _mergeEtats(localActions, remoteActions) {
   localActions.forEach(a => {
     const remote = remoteMap[a.id];
     if (!remote || !remote.etats) return;
+    mergeCount += _mergeStepsForItem(a, remote);
+    // Extras actions : responsable, commentaire
     SHOPS.forEach(sh => {
       const ls = a.etats && a.etats[sh];
       const rs = remote.etats[sh];
       if (!ls || !rs) return;
-      // Fusionner steps : last-write-wins basé sur _stepTs (timestamp par step)
-      if (rs.steps && ls.steps) {
-        var _lTs = ls._stepTs || {};
-        var _rTs = rs._stepTs || {};
-        Object.keys(rs.steps).forEach(k => {
-          if (typeof rs.steps[k] !== 'boolean') return;
-          var localTs  = _lTs[k] || '';
-          var remoteTs = _rTs[k] || '';
-          // Si le remote est plus récent (ou pas de ts local), prendre le remote
-          if (remoteTs > localTs) {
-            if (rs.steps[k] !== ls.steps[k]) {
-              ls.steps[k] = rs.steps[k];
-              if (!ls._stepTs) ls._stepTs = {};
-              ls._stepTs[k] = remoteTs;
-              mergeCount++;
-            }
-          }
-          // Sinon on garde le local (plus récent ou égal)
-        });
-      }
-      // Recalculer done après merge des steps
-      if (ls.steps) {
-        var _allDone = Object.values(ls.steps).every(function(v) { return v === true; });
-        if (_allDone && !ls.done) {
-          ls.done = true;
-          ls.dateFait = ls.dateFait || ymd(new Date());
-          mergeCount++;
-        } else if (!_allDone && ls.done) {
-          ls.done = false;
-          ls.dateFait = null;
-          mergeCount++;
-        }
-      }
-      // Fusionner responsable : prendre le non-vide
       if (rs.responsable && !ls.responsable) ls.responsable = rs.responsable;
-      // Fusionner commentaire : prendre le plus long (évite d'écraser)
       if (rs.commentaire && (!ls.commentaire || rs.commentaire.length > ls.commentaire.length)) {
         ls.commentaire = rs.commentaire;
       }
@@ -7485,11 +7443,10 @@ function _mergeOpEtats(localOps, remoteOps) {
   if (_deletedIds.size > 0) {
     localOps = localOps.filter(o => {
       if (!_deletedIds.has(o.id)) return true;
-      // Protéger les OPs fanfare référencées par une action RENTRER active
       if ((o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && o.rentrerActionId) {
         const _refA = actions.find(a => a.id === o.rentrerActionId && a.fanfareOpType && !a.annulee);
         if (_refA) {
-          _deletedIds.delete(o.id); // retirer le tombstone erroné
+          _deletedIds.delete(o.id);
           console.warn('[MERGE-PROTECT] OP fanfare ' + o.id + ' protégée contre suppression (action ' + _refA.id + ')');
           return true;
         }
@@ -7502,34 +7459,7 @@ function _mergeOpEtats(localOps, remoteOps) {
   localOps.forEach(op => {
     const remote = remoteMap[op.id];
     if (!remote || !remote.etats) return;
-    SHOPS.forEach(sh => {
-      const ls = op.etats && op.etats[sh];
-      const rs = remote.etats[sh];
-      if (!ls || !rs) return;
-      // Fusionner steps : last-write-wins basé sur _stepTs
-      if (rs.steps && ls.steps) {
-        var _lTs = ls._stepTs || {};
-        var _rTs = rs._stepTs || {};
-        Object.keys(rs.steps).forEach(k => {
-          if (typeof rs.steps[k] !== 'boolean') return;
-          var localTs  = _lTs[k] || '';
-          var remoteTs = _rTs[k] || '';
-          if (remoteTs > localTs) {
-            if (rs.steps[k] !== ls.steps[k]) {
-              ls.steps[k] = rs.steps[k];
-              if (!ls._stepTs) ls._stepTs = {};
-              ls._stepTs[k] = remoteTs;
-            }
-          }
-        });
-      }
-      // Recalculer done après merge
-      if (ls.steps) {
-        var _allDone = Object.values(ls.steps).every(function(v) { return v === true; });
-        if (_allDone && !ls.done) { ls.done = true; ls.dateFait = ls.dateFait || ymd(new Date()); }
-        else if (!_allDone && ls.done) { ls.done = false; ls.dateFait = null; }
-      }
-    });
+    _mergeStepsForItem(op, remote);
   });
   // Ajouter les OPs distantes inconnues localement (sauf tombstones)
   const localIds = new Set(localOps.map(o => o.id));
@@ -8342,44 +8272,6 @@ function setPropSort(col) {
 
 let editingPropId = null;
 
-function startEditProp(id) {
-  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
-  editingPropId = id;
-  renderPropositions();
-}
-
-function cancelEditProp() {
-  editingPropId = null;
-  renderPropositions();
-}
-
-function saveEditProp(id) {
-  const prop = propositions.find(p => p.id === id);
-  if (!prop) return;
-  const pa = parseFloat(document.getElementById('editPA').value);
-  const pv = parseFloat(document.getElementById('editPV').value);
-  const mah = parseInt(document.getElementById('editMAH').value);
-  const w = parseInt(document.getElementById('editW').value);
-  const fournisseur = document.getElementById('editFourn').value;
-  const marque = document.getElementById('editMarque').value;
-  const modele = document.getElementById('editModele').value;
-
-  prop.marque = marque; prop.modele = modele; prop.fournisseur = fournisseur;
-  prop.pa = pa; prop.pv = pv; prop.mah = mah; prop.w = w;
-  { const _m = computeMarge(pa, pv); prop.marge = _m.marge; prop.margePct = _m.margePct; }
-
-  const tirageGroup = (prop.tirage === "MTL" || prop.tirage === "RDL") ? "MTL_RDL" : prop.tirage;
-  const threshold = AUTONOMY_THRESHOLDS[tirageGroup] || 50;
-  prop.autonomie = (mah / w) >= threshold ? "20" : "10";
-  prop.caseTech = tirageGroup + "_" + prop.autonomie + "C";
-
-  syncPropToKit(prop);
-  editingPropId = null;
-  saveData();
-  renderPropositions();
-  renderKits();
-}
-
 function renderPropositions() {
   // Keep autonomie consistent with caseTech (caseTech is the source of truth)
   propositions.forEach(p => {
@@ -8675,7 +8567,6 @@ function renderPropositions() {
   document.getElementById('propList').innerHTML = html || '<p style="color:#64748b; padding:12px;">Aucune proposition dans cette catégorie</p>';
 }
 
-function getStatusClass(status) { const map = { OK: 'status-ok', NOUVEAUTE: 'status-nouveaute', A_RENTRER: 'status-arentrer', A_REMPLACER: 'status-aremplacer', A_TROUVER: 'status-atrouver', A_SORTIR: 'status-asortir', FIN_DE_VIE: 'status-findevie', DESTOCKAGE: 'status-destockage', SORTI: 'status-sorti' }; return map[status] || 'status-ok'; }
 
 let kitSortCol = 'tirage';
 let kitSortDir = 1;
