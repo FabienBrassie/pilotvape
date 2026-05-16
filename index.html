@@ -3153,19 +3153,24 @@ function computeSubstitutionPair(kitId) {
 // Retourne l'action existante ou en crée une nouvelle.
 function ensureAction(produitId, type, produitType, opts) {
   opts = opts || {};
-  // Recherche d'une action ouverte existante du même type pour ce produit
-  const existing = actions.find(a =>
+  // Recherche d'une action existante du même type pour ce produit (non annulée)
+  const _matchBase = a =>
     a.produitId === produitId &&
     a.type === type &&
-    actionGlobalState(a) !== 'FAIT' &&
     !a.annulee &&
     (produitType === 'kit' ? (!a.produitType || a.produitType === 'kit') : a.produitType === produitType) &&
-    (opts.parfumId ? a.produitParfumId === opts.parfumId : !a.produitParfumId)
-  );
+    (opts.parfumId ? a.produitParfumId === opts.parfumId : !a.produitParfumId);
+  // Priorité 1 : action encore en cours (pas FAIT)
+  const existing = actions.find(a => _matchBase(a) && actionGlobalState(a) !== 'FAIT');
   if (existing) {
-    // Garder le nom du parfum à jour si applicable
     if (opts.parfumNom && opts.parfumId) existing._parfumNom = opts.parfumNom;
     return existing;
+  }
+  // Priorité 2 : action déjà FAIT → ne PAS recréer, retourner l'existante
+  const existingDone = actions.find(a => _matchBase(a));
+  if (existingDone) {
+    if (opts.parfumNom && opts.parfumId) existingDone._parfumNom = opts.parfumNom;
+    return existingDone;
   }
   const isManual = (type === 'PRIX');
   const a = {
@@ -7327,9 +7332,9 @@ function _mergeEtats(localActions, remoteActions) {
       });
       // Transférer les liens d'OP si le gagnant n'en a pas
       if (!keepA.opId && dropA.opId) keepA.opId = dropA.opId;
-      // Annuler le doublon (pas de tombstone → syncAutoActions ne le recrée pas)
-      dropA.annulee = true;
-      dropA._dedup = true; // marqueur pour identifier les dédoublonnés
+      // Tombstoner le doublon : il sera filtré du tableau et ne ressuscitera pas par merge.
+      // ensureAction ne recrée plus si une action FAIT existe déjà (priorité 2).
+      _deletedIds.add(dropA.id);
       _semMap[sk] = keepA;
       // Repointer les OPs qui référençaient le doublon vers le gagnant
       ops.forEach(o => {
@@ -7351,7 +7356,10 @@ function _mergeEtats(localActions, remoteActions) {
     }
   });
   if (_dedupCount > 5) console.log('[DEDUP-ACTION] ... et ' + (_dedupCount - 5) + ' autre(s) doublon(s)');
-  if (_dedupCount > 0) console.log('[DEDUP-ACTION] Total : ' + _dedupCount + ' doublon(s) annulé(s)');
+  if (_dedupCount > 0) {
+    console.log('[DEDUP-ACTION] Total : ' + _dedupCount + ' doublon(s) supprimé(s)');
+    localActions = localActions.filter(a => !_deletedIds.has(a.id));
+  }
   return localActions;
 }
 
