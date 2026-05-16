@@ -2528,6 +2528,13 @@ function autoPurgeOps() {
       orphans.map(o => ({ id: o.id, type: o.type, produit: (o.produitIds||[])[0], rentrer: o.rentrerActionId, dateFin: o.dateFin })));
   } catch(e) {}
   ids.forEach(id => _deletedIds.add(id));
+  // Nettoyer fanfareOpType sur les actions RENTRER liées aux OPs fanfare purgées
+  orphans.forEach(o => {
+    if ((o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && o.rentrerActionId) {
+      const ra = actions.find(a => a.id === o.rentrerActionId);
+      if (ra && ra.fanfareOpType) { ra.fanfareOpType = null; console.log('[AUTO-PURGE] fanfareOpType effacé sur action ' + ra.id); }
+    }
+  });
   ops = ops.filter(o => !ids.has(o.id));
   actions.forEach(a => { if (a.opId && ids.has(a.opId)) a.opId = null; });
   return orphans.length;
@@ -2545,6 +2552,13 @@ async function purgeOrphanOps() {
   if (!await pvConfirm('Purger ' + orphans.length + ' OP(s) orpheline(s) ?\n\n' + lines)) return;
   const ids = new Set(orphans.map(o => o.id));
   ids.forEach(id => _deletedIds.add(id));
+  // Nettoyer fanfareOpType sur les actions RENTRER liées aux OPs fanfare purgées
+  orphans.forEach(o => {
+    if ((o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && o.rentrerActionId) {
+      const ra = actions.find(a => a.id === o.rentrerActionId);
+      if (ra && ra.fanfareOpType) { ra.fanfareOpType = null; console.log('[PURGE-OP] fanfareOpType effacé sur action ' + ra.id); }
+    }
+  });
   ops = ops.filter(o => !ids.has(o.id));
   // Nettoie également les références opId côté actions pointant vers ces OPs
   actions.forEach(a => { if (a.opId && ids.has(a.opId)) a.opId = null; });
@@ -3605,25 +3619,11 @@ function syncAutoActions() {
       }
       return; // OP existe pour ce produit → pas de doublon
     }
-    // Aucune OP fanfare pour ce produit → recréer
-    console.warn('[FANFARE-HEAL] OP ' + a.fanfareOpType + ' manquante pour action ' + a.id + ' — recréation auto');
-    const _healDate = a._ts ? a._ts.slice(0, 10) : ymd(new Date());
-    const _healOp = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
-      type: a.fanfareOpType,
-      produitIds: [a.produitId],
-      dateDebut: _healDate,
-      dateFin: null,
-      commentaire: 'Entrée en fanfare (auto-restaurée)',
-      rentrerActionId: a.id,
-      auto: false,
-      etats: {},
-      pieces: []
-    };
-    seedOpDefaults(_healOp);
-    ensureOpSteps(_healOp);
-    pushOpTraced(_healOp, 'syncAutoActions_fanfareHeal');
-    a.opId = _healOp.id;
+    // Aucune OP fanfare pour ce produit.
+    // On NE recrée PAS automatiquement : l'OP a probablement été supprimée volontairement.
+    // On nettoie le fanfareOpType orphelin pour éviter le cycle recréation/suppression.
+    console.log('[FANFARE-HEAL] fanfareOpType orphelin sur action ' + a.id + ' (type=' + a.fanfareOpType + ', produit=' + a.produitId + ') — nettoyage au lieu de recréation');
+    a.fanfareOpType = null;
   });
   // ── Sync fanfare NOUVEAUTE/EXCLU : LECTURE SEULE ──
   // L'OP ne stocke plus les steps rentrer_* — ils sont calculés dynamiquement
@@ -7892,26 +7892,9 @@ function _startAutoSync() {
             }
             return; // OP existe pour ce produit
           }
-          // Aucune OP fanfare pour ce produit → recréer
-          console.warn('[AUTO-SYNC FANFARE-HEAL] OP ' + a.fanfareOpType + ' manquante pour ' + a.id + ' — recréation');
-          var _hDate = a._ts ? a._ts.slice(0, 10) : ymd(new Date());
-          var _hOp = {
-            id: 'OP-' + String(nextOpId++).padStart(4, '0'),
-            type: a.fanfareOpType,
-            produitIds: [a.produitId],
-            dateDebut: _hDate,
-            dateFin: null,
-            commentaire: 'Entrée en fanfare (auto-restaurée sync)',
-            rentrerActionId: a.id,
-            auto: false,
-            etats: {},
-            pieces: []
-          };
-          seedOpDefaults(_hOp);
-          ensureOpSteps(_hOp);
-          if (typeof pushOpTraced === 'function') pushOpTraced(_hOp, 'autoSync_fanfareHeal');
-          else ops.push(_hOp);
-          a.opId = _hOp.id;
+          // Aucune OP fanfare pour ce produit — nettoyage au lieu de recréation
+          console.log('[AUTO-SYNC FANFARE-HEAL] fanfareOpType orphelin sur action ' + a.id + ' — nettoyage');
+          a.fanfareOpType = null;
         });
         // Sauvegarder localement (données fusionnées en mémoire)
         localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
@@ -13307,6 +13290,8 @@ function renderDashboard() {
       _opEnCoursInner += _oecNoCamp.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('');
     }
   }
+  // Forcer l'ouverture par défaut du bloc OP en cours (une seule fois, au premier rendu)
+  if (dashCollapsed['opEnCours'] === undefined) { dashCollapsed['opEnCours'] = false; try { localStorage.setItem('pilotVapeDashCollapsed', JSON.stringify(dashCollapsed)); } catch(e) {} }
   const opEnCoursBlock = _opEnCoursOps.length === 0 ? '' : block('opEnCours', 'OP en cours', '#a855f7', _opEnCoursOps.length, _opEnCoursInner,
     'Opérations commerciales actuellement actives. Déplier pour voir le détail et l\'avancement par boutique.');
 
@@ -16126,6 +16111,12 @@ async function deleteOp(id) {
         a.decisionChoice = 'recalibrer';
         logAction('Décision PRIX reset', 'rouge → recalibrer (suite suppression OP ' + id + ')');
       }
+    }
+    // NOUVEAUTE/EXCLU : nettoyer fanfareOpType sur l'action RENTRER liée
+    // pour empêcher l'auto-heal de recréer l'OP en boucle.
+    if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && a.type === 'RENTRER' && a.fanfareOpType) {
+      console.log('[DELETE-OP] fanfareOpType effacé sur action RENTRER ' + a.id + ' (était ' + a.fanfareOpType + ')');
+      a.fanfareOpType = null;
     }
   });
   // ── COUP one-shot : désactiver le flag oneShot sur le produit lié ──
