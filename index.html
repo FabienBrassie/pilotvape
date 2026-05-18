@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-19 00:49</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-19 00:53</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -8090,7 +8090,11 @@ async function _doSyncPoll() {
 
 function _startAutoSync() {
   if (_syncInterval) return;
-  _syncInterval = setInterval(_doSyncPoll, 60000); // 60 secondes
+  // Polling à 15s (réduit depuis 60s le 2026-05-19) : compromis fluidité / charge
+  // serveur. Reste largement dans le plan gratuit Cloudflare Worker. Combiné aux
+  // écouteurs visibilitychange/focus qui forcent un sync immédiat au retour sur
+  // l'onglet, le ressenti utilisateur est quasi-temps-réel sans refonte backend.
+  _syncInterval = setInterval(_doSyncPoll, 15000); // 15 secondes
 }
 
 // Démarrer l'auto-sync après le chargement initial
