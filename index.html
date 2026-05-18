@@ -7259,9 +7259,34 @@ async function forcerVersionAdminPartout() {
   _stampAll(baseLiq);
   _stampAll(basePD);
   _stampAll(campagnes);
-  console.log('[FORCE-ADMIN]', total, 'objets marqués avec _adminTs =', _now);
+  // ── Étendre aussi aux coches d'étapes (etats[shop].steps) ──
+  // Sans ça, des coches admin historiques (posées par closeOpWithMotif "kit_sorti" ou
+  // forceCloseReturnAction de l'ancien code) restent à true sans timestamp côté serveur,
+  // et peuvent se faire battre par des copies boutique avec faux timestamps récents
+  // (cf. bug des "PR fantômes sur ordi Langon" 2026-05-18). En forçant _stepTs[k] = maintenant
+  // sur toutes les coches du Mac admin, on garantit qu'au prochain merge, les coches admin
+  // gagnent contre n'importe quel timestamp historique côté boutique.
+  let stepsCount = 0;
+  const _stampAllSteps = (arr) => {
+    if (!Array.isArray(arr)) return;
+    arr.forEach(item => {
+      if (!item || !item.etats) return;
+      SHOPS.forEach(sh => {
+        const st = item.etats[sh];
+        if (!st || !st.steps) return;
+        if (!st._stepTs) st._stepTs = {};
+        Object.keys(st.steps).forEach(k => {
+          st._stepTs[k] = _now;
+          stepsCount++;
+        });
+      });
+    });
+  };
+  _stampAllSteps(ops);
+  _stampAllSteps(actions);
+  console.log('[FORCE-ADMIN]', total, 'objets marqués avec _adminTs =', _now, '+', stepsCount, 'coches re-horodatées');
   saveData();
-  pvAlert('Version verrouillée : ' + total + ' objets marqués.\n\nLes boutiques adopteront ta version au prochain rafraîchissement automatique (≤ 60s).');
+  pvAlert('Version verrouillée : ' + total + ' objets + ' + stepsCount + ' coches re-horodatées.\n\nLes boutiques adopteront ta version au prochain rafraîchissement automatique (≤ 60s).');
 }
 
 function saveData() {
