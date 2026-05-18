@@ -4561,8 +4561,13 @@ function syncActionStepsToOp(a) {
       Object.entries(m.a_to_o).forEach(([ak, ok]) => {
         if (typeof ast.steps[ak] === 'boolean' && typeof ost.steps[ok] === 'boolean') {
           ost.steps[ok] = ast.steps[ak];
-          if (!ost._stepTs) ost._stepTs = {};
-          ost._stepTs[ok] = (ast._stepTs && ast._stepTs[ak]) || new Date().toISOString();
+          // Ne propager le timestamp QUE s'il existe côté source. PAS de fallback
+          // new Date() ici : sinon on horodate "maintenant" un miroir au chargement,
+          // ce qui battrait ensuite à tort une vraie coche admin sans timestamp.
+          if (ast._stepTs && ast._stepTs[ak]) {
+            if (!ost._stepTs) ost._stepTs = {};
+            ost._stepTs[ok] = ast._stepTs[ak];
+          }
         }
       });
       ost.done = opAllStepsDone(op, sh);
@@ -4626,9 +4631,11 @@ function syncOpStepsToAction(op) {
       Object.entries(m.o_to_a).forEach(([ok, ak]) => {
         if (typeof ost.steps[ok] === 'boolean' && typeof ast.steps[ak] === 'boolean') {
           ast.steps[ak] = ost.steps[ok];
-          // Propager le timestamp du step source vers le step miroir
-          if (!ast._stepTs) ast._stepTs = {};
-          ast._stepTs[ak] = (ost._stepTs && ost._stepTs[ok]) || new Date().toISOString();
+          // Ne propager le timestamp QUE s'il existe côté source (cf. syncActionStepsToOp).
+          if (ost._stepTs && ost._stepTs[ok]) {
+            if (!ast._stepTs) ast._stepTs = {};
+            ast._stepTs[ak] = ost._stepTs[ok];
+          }
         }
       });
       ast.done = allStepsDone(a, sh);
@@ -7339,6 +7346,20 @@ function _mergeStepsForItem(localItem, remoteItem) {
         if (typeof rs.steps[k] !== 'boolean') return;
         var localTs  = _lTs[k] || '';
         var remoteTs = _rTs[k] || '';
+        // Tie-break "true gagne sur false" quand les timestamps sont égaux ou tous deux absents.
+        // Cf. décision §9 du 2026-05-18 : "true gagne sur false" — règle métier qui empêche
+        // qu'un faux timestamp côté boutique fasse revenir une coche admin à false.
+        // Cas concret : action SORTIR clôturée par admin via "kit_sorti" → steps=true sans
+        // timestamp côté serveur, et boutique avait un timestamp ancien sur la même step false.
+        if (localTs === remoteTs && rs.steps[k] !== ls.steps[k]) {
+          if (rs.steps[k] === true) {
+            ls.steps[k] = true;
+            if (!ls._stepTs) ls._stepTs = {};
+            if (remoteTs) ls._stepTs[k] = remoteTs;
+            changed++;
+          }
+          return;
+        }
         if (remoteTs > localTs) {
           if (rs.steps[k] !== ls.steps[k]) {
             ls.steps[k] = rs.steps[k];
@@ -17248,7 +17269,14 @@ function executeOpClosure(opId, motif, params) {
         const st = sortirA.etats[sh];
         if (!st) return;
         // Marque toutes les steps comme done (triche contrôlée)
-        if (st.steps) Object.keys(st.steps).forEach(k => { st.steps[k] = true; });
+        // Pose _stepTs pour que le merge multi-ordi propage les coches (sans ça, le serveur
+        // recevait des steps=true sans timestamp et les autres ordis ne les adoptaient pas).
+        const _nowIso = new Date().toISOString();
+        if (!st._stepTs) st._stepTs = {};
+        if (st.steps) Object.keys(st.steps).forEach(k => {
+          st.steps[k] = true;
+          st._stepTs[k] = _nowIso;
+        });
         st.done = true;
         st.dateFait = st.dateFait || today;
         _applyActionShopChange(sortirA, sh);
@@ -17300,7 +17328,13 @@ function forceCloseReturnAction(opId, commentaire) {
   SHOPS.forEach(sh => {
     const st = a.etats[sh];
     if (!st) return;
-    if (st.steps) Object.keys(st.steps).forEach(k => { st.steps[k] = true; });
+    // Pose _stepTs pour que la propagation multi-ordi fonctionne (cf. closeOpWithMotif)
+    const _nowIso = new Date().toISOString();
+    if (!st._stepTs) st._stepTs = {};
+    if (st.steps) Object.keys(st.steps).forEach(k => {
+      st.steps[k] = true;
+      st._stepTs[k] = _nowIso;
+    });
     st.done = true;
     st.dateFait = st.dateFait || today;
     _applyActionShopChange(a, sh);
