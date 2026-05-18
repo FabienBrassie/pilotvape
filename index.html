@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-19 00:53</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-19 01:07</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -7854,6 +7854,12 @@ async function _saveToSupabase(payload, _retryCount) {
       if (Array.isArray(payload.baseLiq)) payload.baseLiq.forEach(_stampAdmin);
       if (Array.isArray(payload.basePD)) payload.basePD.forEach(_stampAdmin);
       if (Array.isArray(payload.campagnes)) payload.campagnes.forEach(_stampAdmin);
+      // Propositions (admin-only) — fix trou identifié 2026-05-19 :
+      // sans cette pose, une décision RETENU/REFUSE ou un édit de champ
+      // sur une proposition ne se propage pas aux autres ordis.
+      if (Array.isArray(payload.propositions)) payload.propositions.forEach(_stampAdmin);
+      if (Array.isArray(payload.propositionsLiq)) payload.propositionsLiq.forEach(_stampAdmin);
+      if (Array.isArray(payload.propositionsPD)) payload.propositionsPD.forEach(_stampAdmin);
     }
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
     const remoteResult = await _syncRead();
@@ -8067,8 +8073,17 @@ async function _doSyncPoll() {
             if (typeof renderKits === 'function') renderKits();
             if (typeof renderLiqAll === 'function') renderLiqAll();
             if (typeof renderBasePD === 'function') renderBasePD();
+            if (typeof renderWalls === 'function') renderWalls();
             if (typeof renderPropositions === 'function') renderPropositions();
+            if (typeof renderPropositionsLiq === 'function') renderPropositionsLiq();
+            if (typeof renderPropositionsPD === 'function') renderPropositionsPD();
             if (typeof renderReleves === 'function') renderReleves();
+            // renderRelevesPd prend un argument de catégorie (BOX/ATO). On l'appelle
+            // seulement si le sous-onglet est actif (sinon ça peut perturber).
+            const _activePdSubtab = document.querySelector('.pd-subtab.active');
+            if (_activePdSubtab && typeof renderRelevesPd === 'function') {
+              try { renderRelevesPd(_activePdSubtab.dataset.cat || 'BOX'); } catch(_) {}
+            }
             console.log('[AUTO-SYNC] Re-render auto');
           } catch(e) { console.warn('[AUTO-SYNC] Erreur re-render:', e.message); }
         } else if (!document.getElementById('syncBanner')) {
@@ -14569,6 +14584,7 @@ function commitReleveEdit() {
       if (v.url) same.urls[compKey] = v.url; else delete same.urls[compKey];
       if (releveDraftNote) same.note = releveDraftNote;
       same.mode = 'releve'; // promouvoir en vrai relevé si c'était un quick edit
+      same._ts = new Date().toISOString(); // fix 2026-05-19 : sans ça la modif d'un relevé existant ne se propageait pas
       return;
     }
     relevesPrix.push({
@@ -14689,6 +14705,7 @@ function executeImportReleve() {
         if (!existing.urls) existing.urls = {};
         if (url) existing.urls[conc.key] = url;
         existing.note = (existing.note || '') ? existing.note : 'Import ChatGPT';
+        existing._ts = new Date().toISOString(); // fix 2026-05-19 : sans ça la mise à jour d'un relevé existant ne se propageait pas
       } else {
         relevesPrix.push({
           id: 'REL-' + String(nextReleveId++).padStart(4, '0'),
@@ -14902,6 +14919,7 @@ function commitQuickReleveEdit() {
     same.prix[compKey] = price;
     if (!same.urls) same.urls = {};
     if (url) same.urls[compKey] = url; else delete same.urls[compKey];
+    same._ts = new Date().toISOString(); // fix 2026-05-19 : propagation update relevé (kit/PD)
   } else {
     relevesPrix.push({
       id: 'REL-' + String(nextReleveId++).padStart(4, '0'),
@@ -15639,6 +15657,7 @@ function commitRelevePdEdit() {
       if (!same.urls) same.urls = {};
       if (v.url) same.urls[compKey] = v.url; else delete same.urls[compKey];
       same.mode = 'releve';
+      same._ts = new Date().toISOString(); // fix 2026-05-19 : propagation update relevé PD
       return;
     }
     relevesPrix.push({
@@ -15722,6 +15741,7 @@ function commitQuickRelevePdEdit() {
     same.prix[compKey] = price;
     if (!same.urls) same.urls = {};
     if (url) same.urls[compKey] = url; else delete same.urls[compKey];
+    same._ts = new Date().toISOString(); // fix 2026-05-19 : propagation update relevé (kit/PD)
   } else {
     const newId = 'REL-' + String(nextReleveId++).padStart(4, '0');
     relevesPrix.push({
