@@ -1,0 +1,24 @@
+# Configuration des en-têtes HTTP pour Cloudflare Pages
+# https://developers.cloudflare.com/pages/configuration/headers/
+#
+# Objectif : éviter que le navigateur garde une ancienne version
+# d'index.html en cache après un déploiement.
+# Sans ces règles, Cmd+R sur le navigateur peut servir une version
+# obsolète parce que le navigateur fait confiance à son cache local
+# (les meta tags HTTP-equiv dans le HTML sont largement ignorés par
+# les CDN et navigateurs modernes).
+
+# index.html : toujours frais (jamais de cache)
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Racine du site (= index.html quand on accède à pilotvape.fr)
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+# Les fichiers statiques rarement modifiés peuvent être mis en cache
+# (à compléter plus tard si on ajoute des assets versionnés)
