@@ -7902,13 +7902,15 @@ async function _saveToSupabase(payload, _retryCount) {
 // ── Auto-sync : poll Supabase toutes les 60s pour intégrer les changements des autres ──
 let _lastSyncTimestamp = null;
 let _syncInterval = null;
-function _startAutoSync() {
-  if (_syncInterval) return;
-  _syncInterval = setInterval(async () => {
-    if (_syncOk === false || _savePending) return;
-    try {
-      const remoteResult = await _syncRead();
-      if (!remoteResult || !remoteResult.data) return;
+// Fonction extraite du setInterval (2026-05-18) pour pouvoir être appelée aussi
+// au retour de visibilité de l'onglet (visibilitychange / focus). Safari met les
+// minuteries en arrière-plan en veille profonde, donc le setInterval seul ne
+// suffit pas à garantir un sync au retour sur l'onglet.
+async function _doSyncPoll() {
+  if (_syncOk === false || _savePending) return;
+  try {
+    const remoteResult = await _syncRead();
+    if (!remoteResult || !remoteResult.data) return;
       // Ne traiter que si le timestamp distant est plus récent que notre dernier sync
       const remoteTs = remoteResult.updated_at;
       if (_lastSyncTimestamp && remoteTs <= _lastSyncTimestamp) return;
@@ -8068,10 +8070,36 @@ function _startAutoSync() {
     } catch(e) {
       // Silencieux — le prochain poll réessaiera
     }
-  }, 60000); // 60 secondes
 }
+
+function _startAutoSync() {
+  if (_syncInterval) return;
+  _syncInterval = setInterval(_doSyncPoll, 60000); // 60 secondes
+}
+
 // Démarrer l'auto-sync après le chargement initial
 setTimeout(_startAutoSync, 5000);
+
+// ── Sync au retour de visibilité (2026-05-18) ──
+// Safari (et autres navigateurs modernes) mettent les setInterval en veille
+// quand l'onglet est en arrière-plan. Résultat : un employé qui revient sur
+// l'onglet PilotVape après une absence ne voit pas les modifs admin tant
+// qu'il n'a pas attendu le prochain tic ou fait une action. Solution :
+// déclencher un poll immédiat dès que l'onglet redevient visible ou la
+// fenêtre reprend le focus.
+let _lastVisibilitySync = 0;
+function _maybeSyncOnReturn() {
+  // Anti-rebond : pas plus d'un sync forcé toutes les 2 secondes (évite les
+  // doubles déclenchements quand visibilitychange et focus tombent ensemble).
+  const now = Date.now();
+  if (now - _lastVisibilitySync < 2000) return;
+  _lastVisibilitySync = now;
+  _doSyncPoll();
+}
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) _maybeSyncOnReturn();
+});
+window.addEventListener('focus', _maybeSyncOnReturn);
 
 // ── Auto-update : vérifie toutes les 5min si le fichier HTML a changé ──
 // Compare un hash léger (taille du fichier) pour détecter une mise à jour.
