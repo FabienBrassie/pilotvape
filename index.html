@@ -121,7 +121,8 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <button onclick="openSettings()" style="margin-left:auto; background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-18 22:25</span>
+    <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
   <div class="tabs">
@@ -8033,27 +8034,28 @@ async function _doSyncPoll() {
         });
         // Sauvegarder localement (données fusionnées en mémoire)
         localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
-        // ── Différencié admin / boutique ──
-        // Côté boutique : re-render automatique (les boutiques ne saisissent que des
-        //   cochages — pas de longue saisie à protéger). Exception : si un input/textarea
-        //   a le focus (saisie commentaire en cours), on tombe sur le bandeau pour ne
-        //   pas casser la frappe.
-        // Côté admin : bandeau "Rafraîchir" comme avant — toi tu peux être en train de
-        //   taper une date dans un formulaire d'OP, on ne re-render pas sous tes doigts.
+        // ── Re-render auto pour TOUS (admin et boutique) si pas en train de taper ──
+        // Révisé 2026-05-18 : avant, côté admin on tombait toujours sur le bandeau
+        // "Rafraîchir" même quand l'admin ne faisait rien. Du coup une coche boutique
+        // ne s'affichait pas tant que l'admin n'avait pas cliqué le bandeau (souvent
+        // raté car il est petit et auto-disparaît en 30s).
+        // Nouvelle règle : si personne n'est en train de saisir un champ, on re-render
+        // direct. Si quelqu'un est en train de taper (saisie d'une date dans un
+        // formulaire d'OP, commentaire, etc.), on tombe sur le bandeau pour ne pas
+        // casser la frappe — protection valide aussi bien côté admin que boutique.
         const _isTyping = (function() {
           const el = document.activeElement;
           if (!el || el === document.body) return false;
           const tag = (el.tagName || '').toUpperCase();
           return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
         })();
-        const _isAdminUser = (typeof isAdmin === 'function') && isAdmin();
-        if (!_isAdminUser && !_isTyping) {
-          // Boutique idle → re-render direct, pas de bandeau
+        if (!_isTyping) {
+          // Personne ne tape → re-render direct, peu importe admin/boutique
           try {
             renderDashboard();
             if (typeof renderOps === 'function') renderOps();
             if (typeof renderKits === 'function') renderKits();
-            console.log('[AUTO-SYNC] Re-render auto (boutique)');
+            console.log('[AUTO-SYNC] Re-render auto');
           } catch(e) { console.warn('[AUTO-SYNC] Erreur re-render:', e.message); }
         } else if (!document.getElementById('syncBanner')) {
           // Admin (toujours) OU boutique en train de taper → bandeau Rafraîchir
