@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-19 01:07</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-19 01:26</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -2283,6 +2283,10 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
   if (!op.progress) op.progress = { global: {} };
   if (!op.progress.global) op.progress.global = {};
   op.progress.global[stepKey] = !!checked;
+  // fix 2026-05-19 : timestamp par step globale pour LWW au merge (admin OU boutique).
+  if (!op.progress._globalTs) op.progress._globalTs = {};
+  op.progress._globalTs[stepKey] = new Date().toISOString();
+  op._ts = new Date().toISOString(); // protège l'OP contre l'écrasement par merge
 
   // Propagation campagne : si l'OP fait partie d'une campagne, synchroniser le même
   // step global sur toutes les autres OPs de la campagne qui possèdent un step
@@ -2292,15 +2296,19 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
     const srcDef = srcDefs.find(d => d.key === stepKey);
     const srcLabel = srcDef ? srcDef.label : null;
     const siblings = ops.filter(o => o.id !== op.id && o.campagneId === op.campagneId && !o._archived);
+    const _siblingTs = new Date().toISOString();
     siblings.forEach(sib => {
       ensureOpModel(sib);
       if (!sib.progress) sib.progress = { global: {} };
       if (!sib.progress.global) sib.progress.global = {};
+      if (!sib.progress._globalTs) sib.progress._globalTs = {};
       const sibDefs = computeOpGlobalStepDefs(sib);
       // Match par clé exacte
       const byKey = sibDefs.find(d => d.key === stepKey);
       if (byKey) {
         sib.progress.global[stepKey] = !!checked;
+        sib.progress._globalTs[stepKey] = _siblingTs; // fix 2026-05-19
+        sib._ts = _siblingTs;
         return;
       }
       // Match par label (même pièce type/source mais ID différent)
@@ -2308,6 +2316,8 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
         const byLabel = sibDefs.find(d => d.label === srcLabel);
         if (byLabel) {
           sib.progress.global[byLabel.key] = !!checked;
+          sib.progress._globalTs[byLabel.key] = _siblingTs; // fix 2026-05-19
+          sib._ts = _siblingTs;
         }
       }
     });
@@ -7357,6 +7367,44 @@ window.addEventListener('pagehide', _flushPendingSave);
 // Principe : une coche cochée (true) gagne toujours sur false.
 // Cela évite qu'une boutique écrase les coches d'une autre.
 
+// ── Helper : fusionne op.progress.global par _globalTs (steps amont d'une OP) ──
+// Posé 2026-05-19 suite au constat que `toggleOpGlobalStep` ne propageait pas
+// les décochages (admin OU boutique). Logique LWW par step, identique à
+// `_mergeStepsForItem` : tie-break "true gagne sur false" si timestamps égaux/absents.
+function _mergeGlobalStepsForOp(localOp, remoteOp) {
+  if (!remoteOp || !remoteOp.progress || !remoteOp.progress.global) return 0;
+  if (!localOp.progress) localOp.progress = { global: {} };
+  if (!localOp.progress.global) localOp.progress.global = {};
+  if (!localOp.progress._globalTs) localOp.progress._globalTs = {};
+  const _lTs = localOp.progress._globalTs;
+  const _rTs = (remoteOp.progress && remoteOp.progress._globalTs) || {};
+  let changed = 0;
+  Object.keys(remoteOp.progress.global).forEach(k => {
+    if (typeof remoteOp.progress.global[k] !== 'boolean') return;
+    const localTs  = _lTs[k] || '';
+    const remoteTs = _rTs[k] || '';
+    const rVal = remoteOp.progress.global[k];
+    const lVal = localOp.progress.global[k];
+    // Tie-break "true gagne sur false" quand timestamps égaux/absents
+    if (localTs === remoteTs && rVal !== lVal) {
+      if (rVal === true) {
+        localOp.progress.global[k] = true;
+        if (remoteTs) _lTs[k] = remoteTs;
+        changed++;
+      }
+      return;
+    }
+    if (remoteTs > localTs) {
+      if (rVal !== lVal) {
+        localOp.progress.global[k] = rVal;
+        _lTs[k] = remoteTs;
+        changed++;
+      }
+    }
+  });
+  return changed;
+}
+
 // ── Helper commun : fusionne les etats[shop].steps par _stepTs + recalcule done ──
 // Utilisé par _mergeEtats (actions) et _mergeOpEtats (OPs).
 function _mergeStepsForItem(localItem, remoteItem) {
@@ -7549,6 +7597,10 @@ function _mergeOpEtats(localOps, remoteOps) {
     // Verrouille les dates/produits/nom validés par l'admin contre tout écrasement
     // par un save boutique. Cf. _mergeAdminFields et _saveToSupabase.
     _mergeAdminFields(op, remote, 'id');
+    // Fusion des steps globaux (op.progress.global) par _globalTs (LWW par step + tie-break true gagne).
+    // Fix 2026-05-19 : sans ça, les coches "amont" des OPs (notamment celles du bloc dashboard
+    // "OP en cours" et de l'onglet OP) ne se propageaient pas entre admin et boutiques.
+    _mergeGlobalStepsForOp(op, remote);
     if (!remote.etats) return;
     _mergeStepsForItem(op, remote);
   });
@@ -7581,7 +7633,10 @@ function _mergeAdminFields(localItem, remoteItem, idField) {
   if (localItem._adminTs && remoteItem._adminTs <= localItem._adminTs) return 0;
   // remote._adminTs strictement plus récent (ou local n'a pas de _adminTs)
   let updated = 0;
-  // Champs à NE PAS toucher (logique de merge dédiée ailleurs, ou identité de l'objet)
+  // Champs à NE PAS toucher (logique de merge dédiée ailleurs, ou identité de l'objet).
+  // Note 2026-05-19 (v2) : `progress` remis dans la liste — il a désormais un merge
+  // dédié `_mergeGlobalStepsForOp` (LWW par step). L'admin n'est PAS le seul à modifier
+  // `progress.global` : les boutiques aussi cochent ces étapes amont.
   const _skip = new Set(['parfums', 'etats', 'steps', '_stepTs', 'progress', '_ts', 'id']);
   Object.keys(remoteItem).forEach(k => {
     if (_skip.has(k)) return;
@@ -7650,7 +7705,8 @@ function _mergeArray(localArr, remoteArr, idField) {
       }
       // Item existant avec remote plus récent → mettre à jour les champs scalaires
       Object.keys(rx).forEach(k => {
-        // Ne pas écraser les sous-structures complexes qui ont leur propre merge
+        // Ne pas écraser les sous-structures complexes qui ont leur propre merge.
+        // `progress` a son merge dédié `_mergeGlobalStepsForOp` (2026-05-19 v2).
         if (k === 'parfums' || k === 'etats' || k === 'steps' || k === '_stepTs' || k === 'progress') return;
         // Ne pas écraser un champ local défini avec un null/undefined distant.
         // Protège contre la perte de données quand un ordi distant a une version plus ancienne
