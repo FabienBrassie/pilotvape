@@ -7918,14 +7918,19 @@ function _startAutoSync() {
       // Intégrer les tombstones distants AVANT le merge (pour ne pas ressusciter des items supprimés)
       if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
       if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
-      // Fusionner coches actions (capturer le retour car .filter() crée un nouveau tableau)
-      const beforeActions = JSON.stringify(actions.map(a => a.etats));
+      // Fusionner actions (capturer le retour car .filter() crée un nouveau tableau).
+      // Détection `changed` étendue (2026-05-18) : on compare l'objet entier, pas
+      // seulement les etats[shop]. Avant, une modif admin sur un champ racine (date,
+      // nom, produits…) n'était pas détectée comme un changement → pas de re-render
+      // auto côté boutique. Maintenant, toute différence (etats OU champs racine)
+      // déclenche le re-render.
+      const beforeActions = JSON.stringify(actions);
       actions = _mergeEtats(actions, remote.actions);
-      if (JSON.stringify(actions.map(a => a.etats)) !== beforeActions) changed = true;
-      // Fusionner coches OPs (idem)
-      const beforeOps = JSON.stringify(ops.map(o => o.etats));
+      if (JSON.stringify(actions) !== beforeActions) changed = true;
+      // Fusionner OPs (idem)
+      const beforeOps = JSON.stringify(ops);
       ops = _mergeOpEtats(ops, remote.ops);
-      if (JSON.stringify(ops.map(o => o.etats)) !== beforeOps) changed = true;
+      if (JSON.stringify(ops) !== beforeOps) changed = true;
       // Fusionner nouveaux items structurels
       const bk = baseKits.length, bl = baseLiq.length, bp = basePD.length;
       _mergeArray(baseKits, remote.baseKits, 'id');
