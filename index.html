@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-18 22:25</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-18 22:36</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -7627,7 +7627,17 @@ function _mergeArray(localArr, remoteArr, idField) {
       // Nouvel item distant → ajouter
       localArr.push(rx);
       added++;
-    } else if (rx._ts && (!lx._ts || rx._ts > lx._ts)) {
+    } else if (
+      (rx._ts && (!lx._ts || rx._ts > lx._ts)) ||
+      (rx._adminTs && (!lx._adminTs || rx._adminTs > lx._adminTs))
+    ) {
+      // ── Déclenchement étendu (2026-05-18) : entrer dans la branche update si
+      //   soit _ts remote plus récent (cas legacy)
+      //   soit _adminTs remote plus récent (cas modif admin sur champs scalaires
+      //   comme statutVie d'une pièce détachée ou d'un kit, où le code UI ne met
+      //   pas systématiquement _ts à jour).
+      // Sans cette extension, une modif admin du statut produit ne se propageait
+      // pas aux boutiques (constaté en test Firefox admin → Safari boutique).
       // ── PROTECTION ADMIN (_adminTs) ──
       // Si les deux items ont un _adminTs et que local._adminTs > remote._adminTs,
       // ça signifie que le remote provient d'une save boutique avec une copie
