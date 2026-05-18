@@ -7338,7 +7338,14 @@ function _mergeEtats(localActions, remoteActions) {
   let mergeCount = 0;
   localActions.forEach(a => {
     const remote = remoteMap[a.id];
-    if (!remote || !remote.etats) return;
+    if (!remote) return;
+    // ── Fusion des champs racine admin par _adminTs (option A v2) ──
+    // Seul l'admin pose _adminTs ; les saves boutique ne le touchent pas.
+    // Donc remote._adminTs > local._adminTs ⇔ l'admin a modifié récemment.
+    // Garantit que les dates/produits/nom validés par l'admin ne sont jamais
+    // écrasés par un save boutique (cochage d'étape).
+    mergeCount += _mergeAdminFields(a, remote, 'id');
+    if (!remote.etats) return;
     mergeCount += _mergeStepsForItem(a, remote);
     // Extras actions : responsable, commentaire
     SHOPS.forEach(sh => {
@@ -7458,7 +7465,12 @@ function _mergeOpEtats(localOps, remoteOps) {
   remoteOps.forEach(o => { if (o && o.id) remoteMap[o.id] = o; });
   localOps.forEach(op => {
     const remote = remoteMap[op.id];
-    if (!remote || !remote.etats) return;
+    if (!remote) return;
+    // ── Fusion des champs racine admin par _adminTs (option A v2) ──
+    // Verrouille les dates/produits/nom validés par l'admin contre tout écrasement
+    // par un save boutique. Cf. _mergeAdminFields et _saveToSupabase.
+    _mergeAdminFields(op, remote, 'id');
+    if (!remote.etats) return;
     _mergeStepsForItem(op, remote);
   });
   // Ajouter les OPs distantes inconnues localement (sauf tombstones)
@@ -7467,6 +7479,53 @@ function _mergeOpEtats(localOps, remoteOps) {
     if (ro && ro.id && !localIds.has(ro.id) && !_deletedIds.has(ro.id)) localOps.push(ro);
   });
   return localOps;
+}
+
+// ── Helper : fusion des champs racine d'une OP/action par _adminTs ──
+// Contrat : sur PilotVape, les champs racine d'une OP ou d'une action (dateDebut,
+// dateFin, nom, produitIds, campagneId, prixRouge, etc.) sont modifiés UNIQUEMENT
+// par l'admin (cf. isAdmin() vérifications partout dans le code). Les boutiques
+// ne touchent que etats[shop] (cochages d'étapes, commentaires, responsable).
+//
+// On utilise un timestamp dédié _adminTs (distinct de _ts qui bouge à chaque save,
+// y compris boutique) qui n'est posé QUE par les saves admin (cf. _saveToSupabase).
+// Côté boutique, _adminTs ne bouge jamais.
+//
+// Au merge : si remote._adminTs > local._adminTs, on adopte les champs racine du
+// remote. Sinon on garde local. Conséquence :
+//   - Les modifs admin se propagent toujours aux boutiques.
+//   - Les saves boutique (cochages) n'écrasent jamais les champs admin.
+//   - Une date validée par admin se "verrouille" tant que l'admin ne la remodifie pas.
+function _mergeAdminFields(localItem, remoteItem, idField) {
+  if (!localItem || !remoteItem) return 0;
+  if (!remoteItem._adminTs) return 0;
+  if (localItem._adminTs && remoteItem._adminTs <= localItem._adminTs) return 0;
+  // remote._adminTs strictement plus récent (ou local n'a pas de _adminTs)
+  let updated = 0;
+  // Champs à NE PAS toucher (logique de merge dédiée ailleurs, ou identité de l'objet)
+  const _skip = new Set(['parfums', 'etats', 'steps', '_stepTs', 'progress', '_ts', 'id']);
+  Object.keys(remoteItem).forEach(k => {
+    if (_skip.has(k)) return;
+    // Monotones : annulee, _archived ne reviennent jamais à false par merge
+    if ((k === 'annulee' || k === '_archived') && localItem[k] === true && !remoteItem[k]) {
+      console.log('[MERGE-ADMIN-MONO] ' + k + ' protégé (true→false interdit) sur', localItem[idField]);
+      return;
+    }
+    // dateCloture : ne disparaît jamais
+    if (k === 'dateCloture' && localItem[k] && !remoteItem[k]) {
+      console.log('[MERGE-ADMIN-MONO] dateCloture protégée sur', localItem[idField]);
+      return;
+    }
+    // Sinon : remote wins (puisque _adminTs remote plus récent = admin a modifié récemment)
+    if (localItem[k] !== remoteItem[k]) {
+      localItem[k] = remoteItem[k];
+      updated++;
+    }
+  });
+  // Adopter aussi le _adminTs lui-même
+  localItem._adminTs = remoteItem._adminTs;
+  if (updated > 0) console.log('[MERGE-ADMIN] ' + updated + ' champ(s) adopté(s) sur', localItem[idField], '(adminTs=', remoteItem._adminTs + ')');
+  return updated;
 }
 
 // ── Fusion structurelle pour données admin (produits, relevés, campagnes) ──
@@ -7674,6 +7733,21 @@ async function _saveToSupabase(payload, _retryCount) {
   let _resolveInFlight;
   _saveInFlight = new Promise(r => { _resolveInFlight = r; });
   try {
+    // ── Verrouillage admin : poser _adminTs sur les OPs/actions modifiées par l'admin ──
+    // Seul l'admin peut modifier les champs racine (dates, nom, produits, etc.) —
+    // les boutiques ne touchent qu'à etats[shop]. Pour chaque objet dont _ts a bougé
+    // (= modif récente) sans que _adminTs ne l'ait suivi, on aligne _adminTs sur _ts.
+    // Côté boutique, ce bloc ne s'exécute pas → _adminTs reste figé sur la dernière
+    // modif admin connue. Au merge, _mergeAdminFields utilise _adminTs pour décider
+    // qui gagne sur les champs racine.
+    if (typeof isAdmin === 'function' && isAdmin()) {
+      if (Array.isArray(payload.ops)) payload.ops.forEach(o => {
+        if (o && o._ts && (!o._adminTs || o._ts > o._adminTs)) o._adminTs = o._ts;
+      });
+      if (Array.isArray(payload.actions)) payload.actions.forEach(a => {
+        if (a && a._ts && (!a._adminTs || a._ts > a._adminTs)) a._adminTs = a._ts;
+      });
+    }
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
     const remoteResult = await _syncRead();
     if (remoteResult && remoteResult.data) {
@@ -7856,9 +7930,30 @@ function _startAutoSync() {
         });
         // Sauvegarder localement (données fusionnées en mémoire)
         localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
-        // Pas de re-render automatique pour ne pas interrompre la navigation.
-        // Afficher un bandeau discret invitant l'utilisateur à rafraîchir quand il est prêt.
-        if (!document.getElementById('syncBanner')) {
+        // ── Différencié admin / boutique ──
+        // Côté boutique : re-render automatique (les boutiques ne saisissent que des
+        //   cochages — pas de longue saisie à protéger). Exception : si un input/textarea
+        //   a le focus (saisie commentaire en cours), on tombe sur le bandeau pour ne
+        //   pas casser la frappe.
+        // Côté admin : bandeau "Rafraîchir" comme avant — toi tu peux être en train de
+        //   taper une date dans un formulaire d'OP, on ne re-render pas sous tes doigts.
+        const _isTyping = (function() {
+          const el = document.activeElement;
+          if (!el || el === document.body) return false;
+          const tag = (el.tagName || '').toUpperCase();
+          return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable;
+        })();
+        const _isAdminUser = (typeof isAdmin === 'function') && isAdmin();
+        if (!_isAdminUser && !_isTyping) {
+          // Boutique idle → re-render direct, pas de bandeau
+          try {
+            renderDashboard();
+            if (typeof renderOps === 'function') renderOps();
+            if (typeof renderKits === 'function') renderKits();
+            console.log('[AUTO-SYNC] Re-render auto (boutique)');
+          } catch(e) { console.warn('[AUTO-SYNC] Erreur re-render:', e.message); }
+        } else if (!document.getElementById('syncBanner')) {
+          // Admin (toujours) OU boutique en train de taper → bandeau Rafraîchir
           const banner = document.createElement('div');
           banner.id = 'syncBanner';
           banner.innerHTML = '🔄 Nouvelles données reçues — <a href="#" onclick="document.getElementById(\'syncBanner\').remove();renderDashboard();renderOps();if(typeof renderKits===\'function\')renderKits();return false;" style="color:#38bdf8;text-decoration:underline;font-weight:600;">Rafraîchir</a>'
