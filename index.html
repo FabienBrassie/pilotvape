@@ -7821,27 +7821,24 @@ async function _saveToSupabase(payload, _retryCount) {
   let _resolveInFlight;
   _saveInFlight = new Promise(r => { _resolveInFlight = r; });
   try {
-    // ── Verrouillage admin : poser _adminTs sur les OPs/actions modifiées par l'admin ──
-    // Seul l'admin peut modifier les champs racine (dates, nom, produits, etc.) —
-    // les boutiques ne touchent qu'à etats[shop]. À chaque save admin, on pose
-    // _adminTs sur TOUS ses objets (sans _adminTs encore, ou _ts plus récent que
-    // _adminTs). Couvre y compris les OPs/actions sans _ts historique (legacy ou
-    // jamais modifiées) : on leur pose _adminTs = maintenant. Côté boutique ce bloc
-    // ne s'exécute pas → _adminTs reste figé sur la dernière modif admin connue.
+    // ── Verrouillage admin (révisé 2026-05-18) : poser _adminTs INCONDITIONNELLEMENT
+    // sur TOUS les objets admin à chaque save admin.
+    //
+    // Pourquoi inconditionnel : la logique précédente posait _adminTs uniquement si
+    // _ts > _adminTs, mais le code qui modifie les champs racine d'une OP (date, nom,
+    // produits…) ne met pas systématiquement op._ts à jour. Résultat : _adminTs ne
+    // bougeait pas, et côté boutique le poll ne détectait pas la nouvelle version
+    // admin. Confirmé par test Firefox admin / Safari boutique : seul "🔒 Forcer ma
+    // version" déclenchait la propagation.
+    //
+    // Sûreté : Fabien est le seul admin → pas de conflit entre admins possibles. Et
+    // _mergeAdminFields ne touche PAS aux etats[shop].steps, donc les coches boutique
+    // sont préservées même si _adminTs admin > _adminTs boutique.
     if (typeof isAdmin === 'function' && isAdmin()) {
       const _nowIso = new Date().toISOString();
-      const _stampAdmin = (item) => {
-        if (!item) return;
-        if (!item._adminTs) item._adminTs = item._ts || _nowIso;
-        else if (item._ts && item._ts > item._adminTs) item._adminTs = item._ts;
-      };
+      const _stampAdmin = (item) => { if (item) item._adminTs = _nowIso; };
       if (Array.isArray(payload.ops)) payload.ops.forEach(_stampAdmin);
       if (Array.isArray(payload.actions)) payload.actions.forEach(_stampAdmin);
-      // ── Extension : bases produits + campagnes (admin-only confirmé 2026-05-18) ──
-      // Les boutiques ne modifient JAMAIS ces objets. Donc _adminTs ne bouge
-      // qu'à un save admin. Au merge (_mergeArray), si local._adminTs > remote._adminTs,
-      // c'est que le remote vient d'une save boutique avec une copie obsolète
-      // (ex : vieux stock) → on ne touche pas au local.
       if (Array.isArray(payload.baseKits)) payload.baseKits.forEach(_stampAdmin);
       if (Array.isArray(payload.baseLiq)) payload.baseLiq.forEach(_stampAdmin);
       if (Array.isArray(payload.basePD)) payload.basePD.forEach(_stampAdmin);
