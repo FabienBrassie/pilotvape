@@ -7237,15 +7237,24 @@ async function loadData() {
 // Aucun appel téléphonique nécessaire, aucun hard refresh côté boutique.
 async function forcerVersionAdminPartout() {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
-  const ok = await pvConfirm('Forcer ta version actuelle (dates, noms, produits, prix…) sur toutes les boutiques ?\n\n• ' + ops.length + ' OPs et ' + actions.length + ' actions seront marquées avec ton timestamp.\n• Les boutiques adopteront ta version en moins de 60s, sans rien faire.\n• Leurs cochages d\'étapes seront préservés.');
+  const _kits = (typeof baseKits !== 'undefined' && Array.isArray(baseKits)) ? baseKits.length : 0;
+  const _liq = (typeof baseLiq !== 'undefined' && Array.isArray(baseLiq)) ? baseLiq.length : 0;
+  const _pd = (typeof basePD !== 'undefined' && Array.isArray(basePD)) ? basePD.length : 0;
+  const _camp = (typeof campagnes !== 'undefined' && Array.isArray(campagnes)) ? campagnes.length : 0;
+  const ok = await pvConfirm('Forcer ta version actuelle sur toutes les boutiques ?\n\n• ' + ops.length + ' OPs, ' + actions.length + ' actions\n• ' + _kits + ' kits, ' + _liq + ' liquides, ' + _pd + ' pièces détachées\n• ' + _camp + ' campagnes\n\nseront marquées avec ton timestamp. Les boutiques adopteront ta version en moins de 60s, sans rien faire. Leurs cochages d\'étapes seront préservés.');
   if (!ok) return;
   const _now = new Date().toISOString();
-  let opsCount = 0, actCount = 0;
-  ops.forEach(o => { if (o) { o._adminTs = _now; opsCount++; } });
-  actions.forEach(a => { if (a) { a._adminTs = _now; actCount++; } });
-  console.log('[FORCE-ADMIN]', opsCount, 'OPs et', actCount, 'actions marquées avec _adminTs =', _now);
+  let total = 0;
+  const _stampAll = (arr) => { if (Array.isArray(arr)) arr.forEach(x => { if (x) { x._adminTs = _now; total++; } }); };
+  _stampAll(ops);
+  _stampAll(actions);
+  _stampAll(baseKits);
+  _stampAll(baseLiq);
+  _stampAll(basePD);
+  _stampAll(campagnes);
+  console.log('[FORCE-ADMIN]', total, 'objets marqués avec _adminTs =', _now);
   saveData();
-  pvAlert('Version verrouillée : ' + opsCount + ' OPs + ' + actCount + ' actions.\n\nLes boutiques adopteront ta version au prochain rafraîchissement automatique (≤ 60s).');
+  pvAlert('Version verrouillée : ' + total + ' objets marqués.\n\nLes boutiques adopteront ta version au prochain rafraîchissement automatique (≤ 60s).');
 }
 
 function saveData() {
@@ -7572,6 +7581,16 @@ function _mergeArray(localArr, remoteArr, idField) {
       localArr.push(rx);
       added++;
     } else if (rx._ts && (!lx._ts || rx._ts > lx._ts)) {
+      // ── PROTECTION ADMIN (_adminTs) ──
+      // Si les deux items ont un _adminTs et que local._adminTs > remote._adminTs,
+      // ça signifie que le remote provient d'une save boutique avec une copie
+      // obsolète d'un objet admin (cas typique : un ordi boutique a un vieux stock,
+      // coche une étape, save → push de la vieille version au serveur). On ignore
+      // le remote sur les champs scalaires, le local (à jour côté admin) reste.
+      if (lx._adminTs && rx._adminTs && lx._adminTs > rx._adminTs) {
+        console.log('[MERGE-ADMIN-PROTECT] Item admin-locked sur', lx[idField], '(local._adminTs > remote._adminTs)');
+        return;
+      }
       // Item existant avec remote plus récent → mettre à jour les champs scalaires
       Object.keys(rx).forEach(k => {
         // Ne pas écraser les sous-structures complexes qui ont leur propre merge
@@ -7772,6 +7791,15 @@ async function _saveToSupabase(payload, _retryCount) {
       };
       if (Array.isArray(payload.ops)) payload.ops.forEach(_stampAdmin);
       if (Array.isArray(payload.actions)) payload.actions.forEach(_stampAdmin);
+      // ── Extension : bases produits + campagnes (admin-only confirmé 2026-05-18) ──
+      // Les boutiques ne modifient JAMAIS ces objets. Donc _adminTs ne bouge
+      // qu'à un save admin. Au merge (_mergeArray), si local._adminTs > remote._adminTs,
+      // c'est que le remote vient d'une save boutique avec une copie obsolète
+      // (ex : vieux stock) → on ne touche pas au local.
+      if (Array.isArray(payload.baseKits)) payload.baseKits.forEach(_stampAdmin);
+      if (Array.isArray(payload.baseLiq)) payload.baseLiq.forEach(_stampAdmin);
+      if (Array.isArray(payload.basePD)) payload.basePD.forEach(_stampAdmin);
+      if (Array.isArray(payload.campagnes)) payload.campagnes.forEach(_stampAdmin);
     }
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
     const remoteResult = await _syncRead();
