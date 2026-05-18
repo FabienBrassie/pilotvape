@@ -119,6 +119,7 @@
     <button onclick="document.getElementById('importFile').click()">📂 Charger</button>
     <input type="file" id="importFile" style="display:none;" accept=".json">
     <button onclick="exportData()">📤 Exporter</button>
+    <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <button onclick="openSettings()" style="margin-left:auto; background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -787,7 +788,7 @@ function applyRoleUI() {
   headerBtns.forEach(btn => {
     const txt = (btn.textContent || '').trim();
     const onclick = btn.getAttribute('onclick') || '';
-    if (onclick.includes('saveData') || onclick.includes('exportData') || onclick.includes('importFile') || onclick.includes('openSettings')) {
+    if (onclick.includes('saveData') || onclick.includes('exportData') || onclick.includes('importFile') || onclick.includes('openSettings') || onclick.includes('forcerVersionAdminPartout')) {
       btn.style.display = isAdmin() ? '' : 'none';
     }
   });
@@ -7225,6 +7226,28 @@ async function loadData() {
   }
 }
 
+// ── Forcer la propagation de la version admin à toutes les boutiques ──
+// Cas d'usage : Fabien voit le matin que Langon affiche encore une vieille date
+// alors que sa version Mac est à jour. Au lieu d'attendre / d'appeler la boutique
+// pour faire un hard refresh, il clique ce bouton :
+//   1. _adminTs = maintenant est posé sur TOUTES les OPs et actions.
+//   2. Save serveur déclenché.
+//   3. Au prochain poll de chaque boutique (max 60s), elles adoptent toute la
+//      version admin (cf. _mergeAdminFields).
+// Aucun appel téléphonique nécessaire, aucun hard refresh côté boutique.
+async function forcerVersionAdminPartout() {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const ok = await pvConfirm('Forcer ta version actuelle (dates, noms, produits, prix…) sur toutes les boutiques ?\n\n• ' + ops.length + ' OPs et ' + actions.length + ' actions seront marquées avec ton timestamp.\n• Les boutiques adopteront ta version en moins de 60s, sans rien faire.\n• Leurs cochages d\'étapes seront préservés.');
+  if (!ok) return;
+  const _now = new Date().toISOString();
+  let opsCount = 0, actCount = 0;
+  ops.forEach(o => { if (o) { o._adminTs = _now; opsCount++; } });
+  actions.forEach(a => { if (a) { a._adminTs = _now; actCount++; } });
+  console.log('[FORCE-ADMIN]', opsCount, 'OPs et', actCount, 'actions marquées avec _adminTs =', _now);
+  saveData();
+  pvAlert('Version verrouillée : ' + opsCount + ' OPs + ' + actCount + ' actions.\n\nLes boutiques adopteront ta version au prochain rafraîchissement automatique (≤ 60s).');
+}
+
 function saveData() {
   const payload = {baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)};
   const jsonStr = JSON.stringify(payload);
@@ -7735,18 +7758,20 @@ async function _saveToSupabase(payload, _retryCount) {
   try {
     // ── Verrouillage admin : poser _adminTs sur les OPs/actions modifiées par l'admin ──
     // Seul l'admin peut modifier les champs racine (dates, nom, produits, etc.) —
-    // les boutiques ne touchent qu'à etats[shop]. Pour chaque objet dont _ts a bougé
-    // (= modif récente) sans que _adminTs ne l'ait suivi, on aligne _adminTs sur _ts.
-    // Côté boutique, ce bloc ne s'exécute pas → _adminTs reste figé sur la dernière
-    // modif admin connue. Au merge, _mergeAdminFields utilise _adminTs pour décider
-    // qui gagne sur les champs racine.
+    // les boutiques ne touchent qu'à etats[shop]. À chaque save admin, on pose
+    // _adminTs sur TOUS ses objets (sans _adminTs encore, ou _ts plus récent que
+    // _adminTs). Couvre y compris les OPs/actions sans _ts historique (legacy ou
+    // jamais modifiées) : on leur pose _adminTs = maintenant. Côté boutique ce bloc
+    // ne s'exécute pas → _adminTs reste figé sur la dernière modif admin connue.
     if (typeof isAdmin === 'function' && isAdmin()) {
-      if (Array.isArray(payload.ops)) payload.ops.forEach(o => {
-        if (o && o._ts && (!o._adminTs || o._ts > o._adminTs)) o._adminTs = o._ts;
-      });
-      if (Array.isArray(payload.actions)) payload.actions.forEach(a => {
-        if (a && a._ts && (!a._adminTs || a._ts > a._adminTs)) a._adminTs = a._ts;
-      });
+      const _nowIso = new Date().toISOString();
+      const _stampAdmin = (item) => {
+        if (!item) return;
+        if (!item._adminTs) item._adminTs = item._ts || _nowIso;
+        else if (item._ts && item._ts > item._adminTs) item._adminTs = item._ts;
+      };
+      if (Array.isArray(payload.ops)) payload.ops.forEach(_stampAdmin);
+      if (Array.isArray(payload.actions)) payload.actions.forEach(_stampAdmin);
     }
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
     const remoteResult = await _syncRead();
