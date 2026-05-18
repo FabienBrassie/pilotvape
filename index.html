@@ -7338,12 +7338,7 @@ function _mergeEtats(localActions, remoteActions) {
   let mergeCount = 0;
   localActions.forEach(a => {
     const remote = remoteMap[a.id];
-    if (!remote) return;
-    // ── Fusion des champs scalaires par _ts (option A revisitée — bug critique sync) ──
-    // Délègue à _mergeScalarsByTs qui réutilise les protections de _mergeArray
-    // (null-guard, protection dates avec flag manuelle, monotones, commentaire).
-    mergeCount += _mergeScalarsByTs(a, remote, 'id');
-    if (!remote.etats) return;
+    if (!remote || !remote.etats) return;
     mergeCount += _mergeStepsForItem(a, remote);
     // Extras actions : responsable, commentaire
     SHOPS.forEach(sh => {
@@ -7463,10 +7458,7 @@ function _mergeOpEtats(localOps, remoteOps) {
   remoteOps.forEach(o => { if (o && o.id) remoteMap[o.id] = o; });
   localOps.forEach(op => {
     const remote = remoteMap[op.id];
-    if (!remote) return;
-    // ── Fusion des champs scalaires par _ts (option A revisitée — bug critique sync) ──
-    _mergeScalarsByTs(op, remote, 'id');
-    if (!remote.etats) return;
+    if (!remote || !remote.etats) return;
     _mergeStepsForItem(op, remote);
   });
   // Ajouter les OPs distantes inconnues localement (sauf tombstones)
@@ -7475,87 +7467,6 @@ function _mergeOpEtats(localOps, remoteOps) {
     if (ro && ro.id && !localIds.has(ro.id) && !_deletedIds.has(ro.id)) localOps.push(ro);
   });
   return localOps;
-}
-
-// ── Helper : fusion des champs scalaires d'un item par _ts (option A revisitée) ──
-// Extrait de la logique de _mergeArray ci-dessous, réutilisable pour les OPs et actions
-// (qui n'étaient pas fusionnées sur leurs champs métier — cf. bug critique sync, REGLES §10).
-// Si remoteItem._ts > localItem._ts, on copie les champs scalaires du remote vers le local,
-// en appliquant les mêmes protections que _mergeArray :
-//   - skip sous-structures complexes (parfums, etats, steps, _stepTs, progress) ;
-//   - null-guard sur une liste de champs métier (ne pas écraser un champ rempli avec null) ;
-//   - protection dates (dateDebut/dateFin) sauf si le remote a le flag _date*Manuelle ;
-//   - protection monotone sur annulee, _archived, dateCloture (jamais true→false) ;
-//   - protection commentaire (concat ou garder le plus long).
-// Retourne le nombre de champs effectivement modifiés.
-function _mergeScalarsByTs(localItem, remoteItem, idField) {
-  if (!localItem || !remoteItem || !remoteItem._ts) return 0;
-  if (localItem._ts && remoteItem._ts <= localItem._ts) return 0;
-  let updated = 0;
-  Object.keys(remoteItem).forEach(k => {
-    // Ne pas écraser les sous-structures complexes qui ont leur propre merge
-    if (k === 'parfums' || k === 'etats' || k === 'steps' || k === '_stepTs' || k === 'progress') return;
-    // Null-guard : ne pas écraser un champ local défini avec un null/undefined distant.
-    if (localItem[k] != null && remoteItem[k] == null) {
-      const _nullGuard = new Set([
-        'prixRouge', 'prixAvantRouge', 'fanfareOpType',
-        '_dateFinManuelle', '_dateDebutManuelle', 'motifCloture',
-        'dateFin', 'dateDebut',
-        'campagneId',
-        'rentrerActionId', 'sortirActionId',
-        'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId',
-        'groupActionIds', 'oneShotOpId', 'decisionChoice',
-        'produitParfumId', 'parfumNom', 'replaceParId',
-        'caseMurOverride', 'produitIds'
-      ]);
-      if (_nullGuard.has(k)) return;
-    }
-    // Protection des dates OP (ne bougent pas par merge sauf flag manuelle remote).
-    if ((k === 'dateDebut' || k === 'dateFin') && localItem[k] != null && remoteItem[k] != null && localItem[k] !== remoteItem[k]) {
-      const manuelleFlag = k === 'dateDebut' ? '_dateDebutManuelle' : '_dateFinManuelle';
-      if (remoteItem[manuelleFlag] && !localItem[manuelleFlag]) {
-        console.log('[MERGE-DATE] ' + k + ' acceptée depuis remote (flag manuelle) sur', localItem[idField], ':', localItem[k], '→', remoteItem[k]);
-      } else {
-        console.log('[MERGE-PROTECT] ' + k + ' protégée sur', localItem[idField], ':', localItem[k], '(remote voulait', remoteItem[k] + ')');
-        return;
-      }
-    }
-    // Protection monotone : annulee, _archived ne reviennent jamais à false/null
-    if (k === 'annulee' || k === '_archived') {
-      if (localItem[k] === true && !remoteItem[k]) {
-        console.log('[MERGE-MONO] ' + k + ' protégé (true → false interdit) sur', localItem[idField]);
-        return;
-      }
-    }
-    if (k === 'dateCloture') {
-      if (localItem[k] && !remoteItem[k]) {
-        console.log('[MERGE-MONO] dateCloture protégée sur', localItem[idField], ':', localItem[k]);
-        return;
-      }
-    }
-    // Protection commentaire : ne jamais perdre un commentaire plus riche
-    if (k === 'commentaire') {
-      const localC = (localItem[k] || '').trim();
-      const remoteC = (remoteItem[k] || '').trim();
-      if (localC && !remoteC) return;
-      if (localC && remoteC && localC !== remoteC) {
-        if (!localC.includes(remoteC) && !remoteC.includes(localC)) {
-          localItem[k] = localC + ' | ' + remoteC;
-          console.log('[MERGE-COMMENT] Commentaires fusionnés sur', localItem[idField]);
-          updated++;
-        } else if (remoteC.length > localC.length) {
-          localItem[k] = remoteC;
-          updated++;
-        }
-        return;
-      }
-    }
-    if (localItem[k] !== remoteItem[k]) {
-      localItem[k] = remoteItem[k];
-      updated++;
-    }
-  });
-  return updated;
 }
 
 // ── Fusion structurelle pour données admin (produits, relevés, campagnes) ──
