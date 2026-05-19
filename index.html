@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-19 01:40</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-20 00:15</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -8377,7 +8377,8 @@ function syncPropToKit(prop) {
         marge: prop.marge, margePct: prop.margePct, mah: prop.mah, w: prop.w,
         tirage: prop.tirage, caseTech: prop.caseTech, rolePossible: prop.rolePossible,
         fournisseur: prop.fournisseur, note: calcNote(prop.rolePossible),
-        profilChoisi: '', roleChoisi: '', statutVie: 'A_RENTRER', qualitePot: '', commentaire: '', caseTechChoisi: ''
+        profilChoisi: '', roleChoisi: '', statutVie: 'A_RENTRER', qualitePot: '', commentaire: '', caseTechChoisi: '',
+        _ts: new Date().toISOString() // fix 2026-05-19 : timestamp dès création
       };
       baseKits.push(kit);
     } else {
@@ -8385,6 +8386,7 @@ function syncPropToKit(prop) {
       kit.marge = prop.marge; kit.margePct = prop.margePct; kit.mah = prop.mah; kit.w = prop.w;
       kit.tirage = prop.tirage; kit.caseTech = prop.caseTech; kit.rolePossible = prop.rolePossible;
       kit.fournisseur = prop.fournisseur; kit.note = calcNote(prop.rolePossible);
+      kit._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp après modif via miroir prop→kit
     }
   }
 }
@@ -8429,6 +8431,7 @@ function syncKitToProp(kit) {
     prop.decision = prop.decisionAvantSortie || 'RETENU';
     delete prop.decisionAvantSortie;
   }
+  prop._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp après modif via miroir kit→prop
 }
 
 function syncLiqToPropLiq(gamme) {
@@ -8450,7 +8453,8 @@ function syncLiqToPropLiq(gamme) {
       commentaire: 'Archivée automatiquement (sortie)',
       parfums: (gamme.parfums||[]).map(p => ({ n: p.n, ct: p.ct || '' })),
       date: new Date().toISOString().slice(0,10),
-      auteur: ''
+      auteur: '',
+      _ts: new Date().toISOString() // fix 2026-05-19 : timestamp dès création
     };
     propositionsLiq.push(prop);
     return;
@@ -8466,6 +8470,7 @@ function syncLiqToPropLiq(gamme) {
     prop.decision = prop.decisionAvantSortie || 'RETENU';
     delete prop.decisionAvantSortie;
   }
+  prop._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp après modif via miroir gamme→prop
 }
 
 function detectDoublon(marque, modele, caseTech, pa, pv, excludeId) {
@@ -8860,6 +8865,7 @@ function updateKitCaseTech(id, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const kit = baseKits.find(k => k.id === id);
   if (kit) {
+    kit._ts = new Date().toISOString(); // fix 2026-05-19 : sans ça, le merge auto pouvait écraser la modif avant save
     kit.caseTechChoisi = (val === 'AUTO') ? '' : val;
     syncKitToProp(kit);
     saveData();
@@ -8877,6 +8883,7 @@ function updateKitCaseMur(id, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const kit = baseKits.find(k => k.id === id);
   if (kit) {
+    kit._ts = new Date().toISOString(); // fix 2026-05-19 : cause directe du bug Freetouch — sans ça la case forcée ne se gardait pas
     kit.caseMurOverride = (val === '' || val === getEffectiveCaseTech(kit)) ? undefined : val;
     saveData();
     renderKits();
@@ -8909,6 +8916,7 @@ function togglePropDetail(id) {
 function updatePropField(id, field, value) {
   const prop = propositions.find(p => p.id === id);
   if (!prop) return;
+  prop._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   if (field === 'pa' || field === 'pv') {
     prop[field] = parseFloat(value) || 0;
     { const _m = computeMarge(prop.pa, prop.pv); prop.marge = _m.marge; prop.margePct = _m.margePct; }
@@ -8982,6 +8990,7 @@ function toggleKitAssemblage(kitId, checked) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const kit = baseKits.find(k => k.id === kitId);
   if (!kit) return;
+  kit._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   kit.isAssemblage = !!checked;
   if (!checked) { delete kit.boxPdId; delete kit.reservoirPdId; }
   saveData(); renderKits(); renderDashboard();
@@ -8991,6 +9000,7 @@ async function updateKitComponent(kitId, field, pdId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const kit = baseKits.find(k => k.id === kitId);
   if (!kit) return;
+  kit._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   const oldPdId = kit[field];
   kit[field] = pdId || null;
   // Recalculer PA assemblé
@@ -9036,6 +9046,7 @@ async function updateKitComponent(kitId, field, pdId) {
 function recalcAndRenderAssemblage(kitId) {
   const kit = baseKits.find(k => k.id === kitId);
   if (!kit || !kit.isAssemblage) return;
+  kit._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   recalcAssemblagePA(kit);
   syncKitToProp(kit);
   saveData(); renderKits(); renderDashboard();
@@ -9428,8 +9439,8 @@ function highlightKit(id) {
     }, 5000);
   }); });
 }
-function updateKitProfil(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit.profilChoisi = val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
-function updateKitRole(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit.roleChoisi = val === 'AUTO' ? '' : val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
+function updateKitProfil(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit._ts = new Date().toISOString(); kit.profilChoisi = val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
+function updateKitRole(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit._ts = new Date().toISOString(); kit.roleChoisi = val === 'AUTO' ? '' : val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
 
 // Statut multi-select filter arrays
 let kitStatutFilter = [];
@@ -10128,6 +10139,7 @@ async function updateKitStatus(id, status) {
       return;
     }
   }
+  kit._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   kit.statutVie = status;
   syncKitToProp(kit); syncAutoActions(); saveData();
   renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id);
@@ -20299,6 +20311,7 @@ async function updatePdStatus(id, status) {
       return;
     }
   }
+  pd._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   pd.statutVie = status;
   syncAutoActions();
   saveData();
@@ -20314,6 +20327,7 @@ function updatePdRole(id, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const pd = basePD.find(p => p.id === id);
   if (!pd) return;
+  pd._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   pd.roleChoisi = val;
   saveData();
   renderBasePD();
@@ -21704,6 +21718,7 @@ function updatePropLiqField(id, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const p = propositionsLiq.find(x => x.id === id);
   if (!p) return;
+  p._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   if (['pa','pv'].includes(field)) {
     p[field] = parseFloat(val) || 0;
     const _m = computeMarge(p.pa, p.pv);
@@ -21732,6 +21747,7 @@ function updatePropLiqDecision(id, decision) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const p = propositionsLiq.find(x => x.id === id);
   if (!p) return;
+  p._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   // Si on retire RETENU, annuler l'ajout
   if (p.decision === 'RETENU' && decision !== 'RETENU') {
     if (p.type === 'parfum' && p.gammeExistId) {
