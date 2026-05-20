@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-20 17:31</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-20 19:31</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3728,6 +3728,7 @@ function toggleLiqOneShot(gammeId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const g = baseLiq.find(x => x.id === gammeId);
   if (!g) return;
+  g._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   g.oneShot = !g.oneShot;
   syncAutoActions();
   if (g.oneShot && ['A_RENTRER','DANS_OFFRE'].includes(g.statutVie)) {
@@ -3895,6 +3896,7 @@ function decidePrixAction(kitId, choice, customPrice, note) {
   };
   // Reset de l'alerte de changement (on vient de (re)valider)
   delete target.verdictChanged;
+  target._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   // Auto-OP : si décision = rouge → OP PRIX_ROUGE créée/rouverte ; sinon OP liée clôturée.
   syncPrixRougeOp(target);
   saveData();
@@ -3942,6 +3944,7 @@ function cancelPrixAction(actionId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const a = actions.find(x => x.id === actionId);
   if (!a) return;
+  a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   a.annulee = true;
   a.dateCloture = ymd(new Date());
   saveData();
@@ -4275,6 +4278,7 @@ function setRentrerFanfare(actionId, opType) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const a = actions.find(x => x.id === actionId);
   if (!a || a.type !== 'RENTRER') return;
+  a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   // Invariant : 1 action RENTRER ↔ 0 ou 1 OP fanfare. Jamais deux.
   // On trouve l'OP existante (ouverte ou clôturée — on n'en a qu'une au max).
   const op = ops.find(o => o.rentrerActionId === a.id);
@@ -4378,6 +4382,7 @@ function promoteActionToOp(actionId, opType, commentaire) {
     ensureOpSteps(op);
     pushOpTraced(op, 'promoteActionToOp');
     if (!a.opId) a.opId = op.id;
+    a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
     saveData();
     renderDashboard();
     renderOps && renderOps();
@@ -4853,11 +4858,13 @@ function initRentrerPrixRouge(actionId) {
   if (!saisie) return;
   const prix = parseFloat(saisie.replace(',', '.'));
   if (isNaN(prix) || prix <= 0) return;
+  a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   a.prixAvantRouge = pvRef;
   a.prixRouge = prix;
   // One-shot : propager vers le COUP ; sinon : OP PRIX_ROUGE séparée
   const _coupOp = ops.find(o => o.type === 'COUP' && !o.dateFin && o.rentrerActionId === a.id);
   if (_coupOp) {
+    _coupOp._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
     _coupOp.prixRouge = prix;
     _coupOp.prixAvantRouge = pvRef;
     const _oldPr = ops.find(o => o.rentrerPrixActionId === a.id && o.type === 'PRIX_ROUGE' && !o.dateFin);
@@ -4925,7 +4932,9 @@ function setGroupPrixRouge(actionIdsPiped) {
 
   // Appliquer le prix rouge sur chaque action
   const allProduitIds = [...new Set(grpActions.map(a => a.produitId))];
+  const _grpTs = new Date().toISOString(); // fix 2026-05-20 phase 2
   grpActions.forEach(a => {
+    a._ts = _grpTs;
     a.prixRouge = prixRouge;
     if (typeof a.prixAvantRouge !== 'number') {
       const _g = baseLiq.find(l => l.id === a.produitId);
@@ -4943,6 +4952,7 @@ function setGroupPrixRouge(actionIdsPiped) {
     grpActions.every(a => o.groupActionIds.includes(a.id)));
   if (groupOp) {
     // Mise à jour
+    groupOp._ts = _grpTs; // fix 2026-05-20 phase 2
     groupOp.prixRouge = prixRouge;
     groupOp.prixAvantRouge = grpActions[0].prixAvantRouge;
     groupOp.dateDebut = dateDebut;
@@ -4987,6 +4997,7 @@ function setGroupPrixRouge(actionIdsPiped) {
 function setActionOpPromotion(actionId, opType) {
   const a = actions.find(x => x.id === actionId);
   if (!a) return;
+  a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   if (a.type === 'RENTRER') { setRentrerFanfare(actionId, opType); return; }
   const linkField = a.type === 'SORTIR' ? 'sortirActionId'
                   : a.type === 'PRIX'   ? 'prixActionId'
@@ -5472,6 +5483,7 @@ function updateActionPriorite(actionId, prio) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const a = actions.find(x => x.id === actionId);
   if (!a) return;
+  a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   a.priorite = prio;
   saveData();
   renderDashboard();
@@ -5483,16 +5495,18 @@ function updateKitRemplaceId(rentrerKitId, sortirKitId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const k = baseKits.find(x => x.id === rentrerKitId);
   if (!k) return;
+  const _nowTs = new Date().toISOString(); // fix 2026-05-20 phase 2
+  k._ts = _nowTs;
   const oldRempl = k.remplaceId;
-  k.remplaceId = sortirKitId || null;
+  k.remplaceId = sortirKitId || '';
   // Synchronisation bidirectionnelle : poser replaceParId sur l'action SORTIR du kit sortant
   if (oldRempl) {
     const oldSortirA = actions.find(a => a.type === 'SORTIR' && !a.annulee && a.produitId === oldRempl && a.replaceParId === rentrerKitId);
-    if (oldSortirA) oldSortirA.replaceParId = '';
+    if (oldSortirA) { oldSortirA._ts = _nowTs; oldSortirA.replaceParId = ''; }
   }
   if (sortirKitId) {
     const newSortirA = actions.find(a => a.type === 'SORTIR' && !a.annulee && a.produitId === sortirKitId);
-    if (newSortirA) newSortirA.replaceParId = rentrerKitId;
+    if (newSortirA) { newSortirA._ts = _nowTs; newSortirA.replaceParId = rentrerKitId; }
   }
   saveData();
   if (typeof renderKits === 'function') renderKits();
@@ -5508,8 +5522,10 @@ function updateActionRemplacePar(actionId, produitId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const a = actions.find(x => x.id === actionId);
   if (!a) return;
+  const _nowTs = new Date().toISOString(); // fix 2026-05-20 phase 2
+  a._ts = _nowTs;
   const oldId = a.replaceParId;
-  a.replaceParId = produitId || null;
+  a.replaceParId = produitId || '';
 
   // Synchronisation bidirectionnelle pour les kits
   if (!a.produitType || a.produitType === 'kit') {
@@ -5517,12 +5533,12 @@ function updateActionRemplacePar(actionId, produitId) {
     // Retirer l'ancien lien remplaceId s'il existait
     if (oldId) {
       const oldRentrant = baseKits.find(k => k.id === oldId && k.remplaceId === sortirKitId);
-      if (oldRentrant) oldRentrant.remplaceId = null;
+      if (oldRentrant) { oldRentrant._ts = _nowTs; oldRentrant.remplaceId = ''; }
     }
     // Poser le nouveau lien remplaceId sur le kit rentrant
     if (produitId) {
       const newRentrant = baseKits.find(k => k.id === produitId);
-      if (newRentrant) newRentrant.remplaceId = sortirKitId;
+      if (newRentrant) { newRentrant._ts = _nowTs; newRentrant.remplaceId = sortirKitId; }
     }
   }
 
@@ -5538,13 +5554,14 @@ function updateRentrerRemplace(rentrerActionId, sortirProdId) {
   const aR = actions.find(x => x.id === rentrerActionId);
   if (!aR) return;
   const rentrerProdId = aR.produitId;
+  const _nowTs = new Date().toISOString(); // fix 2026-05-20 phase 2
   // Retirer l'ancien lien inverse s'il existait
   const oldInverse = actions.find(s => s.type === 'SORTIR' && !s.annulee && s.replaceParId === rentrerProdId);
-  if (oldInverse) oldInverse.replaceParId = '';
+  if (oldInverse) { oldInverse._ts = _nowTs; oldInverse.replaceParId = ''; }
   // Poser le nouveau lien inverse
   if (sortirProdId) {
     const sortirAction = actions.find(s => s.type === 'SORTIR' && !s.annulee && s.produitId === sortirProdId);
-    if (sortirAction) sortirAction.replaceParId = rentrerProdId;
+    if (sortirAction) { sortirAction._ts = _nowTs; sortirAction.replaceParId = rentrerProdId; }
   }
   saveData();
   renderDashboard();
@@ -8375,6 +8392,7 @@ function updatePropDecision(id, decision) {
       // Nettoyer les actions orphelines
       actions = actions.filter(a => a.produitId !== id);
     }
+    prop._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
     prop.decision = decision;
     syncPropToKit(prop);
     syncAutoActions();
@@ -9553,7 +9571,7 @@ async function sendBackToProposition(id) {
   if (idx !== -1) baseKits.splice(idx, 1);
   // Remettre la proposition en attente
   const prop = propositions.find(p => p.id === id);
-  if (prop) prop.decision = '';
+  if (prop) { prop._ts = new Date().toISOString(); prop.decision = ''; } // fix 2026-05-20 phase 2
   // Nettoyer les actions orphelines
   actions = actions.filter(a => a.produitId !== id);
   saveData();
@@ -14785,6 +14803,7 @@ function toggleKitExclusif(kitId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const k = baseKits.find(x => x.id === kitId);
   if (!k) return;
+  k._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   k.exclusifCigusto = !k.exclusifCigusto;
   syncAutoActions();
   saveData();
@@ -14802,6 +14821,7 @@ function toggleKitOneShot(kitId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const k = baseKits.find(x => x.id === kitId);
   if (!k) return;
+  k._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   k.oneShot = !k.oneShot;
   syncAutoActions();
   // Prompt prix rouge à l'activation du one-shot
@@ -14820,6 +14840,7 @@ function togglePdOneShot(pdId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const pd = basePD.find(x => x.id === pdId);
   if (!pd) return;
+  pd._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   pd.oneShot = !pd.oneShot;
   syncAutoActions();
   if (pd.oneShot && ['A_RENTRER','DANS_OFFRE'].includes(pd.statutVie)) {
@@ -16162,6 +16183,7 @@ function opUpdateExistingCampagne() {
   if (!sel) return;
   const c = getCampagne(sel.value);
   if (!c) return;
+  c._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   c.dateDebut   = document.getElementById('opCampagneExistDebut').value   || '';
   c.dateFin     = document.getElementById('opCampagneExistFin').value     || '';
   c.commentaire = document.getElementById('opCampagneExistComment').value || '';
@@ -17312,6 +17334,7 @@ function postPrixRougeDecision(opId, decision) {
     // 'rien' — archiver tel quel
     op._archived = true;
   }
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   saveData();
   renderDashboard();
   renderOps && renderOps();
@@ -17418,6 +17441,7 @@ function executeOpClosure(opId, motif, params) {
       sortirA.commentaireClôture = 'Clôture destockage ' + op.id + (commentaire ? ' — ' + commentaire : '');
     }
     if (kit) {
+      kit._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
       kit.statutVie = 'SORTI';
       kit.motifSortie = 'DESTOCKAGE';
       syncKitToProp(kit);
@@ -17443,6 +17467,7 @@ function executeOpClosure(opId, motif, params) {
     return;
   }
 
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   opClosureOpen.delete(op.id);
   saveData();
   renderDashboard && renderDashboard();
@@ -17478,6 +17503,7 @@ function forceCloseReturnAction(opId, commentaire) {
   }
   op.dateFin = today;
   op.motifCloture = 'retour_prix_abouti';
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   opClosureOpen.delete(op.id);
   saveData();
   renderDashboard && renderDashboard();
@@ -17496,8 +17522,10 @@ async function cancelReturnAction(opId) {
   const a = actions.find(x => x.id === op.returnActionId);
   if (a) {
     a.annulee = true;
+    a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
     a.commentaireClôture = (a.commentaireClôture ? a.commentaireClôture + ' | ' : '') + 'Clôture annulée par l\'utilisateur';
   }
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   op.returnActionId = '';
   // Nettoyage du commentaire "Clôture en cours : ..." si présent
   if (op.commentaire && /Clôture en cours\s*:/.test(op.commentaire)) {
@@ -18539,6 +18567,7 @@ function setOpMecaType(opId, mecaType) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   ensureOpModel(op);
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   op.mecanique.type = mecaType || null;
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
@@ -18546,26 +18575,26 @@ function setOpMecaType(opId, mecaType) {
 function setOpMecaDescription(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
-  ensureOpModel(op); op.mecanique.description = v || '';
+  ensureOpModel(op); op._ts = new Date().toISOString(); op.mecanique.description = v || '';
   saveData(); renderDashboard(); renderOps && renderOps();
 }
 function setOpPartenaire(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
-  ensureOpModel(op); op.partenaire = v || '';
+  ensureOpModel(op); op._ts = new Date().toISOString(); op.partenaire = v || '';
   saveData(); renderDashboard(); renderOps && renderOps();
 }
 function setOpChallenge(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
-  ensureOpModel(op); op.challenge = v || '';
+  ensureOpModel(op); op._ts = new Date().toISOString(); op.challenge = v || '';
   saveData(); renderDashboard(); renderOps && renderOps();
 }
 async function setOpDateDebut(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   logAction('Date début OP', _logOpLabel(opId) + ' → ' + v);
-  if (v) { op.dateDebut = v; op._dateDebutManuelle = true; }
+  if (v) { op.dateDebut = v; op._dateDebutManuelle = true; op._ts = new Date().toISOString(); }
   saveData();
   // Sync sibling one-shot ↔ PR : toujours proposer d'aligner la date de début
   const sibling = _findOneShotSibling(op);
@@ -18599,8 +18628,9 @@ async function setOpDateFin(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   logAction('Date fin OP', _logOpLabel(opId) + ' → ' + v);
-  op.dateFin = v || null;
+  op.dateFin = v || null; // NB : cas "suppression dateFin" (réouverture) = Phase 3, non traité ici
   op._dateFinManuelle = !!(v); // marquer comme posée manuellement (protège contre les auto-sync)
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   // Première sauvegarde : l'OP principale est à jour
   saveData();
   // Sync sibling one-shot ↔ PR : toujours proposer d'aligner la date de fin
@@ -18611,6 +18641,7 @@ async function setOpDateFin(opId, v) {
     const sibFinLbl = sibling.dateFin || 'aucune';
     if (await pvConfirm('Synchroniser la date de fin sur l\'OP liée (' + sibling.id + ' — ' + sibType + ') ?\n\nDate actuelle : ' + sibFinLbl + '\nNouvelle date : ' + (newFin || 'aucune'))) {
       sibling.dateFin = newFin;
+      sibling._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
       saveData();
       pvAlert('✅ Date de fin synchronisée sur ' + sibling.id + ' (' + sibType + ') → ' + (newFin || 'aucune'));
     }
@@ -18698,6 +18729,7 @@ function setOpCommanderProduits(opId, checked) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   ensureOpModel(op);
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   op.prep.commanderProduits = !!checked;
   // Auto-lier le rentrerActionId si le produit a une action RENTRER en cours
   if (checked && !op.rentrerActionId && op.type !== 'COUP') {
@@ -18740,6 +18772,7 @@ function addPieceToOp(opId, pieceType) {
   const t = pieceType || 'PLV_AUTRE';
   const piece = makePiece(t, defaultSourceForPieceType(t), null);
   op.pieces.push(piece);
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
 }
@@ -18747,6 +18780,7 @@ function removePiece(opId, pieceId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   op.pieces = op.pieces.filter(p => p.id !== pieceId);
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   // Purge des steps associés
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
@@ -18761,12 +18795,14 @@ function movePiece(opId, pieceId, dir) {
   const tmp = op.pieces[idx];
   op.pieces[idx] = op.pieces[newIdx];
   op.pieces[newIdx] = tmp;
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   saveData(); renderOps && renderOps();
 }
 function setPieceType(opId, pieceId, newType) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   const p = op.pieces.find(x => x.id === pieceId); if (!p) return;
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   const prevType = p.type;
   p.type = newType || 'PLV_AUTRE';
   // Aligne la source sur le défaut sémantique du nouveau type SI l'ancienne source n'a pas de sens pour ce type.
@@ -18795,6 +18831,7 @@ function setPieceSource(opId, pieceId, newSource) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   const p = op.pieces.find(x => x.id === pieceId); if (!p) return;
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   p.source = newSource || 'fournie';
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
@@ -18803,6 +18840,7 @@ function setPieceLibelle(opId, pieceId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   const p = op.pieces.find(x => x.id === pieceId); if (!p) return;
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   p.libelle = v || '';
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
@@ -18811,6 +18849,7 @@ function setPieceEmplacement(opId, pieceId, shop, empl) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   const p = op.pieces.find(x => x.id === pieceId); if (!p) return;
+  op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   if (!p.affectations[shop]) p.affectations[shop] = { emplacement: null, note: '' };
   p.affectations[shop].emplacement = empl || null;
   ensureOpSteps(op);
@@ -21099,6 +21138,7 @@ function decidePropPdNew(propId, decision) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const prop = propositionsPD.find(p => p.id === propId);
   if (!prop) return;
+  prop._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   prop.decision = decision;
   // Si retenu, ajouter à la base PD
   if (decision === 'RETENU') {
@@ -21291,6 +21331,7 @@ function decidePropPd(propId, decision) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const prop = propositionsPD.find(p => p.id === propId);
   if (!prop) return;
+  prop._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   prop.decision = decision;
   // Si retenu, ajouter à la base PD
   if (decision === 'RETENU') {
@@ -21464,9 +21505,11 @@ function loadBaremes() {
 
 function applyBaremesToAll() {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const _baremeTs = new Date().toISOString(); // fix 2026-05-20 phase 2 : timestamp partagé pour ce recalcul de masse
   // Recalculer rôles liquides — respecter les overrides manuels
   let liqApplied = 0, liqCleared = 0, liqKept = 0;
   baseLiq.forEach(g => {
+    g._ts = _baremeTs;
     const _rc = (g.pa && g.pv) ? calcLiqRole(g.format, g.pa, g.pv) : '';
     const prevCalc = g.roleCalc || '';
     g.roleCalc = _rc;
@@ -21482,6 +21525,7 @@ function applyBaremesToAll() {
   // Recalculer rôles kits (propositions) — respecter les overrides
   let kitApplied = 0, kitKept = 0;
   propositions.forEach(k => {
+    k._ts = _baremeTs;
     const _rc = calcKitRole(k.caseTech, k.pa, k.pv);
     const prevCalc = k.rolePossible || '';
     k.rolePossible = _rc || prevCalc;
@@ -21493,6 +21537,7 @@ function applyBaremesToAll() {
   });
   // Recalculer rôles kits (baseKits) — respecter les overrides
   baseKits.forEach(k => {
+    k._ts = _baremeTs;
     const _rc = calcKitRole(k.caseTech, k.pa, k.pv);
     const prevCalc = k.rolePossible || '';
     if (_rc) k.rolePossible = _rc;
@@ -21504,6 +21549,7 @@ function applyBaremesToAll() {
   // Recalculer rôles PD
   let pdApplied = 0, pdKept = 0;
   basePD.forEach(pd => {
+    pd._ts = _baremeTs;
     const _rc = calcPdRole(pd.caseTech, pd.pa, pd.pv);
     const prevCalc = pd.rolePossible || '';
     pd.rolePossible = _rc;
