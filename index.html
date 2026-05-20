@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-20 00:22</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-20 17:31</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -2534,7 +2534,7 @@ async function purgeOrphanOps() {
   orphans.forEach(o => {
     if ((o.type === 'NOUVEAUTE' || o.type === 'EXCLU') && o.rentrerActionId) {
       const ra = actions.find(a => a.id === o.rentrerActionId);
-      if (ra && ra.fanfareOpType) { ra.fanfareOpType = null; console.log('[PURGE-OP] fanfareOpType effacé sur action ' + ra.id); }
+      if (ra && ra.fanfareOpType) { ra.fanfareOpType = ''; console.log('[PURGE-OP] fanfareOpType effacé sur action ' + ra.id); }
     }
   });
   ops = ops.filter(o => !ids.has(o.id));
@@ -3559,7 +3559,7 @@ function syncAutoActions() {
     // On NE recrée PAS automatiquement : l'OP a probablement été supprimée volontairement.
     // On nettoie le fanfareOpType orphelin pour éviter le cycle recréation/suppression.
     console.log('[FANFARE-HEAL] fanfareOpType orphelin sur action ' + a.id + ' (type=' + a.fanfareOpType + ', produit=' + a.produitId + ') — nettoyage au lieu de recréation');
-    a.fanfareOpType = null;
+    a.fanfareOpType = '';
   });
   // ── Sync fanfare NOUVEAUTE/EXCLU : LECTURE SEULE ──
   // L'OP ne stocke plus les steps rentrer_* — ils sont calculés dynamiquement
@@ -3664,7 +3664,7 @@ function _closeOneShotOpGeneric(produit) {
   ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin && o.source === 'rentrer_action'
     && o.produitIds && o.produitIds[0] === produit.id)
      .forEach(o => { o.dateFin = today; _deletedIds.add(o.id); });
-  produit.oneShotOpId = null;
+  produit.oneShotOpId = '';
 }
 
 // ── Wrappers rétrocompatibles ──
@@ -3709,7 +3709,7 @@ function _syncCoupPrixRouge(op, aRentrer, produit) {
     // Pas d'action RENTRER du tout → ne rien toucher (COUP peut avoir prixRouge posé manuellement)
   } else {
     // Action RENTRER sans prix rouge ET pas de SORTIR avec prix rouge → retirer du COUP si présent
-    if (op.prixRouge) { delete op.prixRouge; delete op.prixAvantRouge; op._ts = new Date().toISOString(); }
+    if (op.prixRouge) { op.prixRouge = 0; op.prixAvantRouge = ''; op._ts = new Date().toISOString(); }
   }
   // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe encore (migration ou résurrection par merge)
   // Recherche élargie : par rentrerPrixActionId OU par produit commun
@@ -4057,7 +4057,7 @@ function syncOpsFromVerdicts() {
         const kit = baseKits.find(k => k.id === (op.produitIds || [])[0]);
         if (kit) {
           kit.oneShot = false;
-          kit.oneShotOpId = null;
+          kit.oneShotOpId = '';
         }
       }
     }
@@ -4285,7 +4285,7 @@ function setRentrerFanfare(actionId, opType) {
       ops = ops.filter(o => o.id !== op.id);
       if (a.opId === op.id) a.opId = null;
     }
-    a.fanfareOpType = null;
+    a.fanfareOpType = '';
     saveData();
     renderDashboard();
     renderOps && renderOps();
@@ -4733,8 +4733,8 @@ function updateActionPrixRouge(actionId, val) {
   if (!a) return;
   const prix = parseFloat(String(val).replace(',', '.'));
   if (isNaN(prix) || prix <= 0) {
-    delete a.prixRouge;
-    delete a.prixAvantRouge;
+    a.prixRouge = 0;
+    a.prixAvantRouge = '';
   } else {
     // Si pas encore de prixAvantRouge, prendre le PV actuel
     if (typeof a.prixAvantRouge !== 'number') {
@@ -4776,7 +4776,7 @@ function updateActionPrixRouge(actionId, val) {
         op.prixRouge = newPrix;
         if (typeof newAvant === 'number') op.prixAvantRouge = newAvant;
       } else {
-        op.prixRouge = null;
+        op.prixRouge = 0;
       }
     }
     // Auto-créer/clore l'OP PRIX_ROUGE pour les RENTRER non-oneshot
@@ -5008,8 +5008,8 @@ function setActionOpPromotion(actionId, opType) {
       if (a.opId === opAuto.id) a.opId = null;
     }
     // Nettoyer le prix rouge sur l'action
-    delete a.prixRouge;
-    delete a.prixAvantRouge;
+    a.prixRouge = 0;
+    a.prixAvantRouge = '';
     saveData();
     renderDashboard();
     renderOps && renderOps();
@@ -5080,7 +5080,7 @@ async function removePromotedOp(opId) {
     const a = actions.find(x => x.id === aid);
     if (!a) return;
     if (a.opId === op.id) a.opId = null;
-    if (op.type === 'PRIX_ROUGE') { delete a.prixRouge; delete a.prixAvantRouge; }
+    if (op.type === 'PRIX_ROUGE') { a.prixRouge = 0; a.prixAvantRouge = ''; }
   });
   ops = ops.filter(o => o.id !== op.id);
   saveData();
@@ -5213,6 +5213,10 @@ function _applyActionShopChange(a, shop) {
   const isFaitNow = actionGlobalState(a) === 'FAIT';
   if (isFaitNow && !a.dateCloture) a.dateCloture = ymd(new Date());
   if (!isFaitNow) a.dateCloture = null;
+  // fix 2026-05-20 phase 1 : timestamp partagé pour cette cascade. Posé sur l'action
+  // systématiquement, et sur prod/parfum/liq selon les branches ci-dessous.
+  const _nowTs = new Date().toISOString();
+  a._ts = _nowTs;
 
   // Résoudre le produit (kit, liquide OU PD)
   const isLiq = a.produitType === 'liq';
@@ -5238,8 +5242,9 @@ function _applyActionShopChange(a, shop) {
       const curStatus = targetParfum ? targetParfum.s : prod.statutVie;
       if (curStatus !== 'SORTI') {
         a.statutKitAvant = curStatus;
-        if (targetParfum) { targetParfum.s = 'SORTI'; }
+        if (targetParfum) { targetParfum._ts = _nowTs; targetParfum.s = 'SORTI'; if (liq) liq._ts = _nowTs; }
         else {
+          prod._ts = _nowTs;
           prod.statutVie = 'SORTI';
           if (kit) syncKitToProp(kit);
           if (liq) syncLiqToPropLiq(liq);
@@ -5250,8 +5255,9 @@ function _applyActionShopChange(a, shop) {
       const curStatus = targetParfum ? targetParfum.s : prod.statutVie;
       if (curStatus !== 'DANS_OFFRE') {
         a.statutKitAvant = curStatus;
-        if (targetParfum) { targetParfum.s = 'DANS_OFFRE'; }
+        if (targetParfum) { targetParfum._ts = _nowTs; targetParfum.s = 'DANS_OFFRE'; if (liq) liq._ts = _nowTs; }
         else {
+          prod._ts = _nowTs;
           prod.statutVie = 'DANS_OFFRE';
           if (kit) syncKitToProp(kit);
           if (liq) syncLiqToPropLiq(liq);
@@ -5263,8 +5269,11 @@ function _applyActionShopChange(a, shop) {
       if (curPv !== a.prixCible) {
         a.pvAvant = curPv;
         if (targetParfum) {
+          targetParfum._ts = _nowTs;
           targetParfum.pv = a.prixCible;
+          if (liq) liq._ts = _nowTs;
         } else {
+          prod._ts = _nowTs;
           prod.lastPvChange = { from: prod.pv, to: a.prixCible, date: ymd(new Date()), actionId: a.id };
           prod.pv = a.prixCible;
           if (kit) syncKitToProp(kit);
@@ -5290,21 +5299,27 @@ function _applyActionShopChange(a, shop) {
                             : null;
       if (targetParfum) {
         if (expectedCurrent && targetParfum.s === expectedCurrent) {
+          targetParfum._ts = _nowTs;
           targetParfum.s = a.statutKitAvant;
+          if (liq) liq._ts = _nowTs;
         }
       } else if (expectedCurrent && prod.statutVie === expectedCurrent) {
+        prod._ts = _nowTs;
         prod.statutVie = a.statutKitAvant;
         if (kit) syncKitToProp(kit);
         if (liq) syncLiqToPropLiq(liq);
       }
-      a.statutKitAvant = null;
+      a.statutKitAvant = '';
     }
     if (a.type === 'PRIX' && typeof a.pvAvant === 'number') {
       const curPv = targetParfum ? targetParfum.pv : prod.pv;
       if (curPv === a.prixCible) {
         if (targetParfum) {
+          targetParfum._ts = _nowTs;
           targetParfum.pv = a.pvAvant;
+          if (liq) liq._ts = _nowTs;
         } else {
+          prod._ts = _nowTs;
           prod.pv = a.pvAvant;
           if (kit) {
             syncKitToProp(kit);
@@ -5319,7 +5334,7 @@ function _applyActionShopChange(a, shop) {
             if (!liq.roleChoisi || liq.roleChoisi === _prevRC) liq.roleChoisi = liq.roleCalc;
           }
         }
-        a.pvAvant = null;
+        a.pvAvant = 0;
       }
     }
   }
@@ -5419,25 +5434,27 @@ function checkOneShotAutoClose(a) {
   if (actionGlobalState(sortirAction) !== 'FAIT') return;
   // ✅ Toutes les boutiques ont terminé le SORTIR → auto-close
   const today = ymd(new Date());
+  const _nowTs = new Date().toISOString(); // fix 2026-05-20 phase 1 : timestamp partagé pour cette cascade
   logAction('Auto-close one-shot', (prod.marque || '') + ' ' + (prod.modele || prod.gamme || prod.designation || '') + ' → SORTI');
   // 1) Passer le produit en SORTI
+  prod._ts = _nowTs;
   prod.statutVie = 'SORTI';
   prod.oneShot = false;
   // 2) Clôturer la COUP OP
   const coupOp = prod.oneShotOpId ? ops.find(o => o.id === prod.oneShotOpId) : null;
-  if (coupOp && !coupOp.dateFin) coupOp.dateFin = today;
+  if (coupOp && !coupOp.dateFin) { coupOp._ts = _nowTs; coupOp.dateFin = today; }
   // Filet : toute COUP OP ouverte liée à ce produit
   ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(_pid) >= 0)
-     .forEach(o => { o.dateFin = today; });
-  prod.oneShotOpId = null;
+     .forEach(o => { o._ts = _nowTs; o.dateFin = today; });
+  prod.oneShotOpId = ''; // fix 2026-05-20 phase 1 : '' au lieu de null pour échapper au _nullGuard
   // 3) Clôturer les OP PRIX_ROUGE liées + tombstone
   ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin && (o.produitIds || []).indexOf(_pid) >= 0)
-     .forEach(o => { o.dateFin = today; _deletedIds.add(o.id); });
+     .forEach(o => { o._ts = _nowTs; o.dateFin = today; _deletedIds.add(o.id); });
   // Aussi via sortirActionId ou rentrerPrixActionId
   ops.filter(o => o.type === 'PRIX_ROUGE' && !o.dateFin &&
      (o.sortirActionId === sortirAction.id ||
       (o.rentrerPrixActionId && actions.some(ra => ra.id === o.rentrerPrixActionId && ra.produitId === _pid))))
-     .forEach(o => { o.dateFin = today; _deletedIds.add(o.id); });
+     .forEach(o => { o._ts = _nowTs; o.dateFin = today; _deletedIds.add(o.id); });
   // 4) Re-synchro actions : cleanupActionsForKit va clôturer les actions orphelines
   // et closeOneShotOp va fermer toute COUP OP résiduelle (puisque statutVie !== DANS_OFFRE/A_RENTRER)
   try { syncAutoActions(); } catch(e) { console.error('[autoClose] syncAutoActions:', e); }
@@ -5471,7 +5488,7 @@ function updateKitRemplaceId(rentrerKitId, sortirKitId) {
   // Synchronisation bidirectionnelle : poser replaceParId sur l'action SORTIR du kit sortant
   if (oldRempl) {
     const oldSortirA = actions.find(a => a.type === 'SORTIR' && !a.annulee && a.produitId === oldRempl && a.replaceParId === rentrerKitId);
-    if (oldSortirA) oldSortirA.replaceParId = null;
+    if (oldSortirA) oldSortirA.replaceParId = '';
   }
   if (sortirKitId) {
     const newSortirA = actions.find(a => a.type === 'SORTIR' && !a.annulee && a.produitId === sortirKitId);
@@ -5523,7 +5540,7 @@ function updateRentrerRemplace(rentrerActionId, sortirProdId) {
   const rentrerProdId = aR.produitId;
   // Retirer l'ancien lien inverse s'il existait
   const oldInverse = actions.find(s => s.type === 'SORTIR' && !s.annulee && s.replaceParId === rentrerProdId);
-  if (oldInverse) oldInverse.replaceParId = null;
+  if (oldInverse) oldInverse.replaceParId = '';
   // Poser le nouveau lien inverse
   if (sortirProdId) {
     const sortirAction = actions.find(s => s.type === 'SORTIR' && !s.annulee && s.produitId === sortirProdId);
@@ -5825,6 +5842,7 @@ function analyzeVsOffre(prop) {
 function applyAffectation(id, profil, role) {
   const kit = baseKits.find(k => k.id === id);
   if (kit) {
+    kit._ts = new Date().toISOString(); // fix 2026-05-20 phase 1
     if (profil) kit.profilChoisi = profil;
     if (role) kit.roleChoisi = role;
     syncKitToProp(kit);
@@ -5840,9 +5858,11 @@ function applyAllSuggestions() {
     return k.statutVie !== 'SORTI' && (!k.profilChoisi || roles.length === 0);
   });
   let applied = 0;
+  const _nowTs = new Date().toISOString();
   nonAffectes.forEach(k => {
     const sug = suggestAffectation(k, baseKits);
     if (sug) {
+      k._ts = _nowTs; // fix 2026-05-20 phase 1
       if (sug.profil) k.profilChoisi = sug.profil;
       if (sug.role) k.roleChoisi = sug.role;
       syncKitToProp(k);
@@ -8046,7 +8066,7 @@ async function _doSyncPoll() {
           }
           // Aucune OP fanfare pour ce produit — nettoyage au lieu de recréation
           console.log('[AUTO-SYNC FANFARE-HEAL] fanfareOpType orphelin sur action ' + a.id + ' — nettoyage');
-          a.fanfareOpType = null;
+          a.fanfareOpType = '';
         });
         // Sauvegarder localement (données fusionnées en mémoire)
         localStorage.setItem('pilotVapeData', JSON.stringify({baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX)}));
@@ -8524,7 +8544,7 @@ function hideDoublonBubble(id) {
 
 function dismissDoublon(id) {
   const prop = propositions.find(p => p.id === id);
-  if (prop) { prop.alerteDoublon = "DISMISSED"; saveData(); renderPropositions(); }
+  if (prop) { prop._ts = new Date().toISOString(); prop.alerteDoublon = "DISMISSED"; saveData(); renderPropositions(); }
 }
 
 function setPropSort(col) {
@@ -10282,15 +10302,16 @@ function closeRemplacement() {
 function markNoReplacement(type, id) {
   // Marquer le produit comme ne nécessitant pas de remplacement
   // → exclut des besoins à combler
+  const _nowTs = new Date().toISOString();
   if (type === 'kit') {
     const k = baseKits.find(x => x.id === id);
-    if (k) k.remplacementNonNecessaire = true;
+    if (k) { k._ts = _nowTs; k.remplacementNonNecessaire = true; }
   } else if (type === 'liq') {
     const g = baseLiq.find(x => x.id === id);
-    if (g) g.remplacementNonNecessaire = true;
+    if (g) { g._ts = _nowTs; g.remplacementNonNecessaire = true; }
   } else if (type === 'pd') {
     const p = basePD.find(x => x.id === id);
-    if (p) p.remplacementNonNecessaire = true;
+    if (p) { p._ts = _nowTs; p.remplacementNonNecessaire = true; }
   }
   saveData();
   renderDashboard();
@@ -14868,6 +14889,7 @@ function toggleKitNonDispo(kitId, compKey) {
   if (!k.nonDispoChez) k.nonDispoChez = {};
   k.nonDispoChez[compKey] = !k.nonDispoChez[compKey];
   if (!k.nonDispoChez[compKey]) delete k.nonDispoChez[compKey];
+  k._ts = new Date().toISOString(); // fix 2026-05-20 phase 1 : sans ça la propagation côté boutique pouvait être écrasée
   syncAutoActions();
   saveData();
   renderReleves();
@@ -16392,8 +16414,8 @@ async function deleteOp(id) {
     // Si c'était un prix rouge, nettoyer le prix ET la décision rouge sur l'action
     // pour empêcher syncPrixRougeOp de recréer une OP identique au prochain cycle.
     if (op.type === 'PRIX_ROUGE') {
-      delete a.prixRouge;
-      delete a.prixAvantRouge;
+      a.prixRouge = 0;
+      a.prixAvantRouge = '';
       // Réinitialiser la décision : passer de 'rouge' à 'recalibrer' (prix aligné, pas de PR)
       if (a.decisionChoice === 'rouge') {
         a.decisionChoice = 'recalibrer';
@@ -16404,7 +16426,7 @@ async function deleteOp(id) {
     // pour empêcher l'auto-heal de recréer l'OP en boucle.
     if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && a.type === 'RENTRER' && a.fanfareOpType) {
       console.log('[DELETE-OP] fanfareOpType effacé sur action RENTRER ' + a.id + ' (était ' + a.fanfareOpType + ')');
-      a.fanfareOpType = null;
+      a.fanfareOpType = '';
     }
   });
   // ── COUP one-shot : désactiver le flag oneShot sur le produit lié ──
@@ -16413,9 +16435,9 @@ async function deleteOp(id) {
     const _coupPids = op.produitIds || [];
     _coupPids.forEach(pid => {
       const _kit = baseKits.find(k => k.id === pid);
-      if (_kit && _kit.oneShot) { _kit.oneShot = false; _kit.oneShotOpId = null; console.log('[DELETE-OP] oneShot désactivé sur kit', _kit.modele); }
+      if (_kit && _kit.oneShot) { _kit.oneShot = false; _kit.oneShotOpId = ''; console.log('[DELETE-OP] oneShot désactivé sur kit', _kit.modele); }
       const _liq = baseLiq.find(l => l.id === pid);
-      if (_liq && _liq.oneShot) { _liq.oneShot = false; _liq.oneShotOpId = null; console.log('[DELETE-OP] oneShot désactivé sur gamme', _liq.gamme); }
+      if (_liq && _liq.oneShot) { _liq.oneShot = false; _liq.oneShotOpId = ''; console.log('[DELETE-OP] oneShot désactivé sur gamme', _liq.gamme); }
     });
   }
   ops = ops.filter(o => o.id !== id);
@@ -16454,10 +16476,10 @@ function duplicateOp(id) {
   });
   copy.progress = { global: {} };
 
-  copy.prixActionId = null;
-  copy.rentrerActionId = null;
-  copy.sortirActionId  = null;
-  copy.mepActionId     = null;
+  copy.prixActionId = '';
+  copy.rentrerActionId = '';
+  copy.sortirActionId  = '';
+  copy.mepActionId     = '';
   copy.auto = false;
 
   // Demander les dates à l'utilisateur
@@ -17476,7 +17498,7 @@ async function cancelReturnAction(opId) {
     a.annulee = true;
     a.commentaireClôture = (a.commentaireClôture ? a.commentaireClôture + ' | ' : '') + 'Clôture annulée par l\'utilisateur';
   }
-  op.returnActionId = null;
+  op.returnActionId = '';
   // Nettoyage du commentaire "Clôture en cours : ..." si présent
   if (op.commentaire && /Clôture en cours\s*:/.test(op.commentaire)) {
     op.commentaire = op.commentaire.replace(/\s*\|?\s*Clôture en cours\s*:[^|]*/g, '').trim().replace(/^\|\s*/, '');
@@ -18645,7 +18667,7 @@ function updateOpPrixRouge(opId, val) {
   const op = ops.find(o => o.id === opId); if (!op) return;
   const prix = parseFloat(String(val).replace(',', '.'));
   if (isNaN(prix) || prix <= 0) {
-    delete op.prixRouge; delete op.prixAvantRouge;
+    op.prixRouge = 0; op.prixAvantRouge = '';
   } else {
     // Garder l'ancien prix si pas encore renseigné
     if (typeof op.prixAvantRouge !== 'number') {
@@ -18668,7 +18690,7 @@ function updateOpPrixRouge(opId, val) {
     const a = actions.find(x => x.id === aid);
     if (!a) return;
     if (op.prixRouge) { a.prixRouge = op.prixRouge; if (!a.prixAvantRouge) a.prixAvantRouge = op.prixAvantRouge; }
-    else { delete a.prixRouge; delete a.prixAvantRouge; }
+    else { a.prixRouge = 0; a.prixAvantRouge = ''; }
   });
   saveData(); renderDashboard(); renderOps && renderOps(); if (typeof renderKits === 'function') renderKits();
 }
