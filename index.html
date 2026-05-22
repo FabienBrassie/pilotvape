@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-22 10:43</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-22 11:06</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -11047,11 +11047,16 @@ function renderLiqAll() {
     html += `<div></div>`;
     ftFormats.forEach(fmt => {
       const fc = LIQ_FORMAT_COLORS[fmt];
-      const _fmtG = actifs.filter(g => g.format === fmt).length;
-      const _fmtP = actifs.filter(g => g.format === fmt).reduce((s,g) => s + (g.parfums||[]).filter(p=>p.s!=='SORTI').length, 0);
+      const _fmtAll = actifs.filter(g => g.format === fmt);
+      const _fmtG = _fmtAll.length;
+      const _fmtP = _fmtAll.reduce((s,g) => s + (g.parfums||[]).filter(p=>p.s!=='SORTI').length, 0);
+      // Score de couverture : cases profil × rôle comblées sur le total possible, pour ce format
+      let _ftOk = 0; const _ftTot = PROFILS.length * LIQ_ROLES.length;
+      PROFILS.forEach(p => LIQ_ROLES.forEach(r => { if (_fmtAll.some(g => g.profilChoisi === p && g.roleChoisi === r)) _ftOk++; }));
+      const _ftCovCol = _ftOk >= _ftTot * 0.66 ? '#22c55e' : (_ftOk >= _ftTot * 0.4 ? '#f59e0b' : '#ef4444');
       html += `<div style="text-align:center; padding:3px; background:${fc}12; border-radius:3px 3px 0 0;">
         <div style="font-size:12px; font-weight:700; color:${fc};">${LIQ_FORMAT_LABELS[fmt]}</div>
-        <div style="font-size:9px; color:#64748b;">${_fmtG}g · <span style="font-weight:700; color:#94a3b8;">${_fmtP}p</span></div>
+        <div style="font-size:9px; color:#64748b;">${_fmtG}g · <span style="font-weight:700; color:#94a3b8;">${_fmtP}p</span> · <span style="font-weight:700; color:${_ftCovCol};" title="Cases profil × rôle comblées sur ${_ftTot}">${_ftOk}/${_ftTot}</span></div>
       </div>`;
     });
     html += `</div>`;
@@ -11079,13 +11084,16 @@ function renderLiqAll() {
           const nbParf = items.reduce((s,g) => s + (g.parfums||[]).filter(p=>p.s!=='SORTI').length, 0);
 
           if (nbGammes === 0) {
-            const _emptyRed = (role === 'PRIX_D_APPEL' || role === 'MEILLEURE_MARGE');
-            html += `<div style="min-height:28px; border:1px dashed ${_emptyRed ? '#ef444430' : '#47556920'}; border-radius:3px; display:flex; align-items:center; justify-content:center; background:${_emptyRed ? '#ef444410' : 'transparent'};">
-              <span style="font-size:8px; color:${_emptyRed ? '#ef444450' : '#47556940'};">—</span>
+            // Trou d'offre : un prix d'appel est attendu par profil x format SAUF Décidé ; la meilleure marge partout.
+            const _trou = (role === 'MEILLEURE_MARGE') || (role === 'PRIX_D_APPEL' && prof !== 'DECIDE');
+            html += `<div style="min-height:28px; border:1px dashed ${_trou ? '#ef444455' : '#47556920'}; border-radius:3px; display:flex; align-items:center; justify-content:center; background:${_trou ? '#ef444414' : 'transparent'};" title="${_trou ? 'Manque — ' + PROFIL_LABELS[prof] + ' · ' + (LIQ_ROLE_LABELS[role]||role) + ' · ' + LIQ_FORMAT_LABELS[fmt] : ''}">
+              <span style="font-size:7px; font-weight:600; color:${_trou ? '#ef4444' : '#47556940'};">${_trou ? 'manque' : '—'}</span>
             </div>`;
           } else if (!cellExpanded) {
-            html += `<div onclick="toggleLiqSection('${cellKey}');renderLiqAll();" style="min-height:28px; border:1px solid ${pc}25; border-radius:3px; background:${pc}10; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; position:relative;" title="Cliquer pour détailler">
+            const _avgMml = items.reduce((s,g)=>s+liqMargeMl(g),0)/Math.max(items.length,1);
+            html += `<div onclick="toggleLiqSection('${cellKey}');renderLiqAll();" style="min-height:28px; border:1px solid ${pc}25; border-radius:3px; background:${pc}10; display:flex; align-items:center; justify-content:center; cursor:pointer; user-select:none; position:relative;" title="Cliquer pour détailler · marge moy ${_avgMml.toFixed(2)} €/mL">
               <span style="font-size:12px; font-weight:700; color:${rc};">${nbParf}</span><span style="font-size:8px; color:${rc}80; margin-left:1px;">p</span>
+              <span style="position:absolute; left:3px; bottom:2px; font-size:7px; color:#4ade8099;" title="Marge moyenne par mL">${_avgMml.toFixed(2)}</span>
               <span style="position:absolute; right:3px; bottom:2px; font-size:7px; color:#64748b;">${nbGammes}g</span>
             </div>`;
           } else {
@@ -11103,6 +11111,7 @@ function renderLiqAll() {
                 <div style="display:flex; gap:3px; align-items:center;">
                   <span style="font-size:7px; color:${ctColor};">${g.ct||'?'}</span>
                   <span style="font-size:7px; color:#22c55e; margin-left:auto;">+€${g.marge.toFixed(1)}</span>
+                  <span style="font-size:7px; color:#4ade80;" title="Marge par mL">${liqMargeMl(g).toFixed(2)}/mL</span>
                   <span style="font-size:7px; color:#94a3b8;">${np}p</span>
                 </div>
               </div>`;
@@ -11150,6 +11159,7 @@ function renderLiqAll() {
                 <div style="display:flex; gap:3px; align-items:center;">
                   <span style="font-size:7px; color:${ctColor};">${g.ct||'?'}</span>
                   <span style="font-size:7px; color:#22c55e; margin-left:auto;">+€${g.marge.toFixed(1)}</span>
+                  <span style="font-size:7px; color:#4ade80;" title="Marge par mL">${liqMargeMl(g).toFixed(2)}/mL</span>
                   <span style="font-size:7px; color:#94a3b8;">${npp}p</span>
                 </div>
               </div>`;
