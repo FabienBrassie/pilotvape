@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:48</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:56</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -1886,13 +1886,21 @@ function getOpProductDisplay(op) {
   const liq = baseLiq.find(l => l.id === (op.produitIds || [])[0]);
   if (liq) {
     const _fmt = liq.format || '';
-    // Déterminer le scope : parfum spécifique, X réf., ou gamme entière
-    const _srcAId = op.sortirActionId || op.prixActionId || op.rentrerActionId || op.rentrerPrixActionId;
-    const _srcA = _srcAId ? actions.find(x => x.id === _srcAId) : null;
+    // Déterminer le scope : parfum spécifique, X réf., ou gamme entière.
+    // 2026-05-28 : priorité à op.produitParfumId (posé directement sur l'OP, notamment via le bouton 🎯 Cible).
+    // Fallback : produitParfumId de l'action source liée.
+    let _opParfumId = op.produitParfumId || '';
+    if (!_opParfumId) {
+      const _srcAId = op.sortirActionId || op.prixActionId || op.rentrerActionId || op.rentrerPrixActionId;
+      const _srcA = _srcAId ? actions.find(x => x.id === _srcAId) : null;
+      if (_srcA && _srcA.produitParfumId) _opParfumId = _srcA.produitParfumId;
+    }
     let _scope = '';
-    if (_srcA && _srcA.produitParfumId && liq.parfums) {
-      const _pf = liq.parfums.find(p => p.id === _srcA.produitParfumId);
+    if (_opParfumId && liq.parfums) {
+      const _pf = liq.parfums.find(p => p.id === _opParfumId);
       _scope = _pf ? ' · ' + _pf.n : ' · 1 réf.';
+    } else if (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length > 0) {
+      _scope = ' · ' + op.produitParfumIds.length + ' parfum' + (op.produitParfumIds.length > 1 ? 's' : '');
     } else {
       const _totalP = (liq.parfums || []).filter(p => p.s !== 'SORTI').length;
       _scope = _totalP > 0 ? ' · Gamme entière' : '';
