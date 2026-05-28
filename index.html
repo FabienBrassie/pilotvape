@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 16:38</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 16:47</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -2438,19 +2438,26 @@ async function _flushPendingDateConfirm() {
 function findOrphanOps() {
   const FANFARE = ['NOUVEAUTE','EXCLU'];
 
-  // Étape 1 : pour chaque produit, trouver l'action RENTRER active et son fanfareOpType.
-  // On calcule la liste des OPs fanfare à GARDER (canoniques) : une seule par produit.
+  // Étape 1 : pour chaque (produit + parfum), trouver l'action RENTRER active et son fanfareOpType.
+  // On calcule la liste des OPs fanfare à GARDER (canoniques) : une seule par couple produit+parfum.
+  // 2026-05-28 fix Phase 1 résiduel : la clé inclut maintenant le parfum (produitParfumId).
+  // Avant : regroupement par gamme seulement → deux fanfares sur 2 parfums différents d'une même gamme
+  // étaient vues comme doublons → la moins chanceuse était marquée orpheline à tort.
   const canonicalIds = new Set();
-  const fanfareByProduit = {};
+  const fanfareByKey = {};
+  function _fanfareKey(pid, parfumId) { return (pid || '') + '|' + (parfumId || ''); }
   ops.forEach(op => {
     if (!FANFARE.includes(op.type)) return;
     const pid = op.produitIds && op.produitIds[0];
     if (!pid) return;
-    (fanfareByProduit[pid] = fanfareByProduit[pid] || []).push(op);
+    const key = _fanfareKey(pid, op.produitParfumId);
+    (fanfareByKey[key] = fanfareByKey[key] || []).push(op);
   });
-  Object.keys(fanfareByProduit).forEach(pid => {
-    const list = fanfareByProduit[pid];
-    const rA = actions.find(a => a.type === 'RENTRER' && a.produitId === pid && !a.annulee);
+  Object.keys(fanfareByKey).forEach(key => {
+    const list = fanfareByKey[key];
+    const [pid, parfumId] = key.split('|');
+    // Action RENTRER correspondante : même produit ET même parfum (vide pour gamme entière)
+    const rA = actions.find(a => a.type === 'RENTRER' && a.produitId === pid && (a.produitParfumId || '') === parfumId && !a.annulee);
     const want = rA && rA.fanfareOpType;
     if (!want || !rA) return; // pas de fanfare voulue → AUCUNE canonique → toutes orphelines
     // Priorité 1 : OP ouverte dont le type == want ET rentrerActionId == rA.id
@@ -2474,8 +2481,9 @@ function findOrphanOps() {
                        || baseLiq.some(l => l.id === pid)
                        || basePD.some(p => p.id === pid);
       if (_prodExists) {
-        // Auto-heal : réparer les liens si possible
-        const _anyRentrer = actions.find(a => a.type === 'RENTRER' && a.produitId === pid && !a.annulee);
+        // 2026-05-28 fix : on match aussi le parfum côté action (sinon on attache la mauvaise)
+        const _opParfum = op.produitParfumId || '';
+        const _anyRentrer = actions.find(a => a.type === 'RENTRER' && a.produitId === pid && (a.produitParfumId || '') === _opParfum && !a.annulee);
         if (_anyRentrer) {
           if (!op.rentrerActionId) {
             op.rentrerActionId = _anyRentrer.id;
@@ -2486,12 +2494,12 @@ function findOrphanOps() {
             console.log('[OP-ORPHAN-GUARD] Restauré fanfareOpType=' + op.type + ' sur action ' + _anyRentrer.id);
           }
         }
-        // Exception dedup : si plusieurs OPs fanfare existent pour le même produit,
+        // Exception dedup : si plusieurs OPs fanfare existent pour le même couple produit+parfum,
         // garder la canonique et marquer les doublons comme orphelins.
-        const _siblings = fanfareByProduit[pid];
+        const _siblings = fanfareByKey[_fanfareKey(pid, _opParfum)];
         if (_siblings && _siblings.length > 1 && canonicalIds.size > 0 && !canonicalIds.has(op.id)) {
           // Il y a un doublon ET cette OP n'est pas la canonique → orpheline
-          console.log('[OP-ORPHAN-GUARD] Doublon fanfare détecté pour produit ' + pid + ' — OP ' + op.id + ' marquée orpheline (canonique = ' + [...canonicalIds].find(id => _siblings.some(s => s.id === id)) + ')');
+          console.log('[OP-ORPHAN-GUARD] Doublon fanfare détecté pour produit ' + pid + ' parfum "' + _opParfum + '" — OP ' + op.id + ' marquée orpheline (canonique = ' + [...canonicalIds].find(id => _siblings.some(s => s.id === id)) + ')');
           return true;
         }
         return false; // produit existe, pas de doublon → JAMAIS orpheline
