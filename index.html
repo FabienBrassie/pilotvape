@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 16:23</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 16:38</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -2022,8 +2022,12 @@ function ensureOpModel(op) {
   // Anciennement tag texte libre (op.campagne), maintenant référence à une entité
   // campagnes[] (op.campagneId). La migration au chargement du localStorage assure
   // la conversion string → entity. Ici on se contente de garantir le type.
-  if (typeof op.campagneId !== 'string' && op.campagneId !== null) op.campagneId = null;
-  if (op.campagneId === '') op.campagneId = null;
+  // 2026-05-28 Phase 2 campagne : on accepte '' comme valeur "détachée".
+  // Avant : '' était normalisé en null, mais null est protégé par _nullGuard dans _mergeArray,
+  // donc une détache côté admin ne se propageait pas aux boutiques. Avec '' (chaîne vide),
+  // la propagation passe et le code de lecture `op.campagneId ? ...` continue de marcher (falsy).
+  if (typeof op.campagneId !== 'string' && op.campagneId != null) op.campagneId = '';
+  if (op.campagneId === null) op.campagneId = '';
   // Produit libre : permet de créer une OP sur un produit non présent dans baseKits
   // (liquides, accessoires, cartouches, box non cataloguées, etc.). Structure : { famille, libelle }.
   // Si renseigné, op.produitIds peut être vide. Ne fournit PAS de cascade kit.statutVie.
@@ -6611,6 +6615,17 @@ async function loadData() {
         // Déclenche une save différée pour propager le backfill aux boutiques.
         // Le save admin pose _adminTs inconditionnel → propagation automatique au prochain poll boutique.
         if (typeof saveData === 'function') setTimeout(() => { try { saveData(); } catch(e) { console.warn('[BACKFILL-PARFUM] save raté:', e); } }, 2000);
+      }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Phase 2 campagne (2026-05-28) : auto-archivage des campagnes terminées depuis > 30 j
+    // sans aucune OP active. Non-destructif (juste _archived = true). Tourne côté admin.
+    // ───────────────────────────────────────────────────────────────────────
+    if (typeof _autoArchiveCampagnesFinies === 'function') {
+      const _nbArch = _autoArchiveCampagnesFinies();
+      if (_nbArch > 0 && typeof saveData === 'function') {
+        setTimeout(() => { try { saveData(); } catch(e) { console.warn('[AUTO-ARCHIVE-CAMP] save raté:', e); } }, 2500);
       }
     }
     // Migration one-shot (avril 2026) : DÉJÀ APPLIQUÉE — ne plus ré-exécuter.
@@ -16428,57 +16443,11 @@ function reopenOp(id) {
   saveData();
   renderOps();
 }
-// Rattachement rapide d'une OP à une campagne (existante ou nouvelle)
+// Rattachement rapide d'une OP à une campagne (existante ou nouvelle).
+// 2026-05-28 Phase 2 : remplace l'ancien prompt-texte buggy par le picker pvCampagnePicker
+// (modale avec liste cliquable + confirmation + bouton "+ Nouvelle campagne").
 async function quickAttachCampagne(opId) {
-  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
-  const op = ops.find(o => o.id === opId);
-  if (!op) return;
-  // Lister les campagnes existantes
-  const campList = campagnes.filter(c => !isCampagneTerminee(c)).slice().sort((a, b) => a.nom.localeCompare(b.nom));
-  let choix;
-  if (campList.length > 0) {
-    const listeTxt = campList.map((c, i) => `  ${i + 1}. ${c.nom}`).join('\n');
-    choix = prompt(`Rattacher "${getOpProductDisplay(op).label}" à une campagne :\n\n${listeTxt}\n\nTaper le numéro, ou un nouveau nom pour créer une campagne :\n(Laisser vide pour annuler)`);
-  } else {
-    choix = prompt(`Créer une campagne pour "${getOpProductDisplay(op).label}" :\n\nNom de la campagne :\n(Laisser vide pour annuler)`);
-  }
-  if (!choix || !choix.trim()) return;
-  const idx = parseInt(choix.trim(), 10);
-  let campagne;
-  if (!isNaN(idx) && idx >= 1 && idx <= campList.length) {
-    campagne = campList[idx - 1];
-  } else {
-    // Chercher par nom exact
-    campagne = campagnes.find(c => c.nom.toLowerCase() === choix.trim().toLowerCase());
-    if (!campagne) {
-      // Créer une nouvelle campagne
-      const newId = 'CAMP-' + String(nextCampagneId++).padStart(4, '0');
-      campagne = { id: newId, nom: choix.trim(), dateDebut: op.dateDebut || ymd(new Date()), dateFin: null, commentaire: '', _ts: new Date().toISOString() };
-      if (typeof ensureCampagneModel === 'function') ensureCampagneModel(campagne);
-      campagnes.push(campagne);
-    }
-  }
-  op.campagneId = campagne.id;
-  op._ts = new Date().toISOString();
-  logAction('OP rattachée campagne', _logOpLabel(opId) + ' → 📣 ' + campagne.nom);
-  // Proposer d'aligner les dates de l'OP sur celles de la campagne
-  if (campagne.dateDebut || campagne.dateFin) {
-    const campDates = `${campagne.dateDebut ? fmtFR(campagne.dateDebut) : '?'} → ${campagne.dateFin ? fmtFR(campagne.dateFin) : '?'}`;
-    const opDates = `${op.dateDebut ? fmtFR(op.dateDebut) : '?'} → ${op.dateFin ? fmtFR(op.dateFin) : '?'}`;
-    const doAlign = await pvConfirm(`Aligner les dates de l'OP sur la campagne "${campagne.nom}" ?\n\nDates campagne : ${campDates}\nDates OP actuelles : ${opDates}\n\nOui = adopter les dates de la campagne\nNon = garder les dates actuelles`);
-    if (doAlign) {
-      if (campagne.dateDebut) { op.dateDebut = campagne.dateDebut; op._dateDebutManuelle = true; }
-      if (campagne.dateFin)   { op.dateFin = campagne.dateFin; op._dateFinManuelle = true; }
-      op._ts = new Date().toISOString();
-      // Garde-fou : si dateFin < dateDebut après alignement, annuler la dateFin
-      if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) {
-        console.warn('[CAMPAGNE] dateFin', op.dateFin, '< dateDebut', op.dateDebut, '→ dateFin annulée');
-        op.dateFin = null; op._dateFinManuelle = false;
-      }
-    }
-  }
-  saveData();
-  renderOps();
+  return pvCampagnePicker(opId);
 }
 
 // Éditer une campagne (nom, dates)
@@ -16535,9 +16504,382 @@ async function quickDetachCampagne(opId) {
   const c = getCampagne(op.campagneId);
   const campNom = c ? c.nom : '?';
   if (!await pvConfirm(`Retirer "${getOpProductDisplay(op).label}" de la campagne "${campNom}" ?`)) return;
-  op.campagneId = null;
+  op.campagneId = ''; // 2026-05-28 Phase 2 campagne : '' au lieu de null pour propagation merge
+  op._ts = new Date().toISOString();
   saveData();
   renderOps();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PHASE 2 CAMPAGNE — 2026-05-28
+// Modale unifiée création/édition d'une campagne avec liste cochable d'OPs.
+// Remplace le prompt-texte buggy de quickAttachCampagne par une UI fiable.
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Modale large : édite (ou crée) une campagne et choisit ses OPs.
+// Args :
+//   campagneId : string|null  → null pour création
+//   opIdsPreselected : string[]  → OPs à pré-cocher en plus de celles déjà rattachées
+//   opts : { defaultDateDebut, defaultDateFin }
+// Retourne Promise<{ campagneData:{nom,dateDebut,dateFin,commentaire}, opIds:[...] } | null>
+function pvCampagneFormulaire(campagneId, opIdsPreselected, opts) {
+  opts = opts || {};
+  const isEdit = !!campagneId;
+  const c = isEdit ? getCampagne(campagneId) : null;
+  if (isEdit && !c) { pvAlert('Campagne introuvable.'); return Promise.resolve(null); }
+  const initNom = isEdit ? (c.nom || '') : '';
+  const initDebut = isEdit ? (c.dateDebut || '') : (opts.defaultDateDebut || ymd(new Date()));
+  const initFin = isEdit ? (c.dateFin || '') : (opts.defaultDateFin || '');
+  const initComment = isEdit ? (c.commentaire || '') : '';
+  const title = isEdit ? ('📣 Campagne « ' + (c.nom || '?') + ' »') : '📣 Nouvelle campagne';
+  // OPs candidates : actives, non archivées, non NATIONALE (les NATIONALE ont leur propre regroupement)
+  const candidateOps = ops.filter(o => !o._archived && o.type !== 'NATIONALE').slice().sort((a, b) => {
+    const ad = a.dateDebut || '9999-99-99', bd = b.dateDebut || '9999-99-99';
+    if (ad !== bd) return ad.localeCompare(bd);
+    return (a.id || '').localeCompare(b.id || '');
+  });
+  // Pré-sélection : déjà dans la campagne + opIdsPreselected
+  const alreadyIn = isEdit ? new Set(candidateOps.filter(o => o.campagneId === campagneId).map(o => o.id)) : new Set();
+  const initSel = new Set([...(opIdsPreselected || []), ...alreadyIn]);
+
+  function escAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  function renderOpRow(o, selected) {
+    const _disp = getOpProductDisplay(o);
+    const _opTypeMeta = OP_TYPE_META[o.type] || { label: o.type, color: '#94a3b8' };
+    const _datesLbl = (o.dateDebut || o.dateFin)
+      ? ((o.dateDebut ? fmtFR(o.dateDebut) : '?') + ' → ' + (o.dateFin ? fmtFR(o.dateFin) : '?'))
+      : 'sans dates';
+    const _otherCampNote = o.campagneId && o.campagneId !== campagneId
+      ? `<span style="color:#fbbf24; font-size:9.5px; margin-left:6px; padding:1px 6px; background:#f59e0b15; border:1px solid #f59e0b40; border-radius:3px;" title="Actuellement rattachée à cette campagne (sera déplacée si tu coches)">⚠ déjà dans : ${escText(getCampagneLabel(o.campagneId))}</span>`
+      : '';
+    const _label = (_disp && _disp.label) ? _disp.label : o.id;
+    return `<label data-opid="${o.id}" style="display:flex; align-items:center; gap:8px; padding:6px 8px; background:#1e293b; border:1px solid #33415540; border-radius:4px; cursor:pointer; font-size:11px;" onmouseenter="this.style.background='#334155'" onmouseleave="this.style.background='#1e293b'">
+      <input type="checkbox" class="_pvCampOpCheck" value="${o.id}" ${selected ? 'checked' : ''} style="cursor:pointer; width:14px; height:14px; accent-color:${_opTypeMeta.color};">
+      <span style="display:inline-block; min-width:62px; padding:1px 6px; background:${_opTypeMeta.color}25; color:${_opTypeMeta.color}; border:1px solid ${_opTypeMeta.color}50; border-radius:3px; font-size:9px; font-weight:700; text-align:center; text-transform:uppercase;">${escText(_opTypeMeta.label)}</span>
+      <span style="flex:1; color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escText(_label)}</span>
+      <span style="color:#94a3b8; font-size:9.5px; white-space:nowrap;">${escText(_datesLbl)}</span>
+      ${_otherCampNote}
+    </label>`;
+  }
+
+  const headHtml = `
+    <div style="color:#fbbf24; font-weight:700; font-size:15px; margin-bottom:14px;">${escText(title)}</div>
+    <div style="display:grid; grid-template-columns:1fr 150px 150px; gap:10px; margin-bottom:10px;">
+      <label style="color:#94a3b8; font-size:11px;">Nom *
+        <input type="text" id="_pvCampNom" value="${escAttr(initNom)}" placeholder="Ex. Nouveauté New Cueillette" style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;">
+      </label>
+      <label style="color:#94a3b8; font-size:11px;">Date de début
+        <input type="date" id="_pvCampDebut" value="${escAttr(initDebut)}" style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;">
+      </label>
+      <label style="color:#94a3b8; font-size:11px;">Date de fin
+        <input type="date" id="_pvCampFin" value="${escAttr(initFin)}" style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;">
+      </label>
+    </div>
+    <label style="color:#94a3b8; font-size:11px; display:block; margin-bottom:14px;">Commentaire (optionnel)
+      <textarea id="_pvCampComment" rows="2" placeholder="Ex. partenaire, mécanique, contexte..." style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px; font-family:inherit; resize:vertical;">${escText(initComment)}</textarea>
+    </label>
+    <div style="border-top:1px solid #33415540; padding-top:12px;">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+        <span style="color:#94a3b8; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;">OPs rattachées</span>
+        <span id="_pvCampCount" style="font-size:10px; color:#fbbf24; font-weight:700;">${initSel.size} cochée${initSel.size > 1 ? 's' : ''} / ${candidateOps.length}</span>
+        <input type="search" id="_pvCampFiltre" placeholder="Filtrer (nom, type)..." style="flex:1; min-width:140px; margin-left:auto; padding:4px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; font-size:11px;">
+        <span id="_pvCampSelAll" style="cursor:pointer; font-size:10px; color:#60a5fa; text-decoration:underline;">Tout cocher</span>
+        <span id="_pvCampSelNone" style="cursor:pointer; font-size:10px; color:#94a3b8; text-decoration:underline;">Tout décocher</span>
+      </div>
+      <div id="_pvCampOpsList" style="max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; padding:4px 2px;">
+        ${candidateOps.length === 0 ? '<div style="color:#64748b; font-size:11px; padding:20px; text-align:center;">Aucune OP active à rattacher.</div>' : candidateOps.map(o => renderOpRow(o, initSel.has(o.id))).join('')}
+      </div>
+    </div>
+  `;
+
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center; animation:pvModalFadeIn 0.15s ease-out;';
+    overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:20px; max-width:820px; width:94%; max-height:90vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5); animation:pvModalSlideIn 0.15s ease-out;">
+      ${headHtml}
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:18px; padding-top:14px; border-top:1px solid #33415540;">
+        <button id="_pvCampCancel" style="padding:8px 20px; font-size:12px; border-radius:5px; cursor:pointer; background:transparent; color:#94a3b8; border:1px solid #475569;">Annuler</button>
+        <button id="_pvCampValider" style="padding:8px 20px; font-size:12px; border-radius:5px; cursor:pointer; background:#22c55e; color:#0f172a; font-weight:700; border:none;">${isEdit ? 'Enregistrer' : 'Créer la campagne'}</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    function updateCount() {
+      const n = overlay.querySelectorAll('._pvCampOpCheck:checked').length;
+      const total = candidateOps.length;
+      overlay.querySelector('#_pvCampCount').textContent = n + ' cochée' + (n > 1 ? 's' : '') + ' / ' + total;
+    }
+    overlay.querySelector('#_pvCampOpsList').addEventListener('change', e => {
+      if (e.target && e.target.classList && e.target.classList.contains('_pvCampOpCheck')) updateCount();
+    });
+    overlay.querySelector('#_pvCampSelAll').addEventListener('click', () => {
+      overlay.querySelectorAll('._pvCampOpCheck').forEach(cb => {
+        const row = cb.closest('label[data-opid]');
+        if (row && row.style.display !== 'none') cb.checked = true;
+      });
+      updateCount();
+    });
+    overlay.querySelector('#_pvCampSelNone').addEventListener('click', () => {
+      overlay.querySelectorAll('._pvCampOpCheck').forEach(cb => {
+        const row = cb.closest('label[data-opid]');
+        if (row && row.style.display !== 'none') cb.checked = false;
+      });
+      updateCount();
+    });
+    overlay.querySelector('#_pvCampFiltre').addEventListener('input', e => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      overlay.querySelectorAll('label[data-opid]').forEach(row => {
+        const txt = row.textContent.toLowerCase();
+        row.style.display = (!q || txt.indexOf(q) >= 0) ? '' : 'none';
+      });
+    });
+    function close(result) { overlay.remove(); resolve(result); }
+    overlay.querySelector('#_pvCampCancel').addEventListener('click', () => close(null));
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(null); });
+    overlay.querySelector('#_pvCampValider').addEventListener('click', () => {
+      const nom = overlay.querySelector('#_pvCampNom').value.trim();
+      if (!nom) { pvAlert('Le nom de la campagne est obligatoire.'); return; }
+      const dateDebut = overlay.querySelector('#_pvCampDebut').value || '';
+      const dateFin = overlay.querySelector('#_pvCampFin').value || '';
+      if (dateDebut && dateFin && dateFin < dateDebut) {
+        pvAlert('La date de fin (' + fmtFR(dateFin) + ') est antérieure à la date de début (' + fmtFR(dateDebut) + '). Vérifie les dates.');
+        return;
+      }
+      const commentaire = overlay.querySelector('#_pvCampComment').value || '';
+      const opIds = [].slice.call(overlay.querySelectorAll('._pvCampOpCheck:checked')).map(cb => cb.value);
+      close({ campagneData: { nom: nom, dateDebut: dateDebut, dateFin: dateFin, commentaire: commentaire }, opIds: opIds });
+    });
+    setTimeout(() => { const nomInp = overlay.querySelector('#_pvCampNom'); if (nomInp) nomInp.focus(); }, 30);
+  });
+}
+
+// Ouvre la modale et applique le résultat (création ou édition de campagne + rattachements).
+// Appelée par les boutons "📣 Nouvelle campagne" et "📋 Gérer les OPs".
+async function openCampagneFormulaire(campagneId, preselectedOpIds) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const result = await pvCampagneFormulaire(campagneId, preselectedOpIds);
+  if (!result) return;
+  const _now = new Date().toISOString();
+  let c;
+  if (campagneId) {
+    c = getCampagne(campagneId);
+    if (!c) { pvAlert('Campagne introuvable.'); return; }
+    c.nom = result.campagneData.nom;
+    c.dateDebut = result.campagneData.dateDebut || '';
+    c.dateFin = result.campagneData.dateFin || '';
+    c.commentaire = result.campagneData.commentaire || '';
+    c._ts = _now;
+  } else {
+    // Détection homonyme (cas-insensible, sans accent simple)
+    const _norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+    const existing = campagnes.find(cc => _norm(cc.nom) === _norm(result.campagneData.nom));
+    if (existing) {
+      const useExisting = await pvConfirm('Une campagne du même nom existe déjà : « ' + existing.nom + ' ».\n\nUtiliser celle-là (Oui) ou créer une 2ème campagne homonyme (Non) ?', { ok: 'Utiliser l\'existante', cancel: 'Créer 2ème' });
+      if (useExisting) {
+        // On bascule en mode édition de l'existante
+        c = existing;
+        c.dateDebut = result.campagneData.dateDebut || c.dateDebut || '';
+        c.dateFin = result.campagneData.dateFin || c.dateFin || '';
+        c.commentaire = result.campagneData.commentaire || c.commentaire || '';
+        c._ts = _now;
+      }
+    }
+    if (!c) {
+      c = {
+        id: 'CAMP-' + String(nextCampagneId++).padStart(4, '0'),
+        nom: result.campagneData.nom,
+        dateDebut: result.campagneData.dateDebut || '',
+        dateFin: result.campagneData.dateFin || '',
+        commentaire: result.campagneData.commentaire || '',
+        _ts: _now
+      };
+      if (typeof ensureCampagneModel === 'function') ensureCampagneModel(c);
+      campagnes.push(c);
+    }
+  }
+  // Rattachements : on synchronise selon les cases cochées
+  const opIdsSet = new Set(result.opIds || []);
+  const previouslyAttached = ops.filter(o => o.campagneId === c.id);
+  previouslyAttached.forEach(o => {
+    if (!opIdsSet.has(o.id)) {
+      o.campagneId = '';
+      o._ts = _now;
+    }
+  });
+  (result.opIds || []).forEach(opId => {
+    const o = ops.find(x => x.id === opId);
+    if (!o) return;
+    if (o.campagneId !== c.id) {
+      o.campagneId = c.id;
+      o._ts = _now;
+    }
+  });
+  if (typeof logAction === 'function') logAction(campagneId ? 'Campagne mise à jour' : 'Campagne créée', '📣 ' + c.nom + ' (' + (result.opIds || []).length + ' OP' + ((result.opIds || []).length > 1 ? 's' : '') + ')');
+  saveData();
+  if (typeof renderOps === 'function') renderOps();
+  if (typeof renderDashboard === 'function') renderDashboard();
+}
+
+// Picker compact : utilisé par le bouton "📣 Campagne ?" sur une carte OP.
+// Affiche les campagnes actives cliquables + un bouton "+ Nouvelle campagne" qui bascule sur le formulaire complet.
+async function pvCampagnePicker(opId) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  const campList = campagnes.filter(c => !c._archived && !isCampagneTerminee(c)).slice().sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+  function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+  const opLbl = (getOpProductDisplay(op).label || op.id);
+  const itemsHtml = campList.length === 0
+    ? '<div style="color:#64748b; font-size:11px; padding:14px; text-align:center;">Aucune campagne active. Crée-en une nouvelle.</div>'
+    : campList.map(c => {
+        const datesL = (c.dateDebut || c.dateFin) ? ((c.dateDebut ? fmtFR(c.dateDebut) : '?') + ' → ' + (c.dateFin ? fmtFR(c.dateFin) : '?')) : 'sans dates';
+        const nbOps = ops.filter(o => o.campagneId === c.id && !o._archived).length;
+        return `<div data-cid="${c.id}" class="_pvCampPickerItem" style="display:flex; align-items:center; gap:10px; padding:8px 10px; background:#1e293b; border:1px solid #334155; border-radius:5px; cursor:pointer; font-size:12px;" onmouseenter="this.style.background='#334155'; this.style.borderColor='#f59e0b40';" onmouseleave="this.style.background='#1e293b'; this.style.borderColor='#334155';">
+          <span style="color:#fbbf24; font-size:14px;">📣</span>
+          <span style="flex:1; color:#e2e8f0; font-weight:600;">${escText(c.nom)}</span>
+          <span style="color:#94a3b8; font-size:10px;">${escText(datesL)}</span>
+          <span style="color:#94a3b8; font-size:10px;">${nbOps} OP${nbOps > 1 ? 's' : ''}</span>
+        </div>`;
+      }).join('');
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center; animation:pvModalFadeIn 0.15s ease-out;';
+    overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:20px; max-width:580px; width:92%; max-height:80vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+      <div style="color:#fbbf24; font-weight:700; font-size:14px; margin-bottom:6px;">Rattacher une OP à une campagne</div>
+      <div style="color:#94a3b8; font-size:11px; margin-bottom:14px;">OP : <span style="color:#e2e8f0; font-weight:600;">${escText(opLbl)}</span></div>
+      <div style="display:flex; flex-direction:column; gap:6px; max-height:50vh; overflow-y:auto; padding-right:2px;">${itemsHtml}</div>
+      <div style="display:flex; gap:8px; justify-content:space-between; margin-top:14px; padding-top:12px; border-top:1px solid #33415540;">
+        <button id="_pvPickNew" style="padding:8px 16px; font-size:12px; border-radius:5px; cursor:pointer; background:#3b82f6; color:#0f172a; font-weight:700; border:none;">+ Nouvelle campagne</button>
+        <button id="_pvPickCancel" style="padding:8px 16px; font-size:12px; border-radius:5px; cursor:pointer; background:transparent; color:#94a3b8; border:1px solid #475569;">Annuler</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    function close(result) { overlay.remove(); resolve(result); }
+    overlay.querySelectorAll('._pvCampPickerItem').forEach(item => {
+      item.addEventListener('click', () => close({ action: 'attach', cid: item.dataset.cid }));
+    });
+    overlay.querySelector('#_pvPickNew').addEventListener('click', () => close({ action: 'new' }));
+    overlay.querySelector('#_pvPickCancel').addEventListener('click', () => close(null));
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(null); });
+  }).then(async result => {
+    if (!result) return;
+    if (result.action === 'new') {
+      // Bascule sur le formulaire complet, avec cette OP préselectionnée
+      await openCampagneFormulaire(null, [opId]);
+      return;
+    }
+    if (result.action === 'attach') {
+      const c = getCampagne(result.cid);
+      if (!c) { pvAlert('Campagne introuvable.'); return; }
+      // Confirmation explicite avant écriture
+      const doIt = await pvConfirm('Rattacher cette OP à la campagne :\n\n📣 ' + c.nom + '\n\nConfirmer ?', { ok: 'Rattacher', okColor: '#22c55e' });
+      if (!doIt) return;
+      const _now = new Date().toISOString();
+      op.campagneId = c.id;
+      op._ts = _now;
+      if (typeof logAction === 'function') logAction('OP rattachée campagne', _logOpLabel(opId) + ' → 📣 ' + c.nom);
+      // Proposer d'aligner les dates de l'OP sur celles de la campagne
+      if (c.dateDebut || c.dateFin) {
+        const campDates = ((c.dateDebut ? fmtFR(c.dateDebut) : '?') + ' → ' + (c.dateFin ? fmtFR(c.dateFin) : '?'));
+        const opDates = ((op.dateDebut ? fmtFR(op.dateDebut) : '?') + ' → ' + (op.dateFin ? fmtFR(op.dateFin) : '?'));
+        const doAlign = await pvConfirm('Aligner les dates de l\'OP sur la campagne ?\n\nDates campagne : ' + campDates + '\nDates OP actuelles : ' + opDates + '\n\nOui = adopter les dates de la campagne\nNon = garder les dates actuelles');
+        if (doAlign) {
+          if (c.dateDebut) { op.dateDebut = c.dateDebut; op._dateDebutManuelle = true; }
+          if (c.dateFin)   { op.dateFin = c.dateFin; op._dateFinManuelle = true; }
+          op._ts = new Date().toISOString();
+          if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) {
+            console.warn('[CAMPAGNE] dateFin', op.dateFin, '< dateDebut', op.dateDebut, '→ dateFin annulée');
+            op.dateFin = null; op._dateFinManuelle = false;
+          }
+        }
+      }
+      saveData();
+      if (typeof renderOps === 'function') renderOps();
+    }
+  });
+}
+
+// Supprime une campagne. Refuse si OPs actives encore rattachées (propose de détacher d'abord).
+async function deleteCampagne(campagneId) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const c = getCampagne(campagneId);
+  if (!c) return;
+  const attachedAll = ops.filter(o => o.campagneId === campagneId);
+  const attachedActives = attachedAll.filter(o => !o._archived && opTimeStatus(o) !== 'TERMINEE');
+  if (attachedActives.length > 0) {
+    const noms = attachedActives.slice(0, 6).map(o => '• ' + ((getOpProductDisplay(o).label) || o.id)).join('\n');
+    const more = attachedActives.length > 6 ? '\n... et ' + (attachedActives.length - 6) + ' autres' : '';
+    const doDetach = await pvConfirm(
+      'La campagne « ' + c.nom + ' » a encore ' + attachedActives.length + ' OP' + (attachedActives.length > 1 ? 's' : '') + ' active' + (attachedActives.length > 1 ? 's' : '') + ' :\n\n' + noms + more + '\n\nDétacher ces OPs et supprimer la campagne ?',
+      { ok: 'Détacher et supprimer', okColor: '#ef4444' }
+    );
+    if (!doDetach) return;
+  } else {
+    const msg = attachedAll.length > 0
+      ? 'Supprimer la campagne « ' + c.nom + ' » et détacher les ' + attachedAll.length + ' OP' + (attachedAll.length > 1 ? 's' : '') + ' terminées ?'
+      : 'Supprimer la campagne « ' + c.nom + ' » ?';
+    if (!await pvConfirm(msg, { ok: 'Supprimer', okColor: '#ef4444' })) return;
+  }
+  const _now = new Date().toISOString();
+  attachedAll.forEach(o => { o.campagneId = ''; o._ts = _now; });
+  campagnes = campagnes.filter(cc => cc.id !== campagneId);
+  if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.add) _deletedIds.add(campagneId);
+  if (typeof logAction === 'function') logAction('Campagne supprimée', '🗑 ' + c.nom);
+  saveData();
+  if (typeof renderOps === 'function') renderOps();
+}
+
+// Marque comme archivées les campagnes terminées depuis > 30 jours et sans OP active.
+// Tourne uniquement côté admin (pour ne pas dériver côté boutique).
+function _autoArchiveCampagnesFinies() {
+  if (typeof isAdmin !== 'function' || !isAdmin()) return 0;
+  const cutoff = ymd(new Date(Date.now() - 30 * 86400000));
+  let changed = 0;
+  campagnes.forEach(c => {
+    if (c._archived) return;
+    if (!c.dateFin) return;
+    if (c.dateFin >= cutoff) return;
+    const hasActive = ops.some(o => o.campagneId === c.id && !o._archived && opTimeStatus(o) !== 'TERMINEE');
+    if (hasActive) return;
+    c._archived = true;
+    c._ts = new Date().toISOString();
+    changed++;
+  });
+  if (changed > 0) console.log('[CAMPAGNES] ' + changed + ' campagne(s) auto-archivée(s) (terminée depuis > 30j, plus aucune OP active)');
+  return changed;
+}
+
+// Liste les campagnes archivées prêtes à purger définitivement (bandeau / bouton manuel).
+function _getCampagnesArchivees() {
+  return campagnes.filter(c => c._archived);
+}
+
+// Suppression définitive en lot des campagnes archivées.
+async function purgeCampagnesArchivees() {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const archived = _getCampagnesArchivees();
+  if (archived.length === 0) { pvAlert('Aucune campagne archivée à purger.'); return; }
+  // Vérif sécurité : on ne purge pas les campagnes qui ont encore des OPs actives (paranoïa)
+  const purgeables = archived.filter(c => !ops.some(o => o.campagneId === c.id && !o._archived && opTimeStatus(o) !== 'TERMINEE'));
+  if (purgeables.length === 0) { pvAlert('Toutes les campagnes archivées ont encore des OPs actives. Détache-les d\'abord.'); return; }
+  const noms = purgeables.slice(0, 8).map(c => '• ' + c.nom).join('\n');
+  const more = purgeables.length > 8 ? '\n... et ' + (purgeables.length - 8) + ' autres' : '';
+  const doIt = await pvConfirm(
+    'Supprimer définitivement ' + purgeables.length + ' campagne' + (purgeables.length > 1 ? 's' : '') + ' archivée' + (purgeables.length > 1 ? 's' : '') + ' ?\n\n' + noms + more + '\n\nLes OPs terminées rattachées seront détachées.',
+    { ok: 'Supprimer définitivement', okColor: '#ef4444' }
+  );
+  if (!doIt) return;
+  const _now = new Date().toISOString();
+  const purgeIds = new Set(purgeables.map(c => c.id));
+  ops.filter(o => purgeIds.has(o.campagneId)).forEach(o => { o.campagneId = ''; o._ts = _now; });
+  campagnes = campagnes.filter(cc => !purgeIds.has(cc.id));
+  if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.add) purgeIds.forEach(id => _deletedIds.add(id));
+  if (typeof logAction === 'function') logAction('Campagnes purgées', purgeables.length + ' campagne(s) supprimée(s)');
+  saveData();
+  if (typeof renderOps === 'function') renderOps();
 }
 
 async function deleteOp(id) {
@@ -17120,7 +17462,9 @@ function renderOps() {
               <span style="display:inline-flex; gap:3px; justify-content:center;">${campDotsNat}</span>
               <span style="display:inline-flex; gap:4px; justify-content:flex-end;">
                 <span onclick="event.stopPropagation(); openCampagneEtiquettesDialog('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; font-weight:600; white-space:nowrap;">🏷️ Étiquettes</span>
+                <span onclick="event.stopPropagation(); openCampagneFormulaire('${cid}', [])" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Ajouter ou retirer des OPs de cette campagne">📋 Gérer les OPs</span>
                 <span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b40; border-radius:3px; font-weight:600; white-space:nowrap;">✎ Modifier</span>
+                <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
               </span>
             </div>
             ${isCampCollapsed ? '' : `<div style="padding:6px 0 8px 0;">${opsInCampagne.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('')}</div>`}
@@ -17169,7 +17513,9 @@ function renderOps() {
               <span style="display:inline-flex; gap:4px; justify-content:flex-end;">
                 <span onclick="event.stopPropagation(); openCampagneEtiquettesDialog('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Générer étiquettes pour tous les produits">🏷️ Étiquettes</span>
                 <span onclick="event.stopPropagation(); generateAffichePrixRouge('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Générer une affiche PDF Prix Rouge avec la liste des produits et prix">📄 Affiche</span>
+                <span onclick="event.stopPropagation(); openCampagneFormulaire('${cid}', [])" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Ajouter ou retirer des OPs de cette campagne">📋 Gérer les OPs</span>
                 <span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Modifier le nom et les dates">✎ Modifier</span>
+                <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
               </span>
             </div>
             ${isCampCol ? '' : `<div style="padding:6px 0 8px 0;">${opsInC.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('')}</div>`}
@@ -17217,7 +17563,9 @@ function renderOps() {
               <span style="display:inline-flex; gap:3px; justify-content:center;">${campDotsOther}</span>
               <span style="display:inline-flex; gap:4px; justify-content:flex-end;">
                 <span onclick="event.stopPropagation(); openCampagneEtiquettesDialog('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Générer étiquettes pour tous les produits">🏷️ Étiquettes</span>
+                <span onclick="event.stopPropagation(); openCampagneFormulaire('${cid}', [])" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Ajouter ou retirer des OPs de cette campagne">📋 Gérer les OPs</span>
                 <span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:${t.color}15; color:${t.color}; border:1px solid ${t.color}40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Modifier le nom et les dates">✎ Modifier</span>
+                <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
               </span>
             </div>
             ${isCampCol ? '' : `<div style="padding:6px 0 8px 0;">${opsInC.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('')}</div>`}
@@ -17245,7 +17593,15 @@ function renderOps() {
     });
   }
 
-  container.innerHTML = form + toolbar + overviewBlock + opsHtml;
+  // 2026-05-28 Phase 2 campagne : barre dédiée campagne (bouton "Nouvelle campagne" + bandeau purge si applicable)
+  const _nbArchivedCamp = (typeof _getCampagnesArchivees === 'function') ? _getCampagnesArchivees().length : 0;
+  const campagneBar = `<div style="display:flex; align-items:center; gap:10px; margin:6px 0 10px; padding:8px 12px; background:#0f172a; border:1px solid #334155; border-radius:6px; flex-wrap:wrap;">
+    <span onclick="openCampagneFormulaire(null, [])" style="cursor:pointer; padding:5px 12px; font-size:11px; font-weight:700; background:#f59e0b; color:#0f172a; border-radius:4px; white-space:nowrap;" title="Créer une nouvelle campagne et y rattacher plusieurs OPs en une fois">📣 Nouvelle campagne</span>
+    ${_nbArchivedCamp > 0 ? `<span style="font-size:10.5px; color:#94a3b8;">${_nbArchivedCamp} campagne${_nbArchivedCamp > 1 ? 's' : ''} archivée${_nbArchivedCamp > 1 ? 's' : ''} (terminée${_nbArchivedCamp > 1 ? 's' : ''} depuis &gt; 30 j, sans OP active).</span>
+      <span onclick="purgeCampagnesArchivees()" style="cursor:pointer; padding:3px 10px; font-size:10px; font-weight:700; background:#ef444420; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; white-space:nowrap;" title="Supprimer définitivement les campagnes archivées">🗑 Purger les archivées</span>` : ''}
+    <span style="margin-left:auto; font-size:10px; color:#64748b; font-style:italic;">Tu peux aussi rattacher une OP isolée via 📣 Campagne ? sur sa carte.</span>
+  </div>`;
+  container.innerHTML = form + toolbar + campagneBar + overviewBlock + opsHtml;
 
   // Pré-sélection de campagne (après création d'une vague, pour enchaîner).
   if (opPreselectCampagneId) {
@@ -17855,6 +18211,7 @@ function opTimeStatus(op) {
 // Campagne terminée = soit dateFin passée, soit toutes ses OPs sont terminées
 function isCampagneTerminee(c) {
   if (!c) return false;
+  if (c._archived) return true; // 2026-05-28 Phase 2 campagne : archivée = terminée
   const today = ymd(new Date());
   // Si la campagne a une dateFin passée → terminée
   if (c.dateFin && c.dateFin < today) return true;
