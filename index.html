@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 17:02</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 17:44</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -4556,15 +4556,18 @@ function syncActionStepsToOp(a) {
     }
     // NOUVEAUTE/EXCLU (fanfare) liées par rentrerActionId (lien direct uniquement).
     // L'OP lit les actions dynamiquement au rendu — pas besoin de lien indirect par produit.
+    // 2026-05-28 Phase 2 hygiène clôture : ajout du filtre dateFin pour ne plus propager
+    // les coches sur une NOUVEAUTÉ/EXCLU finie naturellement.
     ops.filter(function(o) {
       if (o.type !== 'NOUVEAUTE' && o.type !== 'EXCLU') return false;
-      if (o._archived) return false;
+      if (o._archived || !isOpOuverte(o)) return false;
       return o.rentrerActionId === a.id;
     }).forEach(function(o) { if (linkedOps.indexOf(o) < 0) linkedOps.push(o); });
     // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit (avec filtre parfum)
     // 2026-05-28 audit OP : ajout du filtre parfum sur la branche "par produit".
+    // 2026-05-28 Phase 2 hygiène clôture : ajout du filtre dateFin.
     ops.filter(function(o) {
-      if (o.type === 'COUP' || o._archived) return false;
+      if (o.type === 'COUP' || o._archived || !isOpOuverte(o)) return false;
       if (!o.prep || !o.prep.commanderProduits) return false;
       if (o.rentrerActionId === a.id) return true;
       if ((o.produitIds || []).indexOf(a.produitId) >= 0 && _opMatchesActionParfum(o, a)) return true;
@@ -6636,6 +6639,48 @@ async function loadData() {
         setTimeout(() => { try { saveData(); } catch(e) { console.warn('[AUTO-ARCHIVE-CAMP] save raté:', e); } }, 2500);
       }
     }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Phase 2 audit OP — hygiène (2026-05-28) : garbage collector des liens orphelins.
+    // Quand une action est annulée ou supprimée, son OP fanfare/PR/etc. garde son champ
+    // *ActionId qui pointe dans le vide. Le bloc miroir filtre déjà via isOpOuverte mais
+    // d'autres fallbacks peuvent re-tomber dessus. On nettoie ici, côté admin uniquement.
+    // ───────────────────────────────────────────────────────────────────────
+    if (typeof isAdmin === 'function' && isAdmin()) {
+      const _gcNow = new Date().toISOString();
+      const _gcLinkFields = ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId'];
+      let _gcChanged = 0;
+      ops.forEach(op => {
+        let opTouched = false;
+        _gcLinkFields.forEach(f => {
+          const id = op[f];
+          if (!id) return;
+          const a = actions.find(x => x.id === id);
+          if (!a || a.annulee) {
+            op[f] = '';
+            opTouched = true;
+            console.log('[GC-LINKS] OP ' + op.id + ' · ' + f + '=' + id + ' → "" (action ' + (a ? 'annulée' : 'introuvable') + ')');
+          }
+        });
+        if (Array.isArray(op.groupActionIds) && op.groupActionIds.length > 0) {
+          const cleaned = op.groupActionIds.filter(id => {
+            const a = actions.find(x => x.id === id);
+            return a && !a.annulee;
+          });
+          if (cleaned.length < op.groupActionIds.length) {
+            op.groupActionIds = cleaned;
+            opTouched = true;
+            console.log('[GC-LINKS] OP ' + op.id + ' · groupActionIds purgés (' + op.groupActionIds.length + ' restants)');
+          }
+        }
+        if (opTouched) { op._ts = _gcNow; _gcChanged++; }
+      });
+      if (_gcChanged > 0) {
+        console.log('[GC-LINKS] ' + _gcChanged + ' OP(s) nettoyée(s) — liens orphelins purgés');
+        if (typeof saveData === 'function') setTimeout(() => { try { saveData(); } catch(e) { console.warn('[GC-LINKS] save raté:', e); } }, 3000);
+      }
+    }
+
     // Migration one-shot (avril 2026) : DÉJÀ APPLIQUÉE — ne plus ré-exécuter.
     // L'ancienne migration forçait op.dateDebut = '2026-05-04' sur toutes les OPs ouvertes,
     // ce qui écrasait les dates posées manuellement si localStorage était vidé.
@@ -6677,27 +6722,7 @@ async function loadData() {
         console.log('[AUTO-HEAL] Restauré produitIds=[' + src.id + '] sur COUP ' + op.id);
       }
     });
-    // ── TRACEUR TEMPORAIRE : intercepte toute modification de dateFin sur les OPs PROP-010 (Coolfire Z60) ──
-    // À RETIRER une fois le bug identifié.
-    ops.forEach((op, idx) => {
-      if (!op.produitIds || !op.produitIds.includes('PROP-010')) return;
-      const opId = op.id;
-      const origDateFin = op.dateFin;
-      Object.defineProperty(op, 'dateFin', {
-        get() { return this._dateFin; },
-        set(v) {
-          if (v !== this._dateFin) {
-            const stack = new Error().stack.split('\n').slice(1, 6).map(s => s.trim()).join(' ← ');
-            console.warn('[TRACE-DATEFIN]', opId, ':', this._dateFin, '→', v, '|', stack);
-          }
-          this._dateFin = v;
-        },
-        enumerable: true,
-        configurable: true
-      });
-      Object.defineProperty(op, '_dateFin', { value: origDateFin, writable: true, enumerable: false, configurable: true });
-    });
-    // ── FIN TRACEUR ──
+    // 2026-05-28 Phase 2 hygiène : traceur PROP-010 (Coolfire Z60) retiré (diagnostic terminé).
     // Idem pour les OPs : chaque OP doit avoir etats[shop].steps cohérent avec son type.
     ops.forEach(op => ensureOpSteps(op));
     // Migration : aligner la source des pièces au défaut sémantique de leur type.
@@ -8147,30 +8172,7 @@ async function _doSyncPoll() {
           }
         }
       });
-      // ── TRACEUR POST-MERGE : réinstaller le setter dateFin sur les OPs PROP-010 ajoutées/remplacées par le merge ──
-      // Les OPs nouvellement ajoutées par _mergeOpEtats ou _mergeArray n'ont pas le Object.defineProperty.
-      // À RETIRER une fois le bug identifié.
-      ops.forEach(op => {
-        if (!op.produitIds || !op.produitIds.includes('PROP-010')) return;
-        // Skip si le setter est déjà installé (on teste la présence de _dateFin)
-        if (op.hasOwnProperty('_dateFin')) return;
-        const opId = op.id;
-        const origDateFin = op.dateFin;
-        Object.defineProperty(op, 'dateFin', {
-          get() { return this._dateFin; },
-          set(v) {
-            if (v !== this._dateFin) {
-              const stack = new Error().stack.split('\n').slice(1, 6).map(s => s.trim()).join(' ← ');
-              console.warn('[TRACE-DATEFIN-POSTSYNC]', opId, ':', this._dateFin, '→', v, '|', stack);
-            }
-            this._dateFin = v;
-          },
-          enumerable: true,
-          configurable: true
-        });
-        Object.defineProperty(op, '_dateFin', { value: origDateFin, writable: true, enumerable: false, configurable: true });
-      });
-      // ── FIN TRACEUR POST-MERGE ──
+      // 2026-05-28 Phase 2 hygiène : traceur post-merge PROP-010 retiré (diagnostic terminé).
       // Max des compteurs
       if (typeof remote.nextActionId === 'number') nextActionId = Math.max(nextActionId, remote.nextActionId);
       if (typeof remote.nextOpId === 'number') nextOpId = Math.max(nextOpId, remote.nextOpId);
@@ -17896,39 +17898,67 @@ function postPrixRougeDecision(opId, decision) {
       switchTabProgrammatic('ops', opId);
     }
   } else if (decision === 'modifier_prix') {
-    // Créer une action PRIX pour chaque produit encore en offre
+    // Créer une action PRIX pour chaque produit encore en offre.
+    // 2026-05-28 Phase 2 hygiène clôture : si l'OP source était parfumée (op.produitParfumId
+    // ou produitParfumIds rempli après Phase 1), on recrée des actions PRIX parfumées au lieu
+    // de retomber sur la gamme entière. Sinon comportement gamme comme avant.
     const pIds = op.produitIds || [];
+    const _opParfumIds = Array.isArray(op.produitParfumIds) && op.produitParfumIds.length > 0
+      ? op.produitParfumIds
+      : (op.produitParfumId ? [op.produitParfumId] : []);
     pIds.forEach(function(pid) {
       var kit = baseKits.find(function(k) { return k.id === pid; });
       var liq = baseLiq.find(function(g) { return g.id === pid; });
       var prod = kit || liq;
       if (!prod) return;
       if (prod.statutVie === 'SORTI' || prod.statutVie === 'SORTIE') return;
-      // Vérifier qu'il n'y a pas déjà une action PRIX ouverte
-      var existing = actions.find(function(a) {
-        return a.type === 'PRIX' && a.produitId === pid && !a.annulee && actionGlobalState(a) !== 'FAIT';
+      // Liste des couples (produit, parfum) pour lesquels créer une action.
+      // - Si OP parfumée : un couple par parfum cible (avec parfumId)
+      // - Sinon : un seul couple (sans parfum) = action gamme entière, comportement historique
+      var _targets;
+      if (liq && _opParfumIds.length > 0) {
+        _targets = _opParfumIds.map(function(pfId) {
+          var pf = (liq.parfums || []).find(function(p) { return p.id === pfId; });
+          if (!pf) { var idxMatch = String(pfId).match(/_p(\d+)$/); if (idxMatch) pf = (liq.parfums || [])[parseInt(idxMatch[1], 10)]; }
+          // Si parfum sorti, ne pas recréer
+          if (pf && (pf.s === 'SORTI' || pf.s === 'SORTIE')) return null;
+          return { parfumId: pfId, parfumNom: pf ? pf.n : '' };
+        }).filter(Boolean);
+        if (_targets.length === 0) return; // tous les parfums sont sortis
+      } else {
+        _targets = [{ parfumId: '', parfumNom: '' }];
+      }
+      _targets.forEach(function(tgt) {
+        // Vérifier qu'il n'y a pas déjà une action PRIX ouverte pour le même produit+parfum
+        var existing = actions.find(function(a) {
+          if (a.type !== 'PRIX' || a.produitId !== pid || a.annulee) return false;
+          if ((a.produitParfumId || '') !== (tgt.parfumId || '')) return false;
+          return actionGlobalState(a) !== 'FAIT';
+        });
+        if (existing) return;
+        var a = {
+          id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
+          type: 'PRIX',
+          produitId: pid,
+          produitType: kit ? 'kit' : 'liq',
+          produitParfumId: tgt.parfumId || '',
+          parfumNom: tgt.parfumNom || '',
+          priorite: 'HAUTE',
+          dateCreation: ymd(new Date()),
+          auteur: 'Post prix rouge',
+          etats: {},
+          dateCloture: null,
+          annulee: false,
+          lienOP: op.id,
+          decisionChoice: 'recalibrer',
+          prixAvant: (typeof op.prixRouge === 'number') ? op.prixRouge : prod.pv,
+          prixCible: null, // L'admin décidera du nouveau prix
+          note: 'Suite à fin d\'OP prix rouge — prix à redéfinir',
+          etiquetteRouge: false
+        };
+        a.etats = makeShopStates(a);
+        actions.push(a);
       });
-      if (existing) return;
-      var a = {
-        id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
-        type: 'PRIX',
-        produitId: pid,
-        produitType: kit ? 'kit' : 'liq',
-        priorite: 'HAUTE',
-        dateCreation: ymd(new Date()),
-        auteur: 'Post prix rouge',
-        etats: {},
-        dateCloture: null,
-        annulee: false,
-        lienOP: op.id,
-        decisionChoice: 'recalibrer',
-        prixAvant: (typeof op.prixRouge === 'number') ? op.prixRouge : prod.pv,
-        prixCible: null, // L'admin décidera du nouveau prix
-        note: 'Suite à fin d\'OP prix rouge — prix à redéfinir',
-        etiquetteRouge: false
-      };
-      a.etats = makeShopStates(a);
-      actions.push(a);
     });
     // Archiver l'OP prix rouge
     op._archived = true;
@@ -18928,12 +18958,32 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
     miniTags.push(`<span style="font-size:9px; padding:1px 5px; background:#22d3ee15; color:#22d3ee; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;" title="OP générée automatiquement depuis un relevé de prix concurrent">📊 Relevé</span>`);
   }
   // Badge croisé : OP ↔ Prix Rouge liés au même produit
+  // 2026-05-28 Phase 2 hygiène clôture : on filtre désormais `isOpOuverte(o)` pour ne plus
+  // afficher de badge pointant vers une OP morte (dateFin passée), et on resserre sur le parfum
+  // si applicable (cohérence avec la Phase 1 audit OP — gamme seule = fuite parfum/gamme).
   try {
     var _opPids = op.produitIds || [];
+    var _opPf = op.produitParfumId || '';
+    function _samePf(o) {
+      var _oPf = o.produitParfumId || '';
+      var _oPfs = Array.isArray(o.produitParfumIds) ? o.produitParfumIds : [];
+      // OP gamme entière (aucun parfum) : compatible avec tout
+      if (!_oPf && _oPfs.length === 0) return true;
+      if (_oPf && _oPf === _opPf) return true;
+      if (_oPfs.length > 0 && _opPf && _oPfs.indexOf(_opPf) >= 0) return true;
+      // OP avec parfum mais courante sans parfum (gamme entière) : on accepte (la PR couvre la gamme)
+      if ((_oPf || _oPfs.length > 0) && !_opPf) return true;
+      return false;
+    }
     if (_opPids.length > 0) {
       if (op.type === 'PRIX_ROUGE') {
-        // Sur un PR, chercher les OP non-PR liées au même produit
-        var _linkedOps = ops.filter(function(o) { return o.id !== op.id && o.type !== 'PRIX_ROUGE' && !o._archived && (o.produitIds || []).some(function(pid) { return _opPids.indexOf(pid) >= 0; }); });
+        // Sur un PR, chercher les OP non-PR liées au même produit ET encore ouvertes ET parfum compatible
+        var _linkedOps = ops.filter(function(o) {
+          if (o.id === op.id || o.type === 'PRIX_ROUGE') return false;
+          if (o._archived || !isOpOuverte(o)) return false;
+          if (!(o.produitIds || []).some(function(pid) { return _opPids.indexOf(pid) >= 0; })) return false;
+          return _samePf(o);
+        });
         for (var _li = 0; _li < _linkedOps.length; _li++) {
           var _lo = _linkedOps[_li];
           var _loMeta = OP_TYPE_META[_lo.type] || {};
@@ -18942,8 +18992,13 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
           miniTags.push('<span style="font-size:9px; padding:1px 5px; background:#fcd34d15; color:#fcd34d; border:1px solid #fcd34d40; border-radius:3px; font-weight:600; white-space:nowrap;">' + _loIcon + ' ' + _loLabel + '</span>');
         }
       } else {
-        // Sur une OP non-PR, chercher les PR liés au même produit
-        var _linkedPRs = ops.filter(function(o) { return o.id !== op.id && o.type === 'PRIX_ROUGE' && !o._archived && (o.produitIds || []).some(function(pid) { return _opPids.indexOf(pid) >= 0; }); });
+        // Sur une OP non-PR, chercher les PR liés au même produit ET encore ouverts ET parfum compatible
+        var _linkedPRs = ops.filter(function(o) {
+          if (o.id === op.id || o.type !== 'PRIX_ROUGE') return false;
+          if (o._archived || !isOpOuverte(o)) return false;
+          if (!(o.produitIds || []).some(function(pid) { return _opPids.indexOf(pid) >= 0; })) return false;
+          return _samePf(o);
+        });
         if (_linkedPRs.length > 0) {
           miniTags.push('<span style="font-size:9px; padding:1px 5px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;">🔴 Prix rouge</span>');
         }
