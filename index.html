@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:00</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:04</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -12179,6 +12179,43 @@ const _URGENCE_META = {
   A_VENIR:     { label: '🔵 À venir',     color: '#3b82f6', bg: '#3b82f615' }  // bleu
 };
 
+// Clic sur une ligne du bandeau "À anticiper" → scroll vers la card de l'action correspondante
+// dans le dashboard, et la déplie si elle est repliée. Cherche aussi à dérouler les blocs parents
+// si la card est dans un <details> replié.
+function scrollToActionFromUrgence(actionId) {
+  if (!actionId) return;
+  // Chercher la card dashboard (peut être plusieurs avec ce data-attr ; on prend la première hors du bandeau)
+  const _all = document.querySelectorAll('[data-action-id="' + actionId + '"]');
+  let _card = null;
+  for (let i = 0; i < _all.length; i++) {
+    const el = _all[i];
+    // Skip si la cible est à l'intérieur du bandeau urgence (zone repère via attribut data-urgence-row)
+    if (el.closest && el.closest('[data-urgence-row]')) continue;
+    _card = el;
+    break;
+  }
+  if (!_card) _card = _all[0]; // fallback
+  if (!_card) { console.warn('[URGENCE] Card introuvable pour', actionId); return; }
+  // Dérouler les <details> parents si fermés (sections du dashboard pliables)
+  let _node = _card.parentElement;
+  while (_node && _node !== document.body) {
+    if (_node.tagName && _node.tagName.toLowerCase() === 'details' && !_node.open) _node.open = true;
+    _node = _node.parentElement;
+  }
+  // Si la card a un détail en dessous et qu'il est fermé → déplier
+  const _detail = document.getElementById('action-detail-' + actionId);
+  if (_detail && _detail.style.display !== 'block') {
+    if (typeof toggleActionExpand === 'function') toggleActionExpand(actionId);
+  }
+  // Scroll en douceur
+  setTimeout(() => { _card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 50);
+  // Mettre en évidence brièvement
+  const _origBg = _card.style.background;
+  _card.style.transition = 'background 0.4s';
+  _card.style.background = '#f59e0b40';
+  setTimeout(() => { _card.style.background = _origBg; }, 1400);
+}
+
 function renderDashboard() {
   if (!document.getElementById('dashContent')) return;
   // syncAutoActions retiré du render pour performance — appelé uniquement quand les données changent
@@ -14734,7 +14771,7 @@ function renderDashboard() {
         const txt = (st.done || p >= 0.999) ? '#0f172a' : col;
         return '<span title="' + (SHOP_LABELS[sh] || sh) + ' — ' + nbDone + '/' + total + ' étape' + (total > 1 ? 's' : '') + '" style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; font-size:8px; font-weight:700; background:' + bg + '; color:' + txt + '; border:1.5px solid ' + col + '; border-radius:50%; margin-right:2px;">' + init + '</span>';
       }).join('');
-      return `<div onclick="(function(id){var el=document.querySelector('[data-action-id=\\''+id+'\\']'); if (el) { el.scrollIntoView({behavior:'smooth', block:'center'}); if (typeof toggleActionExpand==='function' && !el.parentElement.querySelector('#action-detail-'+id+'[style*=\\'display:block\\']')) { toggleActionExpand(id); } }})('${a.id}')" style="display:grid; grid-template-columns: minmax(0,1fr) 80px 90px ${_shopsToShow.length * 18 + 6}px 100px; gap:8px; align-items:center; padding:6px 10px 6px 12px; background:${meta.bg}; border-left:3px solid ${meta.color}; border-radius:3px; margin:0 6px 3px; cursor:pointer; transition:background 0.12s; font-size:11px;" onmouseover="this.style.background='${meta.color}25'" onmouseout="this.style.background='${meta.bg}'">
+      return `<div data-urgence-row="1" onclick="scrollToActionFromUrgence('${a.id}')" style="display:grid; grid-template-columns: minmax(0,1fr) 80px 110px ${_shopsToShow.length * 18 + 6}px 100px; gap:8px; align-items:center; padding:6px 10px 6px 12px; background:${meta.bg}; border-left:3px solid ${meta.color}; border-radius:3px; margin:0 6px 3px; cursor:pointer; transition:background 0.12s; font-size:11px;" onmouseover="this.style.background='${meta.color}25'" onmouseout="this.style.background='${meta.bg}'">
         <span style="color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${_prodLabel}<span style="color:#94a3b8; font-weight:400; font-size:9.5px;">${_opLabel}</span></span>
         ${_typeBadge}
         <span style="color:${meta.color}; font-size:10px; font-weight:700; text-align:right; white-space:nowrap;">${_delaiTxt}</span>
