@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 18:42</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:00</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -12122,11 +12122,15 @@ function computeBesoins() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 2026-05-28 — Helpers d'URGENCE pour le bandeau "À faire en priorité" du dashboard.
-// Logique : pour chaque action active, on cherche l'OP liée et on calcule combien
-// de jours il reste avant son démarrage. Plus la date approche, plus c'est urgent.
-// Si pas d'OP liée mais priorité HAUTE, on classe en "à anticiper" (~ 2 semaines).
+// 2026-05-28 — Helpers d'ANTICIPATION pour le bandeau "À anticiper" du dashboard.
+// Logique métier : aider à ne pas oublier les étapes PRÉPARATOIRES en amont d'un
+// événement OP. Une OP qui est en cours d'exécution n'est plus du domaine de
+// l'anticipation. Les actions SORTIR pendant une OP en cours = exécution, exclues.
+// Seules les actions RENTRER, PRIX, MISE_EN_PLACE liées à une OP relèvent de
+// l'anticipation. "À rattraper" = l'OP a démarré et le préalable n'est pas en place.
+// Palette sans rouge (rouge = Prix Rouge déjà utilisé) : violet, orange, ambre, bleu.
 // ═══════════════════════════════════════════════════════════════════════════
+const _URGENCE_ACTION_TYPES = ['RENTRER', 'PRIX', 'MISE_EN_PLACE']; // SORTIR exclu (exécution, pas anticipation)
 function _findOpForAction(action) {
   if (!action) return null;
   const _fields = ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId'];
@@ -12143,29 +12147,36 @@ function _daysBetweenYmd(fromYmd, toYmd) {
   const b = new Date(toYmd + 'T00:00:00');
   return Math.round((b - a) / 86400000);
 }
+// Score d'anticipation : nb de jours avant `op.dateDebut` (positif = futur, négatif = retard d'anticipation).
+// Retourne null si l'action ne relève pas d'anticipation (mauvais type, pas d'OP, action faite, etc.).
 function _actionUrgencyScore(action) {
   if (!action || action.annulee || action._archived) return null;
+  if (_URGENCE_ACTION_TYPES.indexOf(action.type) < 0) return null; // SORTIR et autres exclus
   if (typeof actionGlobalState === 'function' && actionGlobalState(action) === 'FAIT') return null;
   const op = _findOpForAction(action);
-  if (op && op.dateDebut) {
-    return _daysBetweenYmd(ymd(new Date()), op.dateDebut);
+  if (!op) {
+    // Pas d'OP liée → anticipation seulement si priorité HAUTE (rare, fallback)
+    return action.priorite === 'HAUTE' ? 14 : null;
   }
-  if (action.priorite === 'HAUTE') return 14;
-  return null;
+  // OP liée : si elle est déjà fermée ou archivée, plus rien à anticiper
+  if (op._archived) return null;
+  if (typeof isOpOuverte === 'function' && !isOpOuverte(op)) return null;
+  if (!op.dateDebut) return null;
+  return _daysBetweenYmd(ymd(new Date()), op.dateDebut);
 }
 function _urgencyCategory(score) {
   if (score == null) return null;
-  if (score < 0) return 'EN_RETARD';
-  if (score <= 3) return 'URGENT';
-  if (score <= 14) return 'A_ANTICIPER';
-  if (score <= 30) return 'A_VENIR';
+  if (score < 0) return 'A_RATTRAPER';   // OP démarrée mais préalable pas en place
+  if (score <= 3) return 'URGENT';        // ≤ 3 jours
+  if (score <= 14) return 'A_ANTICIPER';  // ≤ 2 semaines
+  if (score <= 30) return 'A_VENIR';      // ≤ 1 mois
   return null;
 }
 const _URGENCE_META = {
-  EN_RETARD:   { label: '⏰ En retard',   color: '#ef4444', bg: '#ef444415' },
-  URGENT:      { label: '🔴 Urgent',      color: '#f97316', bg: '#f9731615' },
-  A_ANTICIPER: { label: '🟠 À anticiper', color: '#f59e0b', bg: '#f59e0b15' },
-  A_VENIR:     { label: '🔵 À venir',    color: '#3b82f6', bg: '#3b82f615' }
+  A_RATTRAPER: { label: '⏰ À rattraper', color: '#a855f7', bg: '#a855f718' }, // violet vif (rouge = Prix Rouge)
+  URGENT:      { label: '🔔 Urgent',      color: '#f97316', bg: '#f9731615' }, // orange
+  A_ANTICIPER: { label: '🟠 À anticiper', color: '#f59e0b', bg: '#f59e0b15' }, // ambre
+  A_VENIR:     { label: '🔵 À venir',     color: '#3b82f6', bg: '#3b82f615' }  // bleu
 };
 
 function renderDashboard() {
@@ -14676,9 +14687,9 @@ function renderDashboard() {
         return true;
       })
       .sort((x, y) => x.score - y.score);
-    if (_candidates.length === 0) return ''; // rien d'urgent → pas de bandeau
+    if (_candidates.length === 0) return ''; // rien à anticiper → pas de bandeau
     const _top = _candidates.slice(0, 10);
-    const _nbEnRetard = _top.filter(t => t.cat === 'EN_RETARD').length;
+    const _nbARattraper = _top.filter(t => t.cat === 'A_RATTRAPER').length;
     const _nbUrgent = _top.filter(t => t.cat === 'URGENT').length;
     const _nbAnticiper = _top.filter(t => t.cat === 'A_ANTICIPER').length;
 
@@ -14700,9 +14711,9 @@ function renderDashboard() {
       }
       const _opLabel = op ? (' · 📣 ' + ((OP_TYPE_META[op.type] || {}).label || op.type) + (op.dateDebut ? ' le ' + fmtFR(op.dateDebut) : '')) : '';
       let _delaiTxt;
-      if (score < 0) _delaiTxt = 'en retard ' + (-score) + ' j';
-      else if (score === 0) _delaiTxt = 'aujourd\'hui';
-      else if (score === 1) _delaiTxt = 'demain';
+      if (score < 0) _delaiTxt = 'OP démarrée il y a ' + (-score) + ' j';
+      else if (score === 0) _delaiTxt = 'démarre aujourd\'hui';
+      else if (score === 1) _delaiTxt = 'démarre demain';
       else _delaiTxt = 'dans ' + score + ' j';
       const _typeBadge = `<span style="font-size:9px; padding:1px 6px; background:${meta.color}25; color:${meta.color}; border:1px solid ${meta.color}60; border-radius:3px; font-weight:700; text-transform:uppercase; letter-spacing:0.3px;">${a.type}</span>`;
       const _shopsToShow = _shop ? [_shop] : SHOPS;
@@ -14733,12 +14744,12 @@ function renderDashboard() {
     }).join('');
 
     const _shopLbl = _shop ? ` <span style="color:${SHOP_COLORS[_shop] || '#3b82f6'}; font-weight:400; text-transform:none; letter-spacing:0; font-size:10.5px;">· ${SHOP_LABELS[_shop] || _shop}</span>` : '';
-    const _topColor = _nbEnRetard > 0 ? '#ef4444' : (_nbUrgent > 0 ? '#f97316' : (_nbAnticiper > 0 ? '#f59e0b' : '#3b82f6'));
+    const _topColor = _nbARattraper > 0 ? '#a855f7' : (_nbUrgent > 0 ? '#f97316' : (_nbAnticiper > 0 ? '#f59e0b' : '#3b82f6'));
     return `<div style="margin-bottom:12px; background:#0f172a; border:1px solid ${_topColor}60; border-left:3px solid ${_topColor}; border-radius:6px; overflow:hidden;">
       <div style="padding:8px 12px; background:${_topColor}12; display:flex; align-items:center; gap:10px; font-size:11px; font-weight:700; color:${_topColor}; text-transform:uppercase; letter-spacing:0.4px; flex-wrap:wrap;">
-        <span>🔥 À faire en priorité${_shopLbl}</span>
-        <span style="color:#94a3b8; font-weight:400; text-transform:none; letter-spacing:0; font-size:10px;">· ${_top.length} action${_top.length > 1 ? 's' : ''}${_nbEnRetard > 0 ? ` · <span style="color:#ef4444; font-weight:700;">${_nbEnRetard} en retard</span>` : ''}${_nbUrgent > 0 ? ` · <span style="color:#f97316; font-weight:700;">${_nbUrgent} urgent${_nbUrgent > 1 ? 's' : ''}</span>` : ''}${_nbAnticiper > 0 ? ` · <span style="color:#f59e0b; font-weight:700;">${_nbAnticiper} à anticiper</span>` : ''}</span>
-        <span style="margin-left:auto; font-size:9.5px; color:#64748b; font-style:italic; font-weight:400; text-transform:none; letter-spacing:0;">Clic → scroll vers la card</span>
+        <span>🔮 À anticiper${_shopLbl}</span>
+        <span style="color:#94a3b8; font-weight:400; text-transform:none; letter-spacing:0; font-size:10px;">· ${_top.length} action${_top.length > 1 ? 's' : ''}${_nbARattraper > 0 ? ` · <span style="color:#a855f7; font-weight:700;">${_nbARattraper} à rattraper</span>` : ''}${_nbUrgent > 0 ? ` · <span style="color:#f97316; font-weight:700;">${_nbUrgent} urgent${_nbUrgent > 1 ? 's' : ''}</span>` : ''}${_nbAnticiper > 0 ? ` · <span style="color:#f59e0b; font-weight:700;">${_nbAnticiper} à anticiper</span>` : ''}</span>
+        <span style="margin-left:auto; font-size:9.5px; color:#64748b; font-style:italic; font-weight:400; text-transform:none; letter-spacing:0;">Préparation en amont des OPs — clic → scroll vers la card</span>
       </div>
       <div style="padding:6px 0 8px;">${_rows}</div>
     </div>`;
