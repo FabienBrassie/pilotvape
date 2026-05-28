@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:30</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:35</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -12188,29 +12188,51 @@ function scrollToActionFromUrgence(actionId) {
   if (!actionId) return;
   const _a = actions.find(x => x.id === actionId);
   if (!_a) { console.warn('[URGENCE] Action introuvable', actionId); return; }
-  // Ouvrir les accordéons nécessaires AVANT le render :
-  //  - accordéon gamme (si action liquide) : 'grp_<produitId>_<type>'
-  //  - accordéon paire sortir↔rentrer (si applicable) : 'pair_<id>_<id>'
-  //  - la card elle-même (pour qu'elle apparaisse dépliée)
+  // Le dashboard a PLUSIEURS niveaux de regroupement pour les actions liquides :
+  //   - 'grp_<gammeId>_<type>'   : groupe de plusieurs actions parfumées d'une même gamme/type
+  //   - 'grplvl_<actionId>'      : une action GAMME-level rendue comme groupe de parfums
+  //   - '<actionId>'             : la card individuelle elle-même (pour son détail déplié)
+  // On ouvre toutes les clés possibles AVANT le render pour garantir que la card sera dans le DOM.
   if (_a.produitType === 'liq' && _a.produitId) {
     expandedActions.add('grp_' + _a.produitId + '_' + _a.type);
+    expandedActions.add('grplvl_' + actionId);
   }
   expandedActions.add(actionId);
   // Re-render dashboard → la card est maintenant dans le DOM
   if (typeof renderDashboard === 'function') renderDashboard();
   // Petit délai pour laisser le DOM se stabiliser, puis chercher et scroller
   setTimeout(() => {
-    const _all = document.querySelectorAll('[data-action-id="' + actionId + '"]');
+    // 1) Tentative directe : data-action-id="ACT-XXXX"
     let _card = null;
+    const _all = document.querySelectorAll('[data-action-id="' + actionId + '"]');
     for (let i = 0; i < _all.length; i++) {
       const el = _all[i];
-      if (el.closest && el.closest('[data-urgence-row]')) continue; // skip lignes du bandeau
+      if (el.closest && el.closest('[data-urgence-row]')) continue;
       _card = el;
       break;
     }
-    if (!_card) _card = _all[0];
+    // 2) Fallback : si pas trouvé, viser l'élément cliquable de l'accordéon gamme-level
+    //    (le span onclick="toggleActionExpand('grplvl_ACT-XXXX')" — pas d'id direct mais on
+    //    peut le retrouver via le contenu ou via un re-fetch après scroll).
+    //    À défaut : on scroll vers le bloc parent (rentrerBlock / sortirBlock / prixBlock).
     if (!_card) {
-      console.warn('[URGENCE] Card toujours introuvable pour', actionId, '— accordéons gamme/paire peut-être structurés différemment.');
+      // Chercher par texte dans le DOM : on cible l'élément qui contient le nom du produit
+      // de l'action et qui est cliquable. C'est un dernier filet, pas idéal mais utile.
+      const _prod = baseLiq.find(g => g.id === _a.produitId) || baseKits.find(k => k.id === _a.produitId) || basePD.find(p => p.id === _a.produitId);
+      const _label = _prod ? (_prod.marque + ' — ' + (_prod.gamme || _prod.modele || _prod.designation || '')) : '';
+      // Section de destination selon le type
+      const _sectionMap = { 'RENTRER': 'rentrer', 'SORTIR': 'sortir', 'PRIX': 'prix', 'MISE_EN_PLACE': 'rentrer' };
+      const _sectionKey = _sectionMap[_a.type];
+      if (_sectionKey) {
+        // focusDashSection existe et déroule la bonne section
+        if (typeof focusDashSection === 'function') {
+          focusDashSection(_sectionKey);
+          // Petit message d'info au lieu d'une alerte d'erreur
+          console.warn('[URGENCE] Card individuelle introuvable, scroll vers la section "' + _sectionKey + '" à la place. Action :', actionId, 'produit :', _label);
+          return;
+        }
+      }
+      // Vraiment rien trouvé : pvAlert
       if (typeof pvAlert === 'function') pvAlert('Action introuvable dans le dashboard. Vérifie qu\'aucun filtre boutique/type/priorité ne la masque.');
       return;
     }
