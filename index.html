@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-22 11:06</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 15:53</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3616,6 +3616,7 @@ function _ensureOneShotOpGeneric(produit, produitType, label) {
       id: 'OP-' + String(nextOpId++).padStart(4, '0'),
       type: 'COUP',
       produitIds: [produit.id],
+      produitParfumId: '', // 2026-05-28 audit OP : one-shot pose au niveau produit (gamme), pas de parfum spécifique
       dateDebut: today,
       dateFin: null,
       commentaire: label,
@@ -4232,6 +4233,7 @@ function syncPrixRougeOp(a, opts) {
         id: 'OP-' + String(nextOpId++).padStart(4, '0'),
         type: 'PRIX_ROUGE',
         produitIds: [a.produitId],
+        produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
         dateDebut: today,
         dateFin: null,
         commentaire: typeof a.prixCible === 'number' ? 'Cible ' + a.prixCible.toFixed(2) + '€' : 'Prix rouge auto',
@@ -4309,6 +4311,7 @@ function setRentrerFanfare(actionId, opType) {
         id: 'OP-' + String(nextOpId++).padStart(4, '0'),
         type: opType,
         produitIds: [a.produitId],
+        produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
         dateDebut: dates.dateDebut,
         dateFin: dates.dateFin,
         _dateDebutManuelle: true,
@@ -4374,6 +4377,7 @@ function promoteActionToOp(actionId, opType, commentaire) {
       id: 'OP-' + String(nextOpId++).padStart(4, '0'),
       type: opType,
       produitIds: [a.produitId],
+      produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
       dateDebut: dates.dateDebut,
       dateFin: dates.dateFin,
       _dateDebutManuelle: true,
@@ -4497,6 +4501,23 @@ function _syncOneShotStepsBidi(op, aRentrer, aSortir) {
   });
 }
 
+// 2026-05-28 audit OP : helper pour vérifier qu'une OP est bien compatible avec un parfum d'action.
+// Évite qu'une OP rattachée à un parfum (ou à plusieurs) propage ses coches sur un autre parfum
+// de la même gamme. Une OP "gamme entière" (aucun parfum spécifique) reste compatible avec tous.
+function _opMatchesActionParfum(op, action) {
+  if (!op || !action) return false;
+  const _aPf = action.produitParfumId || '';
+  const _oPf = op.produitParfumId || '';
+  const _oPfs = Array.isArray(op.produitParfumIds) ? op.produitParfumIds : [];
+  // OP gamme entière → compatible avec tout
+  if (!_oPf && _oPfs.length === 0) return true;
+  // OP avec parfum unique : doit matcher
+  if (_oPf && _oPf === _aPf) return true;
+  // OP groupée : action sans parfum ne se lie pas ; sinon match dans la liste
+  if (_oPfs.length > 0 && _aPf && _oPfs.includes(_aPf)) return true;
+  return false;
+}
+
 // Recopie l'état des sous-étapes de l'action → OP liée (PRIX_ROUGE auto OU COUP).
 // Appelé après toggleActionStep pour qu'un clic côté Dashboard se reflète côté OP.
 function syncActionStepsToOp(a) {
@@ -4510,8 +4531,9 @@ function syncActionStepsToOp(a) {
   if (a.type === 'RENTRER') {
     ops.filter(o => o.type === 'COUP' && !o.dateFin && o.rentrerActionId === a.id).forEach(o => linkedOps.push(o));
     // Fallback : COUP lié au même produit mais rentrerActionId manquant ou désynchronisé
+    // 2026-05-28 audit OP : on filtre aussi sur le parfum pour ne pas attacher l'OP au mauvais parfum.
     if (linkedOps.length === 0 && a.produitId) {
-      ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(a.produitId) >= 0).forEach(o => {
+      ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(a.produitId) >= 0 && _opMatchesActionParfum(o, a)).forEach(o => {
         if (linkedOps.indexOf(o) < 0) {
           // Réparer le lien manquant
           o.rentrerActionId = a.id;
@@ -4527,17 +4549,22 @@ function syncActionStepsToOp(a) {
       if (o._archived) return false;
       return o.rentrerActionId === a.id;
     }).forEach(function(o) { if (linkedOps.indexOf(o) < 0) linkedOps.push(o); });
-    // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit
+    // Non-COUP avec commanderProduits : lien par rentrerActionId OU par produit (avec filtre parfum)
+    // 2026-05-28 audit OP : ajout du filtre parfum sur la branche "par produit".
     ops.filter(function(o) {
-      return o.type !== 'COUP' && !o._archived && o.prep && o.prep.commanderProduits &&
-        ((o.rentrerActionId === a.id) || ((o.produitIds || []).indexOf(a.produitId) >= 0));
+      if (o.type === 'COUP' || o._archived) return false;
+      if (!o.prep || !o.prep.commanderProduits) return false;
+      if (o.rentrerActionId === a.id) return true;
+      if ((o.produitIds || []).indexOf(a.produitId) >= 0 && _opMatchesActionParfum(o, a)) return true;
+      return false;
     }).forEach(function(o) { if (linkedOps.indexOf(o) < 0) linkedOps.push(o); });
   }
   if (a.type === 'SORTIR') {
     ops.filter(o => o.type === 'COUP' && !o.dateFin && o.sortirActionId === a.id).forEach(o => linkedOps.push(o));
     // Fallback : COUP lié au même produit mais sortirActionId manquant
+    // 2026-05-28 audit OP : ajout du filtre parfum.
     if (linkedOps.length === 0 && a.produitId) {
-      ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(a.produitId) >= 0).forEach(o => {
+      ops.filter(o => o.type === 'COUP' && !o.dateFin && (o.produitIds || []).indexOf(a.produitId) >= 0 && _opMatchesActionParfum(o, a)).forEach(o => {
         if (linkedOps.indexOf(o) < 0) {
           o.sortirActionId = a.id;
           if (!a.opId) a.opId = o.id;
@@ -4600,19 +4627,25 @@ function syncOpStepsToAction(op) {
   }
   if (op.type === 'COUP') {
     const _coupPid = (op.produitIds || [])[0];
+    const _coupPf = op.produitParfumId || ''; // 2026-05-28 audit OP
     if (op.rentrerActionId) {
       const a = actions.find(x => x.id === op.rentrerActionId);
       if (a) targets.push(a);
     } else if (_coupPid) {
-      // Fallback : trouver la RENTRER du même produit et réparer le lien
-      const a = actions.find(x => x.type === 'RENTRER' && x.produitId === _coupPid && !x.annulee);
+      // Fallback : trouver la RENTRER du même produit (et même parfum si l'OP en a un) et réparer le lien
+      // 2026-05-28 audit OP : filtrer par parfum pour ne pas écrire au mauvais parfum.
+      const _matchByPf = (x) => (x.produitParfumId || '') === _coupPf;
+      const a = actions.find(x => x.type === 'RENTRER' && x.produitId === _coupPid && _matchByPf(x) && !x.annulee)
+             || (!_coupPf ? actions.find(x => x.type === 'RENTRER' && x.produitId === _coupPid && !x.annulee) : null);
       if (a) { op.rentrerActionId = a.id; if (!a.opId) a.opId = op.id; targets.push(a); }
     }
     if (op.sortirActionId) {
       const a = actions.find(x => x.id === op.sortirActionId);
       if (a) targets.push(a);
     } else if (_coupPid) {
-      const a = actions.find(x => x.type === 'SORTIR' && x.produitId === _coupPid && !x.annulee);
+      const _matchByPf = (x) => (x.produitParfumId || '') === _coupPf;
+      const a = actions.find(x => x.type === 'SORTIR' && x.produitId === _coupPid && _matchByPf(x) && !x.annulee)
+             || (!_coupPf ? actions.find(x => x.type === 'SORTIR' && x.produitId === _coupPid && !x.annulee) : null);
       if (a) { op.sortirActionId = a.id; if (!a.opId) a.opId = op.id; targets.push(a); }
     }
   }
@@ -4624,9 +4657,12 @@ function syncOpStepsToAction(op) {
   if (op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
     var _pid = (op.produitIds || [])[0];
     if (_pid) {
+      // 2026-05-28 audit OP : filtrer par parfum sur le fallback.
+      var _opPf = op.produitParfumId || '';
       var _ra = op.rentrerActionId
         ? actions.find(function(x) { return x.id === op.rentrerActionId; })
-        : actions.find(function(x) { return x.type === 'RENTRER' && x.produitId === _pid && !x.annulee; });
+        : (actions.find(function(x) { return x.type === 'RENTRER' && x.produitId === _pid && (x.produitParfumId || '') === _opPf && !x.annulee; })
+            || (!_opPf ? actions.find(function(x) { return x.type === 'RENTRER' && x.produitId === _pid && !x.annulee; }) : null));
       if (_ra && targets.indexOf(_ra) < 0) targets.push(_ra);
     }
   }
@@ -4814,6 +4850,7 @@ function syncRentrerPrixRougeOp(a) {
         id: 'OP-' + String(nextOpId++).padStart(4, '0'),
         type: 'PRIX_ROUGE',
         produitIds: [a.produitId],
+        produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
         dateDebut: today,
         dateFin: null,
         commentaire: 'Prix rouge one-shot : ' + label + (a.prixRouge ? ' à ' + a.prixRouge.toFixed(2) + '€' : ''),
@@ -4936,6 +4973,8 @@ function setGroupPrixRouge(actionIdsPiped) {
 
   // Appliquer le prix rouge sur chaque action
   const allProduitIds = [...new Set(grpActions.map(a => a.produitId))];
+  // 2026-05-28 audit OP : collecter aussi les parfums pour éviter la fuite gamme→parfum
+  const allProduitParfumIds = [...new Set(grpActions.map(a => a.produitParfumId).filter(Boolean))];
   const _grpTs = new Date().toISOString(); // fix 2026-05-20 phase 2
   grpActions.forEach(a => {
     a._ts = _grpTs;
@@ -4961,6 +5000,7 @@ function setGroupPrixRouge(actionIdsPiped) {
     groupOp.prixAvantRouge = grpActions[0].prixAvantRouge;
     groupOp.dateDebut = dateDebut;
     groupOp.produitIds = allProduitIds;
+    groupOp.produitParfumIds = allProduitParfumIds; // 2026-05-28 audit OP
     groupOp.groupActionIds = grpActions.map(a => a.id);
   } else {
     // Construire le label groupé
@@ -4975,6 +5015,7 @@ function setGroupPrixRouge(actionIdsPiped) {
       id: 'OP-' + String(nextOpId++).padStart(4, '0'),
       type: 'PRIX_ROUGE',
       produitIds: allProduitIds,
+      produitParfumIds: allProduitParfumIds, // 2026-05-28 audit OP
       groupActionIds: grpActions.map(a => a.id),
       groupLabel: groupLabel,
       sortirActionId: grpActions[0].id,
@@ -6524,6 +6565,54 @@ async function loadData() {
       return false;
     });
     if (ops.length < _opsBefore) console.log('[Migration] ' + (_opsBefore - ops.length) + ' OP(s) tombstonées retirées de la mémoire');
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Migration (2026-05-28) : reconstruction du parfum cible sur les OPs legacy.
+    // Avant cette session, les OPs ne stockaient que `produitIds` (gamme), pas `produitParfumId`.
+    // → fuite des tâches d'une OP rattachée à un parfum vers les autres parfums de la même gamme.
+    // On parcourt les OPs sans champ parfum et on tente de le reconstruire depuis l'action source.
+    // Côté admin uniquement (sinon double save). Les boutiques adoptent au prochain poll.
+    // ───────────────────────────────────────────────────────────────────────
+    if (typeof isAdmin === 'function' && isAdmin()) {
+      const _backfillTs = new Date().toISOString();
+      let _bfCount = 0, _bfGroupCount = 0;
+      const _linkFields = ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId'];
+      ops.forEach(op => {
+        // Si déjà rempli, ne pas toucher
+        if (op.produitParfumId) return;
+        if (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length > 0) return;
+        // OP groupée : reconstruire depuis groupActionIds
+        if (Array.isArray(op.groupActionIds) && op.groupActionIds.length > 0) {
+          const _pfs = op.groupActionIds.map(id => {
+            const _a = actions.find(x => x.id === id);
+            return _a ? (_a.produitParfumId || '') : '';
+          }).filter(Boolean);
+          if (_pfs.length > 0) {
+            op.produitParfumIds = [...new Set(_pfs)];
+            op._ts = _backfillTs;
+            _bfGroupCount++;
+          }
+          return;
+        }
+        // OP simple : reconstruire depuis le premier *ActionId qui pointe vers une action parfumée
+        for (const f of _linkFields) {
+          if (!op[f]) continue;
+          const _srcA = actions.find(x => x.id === op[f]);
+          if (_srcA && _srcA.produitParfumId) {
+            op.produitParfumId = _srcA.produitParfumId;
+            op._ts = _backfillTs;
+            _bfCount++;
+            break;
+          }
+        }
+      });
+      if (_bfCount > 0 || _bfGroupCount > 0) {
+        console.log('[BACKFILL-PARFUM] ' + _bfCount + ' OP(s) simples + ' + _bfGroupCount + ' OP(s) groupées reconstruites avec le parfum cible');
+        // Déclenche une save différée pour propager le backfill aux boutiques.
+        // Le save admin pose _adminTs inconditionnel → propagation automatique au prochain poll boutique.
+        if (typeof saveData === 'function') setTimeout(() => { try { saveData(); } catch(e) { console.warn('[BACKFILL-PARFUM] save raté:', e); } }, 2000);
+      }
+    }
     // Migration one-shot (avril 2026) : DÉJÀ APPLIQUÉE — ne plus ré-exécuter.
     // L'ancienne migration forçait op.dateDebut = '2026-05-04' sur toutes les OPs ouvertes,
     // ce qui écrasait les dates posées manuellement si localStorage était vidé.
@@ -13044,13 +13133,29 @@ function renderDashboard() {
         // ── Miroir OP : afficher les étapes OP liées en lecture seule ──
         // Cherche toute OP active liée à cette action — par lien direct OU par produit
         const _pid = a.produitId;
+        const _aPf = a.produitParfumId || ''; // 2026-05-28 audit OP : parfum de l'action
         const _linkedOps = ops.filter(o => {
           if (o._archived || !isOpOuverte(o)) return false;
-          // Lien direct par ID d'action
+          // Lien direct par ID d'action (mepActionId inclus pour MISE_EN_PLACE)
           if (o.rentrerActionId === a.id || o.sortirActionId === a.id ||
-              o.prixActionId === a.id || o.rentrerPrixActionId === a.id) return true;
+              o.prixActionId === a.id || o.rentrerPrixActionId === a.id ||
+              o.mepActionId === a.id) return true;
           // Lien par produit : OP dont produitIds contient le même produit
-          if (_pid && o.produitIds && o.produitIds.includes(_pid)) return true;
+          if (_pid && o.produitIds && o.produitIds.includes(_pid)) {
+            // 2026-05-28 audit OP : cohérence parfum pour éviter la fuite entre parfums d'une même gamme.
+            // - OP "gamme entière" (pas de parfum spécifique) → visible pour tous les parfums de la gamme.
+            // - OP ciblant un parfum précis → visible uniquement pour ce parfum.
+            // - OP groupée (produitParfumIds) → visible uniquement pour les parfums listés (ou gamme entière si liste vide).
+            const _oPf = o.produitParfumId || '';
+            const _oPfs = Array.isArray(o.produitParfumIds) ? o.produitParfumIds : [];
+            // OP gamme entière (aucun parfum) → toujours liée
+            if (!_oPf && _oPfs.length === 0) return true;
+            // OP avec parfum unique : doit matcher
+            if (_oPf && _oPf === _aPf) return true;
+            // OP groupée avec liste de parfums
+            if (_oPfs.length > 0 && _aPf && _oPfs.includes(_aPf)) return true;
+            return false;
+          }
           return false;
         });
         if (_linkedOps.length === 0) return '';
@@ -16269,6 +16374,7 @@ function submitNewOp() {
   const newOp = {
     id: 'OP-' + String(nextOpId++).padStart(4, '0'),
     type, produitIds, produitLibre,
+    produitParfumId: '', // 2026-05-28 audit OP : saisie manuelle = pas de parfum spécifique (gamme entière)
     dateDebut, dateFin, commentaire, campagneId,
     _dateDebutManuelle: true,
     _dateFinManuelle: !!dateFin,
