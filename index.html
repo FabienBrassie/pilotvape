@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:35</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:39</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -18918,7 +18918,8 @@ function renderOpCardHtml(op, options) {
   const editBtn = noEdit ? '' : `<span onclick="event.stopPropagation(); toggleOpEdit('${op.id}')" title="Éditer mécanique, pièces, affectations..." style="cursor:pointer; font-size:10px; padding:2px 8px; background:${editOpen ? '#8b5cf6' : '#8b5cf615'}; color:${editOpen ? '#0f172a' : '#c4b5fd'}; border:1px solid #8b5cf650; border-radius:3px; font-weight:700;">${editOpen ? '▾ Fermer' : '✎ Éditer'}</span>`;
   // 2026-05-28 — Bouton "Changer la cible" : permet de modifier produitIds + produitParfumId d'une OP existante.
   // Utile pour corriger une OP créée trop large (gamme entière au lieu d'un parfum précis).
-  const changeCibleBtn = (noEdit || op.auto) ? '' : `<span onclick="event.stopPropagation(); changeOpCible('${op.id}')" title="Changer le produit ou le parfum cible de l'OP" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; font-weight:700;">🎯 Cible</span>`;
+  // Affiché aussi pour les OPs auto (one-shot kit/liq/PD) — la fonction gère le nettoyage des liens.
+  const changeCibleBtn = noEdit ? '' : `<span onclick="event.stopPropagation(); changeOpCible('${op.id}')" title="Changer le produit ou le parfum cible de l'OP" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; font-weight:700;">🎯 Cible</span>`;
   // Bouton Dupliquer : crée une copie à l'identique (mécanique, pièces, affectations, campagne)
   // avec états remis à zéro. Utile pour enchaîner les vagues type « liquide du moment »
   // où seuls l'intitulé et éventuellement la mécanique changent.
