@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:09</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:30</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -12179,47 +12179,48 @@ const _URGENCE_META = {
   A_VENIR:     { label: '🔵 À venir',     color: '#3b82f6', bg: '#3b82f615' }  // bleu
 };
 
-// Clic sur une ligne du bandeau "À anticiper" → scroll vers la card de l'action correspondante
-// dans le dashboard, et la déplie si elle est repliée. Cherche aussi à dérouler les blocs parents
-// si la card est dans un <details> replié.
+// Clic sur une ligne du bandeau "À anticiper" → scroll vers la card de l'action correspondante.
+// Difficulté : les actions liquides du dashboard sont regroupées en accordéons GAMME repliés
+// par défaut (clé `grp_<gammeId>_<type>` dans expandedActions). La card avec data-action-id
+// n'existe dans le DOM que si l'accordéon parent est déplié. On force donc l'ouverture des
+// accordéons nécessaires, on re-render, puis on cherche la card.
 function scrollToActionFromUrgence(actionId) {
-  console.log('[URGENCE] Clic vers action', actionId);
   if (!actionId) return;
-  // Chercher la card dashboard (peut être plusieurs avec ce data-attr ; on prend la première hors du bandeau)
-  const _all = document.querySelectorAll('[data-action-id="' + actionId + '"]');
-  console.log('[URGENCE] Candidats trouvés :', _all.length);
-  let _card = null;
-  for (let i = 0; i < _all.length; i++) {
-    const el = _all[i];
-    // Skip si la cible est à l'intérieur du bandeau urgence (zone repère via attribut data-urgence-row)
-    if (el.closest && el.closest('[data-urgence-row]')) continue;
-    _card = el;
-    break;
+  const _a = actions.find(x => x.id === actionId);
+  if (!_a) { console.warn('[URGENCE] Action introuvable', actionId); return; }
+  // Ouvrir les accordéons nécessaires AVANT le render :
+  //  - accordéon gamme (si action liquide) : 'grp_<produitId>_<type>'
+  //  - accordéon paire sortir↔rentrer (si applicable) : 'pair_<id>_<id>'
+  //  - la card elle-même (pour qu'elle apparaisse dépliée)
+  if (_a.produitType === 'liq' && _a.produitId) {
+    expandedActions.add('grp_' + _a.produitId + '_' + _a.type);
   }
-  if (!_card) _card = _all[0]; // fallback
-  if (!_card) {
-    console.warn('[URGENCE] Card introuvable pour', actionId, '— l\'action est peut-être dans une section masquée par un filtre. Vérifie le filtre boutique/type/priorité du dashboard.');
-    if (typeof pvAlert === 'function') pvAlert('Cette action n\'apparaît pas dans le dashboard actuellement (peut-être masquée par un filtre). Vérifie les filtres en haut.');
-    return;
-  }
-  // Dérouler les <details> parents si fermés (sections du dashboard pliables)
-  let _node = _card.parentElement;
-  while (_node && _node !== document.body) {
-    if (_node.tagName && _node.tagName.toLowerCase() === 'details' && !_node.open) _node.open = true;
-    _node = _node.parentElement;
-  }
-  // Si la card a un détail en dessous et qu'il est fermé → déplier
-  const _detail = document.getElementById('action-detail-' + actionId);
-  if (_detail && _detail.style.display !== 'block') {
-    if (typeof toggleActionExpand === 'function') toggleActionExpand(actionId);
-  }
-  // Scroll en douceur
-  setTimeout(() => { _card.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 50);
-  // Mettre en évidence brièvement
-  const _origBg = _card.style.background;
-  _card.style.transition = 'background 0.4s';
-  _card.style.background = '#f59e0b40';
-  setTimeout(() => { _card.style.background = _origBg; }, 1400);
+  expandedActions.add(actionId);
+  // Re-render dashboard → la card est maintenant dans le DOM
+  if (typeof renderDashboard === 'function') renderDashboard();
+  // Petit délai pour laisser le DOM se stabiliser, puis chercher et scroller
+  setTimeout(() => {
+    const _all = document.querySelectorAll('[data-action-id="' + actionId + '"]');
+    let _card = null;
+    for (let i = 0; i < _all.length; i++) {
+      const el = _all[i];
+      if (el.closest && el.closest('[data-urgence-row]')) continue; // skip lignes du bandeau
+      _card = el;
+      break;
+    }
+    if (!_card) _card = _all[0];
+    if (!_card) {
+      console.warn('[URGENCE] Card toujours introuvable pour', actionId, '— accordéons gamme/paire peut-être structurés différemment.');
+      if (typeof pvAlert === 'function') pvAlert('Action introuvable dans le dashboard. Vérifie qu\'aucun filtre boutique/type/priorité ne la masque.');
+      return;
+    }
+    _card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    // Flash visible
+    const _origBg = _card.style.background;
+    _card.style.transition = 'background 0.4s';
+    _card.style.background = '#f59e0b50';
+    setTimeout(() => { _card.style.background = _origBg; }, 1400);
+  }, 80);
 }
 
 // Event delegation global : un seul listener au niveau document, attaché une fois.
@@ -17019,6 +17020,144 @@ async function pvCampagnePicker(opId) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 2026-05-28 — Changer la cible (produit + parfum) d'une OP existante.
+// Permet de corriger les OPs créées avec un destinataire trop large (gamme entière
+// au lieu d'un parfum précis), ou de basculer vers un autre produit.
+// ═══════════════════════════════════════════════════════════════════════════
+async function changeOpCible(opId) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  function escAttr(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;'); }
+  function escText(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;'); }
+
+  // Cible actuelle
+  const _curPid = (op.produitIds || [])[0] || '';
+  const _curPfId = op.produitParfumId || '';
+  const _curProd = baseKits.find(k => k.id === _curPid) || baseLiq.find(l => l.id === _curPid) || basePD.find(p => p.id === _curPid);
+  const _curIsLiq = _curProd && (baseLiq.indexOf(_curProd) >= 0 || (_curProd.parfums && _curProd.parfums.length > 0));
+  let _curLabel = 'aucun produit';
+  if (_curProd) {
+    _curLabel = (_curProd.marque || '') + ' — ' + (_curIsLiq ? (_curProd.gamme || '') : (_curProd.modele || _curProd.gamme || _curProd.designation || ''));
+    if (_curIsLiq && _curPfId) {
+      const _pf = (_curProd.parfums || []).find(p => p.id === _curPfId);
+      if (_pf) _curLabel += ' · ' + _pf.n;
+      else _curLabel += ' (parfum inconnu)';
+    } else if (_curIsLiq) {
+      _curLabel += ' (gamme entière)';
+    }
+  }
+
+  // Construire la liste des candidats (kits + liquides + PD), avec parfums pour les liquides
+  // Format : { pid, parfumId, label, family, marque }
+  const _candidates = [];
+  baseKits.forEach(k => {
+    _candidates.push({ pid: k.id, parfumId: '', label: (k.marque || '') + ' — ' + (k.modele || k.designation || ''), family: 'Kit', marque: k.marque || '' });
+  });
+  baseLiq.forEach(g => {
+    // Gamme entière (option utile pour les OPs qui doivent vraiment couvrir toute la gamme)
+    _candidates.push({ pid: g.id, parfumId: '', label: (g.marque || '') + ' — ' + (g.gamme || '') + ' (gamme entière)', family: 'Liquide', marque: g.marque || '' });
+    // Chaque parfum non sorti
+    (g.parfums || []).forEach(p => {
+      if (p.s === 'SORTI' || p.s === 'SORTIE') return;
+      _candidates.push({ pid: g.id, parfumId: p.id, label: (g.marque || '') + ' — ' + (g.gamme || '') + ' · ' + (p.n || ''), family: 'Liquide', marque: g.marque || '' });
+    });
+  });
+  basePD.forEach(p => {
+    _candidates.push({ pid: p.id, parfumId: '', label: (p.marque || '') + ' — ' + (p.designation || p.modele || ''), family: 'PD', marque: p.marque || '' });
+  });
+
+  // Tri : marque alpha, puis label
+  _candidates.sort((a, b) => (a.marque || '').localeCompare(b.marque || '') || a.label.localeCompare(b.label));
+
+  const _opTypeLbl = (OP_TYPE_META[op.type] || {}).label || op.type;
+
+  const _itemsHtml = _candidates.map((c, i) => {
+    const _selected = (c.pid === _curPid && c.parfumId === _curPfId);
+    return `<div data-cible-idx="${i}" class="_pvCibleItem" style="display:flex; align-items:center; gap:8px; padding:5px 10px; background:${_selected ? '#22c55e15' : '#1e293b'}; border:1px solid ${_selected ? '#22c55e60' : '#33415540'}; border-radius:4px; cursor:pointer; font-size:11px;" onmouseenter="this.style.background='#334155'; this.style.borderColor='#f59e0b40';" onmouseleave="this.style.background='${_selected ? '#22c55e15' : '#1e293b'}'; this.style.borderColor='${_selected ? '#22c55e60' : '#33415540'}';">
+      <span style="font-size:9px; padding:1px 6px; background:${c.family === 'Kit' ? '#3b82f625' : c.family === 'Liquide' ? '#a855f725' : '#06b6d425'}; color:${c.family === 'Kit' ? '#60a5fa' : c.family === 'Liquide' ? '#c084fc' : '#22d3ee'}; border-radius:3px; font-weight:700; min-width:54px; text-align:center;">${escText(c.family)}</span>
+      <span style="flex:1; color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${escText(c.label)}</span>
+      ${_selected ? '<span style="color:#86efac; font-weight:700; font-size:10px;">✓ actuel</span>' : ''}
+    </div>`;
+  }).join('');
+
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center;';
+    overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:20px; max-width:680px; width:94%; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+      <div style="color:#fbbf24; font-weight:700; font-size:14px; margin-bottom:4px;">🎯 Changer la cible de l'OP</div>
+      <div style="color:#94a3b8; font-size:11px; margin-bottom:14px;">OP ${escText(op.id)} · ${escText(_opTypeLbl)} · cible actuelle : <span style="color:#e2e8f0; font-weight:600;">${escText(_curLabel)}</span></div>
+      <input type="search" id="_pvCibleFiltre" placeholder="Filtrer par marque, gamme, parfum, modèle..." style="padding:8px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px; margin-bottom:10px;">
+      <div id="_pvCibleList" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:4px; min-height:200px; max-height:50vh;">${_itemsHtml}</div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px; padding-top:12px; border-top:1px solid #33415540;">
+        <button id="_pvCibleCancel" style="padding:8px 18px; font-size:12px; border-radius:5px; cursor:pointer; background:transparent; color:#94a3b8; border:1px solid #475569;">Annuler</button>
+      </div>
+    </div>`;
+    document.body.appendChild(overlay);
+
+    function close(idxOrNull) { overlay.remove(); resolve(idxOrNull); }
+    overlay.querySelector('#_pvCibleCancel').addEventListener('click', () => close(null));
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
+    overlay.addEventListener('keydown', e => { if (e.key === 'Escape') close(null); });
+    overlay.querySelectorAll('._pvCibleItem').forEach(item => {
+      item.addEventListener('click', () => close(parseInt(item.dataset.cibleIdx, 10)));
+    });
+    overlay.querySelector('#_pvCibleFiltre').addEventListener('input', e => {
+      const q = (e.target.value || '').toLowerCase().trim();
+      overlay.querySelectorAll('._pvCibleItem').forEach(item => {
+        const txt = item.textContent.toLowerCase();
+        item.style.display = (!q || txt.indexOf(q) >= 0) ? '' : 'none';
+      });
+    });
+    setTimeout(() => { overlay.querySelector('#_pvCibleFiltre').focus(); }, 30);
+  }).then(async idx => {
+    if (idx == null) return;
+    const choice = _candidates[idx];
+    if (!choice) return;
+    // Confirmation explicite si on bascule entre familles (rare mais conséquent)
+    const _newPid = choice.pid;
+    const _newPfId = choice.parfumId;
+    if (_newPid === _curPid && _newPfId === _curPfId) {
+      pvAlert('Aucun changement (même cible).');
+      return;
+    }
+    const doIt = await pvConfirm(
+      'Changer la cible de l\'OP ' + op.id + ' :\n\n' +
+      'Avant : ' + _curLabel + '\n' +
+      'Après : ' + choice.label + '\n\n' +
+      (op.rentrerActionId || op.sortirActionId || op.prixActionId || op.rentrerPrixActionId
+        ? 'Attention : l\'OP a des liens d\'action attachés. Ces liens seront retirés s\'ils ne pointent plus vers le bon produit.\n\n'
+        : '') +
+      'Confirmer ?',
+      { ok: 'Changer la cible', okColor: '#22c55e' }
+    );
+    if (!doIt) return;
+    const _now = new Date().toISOString();
+    op.produitIds = [_newPid];
+    op.produitParfumId = _newPfId;
+    op._ts = _now;
+    // Nettoyer les liens d'action qui ne pointent plus vers le bon produit/parfum
+    const _checkLink = (fieldName) => {
+      const aid = op[fieldName];
+      if (!aid) return;
+      const a = actions.find(x => x.id === aid);
+      if (!a) { op[fieldName] = ''; return; }
+      const sameProd = a.produitId === _newPid;
+      const samePf = (a.produitParfumId || '') === _newPfId;
+      if (!sameProd || !samePf) {
+        console.log('[CHANGE-CIBLE] OP ' + op.id + ' · ' + fieldName + '=' + aid + ' déconnecté (ne pointe plus vers la bonne cible)');
+        op[fieldName] = '';
+      }
+    };
+    ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId'].forEach(_checkLink);
+    if (typeof logAction === 'function') logAction('OP cible changée', op.id + ' : ' + _curLabel + ' → ' + choice.label);
+    saveData();
+    if (typeof renderOps === 'function') renderOps();
+    if (typeof renderDashboard === 'function') renderDashboard();
+  });
+}
+
 // Supprime une campagne. Refuse si OPs actives encore rattachées (propose de détacher d'abord).
 async function deleteCampagne(campagneId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
@@ -18755,6 +18894,9 @@ function renderOpCardHtml(op, options) {
   // On masque donc le bouton Clôturer et on affiche à la place un chip d'info "se termine le X".
   const isNationaleDateDriven = op.type === 'NATIONALE';
   const editBtn = noEdit ? '' : `<span onclick="event.stopPropagation(); toggleOpEdit('${op.id}')" title="Éditer mécanique, pièces, affectations..." style="cursor:pointer; font-size:10px; padding:2px 8px; background:${editOpen ? '#8b5cf6' : '#8b5cf615'}; color:${editOpen ? '#0f172a' : '#c4b5fd'}; border:1px solid #8b5cf650; border-radius:3px; font-weight:700;">${editOpen ? '▾ Fermer' : '✎ Éditer'}</span>`;
+  // 2026-05-28 — Bouton "Changer la cible" : permet de modifier produitIds + produitParfumId d'une OP existante.
+  // Utile pour corriger une OP créée trop large (gamme entière au lieu d'un parfum précis).
+  const changeCibleBtn = (noEdit || op.auto) ? '' : `<span onclick="event.stopPropagation(); changeOpCible('${op.id}')" title="Changer le produit ou le parfum cible de l'OP" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; font-weight:700;">🎯 Cible</span>`;
   // Bouton Dupliquer : crée une copie à l'identique (mécanique, pièces, affectations, campagne)
   // avec états remis à zéro. Utile pour enchaîner les vagues type « liquide du moment »
   // où seuls l'intitulé et éventuellement la mécanique changent.
@@ -18773,10 +18915,10 @@ function renderOpCardHtml(op, options) {
       (isActive ? ' ' + closeBtn : '') +
       ` <span style="font-size:9px; padding:1px 6px; background:#64748b25; color:#94a3b8; border-radius:3px; font-style:italic;">AUTO</span>`;
   } else if (isActive) {
-    actionBtns = editBtn + ' ' + closeBtn + ' ' + duplicateBtn +
+    actionBtns = editBtn + ' ' + changeCibleBtn + ' ' + closeBtn + ' ' + duplicateBtn +
       ` <span onclick="event.stopPropagation(); deleteOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444450; border-radius:3px;">✕</span>`;
   } else {
-    actionBtns = editBtn + ' ' + duplicateBtn +
+    actionBtns = editBtn + ' ' + changeCibleBtn + ' ' + duplicateBtn +
       ` <span onclick="event.stopPropagation(); reopenOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e50; border-radius:3px;">Rouvrir</span>
         <span onclick="event.stopPropagation(); deleteOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444450; border-radius:3px;">✕</span>`;
   }
