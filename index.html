@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:39</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 19:48</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -12188,16 +12188,26 @@ function scrollToActionFromUrgence(actionId) {
   if (!actionId) return;
   const _a = actions.find(x => x.id === actionId);
   if (!_a) { console.warn('[URGENCE] Action introuvable', actionId); return; }
-  // Le dashboard a PLUSIEURS niveaux de regroupement pour les actions liquides :
-  //   - 'grp_<gammeId>_<type>'   : groupe de plusieurs actions parfumées d'une même gamme/type
-  //   - 'grplvl_<actionId>'      : une action GAMME-level rendue comme groupe de parfums
+  // Le dashboard a PLUSIEURS niveaux de regroupement à ouvrir pour faire apparaître la card :
+  //   - 'sub_kits_<type>' / 'sub_liq_<type>' / 'sub_pd_<type>' : sous-accordéon famille DANS le bloc
+  //   - 'grp_<gammeId>_<type>'   : groupe de plusieurs actions parfumées d'une même gamme (liquides)
+  //   - 'grplvl_<actionId>'      : une action GAMME-level rendue comme groupe de parfums (liquides)
   //   - '<actionId>'             : la card individuelle elle-même (pour son détail déplié)
   // On ouvre toutes les clés possibles AVANT le render pour garantir que la card sera dans le DOM.
+  const _famKey = _a.produitType === 'liq' ? 'sub_liq' : (_a.produitType === 'pd' ? 'sub_pd' : 'sub_kits');
+  expandedActions.add(_famKey + '_' + _a.type);
   if (_a.produitType === 'liq' && _a.produitId) {
     expandedActions.add('grp_' + _a.produitId + '_' + _a.type);
     expandedActions.add('grplvl_' + actionId);
   }
   expandedActions.add(actionId);
+  // S'assurer que la section dashboard parente (rentrer/sortir/prix) est aussi dépliée.
+  const _sectionMap0 = { 'RENTRER': 'rentrer', 'SORTIR': 'sortir', 'PRIX': 'prix', 'MISE_EN_PLACE': 'rentrer' };
+  const _sectionKey0 = _sectionMap0[_a.type];
+  if (_sectionKey0 && typeof dashCollapsed === 'object' && typeof isDashCollapsed === 'function' && isDashCollapsed(_sectionKey0)) {
+    dashCollapsed[_sectionKey0] = false;
+    try { localStorage.setItem('pilotVapeDashCollapsed', JSON.stringify(dashCollapsed)); } catch(e) {}
+  }
   // Re-render dashboard → la card est maintenant dans le DOM
   if (typeof renderDashboard === 'function') renderDashboard();
   // Petit délai pour laisser le DOM se stabiliser, puis chercher et scroller
@@ -18934,13 +18944,19 @@ function renderOpCardHtml(op, options) {
   if (op.auto) {
     // Les OP auto se clôturent automatiquement via l'action PRIX associée, mais on garde un bouton manuel
     // au cas où l'utilisateur voudrait anticiper la clôture.
-    actionBtns = editBtn +
-      (isActive ? ' ' + closeBtn : '') +
+    // 2026-05-28 : on affiche le bouton Clôturer tant que l'OP n'est pas TERMINEE (et pas seulement
+    // tant que dateFin est absente). Sinon, une OP avec dateFin future ne pouvait plus être clôturée.
+    actionBtns = editBtn + ' ' + changeCibleBtn +
+      (!_isTerminee ? ' ' + closeBtn : '') +
       ` <span style="font-size:9px; padding:1px 6px; background:#64748b25; color:#94a3b8; border-radius:3px; font-style:italic;">AUTO</span>`;
-  } else if (isActive) {
-    actionBtns = editBtn + ' ' + changeCibleBtn + ' ' + closeBtn + ' ' + duplicateBtn +
+  } else if (!_isTerminee) {
+    // OP non terminée (qu'elle ait une dateFin programmée ou non) → bouton Clôturer disponible.
+    // Si dateFin est posée et future, on ajoute aussi "Rouvrir" pour pouvoir l'enlever sans clôturer.
+    const _reopenBtn = !isActive ? ` <span onclick="event.stopPropagation(); reopenOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e50; border-radius:3px;" title="Enlever la date de fin programmée (l'OP reste ouverte indéfiniment)">↺ Rouvrir</span>` : '';
+    actionBtns = editBtn + ' ' + changeCibleBtn + ' ' + closeBtn + ' ' + duplicateBtn + _reopenBtn +
       ` <span onclick="event.stopPropagation(); deleteOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444450; border-radius:3px;">✕</span>`;
   } else {
+    // OP terminée : on peut la rouvrir (enlève dateFin) ou la supprimer.
     actionBtns = editBtn + ' ' + changeCibleBtn + ' ' + duplicateBtn +
       ` <span onclick="event.stopPropagation(); reopenOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e50; border-radius:3px;">Rouvrir</span>
         <span onclick="event.stopPropagation(); deleteOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#ef444415; color:#fca5a5; border:1px solid #ef444450; border-radius:3px;">✕</span>`;
