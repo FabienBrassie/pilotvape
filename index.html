@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 15:53</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 16:23</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -18480,8 +18480,10 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   const _srcAct = (op.sortirActionId || op.prixActionId || op.rentrerPrixActionId) ? actions.find(x => x.id === (op.sortirActionId || op.prixActionId || op.rentrerPrixActionId)) : null;
   const _prx = op.prixRouge || (_srcAct && (_srcAct.prixRouge || _srcAct.prixCible));
   if (_prx) miniTags.push(`<span style="font-size:9px; color:#fca5a5; font-weight:700;" title="Prix rouge${op.auto ? ' (relevé concurrence)' : ' destockage'}">🔴 ${_prx.toFixed(2)}€</span>`);
-  // Bouton "Campagne" pour toutes les OP actives (pas seulement PRIX_ROUGE)
-  if (!op.dateFin && op.type !== 'NATIONALE') {
+  // Bouton "Campagne" pour toutes les OP non archivées (pas seulement PRIX_ROUGE)
+  // 2026-05-28 audit campagne fix urgent : on retire la condition `!op.dateFin`.
+  // Avant : impossible de sortir une OP d'une campagne dès qu'elle avait une date de fin.
+  if (!op._archived && op.type !== 'NATIONALE') {
     if (!op.campagneId) {
       miniTags.push(`<span onclick="event.stopPropagation(); quickAttachCampagne('${op.id}')" style="font-size:9px; padding:1px 6px; background:#64748b15; color:#64748b; border:1px dashed #64748b40; border-radius:3px; cursor:pointer; font-weight:400; white-space:nowrap; opacity:0.55;" title="Rattacher à une campagne existante ou en créer une">📣 Campagne ?</span>`);
     } else {
