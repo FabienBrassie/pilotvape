@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 17:40</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:21</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -14060,21 +14060,20 @@ function renderDashboard() {
     sortir.length === 0 ? emptyState('Rien à sortir ✓') : renderGroupedActionCards(sortir),
     'Déplier la ligne → cocher par boutique : 1) vendu / plus de stock · 2) désactivé sur Swappy');
   // --- Section "À reprendre" (reprise fournisseur, distincte du destockage commercial) ---
-  // Comptage des campagnes pour le bandeau, et bouton export Excel toujours visible si reprises présentes
-  const _campsReprises = new Set();
-  reprises.forEach(a => { if (a.campagneReprise) _campsReprises.add(a.campagneReprise); });
-  const _exportReprisesBtn = reprises.length > 0
-    ? `<div style="margin-bottom:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+  // Affichée uniquement quand au moins une reprise est en cours (sinon section masquée pour
+  // ne pas polluer le dashboard avec un bloc vide — comme urgenceBlock, opEnCoursBlock, etc.).
+  let reprisesBlock = '';
+  if (reprises.length > 0) {
+    const _campsReprises = new Set();
+    reprises.forEach(a => { if (a.campagneReprise) _campsReprises.add(a.campagneReprise); });
+    const _exportReprisesBtn = `<div style="margin-bottom:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
         <button onclick="exportReprisesExcel()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">📊 Exporter les reprises (Excel)</button>
         ${_campsReprises.size > 0 ? `<span style="font-size:10px; color:#64748b;">${_campsReprises.size} campagne${_campsReprises.size > 1 ? 's' : ''} en cours</span>` : ''}
-      </div>`
-    : '';
-  const reprisesInner = reprises.length === 0
-    ? emptyState('Aucune reprise en cours.')
-    : (_exportReprisesBtn + renderGroupedActionCards(reprises));
-  const reprisesBlock = block('reprises', '📦 À reprendre', '#0ea5e9', reprises.length,
-    reprisesInner,
-    'Workflow reprise fournisseur — 5 étapes par boutique : réappro coupé · stock zéro · produit désactivé sur Swappy · comptage des références · mis de côté dans le carton.');
+      </div>`;
+    reprisesBlock = block('reprises', '📦 À reprendre', '#0ea5e9', reprises.length,
+      _exportReprisesBtn + renderGroupedActionCards(reprises),
+      'Workflow reprise fournisseur — 5 étapes par boutique : réappro coupé · stock zéro · produit désactivé sur Swappy · comptage des références · mis de côté dans le carton.');
+  }
   const rentrerBlock = block('rentrer', 'À rentrer', '#22c55e', rentrer.length,
     rentrer.length === 0 ? emptyState('Rien à rentrer ✓') : renderGroupedActionCards(rentrer),
     'Déplier la ligne → cocher par boutique : 1) commandé · 2) en stock · 3) actif (Swappy)');
