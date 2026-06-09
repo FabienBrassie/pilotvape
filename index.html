@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-05-28 22:50</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 17:40</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -242,7 +242,7 @@
       <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; align-items:center;">
         <input type="text" id="propLiqSearch" oninput="renderPropositionsLiq()" placeholder="Rechercher marque, gamme, parfum..." style="flex:1; min-width:180px; padding:6px 10px; font-size:12px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <select id="propLiqFilterFormat" onchange="renderPropositionsLiq()" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-          <option value="">Tous formats</option><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option>
+          <option value="">Tous formats</option><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option>
         </select>
         <select id="propLiqFilterRole" onchange="renderPropositionsLiq()" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
           <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option>
@@ -266,7 +266,7 @@
           <div class="form-group" id="propLiqMarqueGroup"><label>Marque</label><input type="text" id="propLiqMarque"></div>
           <div class="form-group" id="propLiqGammeGroup"><label>Gamme</label><input type="text" id="propLiqGamme"></div>
           <div class="form-group" id="propLiqNomGroup" style="display:none;"><label>Nom parfum</label><input type="text" id="propLiqNom"></div>
-          <div class="form-group"><label>Format</label><select id="propLiqFormat" onchange="onPropLiqTypeChange()"><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option></select></div>
+          <div class="form-group"><label>Format</label><select id="propLiqFormat" onchange="onPropLiqTypeChange()"><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option></select></div>
           <div class="form-group"><label>PA HT (€)</label><input type="number" id="propLiqPA" step="0.01"></div>
           <div class="form-group"><label>PV TTC (€)</label><input type="number" id="propLiqPV" step="0.01"></div>
           <div class="form-group"><label>Goût</label><select id="propLiqCt"><option value="">—</option><option value="Fruité">Fruité</option><option value="Fruité / Frais">Fruité / Frais</option><option value="Gourmand">Gourmand</option><option value="Gourmand / Fruité">Gourmand / Fruité</option><option value="Tabac">Tabac</option><option value="Tabac / Gourmand">Tabac / Gourmand</option><option value="Menthe">Menthe</option><option value="De_Tout">De Tout</option></select></div>
@@ -370,7 +370,7 @@
     <div class="sticky-sub" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; align-items:center;">
       <input type="text" id="liqSearch" oninput="renderLiqAll();saveUiState();" placeholder="Rechercher marque, gamme, parfum..." style="flex:1; min-width:180px; padding:6px 10px; font-size:12px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
       <select id="liqFilterFormat" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="">Tous formats</option><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option>
+        <option value="">Tous formats</option><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option>
       </select>
       <select id="liqFilterProfil" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous profils</option><option value="RECREATIF">Récréatif</option><option value="PRUDENT">Prudent</option><option value="DECIDE">Décidé</option>
@@ -1076,17 +1076,22 @@ const TIRAGE_SHORT = { MTL_RDL: 'MTL/RDL', DL: 'DL', 'DL+': 'DL+' };
 // =====================================================================
 // Grille liquides : format × profil client = 12 cases
 // Case couverture = "10mL_RECREATIF", "50mL_DECIDE", etc.
-const LIQ_FORMATS = ['10mL', '10mL_SDN', '50mL', '100mL', '+150mL'];
+const LIQ_FORMATS = ['10mL', '10mL_SDN', '20mL', '50mL', '100mL', '+150mL'];
+// Formats concernés par le contrôle de couverture "prix d'appel" sur la vue Freetouch.
+// 20mL = nouvelle gamme sans nicotine (nicotinable manuellement), hors grille PA (cf. décision Fabien 2026-06-09).
+// +150mL = format marginal, hors grille PA historiquement.
+const LIQ_PA_FORMATS = ['10mL', '10mL_SDN', '50mL', '100mL'];
 // Contenance par format (mL) — sert au calcul de la marge par mL.
-const LIQ_FORMAT_ML = { '10mL': 10, '10mL_SDN': 10, '50mL': 50, '100mL': 100, '+150mL': 150 };
+const LIQ_FORMAT_ML = { '10mL': 10, '10mL_SDN': 10, '20mL': 20, '50mL': 50, '100mL': 100, '+150mL': 150 };
 // Marge par mL d'une gamme = marge unitaire / contenance du format. Affichage seul, aucune donnée stockée.
 function liqMargeMl(g) { const ml = LIQ_FORMAT_ML[g && g.format] || 50; return ml > 0 ? ((g && g.marge) || 0) / ml : 0; }
-const LIQ_FORMAT_LABELS = { '10mL': '10 mL', '10mL_SDN': '10 mL SdN', '50mL': '50 mL', '100mL': '100 mL', '+150mL': '+150 mL' };
-const LIQ_FORMAT_COLORS = { '10mL': '#06b6d4', '10mL_SDN': '#0891b2', '50mL': '#8b5cf6', '100mL': '#ec4899', '+150mL': '#f43f5e' };
+const LIQ_FORMAT_LABELS = { '10mL': '10 mL', '10mL_SDN': '10 mL SdN', '20mL': '20 mL', '50mL': '50 mL', '100mL': '100 mL', '+150mL': '+150 mL' };
+const LIQ_FORMAT_COLORS = { '10mL': '#06b6d4', '10mL_SDN': '#0891b2', '20mL': '#0ea5e9', '50mL': '#8b5cf6', '100mL': '#ec4899', '+150mL': '#f43f5e' };
 // Badge colors for format labels in dashboard (bg + text)
 const LIQ_FORMAT_BADGE = {
   '10mL':     { bg: '#475569', text: '#94a3b8' },
   '10mL_SDN': { bg: '#14532d', text: '#4ade80' },
+  '20mL':     { bg: '#0c4a6e', text: '#7dd3fc' },
   '50mL':     { bg: '#1e3a5f', text: '#60a5fa' },
   '100mL':    { bg: '#3b1f63', text: '#c084fc' },
   '+150mL':   { bg: '#475569', text: '#94a3b8' },
@@ -2968,10 +2973,25 @@ const ACTION_STEPS = {
   SWAP_COMPOSANT:[{ key: 'swap',      label: 'Composant changé sur le kit' },
                   { key: 'etiquette', label: 'Nouvelle étiquette imprimée' }]
 };
+// Étapes spécifiques pour une SORTIR de motif REPRISE (reprise fournisseur — séparée du destockage commercial).
+// L'étape "comptage" est éditable : la boutique saisit la quantité reprise dans steps[sh].comptageQte.
+const ACTION_STEPS_REPRISE = [
+  { key: 'reappro_off', label: '1. Réappro coupée sur Swappy' },
+  { key: 'stock_zero',  label: '2. Stock à zéro sur Swappy' },
+  { key: 'swappy_off',  label: '3. Produit désactivé sur Swappy' },
+  { key: 'comptage',    label: '4. Comptage des références', editableQte: true },
+  { key: 'mis_de_cote', label: '5. Mis de côté dans le carton' }
+];
 // Accepte soit un type ('SORTIR'...), soit une action entière (pour gérer les flags
-// instance-specific, ex: PRIX avec etiquetteRouge → le label de l'étape étiquette est ajusté).
+// instance-specific, ex: PRIX avec etiquetteRouge → le label de l'étape étiquette est ajusté ;
+// SORTIR avec motifSortie='REPRISE' → 5 étapes spécifiques au workflow reprise).
 function getActionSteps(typeOrAction) {
   const type = typeof typeOrAction === 'string' ? typeOrAction : (typeOrAction && typeOrAction.type);
+  const motif = (typeof typeOrAction === 'object' && typeOrAction) ? typeOrAction.motifSortie : null;
+  // Cas spécial : SORTIR motif REPRISE → workflow distinct (5 étapes avec quantité éditable).
+  if (type === 'SORTIR' && motif === 'REPRISE') {
+    return ACTION_STEPS_REPRISE.map(s => ({ ...s }));
+  }
   const base = (ACTION_STEPS[type] || [{ key: 'done', label: 'Fait' }]).map(s => ({ ...s }));
   if (type === 'PRIX' && typeof typeOrAction === 'object' && typeOrAction && typeOrAction.etiquetteRouge) {
     const et = base.find(s => s.key === 'etiquette');
@@ -5459,6 +5479,142 @@ function toggleActionStep(actionId, shop, stepKey) {
   try { if (typeof renderPropositions === 'function') renderPropositions(); } catch(e) { console.error(e); }
   try { renderDashboard(); } catch(e) { console.error(e); }
   try { renderOps && renderOps(); } catch(e) { console.error(e); }
+}
+
+// ===================== REPRISE FOURNISSEUR =====================
+// Permet de séparer un destockage commercial (promo, prix rouge, etc.) d'une reprise
+// fournisseur (on retire du linéaire, on désactive sur Swappy, on met de côté pour reprise).
+// Mécanique : on crée/réutilise une action SORTIR avec motifSortie='REPRISE'.
+// Côté dashboard, ces actions atterrissent dans une section dédiée "À reprendre" séparée
+// de "à sortir". Les 5 étapes (dont une avec champ quantité) viennent de ACTION_STEPS_REPRISE
+// via getActionSteps qui détecte le motif.
+//
+// Le statut produit (gamme ou parfum) passe automatiquement à A_SORTIR. Quand toutes les
+// étapes sont cochées sur toutes les boutiques, le produit passe à SORTI (cascade habituelle).
+
+// Modale de saisie de la campagne reprise + confirmation.
+// Retourne Promise<string|null> avec le libellé de campagne, ou null si annulé.
+function _pvPromptCampagneReprise(productLabel) {
+  // Autocomplete sur les campagnes reprise existantes (toutes les actions SORTIR motif=REPRISE)
+  const existantes = new Set();
+  actions.forEach(a => {
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && a.campagneReprise) {
+      existantes.add(a.campagneReprise);
+    }
+  });
+  const datalist = Array.from(existantes).sort().map(c => `<option value="${c}">`).join('');
+  const html = `<div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:8px;">📦 Reprise fournisseur</div>
+    <div style="color:#94a3b8; font-size:12px; margin-bottom:12px;">${productLabel || 'Produit'}</div>
+    <label style="color:#94a3b8; font-size:11px; display:block;">Campagne de reprise *
+      <input type="text" id="_pvCampagneReprise" list="_pvCampagneReprisDL" placeholder="ex : Reprise Vincent juin 2026"
+        style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;">
+      <datalist id="_pvCampagneReprisDL">${datalist}</datalist>
+    </label>
+    <div style="margin-top:10px; padding:8px; background:#0c4a6e22; border:1px solid #0c4a6e; border-radius:4px; color:#7dd3fc; font-size:11px;">
+      Le produit passera en statut <b>À sortir</b>. Une action <b>SORTIR motif Reprise</b> sera créée (ou réutilisée si elle existe déjà), avec 5 étapes à cocher par chaque boutique.
+    </div>`;
+  return new Promise(resolve => {
+    const overlay = _pvModal(html,
+      [{ label: 'Lancer la reprise', color: '#0ea5e9' }, { label: 'Annuler' }],
+      idx => {
+        if (idx !== 0) { resolve(null); return; }
+        const v = (overlay.querySelector('#_pvCampagneReprise').value || '').trim();
+        if (!v) { pvAlert('Le libellé de campagne est obligatoire.').then(() => resolve(null)); return; }
+        resolve(v);
+      }
+    );
+    // Focus auto
+    setTimeout(() => { const el = overlay.querySelector('#_pvCampagneReprise'); if (el) el.focus(); }, 50);
+  });
+}
+
+// Lance le workflow reprise sur un produit (kit / gamme liquide / pièce détachée).
+// Si parfumId est fourni : reprise au niveau parfum (liq uniquement).
+async function lancerReprise(produitType, produitId, parfumId) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  // Calcul du label produit pour la modale
+  let prod, parfumObj;
+  if (produitType === 'liq') {
+    prod = baseLiq.find(g => g.id === produitId);
+    if (prod && parfumId) parfumObj = (prod.parfums || []).find(p => p.id === parfumId);
+  } else if (produitType === 'kit') {
+    prod = baseKits.find(k => k.id === produitId);
+  } else if (produitType === 'pd') {
+    prod = basePD.find(p => p.id === produitId);
+  }
+  if (!prod) { pvAlert('Produit introuvable.'); return; }
+  let label = '';
+  if (produitType === 'liq') {
+    const fmt = LIQ_FORMAT_LABELS[prod.format] || prod.format || '';
+    label = `${prod.marque || ''} · ${prod.gamme || ''} · ${fmt}${parfumObj ? ' · ' + (parfumObj.n || '') : ' · gamme entière'}`;
+  } else if (produitType === 'kit') {
+    label = `${prod.marque || ''} · ${prod.modele || ''}`;
+  } else if (produitType === 'pd') {
+    label = `${prod.marque || ''} · ${prod.modele || ''} · ${PD_CAT_LABELS[prod.categorie] || prod.categorie || ''}`;
+  }
+  // Modale campagne
+  const camp = await _pvPromptCampagneReprise(label);
+  if (!camp) return;
+  // Création / réutilisation de l'action SORTIR motif REPRISE
+  const opts = { extraFields: {} };
+  if (produitType === 'liq' && parfumId) {
+    opts.parfumId = parfumId;
+    opts.parfumNom = parfumObj ? parfumObj.n : null;
+  }
+  const a = ensureAction(produitId, 'SORTIR', produitType, opts);
+  const wasAlreadyReprise = (a.motifSortie === 'REPRISE');
+  a.motifSortie = 'REPRISE';
+  a.campagneReprise = camp;
+  // Si on bascule en mode REPRISE depuis un SORTIR classique, on réinitialise les étapes
+  // (les keys de steps changent : 'vendu'/'swappyOff' → 5 keys REPRISE).
+  if (!wasAlreadyReprise) {
+    SHOPS.forEach(sh => {
+      if (!a.etats[sh]) a.etats[sh] = { done: false, dateFait: null, responsable: '', commentaire: '', steps: {}, _stepTs: {} };
+      a.etats[sh].steps = makeStepMap(a);
+      a.etats[sh].done = false;
+      a.etats[sh].dateFait = null;
+      a.etats[sh].comptageQte = null;
+      if (!a.etats[sh]._stepTs) a.etats[sh]._stepTs = {};
+    });
+  }
+  a._ts = new Date().toISOString();
+  // Pose du statut produit à A_SORTIR (gamme entière ou parfum)
+  if (produitType === 'liq') {
+    if (parfumId && parfumObj) {
+      parfumObj.s = 'A_SORTIR';
+    } else {
+      prod.statutVie = 'A_SORTIR';
+    }
+    prod._ts = new Date().toISOString();
+  } else {
+    prod.statutVie = 'A_SORTIR';
+    prod._ts = new Date().toISOString();
+  }
+  logAction('Reprise lancée', 'Campagne "' + camp + '" sur ' + label + ' → ' + a.id);
+  saveData();
+  pvAlert('Reprise « ' + camp + ' » lancée. Les boutiques verront le produit dans la section "À reprendre" du dashboard.');
+  try { renderDashboard(); } catch(e) {}
+  try { renderLiqAll && renderLiqAll(); } catch(e) {}
+  try { renderKits && renderKits(); } catch(e) {}
+  try { renderBasePD && renderBasePD(); } catch(e) {}
+}
+
+// Saisie d'une quantité éditable sur une étape (ex : étape 'comptage' du workflow REPRISE).
+// La quantité est stockée dans st.comptageQte (entier, ou null si vide).
+function setActionStepQte(actionId, shop, stepKey, value) {
+  const a = actions.find(x => x.id === actionId && !x.annulee) || actions.find(x => x.id === actionId);
+  if (!a) return;
+  ensureActionSteps(a);
+  const st = a.etats[shop];
+  if (!st) return;
+  const _v = (value === '' || value === null) ? null : Math.max(0, parseInt(value, 10) || 0);
+  st.comptageQte = _v;
+  // Pose un timestamp dédié pour ce champ (évite les écrasements au merge)
+  st._comptageQteTs = new Date().toISOString();
+  a._ts = new Date().toISOString();
+  logAction('Comptage reprise', _logShopName(shop) + ' → ' + (_v === null ? 'vide' : _v + ' réf.') + ' sur ' + _logActionLabel(actionId));
+  saveData();
+  // Pas de re-render systématique : le champ reste cohérent en place
 }
 
 // Toggle rapide d'une shop entière : coche/décoche TOUTES les sous-étapes.
@@ -8354,6 +8510,99 @@ function exportData() {
   try { localStorage.setItem('pilotVape_lastBackupReminder', new Date().toISOString()); } catch(e) {}
 }
 
+// Export CSV des reprises (lisible directement par Excel).
+// Une ligne par (action × boutique) : campagne, date, produit, parfum, boutique, quantité comptée,
+// avancement (n/5), état général, dates clés. Permet le bordereau de reprise fournisseur.
+function exportReprisesExcel() {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const all = actions.filter(a => a.type === 'SORTIR' && a.motifSortie === 'REPRISE');
+  if (all.length === 0) { pvAlert('Aucune reprise à exporter.'); return; }
+  // Helper : escape une valeur CSV (gère les ; , " et retour ligne)
+  const _esc = v => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    if (s.includes(';') || s.includes('"') || s.includes('\n') || s.includes(',')) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  };
+  const headers = [
+    'Campagne', 'Date création', 'Type produit', 'Marque', 'Gamme/Modèle',
+    'Format', 'Parfum', 'Boutique', 'Quantité comptée',
+    'Avancement (étapes faites / total)', 'Date du dernier check',
+    'État global', 'ID action'
+  ];
+  const rows = [headers.map(_esc).join(';')];
+  // Tri : campagne ASC, puis date création DESC, puis produit
+  const sorted = all.slice().sort((a, b) => {
+    const ca = a.campagneReprise || '';
+    const cb = b.campagneReprise || '';
+    if (ca !== cb) return ca.localeCompare(cb);
+    const da = a.dateCreation || '';
+    const db = b.dateCreation || '';
+    if (da !== db) return db.localeCompare(da);
+    return (a.produitId || '').localeCompare(b.produitId || '');
+  });
+  sorted.forEach(a => {
+    let prodType, marque = '', label = '', format = '', parfum = '';
+    if (a.produitType === 'liq') {
+      const g = baseLiq.find(x => x.id === a.produitId);
+      prodType = 'Liquide';
+      if (g) {
+        marque = g.marque || '';
+        label = g.gamme || '';
+        format = LIQ_FORMAT_LABELS[g.format] || g.format || '';
+        if (a.produitParfumId && g.parfums) {
+          const p = g.parfums.find(x => x.id === a.produitParfumId);
+          if (p) parfum = p.n || '';
+        } else {
+          parfum = '(gamme entière)';
+        }
+      }
+    } else if (a.produitType === 'pd') {
+      const p = basePD.find(x => x.id === a.produitId);
+      prodType = 'Pièce détachée';
+      if (p) { marque = p.marque || ''; label = p.modele || ''; format = PD_CAT_LABELS[p.categorie] || p.categorie || ''; }
+    } else {
+      const k = baseKits.find(x => x.id === a.produitId);
+      prodType = 'Kit';
+      if (k) { marque = k.marque || ''; label = k.modele || ''; format = ''; }
+    }
+    const etat = a.annulee ? 'Annulée' : (a.dateCloture ? 'Clôturée' : 'En cours');
+    const defs = getActionSteps(a);
+    SHOPS.forEach(sh => {
+      const st = a.etats && a.etats[sh];
+      if (!st) return;
+      const nbDone = defs.filter(d => st.steps && st.steps[d.key] === true).length;
+      const qte = (typeof st.comptageQte === 'number') ? st.comptageQte : '';
+      const dateFait = st.dateFait || '';
+      rows.push([
+        a.campagneReprise || '',
+        a.dateCreation || '',
+        prodType,
+        marque,
+        label,
+        format,
+        parfum,
+        SHOP_LABELS[sh] || sh,
+        qte,
+        nbDone + '/' + defs.length,
+        dateFait,
+        etat,
+        a.id
+      ].map(_esc).join(';'));
+    });
+  });
+  const _bom = '﻿';
+  const csv = _bom + rows.join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'PilotVape_Reprises_' + ymd(new Date()) + '.csv';
+  link.click();
+  logAction('Export reprises', sorted.length + ' actions × ' + SHOPS.length + ' boutiques');
+}
+
 // Import complet symétrique : baseKits/baseLiq/propositions + actions + nextActionId.
 // Compatible avec les anciens exports (les champs actions/nextActionId sont optionnels).
 // On demande confirmation si le fichier contient des actions (écrasement destructif).
@@ -11016,6 +11265,9 @@ function renderLiqGammeDetail(g) {
           ${LIQ_PARFUM_STATUTS.map(s => `<option value="${s}" ${p.s===s?'selected':''}>${LIQ_GAMME_STATUT_LABELS[s]||s}</option>`).join('')}</select>`;
         html += `<label onclick="event.stopPropagation();" title="Exclusif Cigusto" style="display:inline-flex; align-items:center; gap:2px; padding:1px 5px; font-size:9px; background:${p.exclu ? '#64748b30' : 'transparent'}; color:${p.exclu ? '#cbd5e1' : '#64748b'}; border:1px solid ${p.exclu ? '#64748b' : '#33415540'}; border-radius:2px; cursor:pointer; font-weight:${p.exclu ? 700 : 400}; flex-shrink:0;">
           <input type="checkbox" ${p.exclu ? 'checked' : ''} onchange="updateLiqParfumField('${g.id}',${pi},'exclu',this.checked)" style="margin:0; cursor:pointer; accent-color:#64748b; transform:scale(0.8);">Exclu</label>`;
+        if (isAdmin()) {
+          html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #0ea5e960; color:#7dd3fc; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:600;" title="Lancer une reprise fournisseur sur ce parfum">📦</button>`;
+        }
         html += `<button onclick="removeLiqParfum('${g.id}',${pi})" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #ef444440; color:#ef4444; border-radius:2px; cursor:pointer; line-height:1.2;" title="Retirer">×</button>`;
         html += `</div>`;
       });
@@ -11032,6 +11284,9 @@ function renderLiqGammeDetail(g) {
       <input type="checkbox" ${g.oneShot ? 'checked' : ''} onchange="toggleLiqOneShot('${g.id}')" style="margin:0; cursor:pointer; accent-color:#fcd34d;">
       ⚡ One-shot
     </label>`;
+    if (isAdmin()) {
+      html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}',null)" style="padding:2px 8px; font-size:10px; background:#0c4a6e22; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;" title="Lancer une reprise fournisseur sur la gamme entière">📦 Reprise</button>`;
+    }
     html += `</div>`;
 
     html += `</div>`;
@@ -11207,7 +11462,8 @@ function renderLiqAll() {
 
           if (nbGammes === 0) {
             // Trou d'offre : un prix d'appel est attendu par profil x format SAUF Décidé ; la meilleure marge partout.
-            const _trou = (role === 'MEILLEURE_MARGE') || (role === 'PRIX_D_APPEL' && prof !== 'DECIDE');
+            // Le contrôle PA ne s'applique que sur les formats de la grille PA (cf. LIQ_PA_FORMATS — 20mL et +150mL exclus).
+            const _trou = (role === 'MEILLEURE_MARGE') || (role === 'PRIX_D_APPEL' && prof !== 'DECIDE' && LIQ_PA_FORMATS.includes(fmt));
             html += `<div style="min-height:28px; border:1px dashed ${_trou ? '#ef444455' : '#47556920'}; border-radius:3px; display:flex; align-items:center; justify-content:center; background:${_trou ? '#ef444414' : 'transparent'};" title="${_trou ? 'Manque — ' + PROFIL_LABELS[prof] + ' · ' + (LIQ_ROLE_LABELS[role]||role) + ' · ' + LIQ_FORMAT_LABELS[fmt] : ''}">
               <span style="font-size:7px; font-weight:600; color:${_trou ? '#ef4444' : '#47556940'};">${_trou ? 'manque' : '—'}</span>
             </div>`;
@@ -12408,7 +12664,10 @@ function renderDashboard() {
     return 'BASSE';
   }
 
-  const sortir = actions.filter(a => (a.type === 'SORTIR' || a.type === 'SWAP_COMPOSANT') && isVisible(a));
+  // SORTIR motif=REPRISE sont sortis du flux "à sortir" classique et atterrissent dans une section dédiée
+  // "À reprendre" (workflow reprise fournisseur — désactivation Swappy, comptage, mise de côté).
+  const sortir = actions.filter(a => (a.type === 'SORTIR' || a.type === 'SWAP_COMPOSANT') && a.motifSortie !== 'REPRISE' && isVisible(a));
+  const reprises = actions.filter(a => a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && isVisible(a));
   const rentrer = actions.filter(a => a.type === 'RENTRER' && isVisible(a));
   const meps = actions.filter(a => a.type === 'MISE_EN_PLACE' && isVisible(a));
   const prix = actions.filter(a => a.type === 'PRIX' && isVisible(a));
@@ -12457,6 +12716,13 @@ function renderDashboard() {
   });
   meps.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
   prix.sort((a, b) => (_prioRank[effectivePrio(a)] ?? 1) - (_prioRank[effectivePrio(b)] ?? 1));
+  // Tri reprises : par campagne d'abord, puis par produit
+  reprises.sort((a, b) => {
+    const ca = a.campagneReprise || '';
+    const cb = b.campagneReprise || '';
+    if (ca !== cb) return ca.localeCompare(cb);
+    return sortByPair(a, b);
+  });
 
   const prioColor = (p) => p === 'HAUTE' ? '#ef4444' : p === 'BASSE' ? '#64748b' : '#f59e0b';
 
@@ -12592,11 +12858,22 @@ function renderDashboard() {
       const box = checked
         ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:${col}; color:#0f172a; border:1px solid ${col}; border-radius:3px; font-size:10px; font-weight:700;">✓</span>`
         : `<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid ${col}80; border-radius:3px;"></span>`;
+      // Étape avec champ éditable de quantité (ex : étape 'comptage' du workflow REPRISE).
+      // La valeur est stockée dans st.comptageQte (et non dans steps[key], qui reste un booléen pour le merge).
+      let qteField = '';
+      if (d.editableQte) {
+        const _curQte = (st && typeof st.comptageQte === 'number') ? st.comptageQte : '';
+        qteField = `<input type="number" min="0" step="1" value="${_curQte}" placeholder="qté"
+          onclick="event.stopPropagation();"
+          onchange="event.stopPropagation(); setActionStepQte('${a.id}','${sh}','${d.key}', this.value)"
+          style="width:54px; padding:2px 4px; font-size:10px; background:#0f172a; color:#e2e8f0; border:1px solid ${col}60; border-radius:3px; text-align:right;"/>`;
+      }
       return `<div onclick="event.stopPropagation(); toggleActionStep('${a.id}','${sh}','${d.key}')"
         style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'}; border-radius:3px; user-select:none;"
         onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'">
         ${box}
-        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}</span>
+        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}</span>
+        ${qteField}
       </div>`;
     }).join('');
     return `<div style="padding:6px 8px; background:#1e293b; border:1px solid ${col}30; border-radius:4px;">
@@ -13782,6 +14059,22 @@ function renderDashboard() {
   const sortirBlock  = block('sortir', 'À sortir', '#ef4444', sortir.length,
     sortir.length === 0 ? emptyState('Rien à sortir ✓') : renderGroupedActionCards(sortir),
     'Déplier la ligne → cocher par boutique : 1) vendu / plus de stock · 2) désactivé sur Swappy');
+  // --- Section "À reprendre" (reprise fournisseur, distincte du destockage commercial) ---
+  // Comptage des campagnes pour le bandeau, et bouton export Excel toujours visible si reprises présentes
+  const _campsReprises = new Set();
+  reprises.forEach(a => { if (a.campagneReprise) _campsReprises.add(a.campagneReprise); });
+  const _exportReprisesBtn = reprises.length > 0
+    ? `<div style="margin-bottom:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        <button onclick="exportReprisesExcel()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">📊 Exporter les reprises (Excel)</button>
+        ${_campsReprises.size > 0 ? `<span style="font-size:10px; color:#64748b;">${_campsReprises.size} campagne${_campsReprises.size > 1 ? 's' : ''} en cours</span>` : ''}
+      </div>`
+    : '';
+  const reprisesInner = reprises.length === 0
+    ? emptyState('Aucune reprise en cours.')
+    : (_exportReprisesBtn + renderGroupedActionCards(reprises));
+  const reprisesBlock = block('reprises', '📦 À reprendre', '#0ea5e9', reprises.length,
+    reprisesInner,
+    'Workflow reprise fournisseur — 5 étapes par boutique : réappro coupé · stock zéro · produit désactivé sur Swappy · comptage des références · mis de côté dans le carton.');
   const rentrerBlock = block('rentrer', 'À rentrer', '#22c55e', rentrer.length,
     rentrer.length === 0 ? emptyState('Rien à rentrer ✓') : renderGroupedActionCards(rentrer),
     'Déplier la ligne → cocher par boutique : 1) commandé · 2) en stock · 3) actif (Swappy)');
@@ -14853,7 +15146,7 @@ function renderDashboard() {
   })();
 
   document.getElementById('dashContent').innerHTML =
-    urgenceBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    urgenceBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
 
   // Summary top right — chips cliquables qui amènent vers la section correspondante
   const chip = (color, label, key) =>
@@ -23024,7 +23317,7 @@ function renderPropositionsLiq() {
   const refSt = document.getElementById('countLiqRefuseSt'); if (refSt) refSt.textContent = countRef;
 
   // Sort within format groups
-  const fmtOrder = { '10mL': 0, '10mL_SDN': 1, '50mL': 2, '100mL': 3, '+150mL': 4 };
+  const fmtOrder = { '10mL': 0, '10mL_SDN': 1, '20mL': 2, '50mL': 3, '100mL': 4, '+150mL': 5 };
   const dir = propLiqSortDir;
   const sortBy = propLiqSortCol;
   const liqSortFns = {
