@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:45</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:56</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -5352,8 +5352,12 @@ function _applyActionShopChange(a, shop) {
     st.dateFait = null;
   }
   const isFaitNow = actionGlobalState(a) === 'FAIT';
-  if (isFaitNow && !a.dateCloture) a.dateCloture = ymd(new Date());
-  if (!isFaitNow) a.dateCloture = null;
+  // Cas REPRISE : on NE pose PAS dateCloture automatiquement (la campagne reste active
+  // dans la section "À reprendre" jusqu'à clôture manuelle par le bouton 🏁).
+  if (!(a.type === 'SORTIR' && a.motifSortie === 'REPRISE')) {
+    if (isFaitNow && !a.dateCloture) a.dateCloture = ymd(new Date());
+    if (!isFaitNow) a.dateCloture = null;
+  }
   // fix 2026-05-20 phase 1 : timestamp partagé pour cette cascade. Posé sur l'action
   // systématiquement, et sur prod/parfum/liq selon les branches ci-dessous.
   const _nowTs = new Date().toISOString();
@@ -5671,9 +5675,16 @@ async function lancerReprise(produitType, produitId, parfumId) {
   const wasAlreadyReprise = (a.motifSortie === 'REPRISE');
   a.motifSortie = 'REPRISE';
   a.campagneReprise = camp;
-  // Si on bascule en mode REPRISE depuis un SORTIR classique, on réinitialise les étapes
-  // (les keys de steps changent : 'vendu'/'swappyOff' → 5 keys REPRISE).
+  // Si on bascule en mode REPRISE depuis un SORTIR classique (ou une action clôturée/annulée
+  // retournée par ensureAction), on réveille l'action et on réinitialise les étapes (les keys
+  // changent : 'vendu'/'swappyOff' → 5 keys REPRISE). Sinon on laisse en place le travail en cours.
   if (!wasAlreadyReprise) {
+    // Réveil : enlève toute trace de clôture/annulation pour que l'action redevienne active
+    // et visible dans le dashboard "À reprendre".
+    a.annulee = false;
+    a.dateCloture = null;
+    a._archived = false;
+    _deletedIds.delete(a.id);
     SHOPS.forEach(sh => {
       if (!a.etats[sh]) a.etats[sh] = { done: false, dateFait: null, responsable: '', commentaire: '', steps: {}, _stepTs: {} };
       a.etats[sh].steps = makeStepMap(a);
@@ -6992,6 +7003,40 @@ async function loadData() {
       const _nbArch = _autoArchiveCampagnesFinies();
       if (_nbArch > 0 && typeof saveData === 'function') {
         setTimeout(() => { try { saveData(); } catch(e) { console.warn('[AUTO-ARCHIVE-CAMP] save raté:', e); } }, 2500);
+      }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
+    // Auto-réparation REPRISE (2026-06-09) : si un produit/parfum est en statut REPRISE
+    // mais que son action SORTIR motif=REPRISE est clôturée/annulée (héritage d'un cycle
+    // SORTI → DANS_OFFRE → REPRISE avant le fix du 22:55), on la réveille pour qu'elle
+    // réapparaisse dans le dashboard "À reprendre". Sans toucher aux steps déjà cochées
+    // (préserve le travail des boutiques).
+    // ───────────────────────────────────────────────────────────────────────
+    if (typeof isAdmin === 'function' && isAdmin()) {
+      let _healed = 0;
+      const _findAndWake = (pid, parfumId) => {
+        const a = actions.find(x => x.type === 'SORTIR' && x.motifSortie === 'REPRISE'
+          && x.produitId === pid
+          && (parfumId ? x.produitParfumId === parfumId : !x.produitParfumId));
+        if (a && (a.annulee || a.dateCloture || a._archived)) {
+          a.annulee = false;
+          a.dateCloture = null;
+          a._archived = false;
+          a._ts = new Date().toISOString();
+          if (typeof _deletedIds !== 'undefined' && _deletedIds.delete) _deletedIds.delete(a.id);
+          _healed++;
+        }
+      };
+      baseLiq.forEach(g => {
+        if (g.statutVie === 'REPRISE') _findAndWake(g.id, null);
+        (g.parfums || []).forEach(p => { if (p.s === 'REPRISE') _findAndWake(g.id, p.id); });
+      });
+      baseKits.forEach(k => { if (k.statutVie === 'REPRISE') _findAndWake(k.id, null); });
+      basePD.forEach(p => { if (p.statutVie === 'REPRISE') _findAndWake(p.id, null); });
+      if (_healed > 0) {
+        console.log('[HEAL-REPRISE] ' + _healed + ' action(s) REPRISE réveillée(s) au chargement.');
+        setTimeout(() => { try { saveData(); } catch(e) {} }, 1500);
       }
     }
 
