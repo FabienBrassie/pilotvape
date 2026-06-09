@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:53</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:29</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -5638,11 +5638,12 @@ async function lancerReprise(produitType, produitId, parfumId) {
     if (other._archived || other.annulee) return;
     if (other.produitId !== produitId) return;
     if (other.produitType !== produitType) return;
-    // Filtre parfum : si reprise au niveau parfum → ne tape que les actions du même parfum (ou sans parfum si gamme entière en plus)
+    // Filtre parfum :
+    //   - Reprise parfum (parfumId défini) → on annule UNIQUEMENT les actions de ce parfum exact.
+    //     Les actions "gamme entière" (sans produitParfumId) et les actions des AUTRES parfums sont conservées.
+    //   - Reprise gamme entière (parfumId vide) → on annule tout : action gamme entière + toutes les actions parfum.
     if (parfumId) {
-      if (other.produitParfumId && other.produitParfumId !== parfumId) return;
-    } else {
-      // Reprise gamme entière : on tape tout, y compris les actions parfum (la gamme entière disparaît)
+      if (other.produitParfumId !== parfumId) return;
     }
     _cancelAction(other);
     other._ts = new Date().toISOString();
@@ -13822,7 +13823,11 @@ function renderDashboard() {
     const g = baseLiq.find(l => l.id === gammeId);
     if (!g) return grp.map(renderActionCard).join('');
     const T = TYPE_META[grp[0].type] || TYPE_META.SORTIR;
-    const groupKey = 'grp_' + gammeId + '_' + grp[0].type;
+    // Suffixe motif pour différencier les accordéons "À sortir" et "À reprendre" sur la même gamme :
+    // sinon une seule clé `grp_<gammeId>_SORTIR` était partagée entre les deux sections du dashboard,
+    // ce qui faisait toggle l'une = toggle l'autre.
+    const _motifSuffix = (grp[0].motifSortie === 'REPRISE') ? '_REPRISE' : '';
+    const groupKey = 'grp_' + gammeId + '_' + grp[0].type + _motifSuffix;
     const isExpanded = expandedActions.has(groupKey);
     const profColor = g.profilChoisi ? PROFIL_COLORS[g.profilChoisi] : '#64748b';
     const profShort = g.profilChoisi ? PROFIL_SHORT[g.profilChoisi] : '—';
@@ -14032,11 +14037,14 @@ function renderDashboard() {
     // ── FILTRE ANTI-DOUBLON LIQUIDES : masquer gamme-level si parfum-level existent ──
     // On regarde TOUTES les actions liq non-annulées (même FAIT), pas juste celles de la section.
     // Sinon quand les parfums passent FAIT, la gamme-level réapparaît.
+    // Le motif (REPRISE ou vide) est inclus dans la clé pour ne pas mélanger une SORTIR classique
+    // et une SORTIR motif=REPRISE sur la même gamme.
     const _allLiq = actionList.filter(a => a.produitType === 'liq');
     const _parfCovGlobal = new Set();
-    actions.forEach(a => { if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfCovGlobal.add(a.produitId + '::' + a.type); });
+    const _ptmKey = a => a.produitId + '::' + a.type + '::' + (a.motifSortie || '');
+    actions.forEach(a => { if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfCovGlobal.add(_ptmKey(a)); });
     const liqActions = _allLiq.filter(a =>
-      a.produitParfumId || !_parfCovGlobal.has(a.produitId + '::' + a.type)
+      a.produitParfumId || !_parfCovGlobal.has(_ptmKey(a))
     );
 
     let html = '';
@@ -14064,7 +14072,10 @@ function renderDashboard() {
         const rb = (b.replaceParId || linkMap[b.id]) ? 0 : 1;
         return ra - rb;
       });
-      const subKey = subKeyPrefix + '_' + (actions[0] ? actions[0].type : '');
+      // Suffixe motif (REPRISE) : sépare "À sortir" et "À reprendre" dans expandedActions
+      // (sinon les deux blocs partagent la même clé sub_<prefix>_SORTIR et toggle ensemble).
+      const _subMotifSuffix = (actions[0] && actions[0].motifSortie === 'REPRISE') ? '_REPRISE' : '';
+      const subKey = subKeyPrefix + '_' + (actions[0] ? actions[0].type : '') + _subMotifSuffix;
       const isExpanded = expandedActions.has(subKey);
       const _shopDots = SHOPS.map(sh => {
         if (fShop && sh !== fShop) return '';
@@ -14102,7 +14113,9 @@ function renderDashboard() {
     // ── Sous-accordéon Liquides ──
     if (liqActions.length === 0) return html;
 
-    const liqSubKey = 'sub_liq_' + (liqActions[0] ? liqActions[0].type : '');
+    // Suffixe motif (REPRISE) pour la même raison que les sous-accordéons Kits/PD ci-dessus.
+    const _liqMotifSuffix = (liqActions[0] && liqActions[0].motifSortie === 'REPRISE') ? '_REPRISE' : '';
+    const liqSubKey = 'sub_liq_' + (liqActions[0] ? liqActions[0].type : '') + _liqMotifSuffix;
     const liqExpanded = expandedActions.has(liqSubKey);
     // Ronds de progression agrégée par shop
     const _liqShopDots = SHOPS.map(sh => {
