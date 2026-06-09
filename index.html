@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:48</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:53</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -5500,6 +5500,17 @@ function toggleActionStep(actionId, shop, stepKey) {
 // Le statut produit (gamme ou parfum) passe automatiquement à A_SORTIR. Quand toutes les
 // étapes sont cochées sur toutes les boutiques, le produit passe à SORTI (cascade habituelle).
 
+// Helper appelé au clic sur un chip "campagne en cours" dans la modale reprise.
+// Lit le libellé depuis data-camp (décodé par le navigateur depuis &quot; etc.) et le pose dans l'input.
+function _pvPickCampagneReprise(el) {
+  const c = el && el.dataset ? el.dataset.camp : '';
+  if (!c) return;
+  const input = document.getElementById('_pvCampagneReprise');
+  if (input) { input.value = c; input.focus(); }
+  document.querySelectorAll('[data-camp-chip]').forEach(x => { x.style.background = '#1e293b'; });
+  el.style.background = '#0ea5e955';
+}
+
 // Modale de saisie de la campagne reprise + confirmation.
 // Retourne Promise<string|null> avec le libellé de campagne, ou null si annulé.
 function _pvPromptCampagneReprise(productLabel) {
@@ -5515,10 +5526,13 @@ function _pvPromptCampagneReprise(productLabel) {
     const target = isActive ? campsEnCours : campsAutres;
     target.set(a.campagneReprise, (target.get(a.campagneReprise) || 0) + 1);
   });
+  // Helper d'échappement HTML pour les attributs (nom de campagne peut contenir des quotes, &, <, >, espaces...)
+  const _attrEsc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const _txtEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const chipsEnCoursHtml = campsEnCours.size > 0
     ? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
         ${Array.from(campsEnCours.entries()).sort((a,b) => a[0].localeCompare(b[0])).map(([c, n]) =>
-          `<span onclick="document.getElementById('_pvCampagneReprise').value = ${JSON.stringify(c)}; document.querySelectorAll('[data-camp-chip]').forEach(el => el.style.background='#1e293b'); this.style.background='#0ea5e955';" data-camp-chip="1" style="font-size:10px; padding:3px 8px; background:#1e293b; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;" title="Cliquer pour rejoindre cette campagne (${n} produit${n>1?'s':''} déjà dedans)">${c} <span style="opacity:0.6;">·${n}</span></span>`
+          `<span onclick="_pvPickCampagneReprise(this)" data-camp="${_attrEsc(c)}" data-camp-chip="1" style="font-size:10px; padding:3px 8px; background:#1e293b; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;" title="Cliquer pour rejoindre cette campagne (${n} produit${n>1?'s':''} déjà dedans)">${_txtEsc(c)} <span style="opacity:0.6;">·${n}</span></span>`
         ).join('')}
       </div>`
     : `<div style="margin-top:6px; color:#64748b; font-size:10px; font-style:italic;">Aucune campagne en cours — tape un nouveau libellé pour démarrer.</div>`;
