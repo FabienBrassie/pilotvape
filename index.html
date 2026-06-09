@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:33</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:48</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -5503,16 +5503,33 @@ function toggleActionStep(actionId, shop, stepKey) {
 // Modale de saisie de la campagne reprise + confirmation.
 // Retourne Promise<string|null> avec le libellé de campagne, ou null si annulé.
 function _pvPromptCampagneReprise(productLabel) {
-  // Autocomplete sur les campagnes reprise existantes (toutes les actions SORTIR motif=REPRISE)
-  const existantes = new Set();
+  // Liste des campagnes reprise existantes :
+  //   - "en cours" = au moins une action SORTIR motif=REPRISE encore active sur cette campagne
+  //   - "récentes" = clôturées mais encore visibles (pour réutilisation rapide d'un libellé)
+  // L'utilisateur peut cliquer sur une campagne en cours pour la sélectionner, ou taper un nouveau libellé.
+  const campsEnCours = new Map(); // campagne → nb actions actives
+  const campsAutres = new Map();  // campagne → nb actions clôturées
   actions.forEach(a => {
-    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && a.campagneReprise) {
-      existantes.add(a.campagneReprise);
-    }
+    if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || !a.campagneReprise) return;
+    const isActive = !a.annulee && !a.dateCloture;
+    const target = isActive ? campsEnCours : campsAutres;
+    target.set(a.campagneReprise, (target.get(a.campagneReprise) || 0) + 1);
   });
-  const datalist = Array.from(existantes).sort().map(c => `<option value="${c}">`).join('');
-  const html = `<div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:8px;">📦 Reprise fournisseur</div>
+  const chipsEnCoursHtml = campsEnCours.size > 0
+    ? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">
+        ${Array.from(campsEnCours.entries()).sort((a,b) => a[0].localeCompare(b[0])).map(([c, n]) =>
+          `<span onclick="document.getElementById('_pvCampagneReprise').value = ${JSON.stringify(c)}; document.querySelectorAll('[data-camp-chip]').forEach(el => el.style.background='#1e293b'); this.style.background='#0ea5e955';" data-camp-chip="1" style="font-size:10px; padding:3px 8px; background:#1e293b; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;" title="Cliquer pour rejoindre cette campagne (${n} produit${n>1?'s':''} déjà dedans)">${c} <span style="opacity:0.6;">·${n}</span></span>`
+        ).join('')}
+      </div>`
+    : `<div style="margin-top:6px; color:#64748b; font-size:10px; font-style:italic;">Aucune campagne en cours — tape un nouveau libellé pour démarrer.</div>`;
+  const datalist = Array.from(new Set([...campsEnCours.keys(), ...campsAutres.keys()])).sort()
+    .map(c => `<option value="${c}">`).join('');
+  const html = `<div style="color:#0ea5e9; font-weight:700; font-size:14px; margin-bottom:8px;">📦 Reprise fournisseur</div>
     <div style="color:#94a3b8; font-size:12px; margin-bottom:12px;">${productLabel || 'Produit'}</div>
+    <div style="margin-bottom:10px;">
+      <div style="color:#94a3b8; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:2px;">Campagnes en cours${campsEnCours.size > 0 ? ' (cliquer pour rejoindre)' : ''}</div>
+      ${chipsEnCoursHtml}
+    </div>
     <label style="color:#94a3b8; font-size:11px; display:block;">Campagne de reprise *
       <input type="text" id="_pvCampagneReprise" list="_pvCampagneReprisDL" placeholder="ex : Reprise Vincent juin 2026"
         style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;">
@@ -5531,7 +5548,6 @@ function _pvPromptCampagneReprise(productLabel) {
         resolve(v);
       }
     );
-    // Focus auto
     setTimeout(() => { const el = overlay.querySelector('#_pvCampagneReprise'); if (el) el.focus(); }, 50);
   });
 }
@@ -9978,10 +9994,10 @@ function renderStatutMultiSelect(filterName) {
 
   const arr = filterName === 'kit' ? kitStatutFilter : filterName === 'liq' ? liqStatutFilter : pdStatutFilter;
   const statuts = filterName === 'kit'
-    ? ['DANS_OFFRE','A_RENTRER','A_REMPLACER','FIN_DE_VIE','A_SORTIR','SORTI']
-    : ['DANS_OFFRE','A_RENTRER','EN_ATTENTE','A_REMPLACER','FIN_DE_VIE','A_SORTIR','SORTI'];
+    ? ['DANS_OFFRE','A_RENTRER','A_REMPLACER','FIN_DE_VIE','A_SORTIR','REPRISE','SORTI']
+    : ['DANS_OFFRE','A_RENTRER','EN_ATTENTE','A_REMPLACER','FIN_DE_VIE','A_SORTIR','REPRISE','SORTI'];
   const labels = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", REPRISE:"📦 En reprise", SORTI:"Sorti" };
-  const statusColors = { DANS_OFFRE:'#22c55e', A_RENTRER:'#3b82f6', EN_ATTENTE:'#6366f1', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', A_SORTIR:'#ef4444', SORTI:'#64748b' };
+  const statusColors = { DANS_OFFRE:'#22c55e', A_RENTRER:'#3b82f6', EN_ATTENTE:'#6366f1', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', A_SORTIR:'#ef4444', REPRISE:'#0ea5e9', SORTI:'#64748b' };
 
   const tags = arr.length === 0
     ? '<span style="color:#94a3b8; font-size:10px;">Tous statuts</span>'
@@ -11277,7 +11293,13 @@ function renderLiqGammeDetail(g) {
     // Contrôles d'édition
     html += `<div style="display:flex; gap:4px; flex-wrap:wrap; margin-bottom:4px; align-items:center;">`;
     html += `<select onclick="event.stopPropagation();" onchange="updateLiqField('${g.id}','statutVie',this.value)" style="padding:1px 4px; font-size:9px; background:#0f172a; border:1px solid #475569; color:${sc}; border-radius:3px;">
-      ${LIQ_GAMME_STATUTS.map(s => `<option value="${s}" ${g.statutVie===s?'selected':''}>${LIQ_GAMME_STATUT_LABELS[s]||s}</option>`).join('')}</select>`;
+      ${LIQ_GAMME_STATUTS.map(s => {
+        // REPRISE non sélectionnable via le select : seul le bouton 📦 peut y mener (modale campagne + annulation OPs).
+        const _isReprise = (s === 'REPRISE');
+        const _disabled = (_isReprise && g.statutVie !== 'REPRISE');
+        const _title = _disabled ? ' title="Utilise le bouton 📦 Reprise pour mettre en reprise (campagne + annulation des OPs liées)"' : '';
+        return `<option value="${s}" ${g.statutVie===s?'selected':''}${_disabled ? ' disabled' : ''}${_title}>${LIQ_GAMME_STATUT_LABELS[s]||s}</option>`;
+      }).join('')}</select>`;
     html += `<select onclick="event.stopPropagation();" onchange="updateLiqField('${g.id}','profilChoisi',this.value)" style="padding:1px 4px; font-size:9px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:3px;">
       <option value="">— profil —</option>${PROFILS.map(p => `<option value="${p}" ${g.profilChoisi===p?'selected':''}>${PROFIL_LABELS[p]}</option>`).join('')}</select>`;
     const _roleCalcLive = g.roleCalc || calcLiqRole(g.format, g.pa, g.pv);
@@ -11341,7 +11363,13 @@ function renderLiqGammeDetail(g) {
         html += `<select onclick="event.stopPropagation();" onchange="updateLiqParfumField('${g.id}',${pi},'ct',this.value)" style="padding:1px 4px; font-size:9px; background:#0f172a; border:1px solid #33415580; color:${pCtColor}; border-radius:2px; flex-shrink:0;">
           <option value="" ${!p.ct?'selected':''}>?</option>${LIQ_GOUT_CATS.map(c => `<option value="${c}" ${p.ct===c?'selected':''}>${c}</option>`).join('')}</select>`;
         html += `<select onclick="event.stopPropagation();" onchange="updateLiqParfumField('${g.id}',${pi},'s',this.value)" style="padding:1px 4px; font-size:10px; background:#0f172a; border:1px solid #33415580; color:${pSc}; border-radius:2px;">
-          ${LIQ_PARFUM_STATUTS.map(s => `<option value="${s}" ${p.s===s?'selected':''}>${LIQ_GAMME_STATUT_LABELS[s]||s}</option>`).join('')}</select>`;
+          ${LIQ_PARFUM_STATUTS.map(s => {
+            // REPRISE non sélectionnable via le select : seul le bouton 📦 peut y mener.
+            const _isReprise = (s === 'REPRISE');
+            const _disabled = (_isReprise && p.s !== 'REPRISE');
+            const _title = _disabled ? ' title="Utilise le bouton 📦 sur le parfum pour mettre en reprise"' : '';
+            return `<option value="${s}" ${p.s===s?'selected':''}${_disabled ? ' disabled' : ''}${_title}>${LIQ_GAMME_STATUT_LABELS[s]||s}</option>`;
+          }).join('')}</select>`;
         html += `<label onclick="event.stopPropagation();" title="Exclusif Cigusto" style="display:inline-flex; align-items:center; gap:2px; padding:1px 5px; font-size:9px; background:${p.exclu ? '#64748b30' : 'transparent'}; color:${p.exclu ? '#cbd5e1' : '#64748b'}; border:1px solid ${p.exclu ? '#64748b' : '#33415540'}; border-radius:2px; cursor:pointer; font-weight:${p.exclu ? 700 : 400}; flex-shrink:0;">
           <input type="checkbox" ${p.exclu ? 'checked' : ''} onchange="updateLiqParfumField('${g.id}',${pi},'exclu',this.checked)" style="margin:0; cursor:pointer; accent-color:#64748b; transform:scale(0.8);">Exclu</label>`;
         if (isAdmin()) {
