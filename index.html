@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:59</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 01:57</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -8969,6 +8969,517 @@ function _pvSelectCampReprise(el) {
   el.style.background = '#0c4a6e44';
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// GESTION CAMPAGNES REPRISE — backend
+// ═══════════════════════════════════════════════════════════════════════════
+// Le modèle "campagne reprise" est implicite : c'est le champ a.campagneReprise sur
+// les actions SORTIR motif=REPRISE. Pas d'objet "campagne" dédié pour éviter d'alourdir
+// le sync. Les méta-données (commentaire) sont stockées sur CHAQUE action de la campagne,
+// synchronisées quand on modifie la campagne via les helpers ci-dessous.
+
+// Récupère toutes les campagnes reprise (en cours + archivées).
+// includeArchived=true → inclut les campagnes dont TOUTES les actions sont clôturées.
+function _listCampagnesReprise(includeArchived) {
+  const map = new Map(); // name → { name, actions: [], dateCreation, dateClotureMin, comment, totalSteps, doneSteps, isArchived }
+  actions.forEach(a => {
+    if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || !a.campagneReprise) return;
+    if (a._archived) return; // archivée définitivement = invisible
+    const name = a.campagneReprise;
+    if (!map.has(name)) {
+      map.set(name, { name, actions: [], dateCreation: a.dateCreation || '', dateClotureMin: null, comment: a.campagneRepriseComment || '', totalSteps: 0, doneSteps: 0, nbActive: 0, nbClotured: 0 });
+    }
+    const entry = map.get(name);
+    entry.actions.push(a);
+    if (a.dateCreation && (!entry.dateCreation || a.dateCreation < entry.dateCreation)) entry.dateCreation = a.dateCreation;
+    if (a.campagneRepriseComment && !entry.comment) entry.comment = a.campagneRepriseComment;
+    if (a.dateCloture || a.annulee) {
+      entry.nbClotured++;
+      if (a.dateCloture && (!entry.dateClotureMin || a.dateCloture < entry.dateClotureMin)) entry.dateClotureMin = a.dateCloture;
+    } else {
+      entry.nbActive++;
+      const defs = getActionSteps(a);
+      SHOPS.forEach(sh => {
+        const st = a.etats && a.etats[sh];
+        if (!st) return;
+        entry.totalSteps += defs.length;
+        entry.doneSteps += defs.filter(d => st.steps && st.steps[d.key] === true).length;
+      });
+    }
+  });
+  const result = [];
+  map.forEach(entry => {
+    entry.isArchived = (entry.nbActive === 0);
+    if (entry.isArchived && !includeArchived) return;
+    result.push(entry);
+  });
+  // Tri : actives d'abord (par nom asc), puis archivées (par dateClotureMin desc)
+  result.sort((a, b) => {
+    if (a.isArchived !== b.isArchived) return a.isArchived ? 1 : -1;
+    if (a.isArchived) return (b.dateClotureMin || '').localeCompare(a.dateClotureMin || '');
+    return a.name.localeCompare(b.name);
+  });
+  return result;
+}
+
+// Renomme une campagne reprise (sur toutes les actions).
+function _renameCampagneReprise(oldName, newName) {
+  const _nowTs = new Date().toISOString();
+  let count = 0;
+  actions.forEach(a => {
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && a.campagneReprise === oldName) {
+      a.campagneReprise = newName;
+      a._ts = _nowTs;
+      count++;
+    }
+  });
+  if (count > 0) {
+    logAction('Campagne reprise renommée', '"' + oldName + '" → "' + newName + '" · ' + count + ' action(s)');
+    saveData();
+  }
+  return count;
+}
+
+// Pose/met à jour le commentaire d'une campagne reprise (synchronisé sur toutes ses actions).
+function _setCommentaireCampagneReprise(name, comment) {
+  const _nowTs = new Date().toISOString();
+  let count = 0;
+  actions.forEach(a => {
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && a.campagneReprise === name) {
+      a.campagneRepriseComment = comment || '';
+      a._ts = _nowTs;
+      count++;
+    }
+  });
+  if (count > 0) {
+    logAction('Commentaire campagne reprise', '"' + name + '" · ' + count + ' action(s) mises à jour');
+    saveData();
+  }
+  return count;
+}
+
+// Annule une campagne reprise complète (= revient avant le lancement).
+// Pour chaque action de la campagne : annule, remet le statut produit/parfum à statutKitAvant
+// (ou DANS_OFFRE par défaut). Si l'action a déjà été clôturée (passé en SORTI via clôture
+// manuelle), elle reste clôturée — pas de retour en arrière sur SORTI.
+function _annulerCampagneReprise(name) {
+  const _now = ymd(new Date());
+  const _nowTs = new Date().toISOString();
+  let nbActions = 0, nbProds = 0;
+  const _seen = new Set();
+  const _gammesTouchees = new Set();
+  actions.forEach(a => {
+    if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || a.campagneReprise !== name) return;
+    if (a.annulee || a.dateCloture) return; // clôturée → on ne touche pas
+    // Remet le statut produit/parfum à statutKitAvant (capturé au lancement de la reprise)
+    const _revertTo = a.statutKitAvant || 'DANS_OFFRE';
+    if (a.produitType === 'liq') {
+      const g = baseLiq.find(x => x.id === a.produitId);
+      if (g) {
+        if (a.produitParfumId) {
+          const p = (g.parfums || []).find(x => x.id === a.produitParfumId);
+          if (p && p.s === 'REPRISE') { p.s = _revertTo; p._ts = _nowTs; }
+          _gammesTouchees.add(g.id);
+        } else {
+          if (g.statutVie === 'REPRISE') { g.statutVie = _revertTo; }
+          // Parfums également propagés (cas symétrique de lancerReprise gamme entière)
+          (g.parfums || []).forEach(p => { if (p.s === 'REPRISE') { p.s = _revertTo; p._ts = _nowTs; } });
+        }
+        g._ts = _nowTs;
+        if (!_seen.has(g.id)) { _seen.add(g.id); nbProds++; }
+      }
+    } else if (a.produitType === 'pd') {
+      const p = basePD.find(x => x.id === a.produitId);
+      if (p && p.statutVie === 'REPRISE') { p.statutVie = _revertTo; p._ts = _nowTs; if (!_seen.has(p.id)) { _seen.add(p.id); nbProds++; } }
+    } else {
+      const k = baseKits.find(x => x.id === a.produitId);
+      if (k && k.statutVie === 'REPRISE') { k.statutVie = _revertTo; k._ts = _nowTs; if (!_seen.has(k.id)) { _seen.add(k.id); nbProds++; } }
+    }
+    _cancelAction(a);
+    a._ts = _nowTs;
+    nbActions++;
+  });
+  // Recalcule le statut gamme depuis les parfums pour les gammes touchées par retrait parfum
+  _gammesTouchees.forEach(gid => {
+    const g = baseLiq.find(x => x.id === gid);
+    if (g) _recomputeGammeStatutFromParfums(g);
+  });
+  logAction('Campagne reprise annulée', '"' + name + '" · ' + nbActions + ' action(s) · ' + nbProds + ' produit(s) revenu(s) à l\'état antérieur');
+  saveData();
+  return { nbActions, nbProds };
+}
+
+// Retire un produit/parfum précis d'une campagne (annule juste cette action).
+function _retirerProduitDeCampagneReprise(actionId) {
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE') return false;
+  if (a.annulee || a.dateCloture) return false;
+  const _nowTs = new Date().toISOString();
+  const _revertTo = a.statutKitAvant || 'DANS_OFFRE';
+  if (a.produitType === 'liq') {
+    const g = baseLiq.find(x => x.id === a.produitId);
+    if (g) {
+      if (a.produitParfumId) {
+        const p = (g.parfums || []).find(x => x.id === a.produitParfumId);
+        if (p && p.s === 'REPRISE') { p.s = _revertTo; p._ts = _nowTs; }
+        _recomputeGammeStatutFromParfums(g);
+      } else {
+        if (g.statutVie === 'REPRISE') { g.statutVie = _revertTo; }
+        (g.parfums || []).forEach(p => { if (p.s === 'REPRISE') { p.s = _revertTo; p._ts = _nowTs; } });
+      }
+      g._ts = _nowTs;
+    }
+  } else if (a.produitType === 'pd') {
+    const p = basePD.find(x => x.id === a.produitId);
+    if (p && p.statutVie === 'REPRISE') { p.statutVie = _revertTo; p._ts = _nowTs; }
+  } else {
+    const k = baseKits.find(x => x.id === a.produitId);
+    if (k && k.statutVie === 'REPRISE') { k.statutVie = _revertTo; k._ts = _nowTs; }
+  }
+  _cancelAction(a);
+  a._ts = _nowTs;
+  logAction('Produit retiré de campagne reprise', '"' + a.campagneReprise + '" · ' + a.id);
+  saveData();
+  return true;
+}
+
+// Helpers d'échappement HTML utilisés dans les modales de gestion (attributs + texte affiché).
+function _camp_attrEsc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function _camp_txtEsc(s)  { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+// Modale principale : liste de toutes les campagnes de reprise (en cours + archivées).
+// Chaque campagne est cliquable pour ouvrir un panneau de gestion détaillé.
+function gestionCampagnesReprise() {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const camps = _listCampagnesReprise(true);
+  if (camps.length === 0) { pvAlert('Aucune campagne de reprise — lance une reprise via le bouton 📦 sur la base liquides pour commencer.'); return; }
+  const _renderRow = c => {
+    const pct = c.totalSteps > 0 ? Math.round(100 * c.doneSteps / c.totalSteps) : (c.isArchived ? 100 : 0);
+    const _col = c.isArchived ? '#64748b' : (pct === 100 ? '#22c55e' : (pct >= 50 ? '#f59e0b' : '#0ea5e9'));
+    const _statusLbl = c.isArchived ? 'Archivée' : (pct === 100 ? 'Prête à clôturer' : 'En cours');
+    const _commentBadge = c.comment ? `<span style="font-size:9px; color:#94a3b8; font-style:italic; margin-left:6px;" title="${_camp_attrEsc(c.comment)}">💬 ${_camp_txtEsc(c.comment.length > 40 ? c.comment.slice(0,40) + '…' : c.comment)}</span>` : '';
+    const _dateInfo = c.isArchived
+      ? (c.dateClotureMin ? `clôturée le ${fmtFR(c.dateClotureMin)}` : 'clôturée')
+      : (c.dateCreation ? `lancée le ${fmtFR(c.dateCreation)}` : '');
+    return `<div onclick="_pvOpenCampagneRepriseDetail(this.dataset.camp)" data-camp="${_camp_attrEsc(c.name)}"
+      style="display:flex; align-items:center; gap:10px; padding:8px 10px; margin:3px 0; background:#1e293b; border:1px solid ${_col}40; border-radius:5px; cursor:pointer;"
+      onmouseover="this.style.background='#1e293bcc'; this.style.borderColor='${_col}99';"
+      onmouseout="this.style.background='#1e293b'; this.style.borderColor='${_col}40';">
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:13px; color:#e2e8f0; font-weight:600; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+          ${_camp_txtEsc(c.name)}${_commentBadge}
+        </div>
+        <div style="font-size:10px; color:#64748b; margin-top:2px;">${c.nbActive + c.nbClotured} produit${(c.nbActive+c.nbClotured)>1?'s':''} · ${_dateInfo}</div>
+      </div>
+      <span style="font-size:10px; padding:2px 8px; background:${_col}22; color:${_col}; border:1px solid ${_col}60; border-radius:3px; font-weight:700; white-space:nowrap;">${_statusLbl}</span>
+      <span style="font-size:11px; padding:2px 8px; background:${_col}22; color:${_col}; border:1px solid ${_col}60; border-radius:3px; font-weight:700;">${pct}%</span>
+      <span style="color:${_col}; font-size:14px;">›</span>
+    </div>`;
+  };
+  const enCours = camps.filter(c => !c.isArchived);
+  const archived = camps.filter(c => c.isArchived);
+  let html = `<div style="color:#0ea5e9; font-weight:700; font-size:14px; margin-bottom:10px;">📋 Gérer les campagnes de reprise</div>`;
+  if (enCours.length > 0) {
+    html += `<div style="color:#94a3b8; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; margin-top:4px;">En cours (${enCours.length})</div>`;
+    html += enCours.map(_renderRow).join('');
+  }
+  if (archived.length > 0) {
+    html += `<div style="color:#94a3b8; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; margin-top:14px;">Archivées (${archived.length})</div>`;
+    html += archived.map(_renderRow).join('');
+  }
+  html = `<div style="max-height:540px; overflow-y:auto; padding-right:4px;">${html}</div>`;
+  _pvModal(html, [{ label: 'Fermer' }], () => {});
+}
+
+// Ouvre le panneau de détail d'une campagne. Stocké en window pour pouvoir être appelé depuis onclick.
+window._pvOpenCampagneRepriseDetail = function(name) {
+  if (!name) return;
+  // Ferme la modale parente (liste) avant d'ouvrir le détail
+  document.querySelectorAll('.pv-modal-overlay').forEach(o => { try { o.remove(); } catch(e) {} });
+  _pvGestionCampagneRepriseDetail(name);
+};
+
+// Panneau détail d'une campagne : affiche infos + liste produits + tous les boutons d'action.
+function _pvGestionCampagneRepriseDetail(name) {
+  const camps = _listCampagnesReprise(true);
+  const entry = camps.find(c => c.name === name);
+  if (!entry) { pvAlert('Campagne « ' + name + ' » introuvable.'); return; }
+  const pct = entry.totalSteps > 0 ? Math.round(100 * entry.doneSteps / entry.totalSteps) : (entry.isArchived ? 100 : 0);
+  const _col = entry.isArchived ? '#64748b' : (pct === 100 ? '#22c55e' : (pct >= 50 ? '#f59e0b' : '#0ea5e9'));
+
+  // Liste des produits
+  const _productsHtml = entry.actions.map(a => {
+    let label = '?';
+    if (a.produitType === 'liq') {
+      const g = baseLiq.find(x => x.id === a.produitId);
+      if (g) {
+        const fmt = LIQ_FORMAT_LABELS[g.format] || g.format || '';
+        if (a.produitParfumId && g.parfums) {
+          const p = g.parfums.find(x => x.id === a.produitParfumId);
+          label = `${g.marque || ''} · ${g.gamme || ''} · ${fmt} · ${p ? p.n : '?'}`;
+        } else {
+          label = `${g.marque || ''} · ${g.gamme || ''} · ${fmt} · gamme entière`;
+        }
+      }
+    } else if (a.produitType === 'pd') {
+      const p = basePD.find(x => x.id === a.produitId);
+      if (p) label = `${p.marque || ''} · ${p.modele || ''} (PD)`;
+    } else {
+      const k = baseKits.find(x => x.id === a.produitId);
+      if (k) label = `${k.marque || ''} · ${k.modele || ''} (kit)`;
+    }
+    const _state = a.annulee ? 'Annulée' : (a.dateCloture ? 'Clôturée' : 'En cours');
+    const _stateColor = a.annulee ? '#94a3b8' : (a.dateCloture ? '#22c55e' : '#0ea5e9');
+    // Timeline cochages compacte : pour chaque shop, X/N + date
+    const defs = getActionSteps(a);
+    const _timeline = SHOPS.map(sh => {
+      const st = a.etats && a.etats[sh];
+      if (!st) return '';
+      const nbDone = defs.filter(d => st.steps && st.steps[d.key] === true).length;
+      const _scol = SHOP_COLORS[sh];
+      const _init = SHOP_LABELS[sh][0];
+      const _qte = (typeof st.comptageQte === 'number') ? ` · ${st.comptageQte}réf` : '';
+      const _dateF = st.dateFait ? ` · ${fmtFR(st.dateFait)}` : '';
+      return `<span title="${SHOP_LABELS[sh]} : ${nbDone}/${defs.length}${_qte}${_dateF}" style="font-size:9px; padding:1px 5px; background:${_scol}22; color:${_scol}; border:1px solid ${_scol}60; border-radius:3px; font-weight:600;">${_init} ${nbDone}/${defs.length}${_qte}</span>`;
+    }).join(' ');
+    const _btnRetirer = (!a.annulee && !a.dateCloture) ? `<button onclick="_pvRetirerProduitCampagneReprise('${a.id}', this)" title="Retirer ce produit de la campagne (annule juste son action, garde les autres)" style="padding:2px 8px; font-size:10px; background:none; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; cursor:pointer;">× Retirer</button>` : '';
+    return `<div style="display:flex; align-items:center; gap:8px; padding:6px 8px; margin:2px 0; background:#1e293b; border:1px solid #33415560; border-radius:4px;">
+      <div style="flex:1; min-width:0;">
+        <div style="font-size:11px; color:#e2e8f0; font-weight:600;">${_camp_txtEsc(label)}</div>
+        <div style="display:flex; gap:4px; margin-top:3px; flex-wrap:wrap;">${_timeline}</div>
+      </div>
+      <span style="font-size:9px; padding:1px 6px; background:${_stateColor}22; color:${_stateColor}; border:1px solid ${_stateColor}60; border-radius:3px; font-weight:700; white-space:nowrap;">${_state}</span>
+      ${_btnRetirer}
+    </div>`;
+  }).join('');
+
+  const _actifsCount = entry.actions.filter(a => !a.annulee && !a.dateCloture).length;
+  const _archiveBtn = entry.isArchived
+    ? `<button onclick="_pvSupprimerCampagneArchivee('${_camp_attrEsc(name)}')" style="padding:6px 12px; font-size:11px; background:#ef444420; color:#fca5a5; border:1px solid #ef444460; border-radius:4px; cursor:pointer; font-weight:700;">🗑 Supprimer définitivement</button>`
+    : '';
+  const _annulerBtn = !entry.isArchived && _actifsCount > 0
+    ? `<button onclick="_pvAnnulerCampagneReprise('${_camp_attrEsc(name)}')" style="padding:6px 12px; font-size:11px; background:#f59e0b20; color:#fcd34d; border:1px solid #f59e0b60; border-radius:4px; cursor:pointer; font-weight:700;" title="Annule la campagne : revient à l'état avant lancement. Les statuts produits retournent à leur valeur d'avant.">⎌ Annuler la campagne</button>`
+    : '';
+  const _ajouterBtn = !entry.isArchived
+    ? `<button onclick="_pvAjouterProduitCampagneReprise('${_camp_attrEsc(name)}')" style="padding:6px 12px; font-size:11px; background:#22c55e20; color:#86efac; border:1px solid #22c55e60; border-radius:4px; cursor:pointer; font-weight:700;">+ Ajouter un produit</button>`
+    : '';
+  const _exportBtn = `<button onclick="_pvExporterCampagneReprise('${_camp_attrEsc(name)}')" style="padding:6px 12px; font-size:11px; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:4px; cursor:pointer; font-weight:700;">📊 Exporter cette campagne (Excel)</button>`;
+  const _cloturerBtn = !entry.isArchived && _actifsCount > 0
+    ? `<button onclick="_pvCloturerUneCampagne('${_camp_attrEsc(name)}')" style="padding:6px 12px; font-size:11px; background:#22c55e20; color:#86efac; border:1px solid #22c55e60; border-radius:4px; cursor:pointer; font-weight:700;" title="Passe tous les produits en SORTI et archive la campagne.">🏁 Clôturer</button>`
+    : '';
+
+  const html = `<div style="color:${_col}; font-weight:700; font-size:14px; margin-bottom:4px;">📋 ${_camp_txtEsc(name)}</div>
+    <div style="font-size:10px; color:#94a3b8; margin-bottom:10px;">
+      ${entry.actions.length} produit${entry.actions.length > 1 ? 's' : ''} · ${pct}% d'avancement · ${entry.isArchived ? 'Archivée' : 'En cours'}
+      ${entry.dateCreation ? ' · lancée le ' + fmtFR(entry.dateCreation) : ''}
+    </div>
+
+    <div style="display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap;">
+      <button onclick="_pvRenommerCampagneReprise('${_camp_attrEsc(name)}')" style="padding:6px 12px; font-size:11px; background:#3b82f620; color:#93c5fd; border:1px solid #3b82f660; border-radius:4px; cursor:pointer; font-weight:700;">✎ Renommer</button>
+      ${_ajouterBtn}
+      ${_exportBtn}
+      ${_cloturerBtn}
+      ${_annulerBtn}
+      ${_archiveBtn}
+    </div>
+
+    <label style="display:block; font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase; margin-bottom:3px;">Commentaire (visible dans l'export)</label>
+    <textarea id="_pvCampRepriseComment" rows="2" placeholder="ex : Contact fournisseur Vincent — bordereau n°234"
+      style="width:100%; padding:6px 10px; font-size:11px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; resize:vertical; margin-bottom:6px;">${_camp_txtEsc(entry.comment)}</textarea>
+    <div style="text-align:right; margin-bottom:14px;">
+      <button onclick="_pvSauverCommentaireCampagneReprise('${_camp_attrEsc(name)}')" style="padding:4px 12px; font-size:10px; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;">💾 Enregistrer le commentaire</button>
+    </div>
+
+    <div style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase; margin-bottom:4px;">Produits dans la campagne (${entry.actions.length})</div>
+    <div style="max-height:300px; overflow-y:auto; padding-right:4px;">${_productsHtml || '<div style="color:#64748b; font-size:11px; font-style:italic; padding:8px;">Aucun produit.</div>'}</div>`;
+  _pvModal(html, [{ label: '← Retour à la liste', color: '#475569' }, { label: 'Fermer' }], idx => {
+    if (idx === 0) { setTimeout(() => gestionCampagnesReprise(), 50); }
+  });
+}
+
+// === Actions appelées depuis les boutons de la modale détail ===
+
+window._pvRenommerCampagneReprise = async function(name) {
+  const newName = prompt('Nouveau nom pour la campagne « ' + name + ' » :', name);
+  if (newName === null) return;
+  const trimmed = newName.trim();
+  if (!trimmed || trimmed === name) return;
+  // Vérifier qu'il n'y a pas conflit avec une autre campagne du même nom
+  const exists = _listCampagnesReprise(true).some(c => c.name === trimmed && c.name !== name);
+  if (exists) {
+    if (!await pvConfirm(`Une autre campagne s'appelle déjà « ${trimmed} ». Les actions seront fusionnées dans la même campagne. Continuer ?`)) return;
+  }
+  _renameCampagneReprise(name, trimmed);
+  document.querySelectorAll('.pv-modal-overlay').forEach(o => { try { o.remove(); } catch(e) {} });
+  setTimeout(() => _pvGestionCampagneRepriseDetail(trimmed), 50);
+  try { renderDashboard(); } catch(e) {}
+};
+
+window._pvSauverCommentaireCampagneReprise = function(name) {
+  const el = document.getElementById('_pvCampRepriseComment');
+  const val = el ? el.value : '';
+  _setCommentaireCampagneReprise(name, val);
+  pvAlert('Commentaire enregistré.');
+};
+
+window._pvAnnulerCampagneReprise = async function(name) {
+  const ok = await pvConfirm(
+    `Annuler la campagne « ${name} » ?\n\n` +
+    `Cela va : annuler toutes les actions en cours, et faire revenir les produits/parfums à leur statut d'avant le lancement.\n\n` +
+    `Les actions déjà clôturées (= produit déjà passé Sorti via clôture) restent clôturées.\n\n` +
+    `Action irréversible.`
+  );
+  if (!ok) return;
+  const res = _annulerCampagneReprise(name);
+  document.querySelectorAll('.pv-modal-overlay').forEach(o => { try { o.remove(); } catch(e) {} });
+  try { renderDashboard(); renderLiqAll && renderLiqAll(); renderKits && renderKits(); renderBasePD && renderBasePD(); } catch(e) {}
+  pvAlert(`Campagne « ${name} » annulée.\n${res.nbActions} action(s), ${res.nbProds} produit(s) restaurés.`);
+};
+
+window._pvSupprimerCampagneArchivee = async function(name) {
+  const ok = await pvConfirm(
+    `Supprimer définitivement la campagne archivée « ${name} » ?\n\n` +
+    `Les actions seront masquées de l'export. C'est sans retour.`
+  );
+  if (!ok) return;
+  const n = _supprimerCampagneArchivee(name);
+  document.querySelectorAll('.pv-modal-overlay').forEach(o => { try { o.remove(); } catch(e) {} });
+  try { renderDashboard(); } catch(e) {}
+  pvAlert(n + ' action(s) archivée(s) supprimée(s).');
+  setTimeout(() => gestionCampagnesReprise(), 50);
+};
+
+window._pvRetirerProduitCampagneReprise = async function(actionId, btn) {
+  const ok = await pvConfirm('Retirer ce produit de la campagne ?\n\nL\'action sera annulée et le produit reviendra à son statut d\'avant le lancement de la reprise. Les autres produits de la campagne ne sont pas touchés.');
+  if (!ok) return;
+  const success = _retirerProduitDeCampagneReprise(actionId);
+  if (!success) { pvAlert('Action introuvable ou déjà clôturée.'); return; }
+  // Rafraîchit le panneau détail
+  const a = actions.find(x => x.id === actionId);
+  const campName = a ? a.campagneReprise : null;
+  document.querySelectorAll('.pv-modal-overlay').forEach(o => { try { o.remove(); } catch(e) {} });
+  try { renderDashboard(); renderLiqAll && renderLiqAll(); renderKits && renderKits(); renderBasePD && renderBasePD(); } catch(e) {}
+  if (campName) setTimeout(() => _pvGestionCampagneRepriseDetail(campName), 50);
+};
+
+window._pvAjouterProduitCampagneReprise = function(name) {
+  pvAlert('Pour ajouter un produit à la campagne « ' + name + ' » :\n\n1. Va dans la base liquide (ou kit/PD)\n2. Clique sur 📦 Reprise du produit/parfum souhaité\n3. Dans la modale qui s\'ouvre, choisis « ' + name + ' » dans la liste des campagnes en cours.\n\nLe produit rejoindra automatiquement cette campagne.');
+};
+
+window._pvExporterCampagneReprise = function(name) {
+  // Réutilise exportReprisesExcel mais filtre sur cette campagne uniquement
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const all = actions.filter(a => a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && a.campagneReprise === name);
+  if (all.length === 0) { pvAlert('Aucune action dans cette campagne.'); return; }
+  const _esc = v => {
+    if (v === null || v === undefined) return '';
+    const s = String(v);
+    if (s.includes(';') || s.includes('"') || s.includes('\n') || s.includes(',')) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+  const headers = ['Campagne', 'Commentaire', 'Date création', 'Type produit', 'Marque', 'Gamme/Modèle', 'Format', 'Parfum', 'Boutique', 'Quantité comptée', 'Avancement', 'Date dernier check', 'État global', 'ID action'];
+  const rows = [headers.map(_esc).join(';')];
+  all.forEach(a => {
+    let prodType, marque = '', label = '', format = '', parfum = '';
+    if (a.produitType === 'liq') {
+      const g = baseLiq.find(x => x.id === a.produitId);
+      prodType = 'Liquide';
+      if (g) { marque = g.marque || ''; label = g.gamme || ''; format = LIQ_FORMAT_LABELS[g.format] || g.format || '';
+        if (a.produitParfumId && g.parfums) { const p = g.parfums.find(x => x.id === a.produitParfumId); if (p) parfum = p.n || ''; }
+        else parfum = '(gamme entière)';
+      }
+    } else if (a.produitType === 'pd') {
+      const p = basePD.find(x => x.id === a.produitId);
+      prodType = 'Pièce détachée';
+      if (p) { marque = p.marque || ''; label = p.modele || ''; format = PD_CAT_LABELS[p.categorie] || p.categorie || ''; }
+    } else {
+      const k = baseKits.find(x => x.id === a.produitId);
+      prodType = 'Kit';
+      if (k) { marque = k.marque || ''; label = k.modele || ''; }
+    }
+    const etat = a.annulee ? 'Annulée' : (a.dateCloture ? 'Clôturée' : 'En cours');
+    const defs = getActionSteps(a);
+    SHOPS.forEach(sh => {
+      const st = a.etats && a.etats[sh]; if (!st) return;
+      const nbDone = defs.filter(d => st.steps && st.steps[d.key] === true).length;
+      const qte = (typeof st.comptageQte === 'number') ? st.comptageQte : '';
+      rows.push([a.campagneReprise || '', a.campagneRepriseComment || '', a.dateCreation || '', prodType, marque, label, format, parfum, SHOP_LABELS[sh] || sh, qte, nbDone + '/' + defs.length, st.dateFait || '', etat, a.id].map(_esc).join(';'));
+    });
+  });
+  const _bom = '﻿';
+  const blob = new Blob([_bom + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'PilotVape_Reprise_' + name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40) + '_' + ymd(new Date()) + '.csv';
+  link.click();
+};
+
+window._pvCloturerUneCampagne = async function(name) {
+  const ok = await pvConfirm(
+    `Clôturer la campagne « ${name} » ?\n\n` +
+    `Tous les produits/parfums encore actifs dans cette campagne passeront en statut "Sorti".\n\n` +
+    `Pense à exporter le bilan Excel avant si tu en as besoin pour le fournisseur.`
+  );
+  if (!ok) return;
+  const _now = ymd(new Date());
+  const _nowTs = new Date().toISOString();
+  let nbActions = 0, nbProds = 0;
+  const _seen = new Set();
+  const _gammesTouchees = new Set();
+  actions.forEach(a => {
+    if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || a.campagneReprise !== name) return;
+    if (a.annulee || a.dateCloture) return;
+    if (a.produitType === 'liq') {
+      const g = baseLiq.find(x => x.id === a.produitId);
+      if (g) {
+        if (a.produitParfumId) {
+          const p = (g.parfums || []).find(x => x.id === a.produitParfumId);
+          if (p) { p.s = 'SORTI'; p._ts = _nowTs; }
+          _gammesTouchees.add(g.id);
+        } else {
+          g.statutVie = 'SORTI';
+          (g.parfums || []).forEach(p => { if (p.s !== 'SORTI') { p.s = 'SORTI'; p._ts = _nowTs; } });
+        }
+        g._ts = _nowTs;
+        if (!_seen.has(g.id)) { _seen.add(g.id); nbProds++; }
+      }
+    } else if (a.produitType === 'pd') {
+      const p = basePD.find(x => x.id === a.produitId);
+      if (p) { p.statutVie = 'SORTI'; p._ts = _nowTs; if (!_seen.has(p.id)) { _seen.add(p.id); nbProds++; } }
+    } else {
+      const k = baseKits.find(x => x.id === a.produitId);
+      if (k) { k.statutVie = 'SORTI'; k._ts = _nowTs; if (!_seen.has(k.id)) { _seen.add(k.id); nbProds++; } }
+    }
+    a.dateCloture = _now;
+    a._ts = _nowTs;
+    SHOPS.forEach(sh => { const st = a.etats && a.etats[sh]; if (st) { st.done = true; if (!st.dateFait) st.dateFait = _now; } });
+    nbActions++;
+  });
+  _gammesTouchees.forEach(gid => { const g = baseLiq.find(x => x.id === gid); if (g) _recomputeGammeStatutFromParfums(g); });
+  logAction('Campagne reprise clôturée (via panneau)', '"' + name + '" · ' + nbActions + ' action(s) · ' + nbProds + ' produit(s) → SORTI');
+  saveData();
+  document.querySelectorAll('.pv-modal-overlay').forEach(o => { try { o.remove(); } catch(e) {} });
+  try { renderDashboard(); renderLiqAll && renderLiqAll(); renderKits && renderKits(); renderBasePD && renderBasePD(); } catch(e) {}
+  pvAlert(`Campagne « ${name} » clôturée. ${nbProds} produit(s) passé(s) en Sorti.`);
+};
+
+// Supprime définitivement une campagne archivée (toutes les actions deviennent _archived).
+function _supprimerCampagneArchivee(name) {
+  const _nowTs = new Date().toISOString();
+  let count = 0;
+  actions.forEach(a => {
+    if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || a.campagneReprise !== name) return;
+    if (!(a.annulee || a.dateCloture)) return; // seulement les actions déjà closes/annulées
+    a._archived = true;
+    a._ts = _nowTs;
+    count++;
+  });
+  if (count > 0) {
+    logAction('Campagne reprise archivée supprimée', '"' + name + '" · ' + count + ' action(s)');
+    saveData();
+  }
+  return count;
+}
+
 // Import complet symétrique : baseKits/baseLiq/propositions + actions + nextActionId.
 // Compatible avec les anciens exports (les champs actions/nextActionId sont optionnels).
 // On demande confirmation si le fichier contient des actions (écrasement destructif).
@@ -14484,6 +14995,7 @@ function renderDashboard() {
     reprises.forEach(a => { if (a.campagneReprise) _campsReprises.add(a.campagneReprise); });
     const _exportReprisesBtn = `<div style="margin-bottom:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
         <button onclick="exportReprisesExcel()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">📊 Exporter les reprises (Excel)</button>
+        ${isAdmin() ? `<button onclick="gestionCampagnesReprise()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#3b82f620; color:#93c5fd; border:1px solid #3b82f660; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;" title="Gérer les campagnes de reprise : renommer, commentaire, ajouter/retirer des produits, annuler, archiver, exporter par campagne.">📋 Gérer les campagnes</button>` : ''}
         ${isAdmin() ? `<button onclick="cloturerCampagneReprise()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#22c55e20; color:#86efac; border:1px solid #22c55e60; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;" title="Clôturer une campagne : passe les produits en Sorti et fait disparaître la campagne de cette section.">🏁 Clôturer une campagne</button>` : ''}
         ${_campsReprises.size > 0 ? `<span style="font-size:10px; color:#64748b;">${_campsReprises.size} campagne${_campsReprises.size > 1 ? 's' : ''} en cours</span>` : ''}
       </div>`;
