@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:21</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 18:33</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -1031,8 +1031,8 @@ function recalcAssemblagePA(kit) {
 
 const ROLES = ["PRIX_D_APPEL", "MEILLEURE_MARGE", "COMPLEMENT"];
 const FORMATS_LIQ = ["10mL", "10mL_SDN", "50mL", "100mL"];
-const STATUTS_VIE = ["DANS_OFFRE","A_RENTRER","EN_ATTENTE","A_REMPLACER","FIN_DE_VIE","A_SORTIR","SORTI"];
-const STATUT_LABELS = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", SORTI:"Sorti" };
+const STATUTS_VIE = ["DANS_OFFRE","A_RENTRER","EN_ATTENTE","A_REMPLACER","FIN_DE_VIE","A_SORTIR","REPRISE","SORTI"];
+const STATUT_LABELS = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", REPRISE:"📦 En reprise", SORTI:"Sorti" };
 const TIRAGE_LABELS = { MTL_RDL: "MTL / RDL", DL: "DL", "DL+": "DL+" };
 const ROLE_LABELS = { PRIX_D_APPEL: "Prix d'appel", MEILLEURE_MARGE: "Meilleure marge", COMPLEMENT: "Complément" };
 const PROFIL_LABELS = { RECREATIF: "Récréatif", PRUDENT: "Prudent", DECIDE: "Décidé" };
@@ -1135,9 +1135,9 @@ function calcLiqRole(format, pa, pv) {
 const LIQ_GOUT_CATS = ['Fruité', 'Fruité / Frais', 'Gourmand', 'Gourmand / Fruité', 'Tabac', 'Tabac / Gourmand', 'Menthe', 'De_Tout'];
 const LIQ_GOUT_COLORS = { 'Fruité': '#f97316', 'Fruité / Frais': '#22d3ee', 'Gourmand': '#ec4899', 'Gourmand / Fruité': '#f472b6', 'Tabac': '#a3a3a3', 'Tabac / Gourmand': '#78716c', 'Menthe': '#34d399', 'De_Tout': '#94a3b8' };
 // Statuts parfum (sous-niveau d'une gamme)
-const LIQ_PARFUM_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'SORTI'];
+const LIQ_PARFUM_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'REPRISE', 'SORTI'];
 // Statuts gamme liq = alignés sur STATUTS_VIE kit
-const LIQ_GAMME_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'SORTI'];
+const LIQ_GAMME_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'REPRISE', 'SORTI'];
 function slotCode(tirage, autonomie, profil, role) {
   const t = TIRAGE_SHORT[tirage] || tirage || '?';
   const a = autonomie || '?';
@@ -3269,6 +3269,8 @@ function cleanupActionsForKit(kit) {
     if (!a.produitType) a.produitType = 'kit';
     if (a.produitType !== 'kit') return;
     if (actionGlobalState(a) === 'FAIT') return;
+    // ── Reprise fournisseur : protégée tant que le statut est REPRISE ──
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && kit.statutVie === 'REPRISE') return;
     // Pour un kit "one-shot" actif (DANS_OFFRE/A_RENTRER), on maintient à la fois
     // la RENTRER (poser le kit) et la SORTIR (prix rouge + retirer en fin de coup).
     const isOneShotActif = kit.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(kit.statutVie);
@@ -3290,6 +3292,8 @@ function cleanupActionsForLiq(gamme) {
     if (a.produitType !== 'liq') return;
     if (a.produitParfumId) return; // Actions parfum gérées par cleanupActionsForParfum
     if (actionGlobalState(a) === 'FAIT') return;
+    // ── Reprise fournisseur : protégée tant que le statut est REPRISE ──
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && gamme.statutVie === 'REPRISE') return;
     if (a.type === 'PRIX') {
       if (gamme.statutVie === 'SORTI') _cancelAction(a);
       return;
@@ -3318,6 +3322,8 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
     if (a.produitParfumId !== parfumId) return;
     if (a.produitType !== 'liq') return;
     if (actionGlobalState(a) === 'FAIT') return;
+    // ── Reprise fournisseur : protégée tant que le parfum est en statut REPRISE ──
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && parfumStatus === 'REPRISE') return;
     if (a.type === 'PRIX') {
       if (parfumStatus === 'SORTI') _cancelAction(a);
       return;
@@ -3342,6 +3348,8 @@ function cleanupActionsForPd(pd) {
     if (a.produitId !== pd.id) return;
     if (a.produitType !== 'pd') return;
     if (actionGlobalState(a) === 'FAIT') return;
+    // ── Reprise fournisseur : protégée tant que le statut est REPRISE ──
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && pd.statutVie === 'REPRISE') return;
     if (a.type === 'PRIX') {
       if (pd.statutVie === 'SORTI') _cancelAction(a);
       return;
@@ -5511,7 +5519,7 @@ function _pvPromptCampagneReprise(productLabel) {
       <datalist id="_pvCampagneReprisDL">${datalist}</datalist>
     </label>
     <div style="margin-top:10px; padding:8px; background:#0c4a6e22; border:1px solid #0c4a6e; border-radius:4px; color:#7dd3fc; font-size:11px;">
-      Le produit passera en statut <b>À sortir</b>. Une action <b>SORTIR motif Reprise</b> sera créée (ou réutilisée si elle existe déjà), avec 5 étapes à cocher par chaque boutique.
+      Le produit passera en statut <b>📦 En reprise</b> (distinct de "À sortir"). Une action SORTIR motif Reprise sera créée avec 5 étapes à cocher par chaque boutique. <b>Les OPs en cours liées à ce produit/parfum seront annulées.</b>
     </div>`;
   return new Promise(resolve => {
     const overlay = _pvModal(html,
@@ -5578,21 +5586,92 @@ async function lancerReprise(produitType, produitId, parfumId) {
     });
   }
   a._ts = new Date().toISOString();
-  // Pose du statut produit à A_SORTIR (gamme entière ou parfum)
+  // Pose du statut produit à REPRISE (statut dédié, distinct de A_SORTIR — pour repérer dans la base
+  // et exclure des filtres "à sortir" classiques).
   if (produitType === 'liq') {
     if (parfumId && parfumObj) {
-      parfumObj.s = 'A_SORTIR';
+      parfumObj.s = 'REPRISE';
     } else {
-      prod.statutVie = 'A_SORTIR';
+      prod.statutVie = 'REPRISE';
     }
     prod._ts = new Date().toISOString();
   } else {
-    prod.statutVie = 'A_SORTIR';
+    prod.statutVie = 'REPRISE';
     prod._ts = new Date().toISOString();
   }
-  logAction('Reprise lancée', 'Campagne "' + camp + '" sur ' + label + ' → ' + a.id);
+  // ── Annule les autres actions sur ce produit/parfum (RENTRER, PRIX, MISE_EN_PLACE)
+  //    + la SORTIR classique s'il y en avait une déjà sur un AUTRE périmètre (cas exotique).
+  //    On garde uniquement l'action SORTIR motif=REPRISE qu'on vient de créer.
+  const _otherActsCancelled = [];
+  actions.forEach(other => {
+    if (other.id === a.id) return;
+    if (other._archived || other.annulee) return;
+    if (other.produitId !== produitId) return;
+    if (other.produitType !== produitType) return;
+    // Filtre parfum : si reprise au niveau parfum → ne tape que les actions du même parfum (ou sans parfum si gamme entière en plus)
+    if (parfumId) {
+      if (other.produitParfumId && other.produitParfumId !== parfumId) return;
+    } else {
+      // Reprise gamme entière : on tape tout, y compris les actions parfum (la gamme entière disparaît)
+    }
+    _cancelAction(other);
+    other._ts = new Date().toISOString();
+    _otherActsCancelled.push(other.id);
+  });
+  // ── Annule les OPs liées au produit/parfum.
+  //    Cas géré : OP avec un seul parfum, OP gamme entière, OP groupée multi-parfums.
+  //    - Reprise gamme entière → annule TOUTES les OPs sur ce produit (gamme entière + parfums).
+  //    - Reprise parfum unique → annule UNIQUEMENT les OPs qui ciblent CE parfum.
+  //      (Les OPs gamme entière ne sont pas touchées : elles concernent encore les autres parfums.)
+  const _opsCancelled = [];
+  const _now = ymd(new Date());
+  const _opsACancel = [];
+  ops.forEach(op => {
+    if (op._archived || op.annulee) return;
+    if (!op.produitIds || !op.produitIds.includes(produitId)) return;
+    if (parfumId) {
+      // OP groupée multi-parfums
+      if (op.produitParfumIds && op.produitParfumIds.length > 0) {
+        if (op.produitParfumIds.includes(parfumId)) _opsACancel.push(op);
+        return;
+      }
+      // OP ciblée parfum unique
+      if (op.produitParfumId) {
+        if (op.produitParfumId === parfumId) _opsACancel.push(op);
+        return;
+      }
+      // OP gamme entière → on laisse (autres parfums encore concernés)
+    } else {
+      _opsACancel.push(op);
+    }
+  });
+  _opsACancel.forEach(op => {
+    _deletedIds.add(op.id);
+    op.annulee = true;
+    op.dateCloture = _now;
+    op._ts = new Date().toISOString();
+    // Détache les liens d'actions vers cette OP
+    ['sortirActionId','prixActionId','rentrerActionId','mepActionId','rentrerPrixActionId','returnActionId'].forEach(f => {
+      if (op[f]) {
+        const _act = actions.find(x => x.id === op[f]);
+        if (_act && _act.opId === op.id) _act.opId = null;
+      }
+    });
+    _opsCancelled.push(op.id);
+  });
+  if (_opsACancel.length > 0) {
+    ops = ops.filter(o => !_opsACancel.includes(o));
+  }
+  // Trace lisible dans la console pour debug en condition réelle
+  if (_otherActsCancelled.length + _opsCancelled.length > 0) {
+    console.log('[REPRISE] ' + label + ' → ' + _otherActsCancelled.length + ' action(s) annulée(s), ' + _opsCancelled.length + ' OP(s) annulée(s)');
+  }
+  logAction('Reprise lancée', 'Campagne "' + camp + '" sur ' + label + ' → ' + a.id + (_opsCancelled.length ? ' · ' + _opsCancelled.length + ' OP(s) annulée(s)' : '') + (_otherActsCancelled.length ? ' · ' + _otherActsCancelled.length + ' action(s) annulée(s)' : ''));
   saveData();
-  pvAlert('Reprise « ' + camp + ' » lancée. Les boutiques verront le produit dans la section "À reprendre" du dashboard.');
+  const _bilan = (_opsCancelled.length + _otherActsCancelled.length > 0)
+    ? '\n\nNettoyage : ' + (_opsCancelled.length ? _opsCancelled.length + ' OP(s) annulée(s)' : '') + (_opsCancelled.length && _otherActsCancelled.length ? ', ' : '') + (_otherActsCancelled.length ? _otherActsCancelled.length + ' autre(s) action(s) annulée(s)' : '') + '.'
+    : '';
+  pvAlert('Reprise « ' + camp + ' » lancée. Statut produit : 📦 En reprise.\nSection "À reprendre" du dashboard pour suivre.' + _bilan);
   try { renderDashboard(); } catch(e) {}
   try { renderLiqAll && renderLiqAll(); } catch(e) {}
   try { renderKits && renderKits(); } catch(e) {}
@@ -9592,7 +9671,7 @@ function renderKitCard(k) {
 }
 
 function kitStatusColorMap(sv) {
-  return { DANS_OFFRE:'#64748b', A_RENTRER:'#22c55e', EN_ATTENTE:'#eab308', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', A_SORTIR:'#ef4444', SORTI:'#475569' }[sv] || '#64748b';
+  return { DANS_OFFRE:'#64748b', A_RENTRER:'#22c55e', EN_ATTENTE:'#eab308', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', A_SORTIR:'#ef4444', REPRISE:'#0ea5e9', SORTI:'#475569' }[sv] || '#64748b';
 }
 
 function renderRoleSelect(k) {
@@ -9901,7 +9980,7 @@ function renderStatutMultiSelect(filterName) {
   const statuts = filterName === 'kit'
     ? ['DANS_OFFRE','A_RENTRER','A_REMPLACER','FIN_DE_VIE','A_SORTIR','SORTI']
     : ['DANS_OFFRE','A_RENTRER','EN_ATTENTE','A_REMPLACER','FIN_DE_VIE','A_SORTIR','SORTI'];
-  const labels = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", SORTI:"Sorti" };
+  const labels = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", REPRISE:"📦 En reprise", SORTI:"Sorti" };
   const statusColors = { DANS_OFFRE:'#22c55e', A_RENTRER:'#3b82f6', EN_ATTENTE:'#6366f1', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', A_SORTIR:'#ef4444', SORTI:'#64748b' };
 
   const tags = arr.length === 0
@@ -10050,7 +10129,7 @@ function renderKits() {
       date: (a,b) => (a.id||'').localeCompare(b.id||'') * dir,
       marque: (a,b) => (a.marque||'').localeCompare(b.marque||'') * dir || (a.modele||'').localeCompare(b.modele||''),
       modele: (a,b) => (a.modele||'').localeCompare(b.modele||'') * dir,
-      statut: (a,b) => { const _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'SORTI':6}; return ((_so[a.statutVie]??9) - (_so[b.statutVie]??9)) * dir; }
+      statut: (a,b) => { const _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'REPRISE':6,'SORTI':7}; return ((_so[a.statutVie]??9) - (_so[b.statutVie]??9)) * dir; }
     };
     const sortFn = sortFns[sortMode] || sortFns.marge;
     const gridCols = 'grid-template-columns: 3px 1fr auto 70px 55px 50px 50px 60px 40px 40px 70px 70px 60px;';
@@ -10729,7 +10808,7 @@ function setLiqSort(col) {
 function liqGammeStatusColor(sv) {
   return kitStatusColorMap(sv);
 }
-const LIQ_GAMME_STATUT_LABELS = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", SORTI:"Sorti" };
+const LIQ_GAMME_STATUT_LABELS = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", REPRISE:"📦 En reprise", SORTI:"Sorti" };
 
 async function updateLiqField(id, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
@@ -11477,7 +11556,7 @@ function renderLiqAll() {
           } else {
             html += `<div style="border:1px solid ${pc}35; border-radius:3px; background:${pc}08; padding:2px;">`;
             html += `<div onclick="toggleLiqSection('${cellKey}');renderLiqAll();" style="text-align:center; cursor:pointer; font-size:7px; color:#64748b; padding:0 0 2px; user-select:none;">▾ ${nbGammes}g · ${nbParf}p</div>`;
-            const _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'SORTI':6};
+            const _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'REPRISE':6,'SORTI':7};
             items.sort((a,b) => ((_so[a.statutVie]??9) - (_so[b.statutVie]??9)));
             items.forEach(g => {
               const sc = liqGammeStatusColor(g.statutVie);
@@ -11523,7 +11602,7 @@ function renderLiqAll() {
               <span style="font-size:9px; font-weight:700; color:${rc};">${np}p</span>
             </div>`;
           } else {
-            const _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'SORTI':6};
+            const _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'REPRISE':6,'SORTI':7};
             items.sort((a,b) => ((_so[a.statutVie]??9) - (_so[b.statutVie]??9)));
             html += `<div style="border:1px solid ${rc}35; border-radius:3px; background:${rc}08; padding:2px;">`;
             html += `<div onclick="toggleLiqSection('${cellKey}');renderLiqAll();" style="text-align:center; cursor:pointer; font-size:7px; color:#64748b; padding:0 0 2px; user-select:none;">▾ ${items.length}g · ${np}p</div>`;
@@ -21994,7 +22073,7 @@ function renderBasePD() {
     spec1: function(a,b) { var va = a.categorie==='BOX' ? (a.w||0) : (a.contenance||0); var vb = b.categorie==='BOX' ? (b.w||0) : (b.contenance||0); return (va - vb) * dir; },
     spec2: function(a,b) { var va = a.categorie==='BOX' ? (a.mah||0) : 0; var vb = b.categorie==='BOX' ? (b.mah||0) : 0; return (va - vb) * dir; },
     marque: function(a,b) { return ((a.marque||'').localeCompare(b.marque||'')) * dir || (a.modele||'').localeCompare(b.modele||''); },
-    statut: function(a,b) { var _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'SORTI':6}; return ((_so[a.statutVie]||9) - (_so[b.statutVie]||9)) * dir; }
+    statut: function(a,b) { var _so = {'A_RENTRER':0,'DANS_OFFRE':1,'EN_ATTENTE':2,'A_REMPLACER':3,'FIN_DE_VIE':4,'A_SORTIR':5,'REPRISE':6,'SORTI':7}; return ((_so[a.statutVie]||9) - (_so[b.statutVie]||9)) * dir; }
   };
   const sortFn = sortFns[sortMode] || sortFns['case'];
   const innerSort = sortFns[pdSortCol] || sortFns['case'];
