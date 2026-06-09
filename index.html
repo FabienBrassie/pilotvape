@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:29</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:45</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -1136,6 +1136,40 @@ const LIQ_GOUT_CATS = ['Fruité', 'Fruité / Frais', 'Gourmand', 'Gourmand / Fru
 const LIQ_GOUT_COLORS = { 'Fruité': '#f97316', 'Fruité / Frais': '#22d3ee', 'Gourmand': '#ec4899', 'Gourmand / Fruité': '#f472b6', 'Tabac': '#a3a3a3', 'Tabac / Gourmand': '#78716c', 'Menthe': '#34d399', 'De_Tout': '#94a3b8' };
 // Statuts parfum (sous-niveau d'une gamme)
 const LIQ_PARFUM_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'REPRISE', 'SORTI'];
+// Hiérarchie de priorité des statuts liquide pour la cohérence gamme ↔ parfums.
+// Quand les parfums d'une gamme ont des statuts hétérogènes, la gamme prend le plus
+// prioritaire (= le plus "actif" / le plus tôt dans le cycle de vie).
+// Règle métier validée par Fabien (2026-06-09) : DANS_OFFRE l'emporte sur REPRISE/A_SORTIR/etc.,
+// même si un seul parfum est dans l'offre. Si tous les parfums sont SORTI, la gamme est SORTI.
+const LIQ_STATUT_PRIORITY = {
+  DANS_OFFRE:  1,
+  A_RENTRER:   2,
+  A_REMPLACER: 3,
+  EN_ATTENTE:  4,
+  FIN_DE_VIE:  5,
+  A_SORTIR:    6,
+  REPRISE:     7,
+  SORTI:       8
+};
+// Recalcule le statut d'une gamme liquide à partir de ses parfums : prend le plus prioritaire.
+// Appelée après chaque modification d'un parfum (statut manuel, reprise, clôture campagne, cascade SORTI).
+function _recomputeGammeStatutFromParfums(g) {
+  if (!g || !g.parfums || g.parfums.length === 0) return;
+  let bestPrio = Infinity;
+  let bestStatut = null;
+  g.parfums.forEach(p => {
+    const _s = (!p.s || p.s === 'OK') ? 'DANS_OFFRE' : p.s;
+    const prio = LIQ_STATUT_PRIORITY[_s];
+    if (prio !== undefined && prio < bestPrio) {
+      bestPrio = prio;
+      bestStatut = _s;
+    }
+  });
+  if (bestStatut && g.statutVie !== bestStatut) {
+    g.statutVie = bestStatut;
+    g._ts = new Date().toISOString();
+  }
+}
 // Statuts gamme liq = alignés sur STATUTS_VIE kit
 const LIQ_GAMME_STATUTS = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE', 'A_SORTIR', 'REPRISE', 'SORTI'];
 function slotCode(tirage, autonomie, profil, role) {
@@ -5345,11 +5379,23 @@ function _applyActionShopChange(a, shop) {
   //   RENTRER 100% → statutVie/s='DANS_OFFRE'
   //   PRIX 100%    → pv = action.prixCible
   if (isFaitNow && !a.annulee) {
-    if (a.type === 'SORTIR') {
+    // Cas spécial REPRISE : on NE déclenche PAS la cascade vers SORTI quand toutes les étapes
+    // sont cochées. Le produit/parfum reste en statut "📦 En reprise" jusqu'à ce que Fabien
+    // (admin) clôture explicitement la campagne via le bouton "🏁 Clôturer une campagne" du
+    // dashboard. Pourquoi : il a besoin du temps pour envoyer le bilan au fournisseur avant
+    // que la campagne disparaisse de la section "À reprendre".
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE') {
+      // Rien à faire ici. L'action reste active, le statut reste REPRISE, le bilan reste
+      // visible dans le dashboard et exportable.
+    } else if (a.type === 'SORTIR') {
       const curStatus = targetParfum ? targetParfum.s : prod.statutVie;
       if (curStatus !== 'SORTI') {
         a.statutKitAvant = curStatus;
-        if (targetParfum) { targetParfum._ts = _nowTs; targetParfum.s = 'SORTI'; if (liq) liq._ts = _nowTs; }
+        if (targetParfum) {
+          targetParfum._ts = _nowTs; targetParfum.s = 'SORTI'; if (liq) liq._ts = _nowTs;
+          // Recalcule le statut gamme depuis les parfums (un parfum SORTI peut faire passer la gamme à SORTI si dernier vivant)
+          if (liq) _recomputeGammeStatutFromParfums(liq);
+        }
         else {
           prod._ts = _nowTs;
           prod.statutVie = 'SORTI';
@@ -5362,7 +5408,12 @@ function _applyActionShopChange(a, shop) {
       const curStatus = targetParfum ? targetParfum.s : prod.statutVie;
       if (curStatus !== 'DANS_OFFRE') {
         a.statutKitAvant = curStatus;
-        if (targetParfum) { targetParfum._ts = _nowTs; targetParfum.s = 'DANS_OFFRE'; if (liq) liq._ts = _nowTs; }
+        if (targetParfum) {
+          targetParfum._ts = _nowTs; targetParfum.s = 'DANS_OFFRE'; if (liq) liq._ts = _nowTs;
+          // Un parfum qui revient DANS_OFFRE doit prioriser la gamme entière en DANS_OFFRE
+          // (même si les autres parfums sont en REPRISE / A_SORTIR / etc.). C'est la règle métier.
+          if (liq) _recomputeGammeStatutFromParfums(liq);
+        }
         else {
           prod._ts = _nowTs;
           prod.statutVie = 'DANS_OFFRE';
@@ -5409,6 +5460,8 @@ function _applyActionShopChange(a, shop) {
           targetParfum._ts = _nowTs;
           targetParfum.s = a.statutKitAvant;
           if (liq) liq._ts = _nowTs;
+          // Le parfum revient à son statut d'avant → recalcule le statut gamme
+          if (liq) _recomputeGammeStatutFromParfums(liq);
         }
       } else if (expectedCurrent && prod.statutVie === expectedCurrent) {
         prod._ts = _nowTs;
@@ -5593,6 +5646,21 @@ async function lancerReprise(produitType, produitId, parfumId) {
   // Modale campagne
   const camp = await _pvPromptCampagneReprise(label);
   if (!camp) return;
+  // Reprise gamme entière sur liquide : confirmation explicite pour propager le statut REPRISE
+  // à tous les parfums vivants (cohérent avec updateLiqField qui demande aussi confirmation
+  // quand on change le statut gamme).
+  let _propageAuxParfums = true;
+  if (produitType === 'liq' && !parfumId && prod.parfums && prod.parfums.length > 0) {
+    const _parfumsAImpacter = prod.parfums.filter(p => p.s !== 'SORTI' && p.s !== 'REPRISE');
+    if (_parfumsAImpacter.length > 0) {
+      const _ok = await pvConfirm(
+        `Reprise de la gamme entière « ${prod.gamme} ».\n\n` +
+        `${_parfumsAImpacter.length} parfum${_parfumsAImpacter.length > 1 ? 's' : ''} passeront aussi en statut « 📦 En reprise ».\n\n` +
+        `Confirmer ?`
+      );
+      if (!_ok) return; // annulation totale avant tout effet de bord
+    }
+  }
   // Création / réutilisation de l'action SORTIR motif REPRISE
   const opts = { extraFields: {} };
   if (produitType === 'liq' && parfumId) {
@@ -5621,8 +5689,21 @@ async function lancerReprise(produitType, produitId, parfumId) {
   if (produitType === 'liq') {
     if (parfumId && parfumObj) {
       parfumObj.s = 'REPRISE';
+      parfumObj._ts = new Date().toISOString();
+      // Le statut gamme est recalculé depuis les parfums (priorité au plus actif : DANS_OFFRE > ... > SORTI)
+      _recomputeGammeStatutFromParfums(prod);
     } else {
+      // Reprise gamme entière : statut gamme + propagation à TOUS les parfums vivants
+      // (sauf ceux déjà SORTI — pas de retour arrière, et déjà REPRISE — idempotent).
+      // La confirmation a été demandée en amont.
       prod.statutVie = 'REPRISE';
+      const _tsNow = new Date().toISOString();
+      (prod.parfums || []).forEach(p => {
+        if (p.s !== 'SORTI' && p.s !== 'REPRISE') {
+          p.s = 'REPRISE';
+          p._ts = _tsNow;
+        }
+      });
     }
     prod._ts = new Date().toISOString();
   } else {
@@ -8713,6 +8794,129 @@ function exportReprisesExcel() {
   logAction('Export reprises', sorted.length + ' actions × ' + SHOPS.length + ' boutiques');
 }
 
+// Ouvre la modale "Clôturer une campagne de reprise" : liste les campagnes actives avec leur avancement,
+// laisse Fabien choisir laquelle clôturer, puis bascule tous les produits/parfums concernés en SORTI
+// et marque les actions REPRISE comme clôturées.
+async function cloturerCampagneReprise() {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  // Recense les campagnes actives
+  const camps = new Map(); // campagne → { actions:[], totalSteps, doneSteps }
+  actions.forEach(a => {
+    if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE') return;
+    if (a.annulee || a.dateCloture) return;
+    if (!a.campagneReprise) return;
+    if (!camps.has(a.campagneReprise)) camps.set(a.campagneReprise, { actions: [], totalSteps: 0, doneSteps: 0 });
+    const entry = camps.get(a.campagneReprise);
+    entry.actions.push(a);
+    const defs = getActionSteps(a);
+    SHOPS.forEach(sh => {
+      const st = a.etats && a.etats[sh];
+      if (!st) return;
+      entry.totalSteps += defs.length;
+      entry.doneSteps += defs.filter(d => st.steps && st.steps[d.key] === true).length;
+    });
+  });
+  if (camps.size === 0) { pvAlert('Aucune campagne de reprise active à clôturer.'); return; }
+  // Construit le HTML : une ligne cliquable par campagne avec son avancement
+  const _attrEsc = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const _txtEsc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const rows = Array.from(camps.entries()).sort((a,b) => a[0].localeCompare(b[0])).map(([c, entry]) => {
+    const pct = entry.totalSteps > 0 ? Math.round(100 * entry.doneSteps / entry.totalSteps) : 0;
+    const _full = (pct === 100);
+    const _col = _full ? '#22c55e' : (pct >= 50 ? '#f59e0b' : '#94a3b8');
+    const _hint = _full ? '✓ Toutes les étapes cochées' : (pct + '% des étapes faites');
+    return `<div onclick="_pvSelectCampReprise(this)" data-camp="${_attrEsc(c)}" data-camp-row="1"
+      style="display:flex; align-items:center; gap:10px; padding:8px 10px; margin:3px 0; background:#1e293b; border:1px solid ${_col}40; border-radius:5px; cursor:pointer;">
+      <span style="font-size:13px; color:#e2e8f0; font-weight:600; flex:1;">${_txtEsc(c)}</span>
+      <span style="font-size:10px; color:#94a3b8;">${entry.actions.length} produit${entry.actions.length>1?'s':''}</span>
+      <span style="font-size:11px; padding:2px 8px; background:${_col}22; color:${_col}; border:1px solid ${_col}60; border-radius:3px; font-weight:700;" title="${_hint}">${pct}%</span>
+    </div>`;
+  }).join('');
+  const html = `<div style="color:#0ea5e9; font-weight:700; font-size:14px; margin-bottom:8px;">🏁 Clôturer une campagne de reprise</div>
+    <div style="color:#94a3b8; font-size:11px; margin-bottom:10px;">Sélectionne la campagne à clôturer. <b>Tous les produits/parfums associés passeront en statut "Sorti"</b> et la campagne disparaîtra de la section "À reprendre".</div>
+    <div style="max-height:380px; overflow-y:auto;">${rows}</div>
+    <div style="margin-top:10px; font-size:10px; color:#fca5a5; font-style:italic;">Pense à avoir exporté le bilan Excel avant de clôturer si tu en as besoin pour le fournisseur.</div>`;
+  return new Promise(resolve => {
+    const overlay = _pvModal(html,
+      [{ label: 'Clôturer la campagne sélectionnée', color: '#0ea5e9' }, { label: 'Annuler' }],
+      async idx => {
+        if (idx !== 0) { resolve(null); return; }
+        const _sel = overlay.querySelector('[data-camp-row].selected');
+        if (!_sel) { pvAlert('Sélectionne d\'abord une campagne dans la liste.'); resolve(null); return; }
+        const campToClose = _sel.dataset.camp;
+        const entry = camps.get(campToClose);
+        if (!entry) { resolve(null); return; }
+        const _now = ymd(new Date());
+        const _nowTs = new Date().toISOString();
+        let nbActions = 0, nbProds = 0;
+        const _seenProds = new Set();
+        const _gammesToucheesParParfum = new Set(); // pour recalcul statut gamme après
+        entry.actions.forEach(a => {
+          // Bascule le statut produit/parfum à SORTI
+          if (a.produitType === 'liq') {
+            const g = baseLiq.find(x => x.id === a.produitId);
+            if (g) {
+              if (a.produitParfumId) {
+                const p = (g.parfums || []).find(x => x.id === a.produitParfumId);
+                if (p) { p.s = 'SORTI'; p._ts = _nowTs; }
+                _gammesToucheesParParfum.add(g.id);
+              } else {
+                g.statutVie = 'SORTI';
+                // Reprise gamme entière clôturée : on bascule aussi tous les parfums en SORTI
+                // pour rester cohérent (sinon la priorité ferait remonter la gamme à un statut "actif").
+                (g.parfums || []).forEach(p => { if (p.s !== 'SORTI') { p.s = 'SORTI'; p._ts = _nowTs; } });
+              }
+              g._ts = _nowTs;
+              if (!_seenProds.has(g.id)) { _seenProds.add(g.id); nbProds++; }
+            }
+          } else if (a.produitType === 'pd') {
+            const p = basePD.find(x => x.id === a.produitId);
+            if (p) { p.statutVie = 'SORTI'; p._ts = _nowTs; if (!_seenProds.has(p.id)) { _seenProds.add(p.id); nbProds++; } }
+          } else {
+            const k = baseKits.find(x => x.id === a.produitId);
+            if (k) { k.statutVie = 'SORTI'; k._ts = _nowTs; if (!_seenProds.has(k.id)) { _seenProds.add(k.id); nbProds++; } }
+          }
+          // Marque l'action comme clôturée (pas annulée — on garde la trace pour l'export historique)
+          a.dateCloture = _now;
+          a._ts = _nowTs;
+          SHOPS.forEach(sh => {
+            const st = a.etats && a.etats[sh];
+            if (st) { st.done = true; if (!st.dateFait) st.dateFait = _now; }
+          });
+          nbActions++;
+        });
+        // Pour chaque gamme dont on a basculé un parfum en SORTI : recalcule le statut gamme
+        // (priorité au plus actif parmi les parfums restants).
+        _gammesToucheesParParfum.forEach(gid => {
+          const g = baseLiq.find(x => x.id === gid);
+          if (g) _recomputeGammeStatutFromParfums(g);
+        });
+        logAction('Campagne reprise clôturée', '"' + campToClose + '" · ' + nbActions + ' action(s) · ' + nbProds + ' produit(s)/parfum(s) → SORTI');
+        saveData();
+        try { renderDashboard(); } catch(e) {}
+        try { renderLiqAll && renderLiqAll(); } catch(e) {}
+        try { renderKits && renderKits(); } catch(e) {}
+        try { renderBasePD && renderBasePD(); } catch(e) {}
+        pvAlert('Campagne « ' + campToClose + ' » clôturée.\n' + nbProds + ' produit(s)/parfum(s) passé(s) en Sorti.');
+        resolve(campToClose);
+      }
+    );
+  });
+}
+
+// Sélection d'une campagne dans la modale de clôture (clic sur une ligne).
+function _pvSelectCampReprise(el) {
+  if (!el) return;
+  document.querySelectorAll('[data-camp-row]').forEach(x => {
+    x.classList.remove('selected');
+    x.style.outline = '';
+    x.style.background = '#1e293b';
+  });
+  el.classList.add('selected');
+  el.style.outline = '2px solid #0ea5e9';
+  el.style.background = '#0c4a6e44';
+}
+
 // Import complet symétrique : baseKits/baseLiq/propositions + actions + nextActionId.
 // Compatible avec les anciens exports (les champs actions/nextActionId sont optionnels).
 // On demande confirmation si le fichier contient des actions (écrasement destructif).
@@ -10973,6 +11177,10 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
   }
   // Mise à jour nbRefs
   g.nbRefs = g.parfums.filter(pf => pf.s !== 'SORTI').length;
+  // Recalcule le statut gamme depuis les parfums (priorité au plus actif).
+  // Ex : un parfum revient DANS_OFFRE alors que les autres sont REPRISE → la gamme passe DANS_OFFRE
+  // (les autres parfums restent en REPRISE individuellement, visibles sur le dashboard).
+  if (field === 's') _recomputeGammeStatutFromParfums(g);
   saveData(); renderLiqAll();
 }
 
@@ -11200,7 +11408,14 @@ function renderLiqGammeCard(g, showDetail) {
   const roleColor = LIQ_ROLE_COLORS[g.roleChoisi] || '#64748b';
   const roleLbl = LIQ_ROLE_SHORT[g.roleChoisi] || '—';
   const statLbl = LIQ_GAMME_STATUT_LABELS[g.statutVie] || g.statutVie || '?';
-  const parfumsActifs = (g.parfums || []).filter(p => p.s && p.s !== 'SORTI');
+  // Si un filtre statut est actif, on ne compte/affiche que les parfums qui matchent ce filtre
+  // (généralisation du comportement déjà en place dans le détail dépliable).
+  const _activeStatutFilter = (typeof liqStatutFilter !== 'undefined' && liqStatutFilter && liqStatutFilter.length > 0) ? liqStatutFilter : null;
+  const parfumsActifs = (g.parfums || []).filter(p => {
+    if (!p.s || p.s === 'SORTI') return false;
+    if (_activeStatutFilter && !_activeStatutFilter.includes(p.s)) return false;
+    return true;
+  });
   const isExpanded = isLiqExpanded('liq-detail-' + g.id);
   const margePct = g.pv > 0 ? ((g.marge / g.pv) * 100).toFixed(0) : '—';
   const sortantBg = g.statutVie === 'A_SORTIR' ? ' background:color-mix(in srgb, #ef4444 6%, transparent);' : (g.statutVie === 'FIN_DE_VIE' ? ' background:color-mix(in srgb, #f59e0b 8%, transparent);' : '');
@@ -11218,7 +11433,7 @@ function renderLiqGammeCard(g, showDetail) {
   </span>`;
   // Badges statut notable sur la gamme et/ou ses parfums (visible sur toutes les vues)
   var _cardParfumBadge = '';
-  var _notableStatuts = ['A_SORTIR', 'FIN_DE_VIE', 'A_RENTRER', 'A_REMPLACER', 'EN_ATTENTE'];
+  var _notableStatuts = ['A_SORTIR', 'REPRISE', 'FIN_DE_VIE', 'A_RENTRER', 'A_REMPLACER', 'EN_ATTENTE'];
   _notableStatuts.forEach(function(_ns) {
     var _nsc = liqGammeStatusColor(_ns);
     if (g.statutVie === _ns) {
@@ -12789,7 +13004,22 @@ function renderDashboard() {
   // SORTIR motif=REPRISE sont sortis du flux "à sortir" classique et atterrissent dans une section dédiée
   // "À reprendre" (workflow reprise fournisseur — désactivation Swappy, comptage, mise de côté).
   const sortir = actions.filter(a => (a.type === 'SORTIR' || a.type === 'SWAP_COMPOSANT') && a.motifSortie !== 'REPRISE' && isVisible(a));
-  const reprises = actions.filter(a => a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && isVisible(a));
+  // Filtre spécifique pour les reprises : on garde même les actions 100% cochées (FAIT) pour que
+  // Fabien voie le bilan et puisse clôturer manuellement la campagne (sinon tout disparaîtrait
+  // avant qu'il n'envoie le bilan au fournisseur). Annulées et archivées restent exclues.
+  const _isReprisesVisible = a => {
+    if (a._archived) return false;
+    if (a.annulee && !showDone) return false;
+    if (a.dateCloture && !showDone) return false; // une campagne clôturée disparaît
+    if (fProdType && fProdType !== (a.produitType || 'kit')) return false;
+    if (fPrio && effectivePrio(a) !== fPrio) return false;
+    if (fShop) {
+      const st = a.etats && a.etats[fShop];
+      if (!st) return false;
+    }
+    return true;
+  };
+  const reprises = actions.filter(a => a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && _isReprisesVisible(a));
   const rentrer = actions.filter(a => a.type === 'RENTRER' && isVisible(a));
   const meps = actions.filter(a => a.type === 'MISE_EN_PLACE' && isVisible(a));
   const prix = actions.filter(a => a.type === 'PRIX' && isVisible(a));
@@ -14202,6 +14432,7 @@ function renderDashboard() {
     reprises.forEach(a => { if (a.campagneReprise) _campsReprises.add(a.campagneReprise); });
     const _exportReprisesBtn = `<div style="margin-bottom:8px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
         <button onclick="exportReprisesExcel()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">📊 Exporter les reprises (Excel)</button>
+        ${isAdmin() ? `<button onclick="cloturerCampagneReprise()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#22c55e20; color:#86efac; border:1px solid #22c55e60; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;" title="Clôturer une campagne : passe les produits en Sorti et fait disparaître la campagne de cette section.">🏁 Clôturer une campagne</button>` : ''}
         ${_campsReprises.size > 0 ? `<span style="font-size:10px; color:#64748b;">${_campsReprises.size} campagne${_campsReprises.size > 1 ? 's' : ''} en cours</span>` : ''}
       </div>`;
     reprisesBlock = block('reprises', '📦 À reprendre', '#0ea5e9', reprises.length,
