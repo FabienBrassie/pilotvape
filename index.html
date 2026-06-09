@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:56</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-09 22:59</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3244,8 +3244,11 @@ function ensureAction(produitId, type, produitType, opts) {
   }, null);
   if (_bestCancelled) {
     console.log('[ENSURE-ACTION] Réactivation action annulée ' + _bestCancelled.id + ' (' + _bestCancelled._checked + ' steps cochés) au lieu de créer une nouvelle');
+    // Réveil complet (cf. règle d'or §0.12 — nettoyer TOUS les flags de mort, pas un sous-ensemble) :
     _bestCancelled.annulee = false;
     _bestCancelled.dateCloture = null;
+    _bestCancelled._archived = false;
+    _deletedIds.delete(_bestCancelled.id);
     delete _bestCancelled._checked;
     _bestCancelled._ts = new Date().toISOString();
     SHOPS.forEach(sh => { const st = _bestCancelled.etats && _bestCancelled.etats[sh]; if (st) { st.done = allStepsDone(_bestCancelled, sh); if (st.done) { if (!st.dateFait) st.dateFait = ymd(new Date()); } else { st.dateFait = null; } } });
@@ -5298,10 +5301,14 @@ function syncMiseEnPlaceActions() {
       };
       actions.push(mep);
     } else {
-      // Réanimation si annulée + relink au cas où le sortant aurait changé
-      if (mep.annulee) {
+      // Réanimation si annulée + relink au cas où le sortant aurait changé.
+      // Réveil complet (cf. règle d'or §0.12) : annulee + dateCloture + _archived + tombstone.
+      if (mep.annulee || mep.dateCloture || mep._archived) {
         mep.annulee = false;
         mep.dateCloture = null;
+        mep._archived = false;
+        _deletedIds.delete(mep.id);
+        mep._ts = new Date().toISOString();
       }
       mep.sortirActionId = sA.id;
     }
