@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:09</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:32</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -6055,6 +6055,29 @@ function toggleDashSection(key) {
   localStorage.setItem('pilotVapeDashCollapsed', JSON.stringify(dashCollapsed));
   if (typeof renderDashboard === 'function') renderDashboard();
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Mode d'affichage du dashboard (2026-06-10) :
+//   'cards' (par défaut) → grille de cards résumées avec chiffres + dots P/M/L.
+//                           Vue d'œil rapide : tout visible d'un coup, pas de scroll.
+//   'detail:<sectionKey>' → une seule section ouverte en plein contenu (rendu détaillé).
+//                            Bouton "← Retour aux cards" pour revenir.
+//   'all' → mode legacy : toutes les sections empilées verticalement (ancien dashboard).
+//           Pratique pour qui préfère scroller dans une longue liste.
+// ═══════════════════════════════════════════════════════════════════════
+let dashViewMode = (() => {
+  try { return localStorage.getItem('pilotVapeDashViewMode') || 'cards'; }
+  catch { return 'cards'; }
+})();
+function setDashViewMode(mode) {
+  dashViewMode = mode;
+  try { localStorage.setItem('pilotVapeDashViewMode', mode); } catch(e) {}
+  if (typeof renderDashboard === 'function') renderDashboard();
+  // Au passage en mode détail, scroll en haut pour montrer le bouton retour
+  if (mode && mode.indexOf('detail:') === 0) setTimeout(() => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(e) {} }, 50);
+}
+function openDashSectionDetail(sectionKey) { setDashViewMode('detail:' + sectionKey); }
+function backToDashCards() { setDashViewMode('cards'); }
 
 // État plié/déplié des sections profil dans Base Kit — persisté. Même sémantique :
 // absent ou true = plié, false = déplié.
@@ -14623,6 +14646,56 @@ function renderDashboard() {
 
   // Bloc pliable : cliquer sur le header replie/déplie la section. État mémorisé dans localStorage.
   // `definition` = phrase explicite pour l'équipe : ce que "cocher fait" veut dire concrètement.
+  // Dots P/M/L "moyennés" sur un ensemble d'actions :
+  // - Si toutes les actions n'ont aucune progression → contour seulement
+  // - Si certaines progressent → camembert conic-gradient
+  // - Si toutes terminées → cercle plein
+  // Respecte le filtre boutique fShop (n'affiche que la boutique sélectionnée si filtré).
+  function _renderDashCardDots(actionsForDots) {
+    return SHOPS.map(sh => {
+      if (fShop && sh !== fShop) return '';
+      const col = SHOP_COLORS[sh];
+      const init = SHOP_LABELS[sh][0];
+      const active = (actionsForDots || []).filter(a => !a.annulee);
+      if (active.length === 0) {
+        return `<span title="${SHOP_LABELS[sh]}" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:9px; background:transparent; color:${col}; border:1px solid ${col}80; border-radius:50%; user-select:none;">${init}</span>`;
+      }
+      let totalPct = 0;
+      active.forEach(a => { try { ensureActionSteps(a); totalPct += stepsProgress(a, sh); } catch(e) {} });
+      const avgPct = totalPct / active.length;
+      let bg;
+      if (avgPct === 0) bg = 'transparent';
+      else if (avgPct >= 0.999) bg = col;
+      else bg = `conic-gradient(${col} ${(avgPct * 360).toFixed(0)}deg, transparent 0)`;
+      const txt = avgPct >= 0.999 ? '#0f172a' : col;
+      const pctLbl = Math.round(avgPct * 100);
+      return `<span title="${SHOP_LABELS[sh]} — ${pctLbl}% d'avancement sur ${active.length} action${active.length>1?'s':''}" style="display:inline-flex; align-items:center; justify-content:center; width:18px; height:18px; font-size:9px; font-weight:500; background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
+    }).join(' ');
+  }
+
+  // Rend une "card résumée" de section pour la vue d'œil. Clic = ouvre la section en mode détail.
+  // - key : identifiant de la section (utilisé pour basculer en detail:<key>)
+  // - label : titre court (ex : "À sortir")
+  // - color : couleur principale (#hex)
+  // - count : nombre affiché en gros à droite
+  // - actionsForDots : tableau d'actions pour calculer les dots P/M/L (peut être [])
+  // - contextLine : phrase courte d'info contextuelle (peut être vide)
+  function _renderDashSectionCard(key, label, color, count, actionsForDots, contextLine) {
+    const _dots = _renderDashCardDots(actionsForDots);
+    const _ctxHtml = contextLine ? `<div style="font-size:10px; color:#94a3b8; margin-top:6px; line-height:1.3;">${contextLine}</div>` : '';
+    return `<div onclick="openDashSectionDetail('${key}')"
+      style="background:#1e293b; border:1px solid ${color}40; border-left:3px solid ${color}; border-radius:6px; padding:10px 12px; cursor:pointer; transition:background 0.1s, border-color 0.1s;"
+      onmouseover="this.style.background='#1e293bcc'; this.style.borderColor='${color}80';"
+      onmouseout="this.style.background='#1e293b'; this.style.borderColor='${color}40';">
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:8px;">
+        <span style="font-size:10.5px; color:${color}; font-weight:500; text-transform:uppercase; letter-spacing:0.5px;">${label}</span>
+        <span style="font-size:24px; color:${color}; font-weight:500; line-height:1;">${count}</span>
+      </div>
+      <div style="display:inline-flex; gap:3px; margin-top:8px;">${_dots}</div>
+      ${_ctxHtml}
+    </div>`;
+  }
+
   function block(key, title, color, count, innerHtml, definition) {
     const collapsed = isDashCollapsed(key);
     const chevron = collapsed ? '▸' : '▾';
@@ -15129,6 +15202,16 @@ function renderDashboard() {
   // --- Bloc « OP en cours » — copie du EN CE MOMENT de la vue timeline, avec regroupement campagne ---
   // Les OPs sont globales : on ne filtre PAS par boutique, toutes les OP en cours sont affichées
   const _opEnCoursOps = opsNonFinies.filter(op => opTimeStatus(op) === 'EN_COURS');
+  // Décompte "agrégé" pour la card et le badge : une campagne compte comme 1, peu importe
+  // combien d'OPs sont dedans. Les OPs sans campagne sont comptées individuellement.
+  // Règle métier validée par Fabien (2026-06-10) : "5 OPs dans une campagne = 1 dans le compteur".
+  const _opEnCoursCampIds = new Set();
+  let _opEnCoursSansCamp = 0;
+  _opEnCoursOps.forEach(op => {
+    if (op.campagneId) _opEnCoursCampIds.add(op.campagneId);
+    else _opEnCoursSansCamp++;
+  });
+  const _opEnCoursAggCount = _opEnCoursCampIds.size + _opEnCoursSansCamp;
   let _opEnCoursInner = '';
   if (_opEnCoursOps.length === 0) {
     _opEnCoursInner = emptyState('Aucune OP en cours ✓');
@@ -15178,8 +15261,8 @@ function renderDashboard() {
   }
   // Forcer l'ouverture par défaut du bloc OP en cours (une seule fois, au premier rendu)
   if (dashCollapsed['opEnCours'] === undefined) { dashCollapsed['opEnCours'] = false; try { localStorage.setItem('pilotVapeDashCollapsed', JSON.stringify(dashCollapsed)); } catch(e) {} }
-  const opEnCoursBlock = _opEnCoursOps.length === 0 ? '' : block('opEnCours', 'OP en cours', '#a855f7', _opEnCoursOps.length, _opEnCoursInner,
-    'Opérations commerciales actuellement actives. Déplier pour voir le détail et l\'avancement par boutique.');
+  const opEnCoursBlock = _opEnCoursOps.length === 0 ? '' : block('opEnCours', 'OP en cours', '#a855f7', _opEnCoursAggCount, _opEnCoursInner,
+    'Opérations commerciales actuellement actives. Une campagne compte pour 1 (peu importe le nombre d\'OPs dedans). Déplier pour voir le détail et l\'avancement par boutique.');
 
   // --- Bloc Besoins à combler ---
   function renderBesoinTrou(t) {
@@ -16107,8 +16190,76 @@ function renderDashboard() {
     </div>`;
   })();
 
-  document.getElementById('dashContent').innerHTML =
-    urgenceBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+  // ═══════════════════════════════════════════════════════════════════════
+  // Rendu final selon le mode d'affichage :
+  //   - 'cards' (par défaut) → grille de cards résumées + bouton "Tout déplier"
+  //   - 'detail:<key>' → section seule + bouton "← Retour aux cards"
+  //   - 'all' → mode legacy (toutes sections empilées)
+  // ═══════════════════════════════════════════════════════════════════════
+  const _sectionMap = {
+    install:    installBlock,
+    desinstall: desinstBlock,
+    opEnCours:  opEnCoursBlock,
+    sortir:     sortirBlock,
+    reprises:   reprisesBlock,
+    rentrer:    rentrerBlock,
+    prix:       prixBlock,
+    besoins:    besoinsBlock,
+    ops:        alertesBlock,
+    historique: historiqueBlock
+  };
+  const _modeBtns = `<div style="display:flex; gap:6px; justify-content:flex-end; margin-bottom:10px; align-items:center;">
+    <span style="font-size:10px; color:#64748b; margin-right:4px;">Vue :</span>
+    <button onclick="setDashViewMode('cards')" style="padding:4px 10px; font-size:10.5px; font-weight:500; background:${dashViewMode === 'cards' ? '#0ea5e9' : 'transparent'}; color:${dashViewMode === 'cards' ? '#0f172a' : '#94a3b8'}; border:1px solid ${dashViewMode === 'cards' ? '#0ea5e9' : '#334155'}; border-radius:4px; cursor:pointer;">👁️ Cards</button>
+    <button onclick="setDashViewMode('all')" style="padding:4px 10px; font-size:10.5px; font-weight:500; background:${dashViewMode === 'all' ? '#0ea5e9' : 'transparent'}; color:${dashViewMode === 'all' ? '#0f172a' : '#94a3b8'}; border:1px solid ${dashViewMode === 'all' ? '#0ea5e9' : '#334155'}; border-radius:4px; cursor:pointer;" title="Mode liste : toutes les sections empilées (ancien dashboard)">📋 Tout déplier</button>
+  </div>`;
+
+  let _dashHtml = '';
+  if (dashViewMode && dashViewMode.indexOf('detail:') === 0) {
+    // Mode détail : on n'affiche QUE la section ouverte + bouton retour
+    const _sectionKey = dashViewMode.substring('detail:'.length);
+    const _sectionContent = _sectionMap[_sectionKey];
+    const _retourBtn = `<div style="margin-bottom:10px;">
+      <button onclick="backToDashCards()" style="padding:6px 14px; font-size:11.5px; font-weight:500; background:#1e293b; color:#94a3b8; border:1px solid #475569; border-radius:5px; cursor:pointer;">← Retour aux cards</button>
+    </div>`;
+    _dashHtml = urgenceBlock + _retourBtn + (_sectionContent || `<div style="text-align:center; padding:30px; color:#64748b;">Cette section n'a pas de contenu actuellement.</div>`);
+  } else if (dashViewMode === 'all') {
+    // Mode legacy : toutes les sections empilées (comme avant la refonte)
+    _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+  } else {
+    // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
+    const _cards = [];
+    if (opsInstallVisibles.length > 0) {
+      const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInstallVisibles, fShop) : '';
+      _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, _dotsHtml, ''));
+    }
+    if (opsDesinstVisibles.length > 0) {
+      const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsDesinstVisibles, fShop) : '';
+      _cards.push(_renderDashSectionCard('desinstall', '🔻 À désinstaller', '#f97316', opsDesinstVisibles.length, _dotsHtml, ''));
+    }
+    if (_opEnCoursOps.length > 0) {
+      const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(_opEnCoursOps, fShop) : '';
+      const _ctxParts = [];
+      if (_opEnCoursCampIds.size > 0) _ctxParts.push(_opEnCoursCampIds.size + ' campagne' + (_opEnCoursCampIds.size > 1 ? 's' : ''));
+      if (_opEnCoursSansCamp > 0) _ctxParts.push(_opEnCoursSansCamp + ' OP unitaire' + (_opEnCoursSansCamp > 1 ? 's' : ''));
+      _cards.push(_renderDashSectionCard('opEnCours', 'OP en cours', '#a855f7', _opEnCoursAggCount, _dotsHtml, _ctxParts.join(' · ')));
+    }
+    if (sortir.length > 0) _cards.push(_renderDashSectionCard('sortir', 'À sortir', '#ef4444', sortir.length, sortir, ''));
+    if (reprises.length > 0) {
+      const _campsR = new Set(); reprises.forEach(a => { if (a.campagneReprise) _campsR.add(a.campagneReprise); });
+      _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprises.length, reprises, _campsR.size > 0 ? (_campsR.size + ' campagne' + (_campsR.size > 1 ? 's' : '')) : ''));
+    }
+    if (rentrer.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrer.length, rentrer, ''));
+    if (prix.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prix.length, prix, ''));
+    if (totalBesoins > 0) _cards.push(_renderDashSectionCard('besoins', 'Besoins à combler', '#22d3ee', totalBesoins, [], ''));
+    if (historique.length > 0) _cards.push(_renderDashSectionCard('historique', 'Historique', '#64748b', historique.length, [], 'actions clôturées'));
+
+    const _grid = _cards.length > 0
+      ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-bottom:14px;">${_cards.join('')}</div>`
+      : `<div style="text-align:center; padding:40px 20px; color:#64748b; font-size:13px;">Tout est à jour — rien à signaler ✓</div>`;
+    _dashHtml = urgenceBlock + _modeBtns + _grid;
+  }
+  document.getElementById('dashContent').innerHTML = _dashHtml;
 
   // Summary top right — chips cliquables qui amènent vers la section correspondante
   const chip = (color, label, key) =>
