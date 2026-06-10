@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:41</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:50</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -6076,7 +6076,16 @@ function setDashViewMode(mode) {
   // Au passage en mode détail, scroll en haut pour montrer le bouton retour
   if (mode && mode.indexOf('detail:') === 0) setTimeout(() => { try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(e) {} }, 50);
 }
-function openDashSectionDetail(sectionKey) { setDashViewMode('detail:' + sectionKey); }
+function openDashSectionDetail(sectionKey) {
+  // Force l'ouverture (dépliage) de la section ciblée — sinon le block(...) sous-jacent
+  // resterait plié si Fabien ne l'avait jamais ouverte manuellement, et il verrait juste
+  // l'entête sans son contenu en mode détail.
+  if (typeof dashCollapsed === 'object') {
+    dashCollapsed[sectionKey] = false;
+    try { localStorage.setItem('pilotVapeDashCollapsed', JSON.stringify(dashCollapsed)); } catch(e) {}
+  }
+  setDashViewMode('detail:' + sectionKey);
+}
 function backToDashCards() { setDashViewMode('cards'); }
 
 // État plié/déplié des sections profil dans Base Kit — persisté. Même sémantique :
@@ -13425,6 +13434,13 @@ function scrollToActionFromUrgence(actionId) {
   // S'assurer que la section dashboard parente (rentrer/sortir/prix) est aussi dépliée.
   const _sectionMap0 = { 'RENTRER': 'rentrer', 'SORTIR': 'sortir', 'PRIX': 'prix', 'MISE_EN_PLACE': 'rentrer' };
   const _sectionKey0 = _sectionMap0[_a.type];
+  // En mode cards, la card individuelle n'est pas dans le DOM (seules les cards résumées
+  // sont rendues). On bascule donc en mode détail de la bonne section pour qu'elle s'affiche
+  // pleinement avant le scroll.
+  if (_sectionKey0 && typeof dashViewMode !== 'undefined' && dashViewMode !== 'all' && dashViewMode !== ('detail:' + _sectionKey0)) {
+    dashViewMode = 'detail:' + _sectionKey0;
+    try { localStorage.setItem('pilotVapeDashViewMode', dashViewMode); } catch(e) {}
+  }
   if (_sectionKey0 && typeof dashCollapsed === 'object' && typeof isDashCollapsed === 'function' && isDashCollapsed(_sectionKey0)) {
     dashCollapsed[_sectionKey0] = false;
     try { localStorage.setItem('pilotVapeDashCollapsed', JSON.stringify(dashCollapsed)); } catch(e) {}
@@ -16262,7 +16278,10 @@ function renderDashboard() {
       const _grid = _cards.length > 0
         ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-bottom:14px;">${_cards.join('')}</div>`
         : `<div style="text-align:center; padding:40px 20px; color:#64748b; font-size:13px;">Tout est à jour — rien à signaler ✓</div>`;
-      _dashHtml = urgenceBlock + _modeBtns + _grid;
+      // La timeline "Prochaines OP" (alertesBlock — id historique "ops") est gardée en pied
+      // de la vue cards : c'est une vue de planification dans le temps, plus large que les sections,
+      // utile en complément du résumé chiffré.
+      _dashHtml = urgenceBlock + _modeBtns + _grid + alertesBlock;
     }
   } catch (_err) {
     // Filet de sécurité : si quoi que ce soit plante côté cards/détail, on retombe sur
