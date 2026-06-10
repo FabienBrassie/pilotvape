@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 00:07</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 00:12</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -12074,6 +12074,22 @@ function markNoReplacement(type, id) {
   closeRemplacement();
 }
 
+// ═══ LIQUID BASE RENDERING ═══
+// [Restauré 2026-06-11 00:15 — supprimé par erreur pendant le nettoyage E2 : la suppression
+// de la fonction morte applyFilters (une seule ligne) avait avalé ce bloc VIVANT à sa suite.]
+// Logique : tout est FERMÉ par défaut. On stocke les clés OUVERTES dans liqExpanded.
+const liqExpanded = {};
+function toggleLiqSection(key) { liqExpanded[key] = !liqExpanded[key]; renderLiqAll(); saveUiState(); }
+function isLiqExpanded(key) { return !!liqExpanded[key]; }
+
+let liqSortCol = 'gamme';
+let liqSortDir = 1;
+function setLiqSort(col) {
+  if (liqSortCol === col) { liqSortDir *= -1; } else { liqSortCol = col; liqSortDir = 1; }
+  renderLiqAll();
+  saveUiState();
+}
+
 function liqGammeStatusColor(sv) {
   return kitStatusColorMap(sv);
 }
@@ -20484,7 +20500,16 @@ function toggleOpExpand(opId) {
   renderDashboard();
   renderOps && renderOps();
 }
-// Alias legacy (si appelé ailleurs)
+// [Bloc restauré 2026-06-11 00:15 — avalé par erreur avec la fonction morte toggleOpDashExpand (E2).]
+// ── Calcul dynamique de l'état d'un step OP ──
+// Helper : le produit de l'OP existe-t-il dans une base (kit/liq/PD) ?
+// Si non (ex: accessoires), les steps « prod » sont éditables directement dans l'OP
+// au lieu d'être en lecture seule depuis le dashboard.
+function _opProductInBase(op) {
+  const pid = (op.produitIds || [])[0];
+  if (!pid) return false;
+  return baseKits.some(k => k.id === pid) || baseLiq.some(l => l.id === pid) || basePD.some(p => p.id === pid);
+}
 
 // Pour les steps fanfare_rentrer : calcule depuis les actions RENTRER liées (agrégat parfums).
 // Pour les steps coup_rentrer/coup_sortir : lit l'action liée directement.
@@ -22123,6 +22148,13 @@ async function fillSlot(page, item, fonts, sizes, slotRects, slotColors) {
                   : calcNote(kit.rolePossible);
   drawField('note', noteCount || null);
   drawField('prix', formatPrixEtiquette(price));
+}
+
+// [Restauré 2026-06-11 00:15 — avalé par erreur avec la fonction morte clearSlot (E2).]
+function chunkArr(arr, n) {
+  const out = [];
+  for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n));
+  return out;
 }
 
 
