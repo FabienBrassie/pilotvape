@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:05</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:11</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -16291,10 +16291,39 @@ function renderDashboard() {
       _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
     } else {
       // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
+      // Helper de comptage par type produit pour la ligne contextuelle des cards.
+      const _countByProdType = (actionsArr) => {
+        let nbK = 0, nbP = 0, nbL = 0;
+        (actionsArr || []).forEach(a => {
+          const t = a.produitType || 'kit'; // legacy : actions sans produitType = kit
+          if (t === 'kit') nbK++;
+          else if (t === 'pd') nbP++;
+          else if (t === 'liq') nbL++;
+        });
+        const parts = [];
+        if (nbK > 0) parts.push(nbK + ' kit' + (nbK > 1 ? 's' : ''));
+        if (nbP > 0) parts.push(nbP + ' PD');
+        if (nbL > 0) parts.push(nbL + ' liquide' + (nbL > 1 ? 's' : ''));
+        return parts.join(' · ');
+      };
+      // Indication temporelle pour la card "À installer" (aujourd'hui / demain).
+      const _installCtx = (() => {
+        if (!opsInstallVisibles || opsInstallVisibles.length === 0) return '';
+        const _today = ymd(new Date());
+        const _tomD = new Date(); _tomD.setDate(_tomD.getDate() + 1);
+        const _tom = ymd(_tomD);
+        const _nbT = opsInstallVisibles.filter(op => op.dateDebut === _today).length;
+        const _nbD = opsInstallVisibles.filter(op => op.dateDebut === _tom).length;
+        const parts = [];
+        if (_nbT > 0) parts.push(_nbT + ' aujourd\'hui');
+        if (_nbD > 0) parts.push(_nbD + ' demain');
+        return parts.join(' · ');
+      })();
+
       const _cards = [];
       if (opsInstallVisibles && opsInstallVisibles.length > 0) {
         const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInstallVisibles, fShop) : '';
-        _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, _dotsHtml, ''));
+        _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, _dotsHtml, _installCtx));
       }
       if (opsDesinstVisibles && opsDesinstVisibles.length > 0) {
         const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsDesinstVisibles, fShop) : '';
@@ -16307,13 +16336,17 @@ function renderDashboard() {
         if (_opEnCoursSansCamp > 0) _ctxParts.push(_opEnCoursSansCamp + ' OP unitaire' + (_opEnCoursSansCamp > 1 ? 's' : ''));
         _cards.push(_renderDashSectionCard('opEnCours', 'OP en cours', '#a855f7', _opEnCoursAggCount, _dotsHtml, _ctxParts.join(' · ')));
       }
-      if (sortir && sortir.length > 0) _cards.push(_renderDashSectionCard('sortir', 'À sortir', '#ef4444', sortir.length, sortir, ''));
+      if (sortir && sortir.length > 0) _cards.push(_renderDashSectionCard('sortir', 'À sortir', '#ef4444', sortir.length, sortir, _countByProdType(sortir)));
       if (reprises && reprises.length > 0) {
         const _campsR = new Set(); reprises.forEach(a => { if (a.campagneReprise) _campsR.add(a.campagneReprise); });
-        _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprises.length, reprises, _campsR.size > 0 ? (_campsR.size + ' campagne' + (_campsR.size > 1 ? 's' : '')) : ''));
+        const _ctxParts = [];
+        const _byType = _countByProdType(reprises);
+        if (_byType) _ctxParts.push(_byType);
+        if (_campsR.size > 0) _ctxParts.push(_campsR.size + ' campagne' + (_campsR.size > 1 ? 's' : ''));
+        _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprises.length, reprises, _ctxParts.join(' · ')));
       }
-      if (rentrer && rentrer.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrer.length, rentrer, ''));
-      if (prix && prix.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prix.length, prix, ''));
+      if (rentrer && rentrer.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrer.length, rentrer, _countByProdType(rentrer)));
+      if (prix && prix.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prix.length, prix, _countByProdType(prix)));
       // « Besoins à combler » et « Historique » ne sont pas rendus en vue cards (décision Fabien
       // 2026-06-10) : trop secondaires pour le coup d'œil quotidien. Restent accessibles via le
       // mode "Tout déplier" si besoin.
