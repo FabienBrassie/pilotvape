@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:02</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:09</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -5692,6 +5692,13 @@ async function lancerReprise(produitType, produitId, parfumId) {
     a.dateCloture = null;
     a._archived = false;
     _deletedIds.delete(a.id);
+    // Nettoyage des champs Prix Rouge / décision PRIX résiduels : un produit en reprise n'est
+    // plus géré comme un destockage commercial, les badges PR doivent disparaître de la base liquide.
+    a.prixRouge = 0;
+    a.prixAvantRouge = '';
+    if (a.decisionChoice === 'rouge') a.decisionChoice = '';
+    a.etiquetteRouge = false;
+    a.fanfareOpType = '';
     SHOPS.forEach(sh => {
       if (!a.etats[sh]) a.etats[sh] = { done: false, dateFait: null, responsable: '', commentaire: '', steps: {}, _stepTs: {} };
       a.etats[sh].steps = makeStepMap(a);
@@ -5780,12 +5787,28 @@ async function lancerReprise(produitType, produitId, parfumId) {
     op.annulee = true;
     op.dateCloture = _now;
     op._ts = new Date().toISOString();
-    // Détache les liens d'actions vers cette OP
+    // Détache les liens d'actions vers cette OP + cleanup des champs PR / fanfare résiduels
+    // sur les actions liées (symétrique du cleanup fait dans deleteOp). Sinon les badges
+    // PR persisteraient sur les fiches des liquides.
+    const _linkedIds = [];
+    if (op.groupActionIds) _linkedIds.push(...op.groupActionIds);
     ['sortirActionId','prixActionId','rentrerActionId','mepActionId','rentrerPrixActionId','returnActionId'].forEach(f => {
-      if (op[f]) {
-        const _act = actions.find(x => x.id === op[f]);
-        if (_act && _act.opId === op.id) _act.opId = null;
+      if (op[f]) _linkedIds.push(op[f]);
+    });
+    _linkedIds.forEach(aid => {
+      const _act = actions.find(x => x.id === aid);
+      if (!_act) return;
+      if (_act.opId === op.id) _act.opId = null;
+      if (op.type === 'PRIX_ROUGE') {
+        _act.prixRouge = 0;
+        _act.prixAvantRouge = '';
+        if (_act.decisionChoice === 'rouge') _act.decisionChoice = '';
+        _act.etiquetteRouge = false;
       }
+      if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && _act.type === 'RENTRER' && _act.fanfareOpType) {
+        _act.fanfareOpType = '';
+      }
+      _act._ts = new Date().toISOString();
     });
     _opsCancelled.push(op.id);
   });
@@ -7041,8 +7064,22 @@ async function loadData() {
       });
       baseKits.forEach(k => { if (k.statutVie === 'REPRISE') _findAndWake(k.id, null); });
       basePD.forEach(p => { if (p.statutVie === 'REPRISE') _findAndWake(p.id, null); });
-      if (_healed > 0) {
-        console.log('[HEAL-REPRISE] ' + _healed + ' action(s) REPRISE réveillée(s) au chargement.');
+      // Nettoyage des champs PR / fanfare résiduels sur les actions SORTIR motif=REPRISE :
+      // ces champs continuaient d'afficher des badges Prix Rouge fantômes sur les fiches base liquide.
+      let _cleanedPr = 0;
+      actions.forEach(a => {
+        if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE') return;
+        let dirty = false;
+        if (a.prixRouge) { a.prixRouge = 0; dirty = true; }
+        if (a.prixAvantRouge) { a.prixAvantRouge = ''; dirty = true; }
+        if (a.decisionChoice === 'rouge') { a.decisionChoice = ''; dirty = true; }
+        if (a.etiquetteRouge) { a.etiquetteRouge = false; dirty = true; }
+        if (a.fanfareOpType) { a.fanfareOpType = ''; dirty = true; }
+        if (dirty) { a._ts = new Date().toISOString(); _cleanedPr++; }
+      });
+      if (_healed > 0 || _cleanedPr > 0) {
+        if (_healed > 0) console.log('[HEAL-REPRISE] ' + _healed + ' action(s) REPRISE réveillée(s) au chargement.');
+        if (_cleanedPr > 0) console.log('[HEAL-REPRISE] ' + _cleanedPr + ' action(s) REPRISE nettoyée(s) des résidus PR/fanfare.');
         setTimeout(() => { try { saveData(); } catch(e) {} }, 1500);
       }
     }
