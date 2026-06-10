@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:00</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:05</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -16314,8 +16314,9 @@ function renderDashboard() {
       }
       if (rentrer && rentrer.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrer.length, rentrer, ''));
       if (prix && prix.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prix.length, prix, ''));
-      if (typeof totalBesoins === 'number' && totalBesoins > 0) _cards.push(_renderDashSectionCard('besoins', 'Besoins à combler', '#22d3ee', totalBesoins, [], ''));
-      if (historique && historique.length > 0) _cards.push(_renderDashSectionCard('historique', 'Historique', '#64748b', historique.length, [], 'actions clôturées'));
+      // « Besoins à combler » et « Historique » ne sont pas rendus en vue cards (décision Fabien
+      // 2026-06-10) : trop secondaires pour le coup d'œil quotidien. Restent accessibles via le
+      // mode "Tout déplier" si besoin.
 
       const _grid = _cards.length > 0
         ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-bottom:14px;">${_cards.join('')}</div>`
