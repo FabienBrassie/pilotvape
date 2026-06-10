@@ -122,7 +122,7 @@
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 23:01</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 23:09</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -8053,19 +8053,20 @@ function saveData() {
     console.error('[SAVE] Échec localStorage (quota dépassé ?):', e.message);
     pvAlert('⚠️ Impossible de sauvegarder localement — stockage plein.\nExportez vos données immédiatement via le bouton Export.');
   }
-  // Message honnête (chantier B) : à ce stade c'est enregistré ICI, pas encore au serveur.
-  // Le "✓ Synchronisé" vert ne s'affiche qu'après confirmation du serveur (_saveToSupabase).
+  // Feedback honnête (chantier B, allégé 23:10) : le point du header suffit pour "envoi en
+  // cours" (orange) — pas de message en doublon. On n'affiche un message que pour ce qui
+  // mérite l'attention : hors ligne (ambre) ici, et "✓ Synchronisé" après confirmation serveur.
   if (_syncOk === false || _syncFailStreak >= 2) {
     _showSaveMsg('💾 Enregistré ici · hors ligne, partira tout seul', '#78350f', '#fcd34d', 3000);
-  } else {
-    _showSaveMsg('💾 Enregistré ici · envoi…', '#334155', '#e2e8f0', 2000);
   }
   if (typeof _updateSyncIndicator === 'function') _updateSyncIndicator();
   // Sauvegarde Supabase avec debounce (1s)
   _savePending = true;
   _lastPayload = payload; // garder le dernier payload pour flush avant fermeture
   if (_saveTimer) clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => _saveToSupabase(payload), 1000);
+  _saveTimer = setTimeout(() => { _saveTimer = null; _saveToSupabase(payload); }, 1000);
+  // ↑ _saveTimer remis à null quand le minuteur part (fix 2026-06-10 23:10) : sinon il restait
+  // "armé" pour toujours → point d'envoi orange en permanence + relance auto du poll bloquée.
 }
 
 // ── Flush Supabase avant fermeture / mise en arrière-plan ──
