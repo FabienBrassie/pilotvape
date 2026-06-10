@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:32</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:39</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -16215,49 +16215,57 @@ function renderDashboard() {
   </div>`;
 
   let _dashHtml = '';
-  if (dashViewMode && dashViewMode.indexOf('detail:') === 0) {
-    // Mode détail : on n'affiche QUE la section ouverte + bouton retour
-    const _sectionKey = dashViewMode.substring('detail:'.length);
-    const _sectionContent = _sectionMap[_sectionKey];
-    const _retourBtn = `<div style="margin-bottom:10px;">
-      <button onclick="backToDashCards()" style="padding:6px 14px; font-size:11.5px; font-weight:500; background:#1e293b; color:#94a3b8; border:1px solid #475569; border-radius:5px; cursor:pointer;">← Retour aux cards</button>
-    </div>`;
-    _dashHtml = urgenceBlock + _retourBtn + (_sectionContent || `<div style="text-align:center; padding:30px; color:#64748b;">Cette section n'a pas de contenu actuellement.</div>`);
-  } else if (dashViewMode === 'all') {
-    // Mode legacy : toutes les sections empilées (comme avant la refonte)
-    _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
-  } else {
-    // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
-    const _cards = [];
-    if (opsInstallVisibles.length > 0) {
-      const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInstallVisibles, fShop) : '';
-      _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, _dotsHtml, ''));
-    }
-    if (opsDesinstVisibles.length > 0) {
-      const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsDesinstVisibles, fShop) : '';
-      _cards.push(_renderDashSectionCard('desinstall', '🔻 À désinstaller', '#f97316', opsDesinstVisibles.length, _dotsHtml, ''));
-    }
-    if (_opEnCoursOps.length > 0) {
-      const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(_opEnCoursOps, fShop) : '';
-      const _ctxParts = [];
-      if (_opEnCoursCampIds.size > 0) _ctxParts.push(_opEnCoursCampIds.size + ' campagne' + (_opEnCoursCampIds.size > 1 ? 's' : ''));
-      if (_opEnCoursSansCamp > 0) _ctxParts.push(_opEnCoursSansCamp + ' OP unitaire' + (_opEnCoursSansCamp > 1 ? 's' : ''));
-      _cards.push(_renderDashSectionCard('opEnCours', 'OP en cours', '#a855f7', _opEnCoursAggCount, _dotsHtml, _ctxParts.join(' · ')));
-    }
-    if (sortir.length > 0) _cards.push(_renderDashSectionCard('sortir', 'À sortir', '#ef4444', sortir.length, sortir, ''));
-    if (reprises.length > 0) {
-      const _campsR = new Set(); reprises.forEach(a => { if (a.campagneReprise) _campsR.add(a.campagneReprise); });
-      _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprises.length, reprises, _campsR.size > 0 ? (_campsR.size + ' campagne' + (_campsR.size > 1 ? 's' : '')) : ''));
-    }
-    if (rentrer.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrer.length, rentrer, ''));
-    if (prix.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prix.length, prix, ''));
-    if (totalBesoins > 0) _cards.push(_renderDashSectionCard('besoins', 'Besoins à combler', '#22d3ee', totalBesoins, [], ''));
-    if (historique.length > 0) _cards.push(_renderDashSectionCard('historique', 'Historique', '#64748b', historique.length, [], 'actions clôturées'));
+  try {
+    if (dashViewMode && dashViewMode.indexOf('detail:') === 0) {
+      // Mode détail : on n'affiche QUE la section ouverte + bouton retour
+      const _sectionKey = dashViewMode.substring('detail:'.length);
+      const _sectionContent = _sectionMap[_sectionKey];
+      const _retourBtn = `<div style="margin-bottom:10px;">
+        <button onclick="backToDashCards()" style="padding:6px 14px; font-size:11.5px; font-weight:500; background:#1e293b; color:#94a3b8; border:1px solid #475569; border-radius:5px; cursor:pointer;">← Retour aux cards</button>
+      </div>`;
+      _dashHtml = urgenceBlock + _retourBtn + (_sectionContent || `<div style="text-align:center; padding:30px; color:#64748b;">Cette section n'a pas de contenu actuellement.</div>`);
+    } else if (dashViewMode === 'all') {
+      // Mode legacy : toutes les sections empilées (comme avant la refonte)
+      _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    } else {
+      // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
+      const _cards = [];
+      if (opsInstallVisibles && opsInstallVisibles.length > 0) {
+        const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInstallVisibles, fShop) : '';
+        _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, _dotsHtml, ''));
+      }
+      if (opsDesinstVisibles && opsDesinstVisibles.length > 0) {
+        const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsDesinstVisibles, fShop) : '';
+        _cards.push(_renderDashSectionCard('desinstall', '🔻 À désinstaller', '#f97316', opsDesinstVisibles.length, _dotsHtml, ''));
+      }
+      if (_opEnCoursOps && _opEnCoursOps.length > 0) {
+        const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(_opEnCoursOps, fShop) : '';
+        const _ctxParts = [];
+        if (_opEnCoursCampIds.size > 0) _ctxParts.push(_opEnCoursCampIds.size + ' campagne' + (_opEnCoursCampIds.size > 1 ? 's' : ''));
+        if (_opEnCoursSansCamp > 0) _ctxParts.push(_opEnCoursSansCamp + ' OP unitaire' + (_opEnCoursSansCamp > 1 ? 's' : ''));
+        _cards.push(_renderDashSectionCard('opEnCours', 'OP en cours', '#a855f7', _opEnCoursAggCount, _dotsHtml, _ctxParts.join(' · ')));
+      }
+      if (sortir && sortir.length > 0) _cards.push(_renderDashSectionCard('sortir', 'À sortir', '#ef4444', sortir.length, sortir, ''));
+      if (reprises && reprises.length > 0) {
+        const _campsR = new Set(); reprises.forEach(a => { if (a.campagneReprise) _campsR.add(a.campagneReprise); });
+        _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprises.length, reprises, _campsR.size > 0 ? (_campsR.size + ' campagne' + (_campsR.size > 1 ? 's' : '')) : ''));
+      }
+      if (rentrer && rentrer.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrer.length, rentrer, ''));
+      if (prix && prix.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prix.length, prix, ''));
+      if (typeof totalBesoins === 'number' && totalBesoins > 0) _cards.push(_renderDashSectionCard('besoins', 'Besoins à combler', '#22d3ee', totalBesoins, [], ''));
+      if (historique && historique.length > 0) _cards.push(_renderDashSectionCard('historique', 'Historique', '#64748b', historique.length, [], 'actions clôturées'));
 
-    const _grid = _cards.length > 0
-      ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-bottom:14px;">${_cards.join('')}</div>`
-      : `<div style="text-align:center; padding:40px 20px; color:#64748b; font-size:13px;">Tout est à jour — rien à signaler ✓</div>`;
-    _dashHtml = urgenceBlock + _modeBtns + _grid;
+      const _grid = _cards.length > 0
+        ? `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; margin-bottom:14px;">${_cards.join('')}</div>`
+        : `<div style="text-align:center; padding:40px 20px; color:#64748b; font-size:13px;">Tout est à jour — rien à signaler ✓</div>`;
+      _dashHtml = urgenceBlock + _modeBtns + _grid;
+    }
+  } catch (_err) {
+    // Filet de sécurité : si quoi que ce soit plante côté cards/détail, on retombe sur
+    // l'ancien comportement (toutes sections empilées) pour ne PAS bloquer le dashboard.
+    // L'erreur reste visible en console pour diagnostic.
+    console.error('[DASH-RENDER] Erreur dans la vue cards/détail, fallback mode legacy :', _err);
+    _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
   }
   document.getElementById('dashContent').innerHTML = _dashHtml;
 
