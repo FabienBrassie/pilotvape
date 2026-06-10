@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:50</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:00</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -5414,6 +5414,9 @@ function _applyActionShopChange(a, shop) {
           if (liq) syncLiqToPropLiq(liq);
           // PD : pas de sync prop, mais statutVie est mis à jour directement
         }
+        // Cascade OP : un produit/parfum sorti n'a plus de raison d'être destocké via prix rouge
+        // ou one-shot. On ferme les OPs PRIX_ROUGE / COUP liées (granularité parfum respectée).
+        try { _closeRelatedOpsAfterSorti(a.produitId, a.produitParfumId || null); } catch(e) { console.error('[CASCADE-SORTI] _closeRelatedOpsAfterSorti error :', e); }
       }
     } else if (a.type === 'RENTRER') {
       const curStatus = targetParfum ? targetParfum.s : prod.statutVie;
@@ -5881,6 +5884,45 @@ function toggleActionShop(actionId, shop) {
 // Appelé après chaque toggle d'action ou d'OP. Vérifie si un produit one-shot
 // a terminé TOUTES les étapes SORTIR sur TOUTES les boutiques → passe le produit
 // en SORTI, clôt la COUP OP, clôt la PR OP, nettoie les flags.
+// Ferme les OPs liées (PRIX_ROUGE / COUP) quand un produit/parfum passe en SORTI naturellement
+// (cascade après cochage des étapes SORTIR par toutes les boutiques). Logique métier validée
+// par Fabien (2026-06-10) : un produit qui est sorti n'a plus de raison d'être destocké en
+// prix rouge ni en one-shot.
+//
+// Granularité parfum :
+// - SORTIR ciblant un parfum → ne ferme QUE les OPs ciblant ce parfum exact.
+//   Les OPs gamme entière sont conservées (autres parfums encore concernés).
+// - SORTIR ciblant la gamme entière (parfumId vide) → ferme TOUTES les OPs sur ce produit.
+//
+// Ne touche PAS aux SORTIR motif=REPRISE (workflow distinct, OPs déjà annulées au lancement).
+function _closeRelatedOpsAfterSorti(produitId, parfumId) {
+  if (!produitId) return 0;
+  const _today = ymd(new Date());
+  const _nowTs = new Date().toISOString();
+  let closed = 0;
+  ops.forEach(op => {
+    if (op._archived || op.annulee || op.dateFin) return;
+    if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return;
+    if (!op.produitIds || !op.produitIds.includes(produitId)) return;
+    if (parfumId) {
+      // OP groupée multi-parfums
+      if (op.produitParfumIds && op.produitParfumIds.length > 0) {
+        if (!op.produitParfumIds.includes(parfumId)) return;
+      } else if (op.produitParfumId) {
+        if (op.produitParfumId !== parfumId) return;
+      } else {
+        // OP gamme entière : on ne ferme pas (autres parfums encore actifs potentiellement)
+        return;
+      }
+    }
+    op.dateFin = _today;
+    op._ts = _nowTs;
+    closed++;
+    console.log('[CASCADE-SORTI] OP ' + op.id + ' (' + op.type + ') fermée → produit ' + produitId + (parfumId ? ' parfum ' + parfumId : ' gamme entière') + ' sorti');
+  });
+  return closed;
+}
+
 function checkOneShotAutoClose(a) {
   if (!a || a.annulee) return;
   // Ne déclencher que sur une action SORTIR (ou RENTRER liée à un COUP pour vérif SORTIR)
