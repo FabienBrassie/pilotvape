@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:11</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:21</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -13704,6 +13704,29 @@ function renderDashboard() {
   const besoins = computeBesoins();
   const historique = actions.filter(a => a.dateCloture && (!fPrio || effectivePrio(a) === fPrio));
 
+  // ═══════════════════════════════════════════════════════════════════════
+  // Filtre anti-doublon liquide (2026-06-10) : si une action parfum existe sur un produit/type
+  // /motifSortie, on retire l'action gamme entière du même produit. Cohérent avec le filtre
+  // visuel de renderGroupedActionCards — sans ce filtre, les compteurs disent "2 liquides"
+  // pour une gamme qui n'apparaît qu'une fois à l'écran.
+  // Appliqué AVANT tout comptage (block badges, chips Summary, cards de la vue Cards).
+  // ═══════════════════════════════════════════════════════════════════════
+  const _filterAntiDoublonLiq = (actionsArr) => {
+    const _ptmKey = a => a.produitId + '::' + a.type + '::' + (a.motifSortie || '');
+    const _parfCov = new Set();
+    actions.forEach(a => {
+      if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfCov.add(_ptmKey(a));
+    });
+    return (actionsArr || []).filter(a => {
+      if (a.produitType !== 'liq') return true;
+      return a.produitParfumId || !_parfCov.has(_ptmKey(a));
+    });
+  };
+  const sortirAffich   = _filterAntiDoublonLiq(sortir);
+  const reprisesAffich = _filterAntiDoublonLiq(reprises);
+  const rentrerAffich  = _filterAntiDoublonLiq(rentrer);
+  const prixAffich     = _filterAntiDoublonLiq(prix);
+
   // Tri : priorité d'abord (HAUTE → NORMALE → BASSE), puis paires liées, puis profil+case
   const _prioRank = { HAUTE: 0, NORMALE: 1, BASSE: 2 };
   const sortByPair = (x, y) => {
@@ -15152,7 +15175,7 @@ function renderDashboard() {
   // --- Sections empilées verticalement, pliables ---
   // Les définitions sous chaque titre disent à l'équipe CE QUE FAIT concrètement la coche,
   // pour éviter toute ambiguïté terrain (outil VS Swappy VS stock physique).
-  const sortirBlock  = block('sortir', 'À sortir', '#ef4444', sortir.length,
+  const sortirBlock  = block('sortir', 'À sortir', '#ef4444', sortirAffich.length,
     sortir.length === 0 ? emptyState('Rien à sortir ✓') : renderGroupedActionCards(sortir),
     'Déplier la ligne → cocher par boutique : 1) vendu / plus de stock · 2) désactivé sur Swappy');
   // --- Section "À reprendre" (reprise fournisseur, distincte du destockage commercial) ---
@@ -15168,11 +15191,11 @@ function renderDashboard() {
         ${isAdmin() ? `<button onclick="cloturerCampagneReprise()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#22c55e20; color:#86efac; border:1px solid #22c55e60; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;" title="Clôturer une campagne : passe les produits en Sorti et fait disparaître la campagne de cette section.">🏁 Clôturer une campagne</button>` : ''}
         ${_campsReprises.size > 0 ? `<span style="font-size:10px; color:#64748b;">${_campsReprises.size} campagne${_campsReprises.size > 1 ? 's' : ''} en cours</span>` : ''}
       </div>`;
-    reprisesBlock = block('reprises', '📦 À reprendre', '#0ea5e9', reprises.length,
+    reprisesBlock = block('reprises', '📦 À reprendre', '#0ea5e9', reprisesAffich.length,
       _exportReprisesBtn + renderGroupedActionCards(reprises),
       'Workflow reprise fournisseur — 5 étapes par boutique : réappro coupé · stock zéro · produit désactivé sur Swappy · comptage des références · mis de côté dans le carton.');
   }
-  const rentrerBlock = block('rentrer', 'À rentrer', '#22c55e', rentrer.length,
+  const rentrerBlock = block('rentrer', 'À rentrer', '#22c55e', rentrerAffich.length,
     rentrer.length === 0 ? emptyState('Rien à rentrer ✓') : renderGroupedActionCards(rentrer),
     'Déplier la ligne → cocher par boutique : 1) commandé · 2) en stock · 3) actif (Swappy)');
   // --- Alerte relevés prix : pastille orange sur l'onglet Relevés ---
@@ -15185,7 +15208,7 @@ function renderDashboard() {
     ? `<div style="margin-bottom:8px;"><button onclick="openBulkPrixEtiquetteDialog()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b60; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">🏷️ Étiquettes FT — ${_prixKitActions.length} kit${_prixKitActions.length > 1 ? 's' : ''} à modifier</button></div>`
     : '';
   const prixInner = prix.length === 0 ? emptyState('— ajoute un relevé concurrent dans l\'onglet Relevés prix') : (_bulkEtiqBtn + renderGroupedActionCards(prix));
-  const prixBlock    = block('prix', 'Prix à modifier', '#f59e0b', prix.length, prixInner,
+  const prixBlock    = block('prix', 'Prix à modifier', '#f59e0b', prixAffich.length, prixInner,
     'Déplier → cocher par boutique : prix en rayon · Swappy · (prix rouge si besoin). Auto-généré depuis les relevés concurrents.');
   // --- Opérations en cours ---
   // Rassemble toutes les OP non-terminées (à venir, imminentes, en cours).
@@ -16291,19 +16314,27 @@ function renderDashboard() {
       _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
     } else {
       // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
-      // Helper de comptage par type produit pour la ligne contextuelle des cards.
+      // Le filtre anti-doublon a déjà été appliqué en amont (sortirAffich/reprisesAffich/etc.).
+      // Comptage par PRODUITID DISTINCT au lieu d'actions : 1 gamme avec 5 parfums RENTRER = 1
+      // liquide, pas 5. Aligne le décompte avec ce que Fabien perçoit comme "1 gamme".
+      // Anti-fantôme bonus : actions résiduelles (annulées ou sur produit inexistant) écartées.
       const _countByProdType = (actionsArr) => {
-        let nbK = 0, nbP = 0, nbL = 0;
+        const _kit = new Set(), _pd = new Set(), _liq = new Set();
         (actionsArr || []).forEach(a => {
+          if (a.annulee) return;
           const t = a.produitType || 'kit'; // legacy : actions sans produitType = kit
-          if (t === 'kit') nbK++;
-          else if (t === 'pd') nbP++;
-          else if (t === 'liq') nbL++;
+          if (t === 'kit') {
+            if (baseKits.find(k => k.id === a.produitId)) _kit.add(a.produitId);
+          } else if (t === 'pd') {
+            if (basePD.find(p => p.id === a.produitId)) _pd.add(a.produitId);
+          } else if (t === 'liq') {
+            if (baseLiq.find(g => g.id === a.produitId)) _liq.add(a.produitId);
+          }
         });
         const parts = [];
-        if (nbK > 0) parts.push(nbK + ' kit' + (nbK > 1 ? 's' : ''));
-        if (nbP > 0) parts.push(nbP + ' PD');
-        if (nbL > 0) parts.push(nbL + ' liquide' + (nbL > 1 ? 's' : ''));
+        if (_kit.size > 0) parts.push(_kit.size + ' kit' + (_kit.size > 1 ? 's' : ''));
+        if (_pd.size > 0) parts.push(_pd.size + ' PD');
+        if (_liq.size > 0) parts.push(_liq.size + ' liquide' + (_liq.size > 1 ? 's' : ''));
         return parts.join(' · ');
       };
       // Indication temporelle pour la card "À installer" (aujourd'hui / demain).
@@ -16336,17 +16367,17 @@ function renderDashboard() {
         if (_opEnCoursSansCamp > 0) _ctxParts.push(_opEnCoursSansCamp + ' OP unitaire' + (_opEnCoursSansCamp > 1 ? 's' : ''));
         _cards.push(_renderDashSectionCard('opEnCours', 'OP en cours', '#a855f7', _opEnCoursAggCount, _dotsHtml, _ctxParts.join(' · ')));
       }
-      if (sortir && sortir.length > 0) _cards.push(_renderDashSectionCard('sortir', 'À sortir', '#ef4444', sortir.length, sortir, _countByProdType(sortir)));
-      if (reprises && reprises.length > 0) {
-        const _campsR = new Set(); reprises.forEach(a => { if (a.campagneReprise) _campsR.add(a.campagneReprise); });
+      if (sortirAffich.length > 0) _cards.push(_renderDashSectionCard('sortir', 'À sortir', '#ef4444', sortirAffich.length, sortirAffich, _countByProdType(sortirAffich)));
+      if (reprisesAffich.length > 0) {
+        const _campsR = new Set(); reprisesAffich.forEach(a => { if (a.campagneReprise) _campsR.add(a.campagneReprise); });
         const _ctxParts = [];
-        const _byType = _countByProdType(reprises);
+        const _byType = _countByProdType(reprisesAffich);
         if (_byType) _ctxParts.push(_byType);
         if (_campsR.size > 0) _ctxParts.push(_campsR.size + ' campagne' + (_campsR.size > 1 ? 's' : ''));
-        _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprises.length, reprises, _ctxParts.join(' · ')));
+        _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprisesAffich.length, reprisesAffich, _ctxParts.join(' · ')));
       }
-      if (rentrer && rentrer.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrer.length, rentrer, _countByProdType(rentrer)));
-      if (prix && prix.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prix.length, prix, _countByProdType(prix)));
+      if (rentrerAffich.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrerAffich.length, rentrerAffich, _countByProdType(rentrerAffich)));
+      if (prixAffich.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prixAffich.length, prixAffich, _countByProdType(prixAffich)));
       // « Besoins à combler » et « Historique » ne sont pas rendus en vue cards (décision Fabien
       // 2026-06-10) : trop secondaires pour le coup d'œil quotidien. Restent accessibles via le
       // mode "Tout déplier" si besoin.
@@ -16377,8 +16408,8 @@ function renderDashboard() {
   const summaryParts = [];
   if (opsInstallVisibles.length) summaryParts.push(chip('#f472b6', `${opsInstallVisibles.length} à installer`, 'install'));
   if (opsDesinstVisibles.length) summaryParts.push(chip('#f97316', `${opsDesinstVisibles.length} à désinstaller`, 'desinstall'));
-  if (sortir.length) summaryParts.push(chip('#ef4444', `${sortir.length} à sortir`, 'sortir'));
-  if (rentrer.length) summaryParts.push(chip('#22c55e', `${rentrer.length} à rentrer`, 'rentrer'));
+  if (sortirAffich.length) summaryParts.push(chip('#ef4444', `${sortirAffich.length} à sortir`, 'sortir'));
+  if (rentrerAffich.length) summaryParts.push(chip('#22c55e', `${rentrerAffich.length} à rentrer`, 'rentrer'));
   if (totalBesoins && fProdType !== 'liq') {
     // Si au moins une case pure vide (aucun sortant), on remonte l'urgence en rouge.
     const pureTrous = besoins.trous.filter(t => !(t.sortants && t.sortants.length)).length;
@@ -16386,7 +16417,7 @@ function renderDashboard() {
     summaryParts.push(chip(besoinColor, `${totalBesoins} besoin${totalBesoins>1?'s':''}${pureTrous ? ` (${pureTrous} vide${pureTrous>1?'s':''})` : ''}`, 'besoins'));
   }
   if (staleAlerts.length) summaryParts.push(chip('#ef4444', `${staleAlerts.length} relevé${staleAlerts.length>1?'s':''} à faire`, 'prix'));
-  if (prix.length) summaryParts.push(chip('#f59e0b', `${prix.length} prix à modifier`, 'prix'));
+  if (prixAffich.length) summaryParts.push(chip('#f59e0b', `${prixAffich.length} prix à modifier`, 'prix'));
   // "En cours" = dateDebut déjà passée ou aujourd'hui, pas des prévisions (IMMINENTE, A_VENIR).
   const opsEnCoursStricte = ops.filter(op => opTimeStatus(op) === 'EN_COURS');
   if (opsEnCoursStricte.length) summaryParts.push(chip('#a855f7', `${opsEnCoursStricte.length} OP en cours`, 'opEnCours'));
