@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 01:57</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:02</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -878,9 +878,9 @@ function _pvModal(html, buttons, onResult) {
       : `background:transparent; color:#94a3b8; border:1px solid #475569;`;
     return `<button data-idx="${i}" style="padding:8px 20px; font-size:12px; border-radius:5px; cursor:pointer; ${style} transition:filter 0.15s;" onmouseenter="this.style.filter='brightness(1.2)'" onmouseleave="this.style.filter=''">${b.label}</button>`;
   }).join('');
-  overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:24px; max-width:440px; width:90%; box-shadow:0 20px 60px rgba(0,0,0,0.5); animation:pvModalSlideIn 0.15s ease-out;">
-    <div style="color:#e2e8f0; font-size:13px; line-height:1.6; white-space:pre-line; margin-bottom:18px;">${html}</div>
-    <div style="display:flex; gap:8px; justify-content:flex-end;">${btnsHtml}</div>
+  overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:24px; max-width:520px; width:90%; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.5); animation:pvModalSlideIn 0.15s ease-out;">
+    <div style="color:#e2e8f0; font-size:13px; line-height:1.6; white-space:pre-line; margin-bottom:18px; overflow-y:auto; flex:1 1 auto; min-height:0;">${html}</div>
+    <div style="display:flex; gap:8px; justify-content:flex-end; flex-shrink:0;">${btnsHtml}</div>
   </div>`;
   function close(idx) { overlay.remove(); if (onResult) onResult(idx); }
   overlay.querySelectorAll('button[data-idx]').forEach(btn => {
@@ -8886,7 +8886,7 @@ async function cloturerCampagneReprise() {
   }).join('');
   const html = `<div style="color:#0ea5e9; font-weight:700; font-size:14px; margin-bottom:8px;">🏁 Clôturer une campagne de reprise</div>
     <div style="color:#94a3b8; font-size:11px; margin-bottom:10px;">Sélectionne la campagne à clôturer. <b>Tous les produits/parfums associés passeront en statut "Sorti"</b> et la campagne disparaîtra de la section "À reprendre".</div>
-    <div style="max-height:380px; overflow-y:auto;">${rows}</div>
+    <div>${rows}</div>
     <div style="margin-top:10px; font-size:10px; color:#fca5a5; font-style:italic;">Pense à avoir exporté le bilan Excel avant de clôturer si tu en as besoin pour le fournisseur.</div>`;
   return new Promise(resolve => {
     const overlay = _pvModal(html,
@@ -9186,7 +9186,6 @@ function gestionCampagnesReprise() {
     html += `<div style="color:#94a3b8; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; margin-bottom:4px; margin-top:14px;">Archivées (${archived.length})</div>`;
     html += archived.map(_renderRow).join('');
   }
-  html = `<div style="max-height:540px; overflow-y:auto; padding-right:4px;">${html}</div>`;
   _pvModal(html, [{ label: 'Fermer' }], () => {});
 }
 
@@ -9229,7 +9228,7 @@ function _pvGestionCampagneRepriseDetail(name) {
     }
     const _state = a.annulee ? 'Annulée' : (a.dateCloture ? 'Clôturée' : 'En cours');
     const _stateColor = a.annulee ? '#94a3b8' : (a.dateCloture ? '#22c55e' : '#0ea5e9');
-    // Timeline cochages compacte : pour chaque shop, X/N + date
+    // Timeline cochages ultra-compacte : pastille par shop avec ses initiales + score
     const defs = getActionSteps(a);
     const _timeline = SHOPS.map(sh => {
       const st = a.etats && a.etats[sh];
@@ -9239,15 +9238,13 @@ function _pvGestionCampagneRepriseDetail(name) {
       const _init = SHOP_LABELS[sh][0];
       const _qte = (typeof st.comptageQte === 'number') ? ` · ${st.comptageQte}réf` : '';
       const _dateF = st.dateFait ? ` · ${fmtFR(st.dateFait)}` : '';
-      return `<span title="${SHOP_LABELS[sh]} : ${nbDone}/${defs.length}${_qte}${_dateF}" style="font-size:9px; padding:1px 5px; background:${_scol}22; color:${_scol}; border:1px solid ${_scol}60; border-radius:3px; font-weight:600;">${_init} ${nbDone}/${defs.length}${_qte}</span>`;
-    }).join(' ');
-    const _btnRetirer = (!a.annulee && !a.dateCloture) ? `<button onclick="_pvRetirerProduitCampagneReprise('${a.id}', this)" title="Retirer ce produit de la campagne (annule juste son action, garde les autres)" style="padding:2px 8px; font-size:10px; background:none; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; cursor:pointer;">× Retirer</button>` : '';
-    return `<div style="display:flex; align-items:center; gap:8px; padding:6px 8px; margin:2px 0; background:#1e293b; border:1px solid #33415560; border-radius:4px;">
-      <div style="flex:1; min-width:0;">
-        <div style="font-size:11px; color:#e2e8f0; font-weight:600;">${_camp_txtEsc(label)}</div>
-        <div style="display:flex; gap:4px; margin-top:3px; flex-wrap:wrap;">${_timeline}</div>
-      </div>
-      <span style="font-size:9px; padding:1px 6px; background:${_stateColor}22; color:${_stateColor}; border:1px solid ${_stateColor}60; border-radius:3px; font-weight:700; white-space:nowrap;">${_state}</span>
+      return `<span title="${SHOP_LABELS[sh]} : ${nbDone}/${defs.length}${_qte}${_dateF}" style="font-size:9px; padding:1px 4px; background:${_scol}22; color:${_scol}; border:1px solid ${_scol}60; border-radius:2px; font-weight:700; white-space:nowrap;">${_init}${nbDone}/${defs.length}</span>`;
+    }).join('');
+    const _btnRetirer = (!a.annulee && !a.dateCloture) ? `<button onclick="_pvRetirerProduitCampagneReprise('${a.id}', this)" title="Retirer ce produit de la campagne" style="padding:1px 6px; font-size:9px; background:none; border:1px solid #ef444460; color:#fca5a5; border-radius:2px; cursor:pointer; white-space:nowrap;">×</button>` : '';
+    return `<div style="display:flex; align-items:center; gap:4px; padding:3px 6px; margin:1px 0; background:#1e293b; border:1px solid #33415540; border-radius:3px; font-size:11px;">
+      <span style="flex:1; min-width:0; color:#e2e8f0; font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_camp_attrEsc(label)}">${_camp_txtEsc(label)}</span>
+      <span style="display:inline-flex; gap:2px; flex-shrink:0;">${_timeline}</span>
+      <span style="font-size:9px; padding:1px 5px; background:${_stateColor}22; color:${_stateColor}; border:1px solid ${_stateColor}60; border-radius:2px; font-weight:700; white-space:nowrap;">${_state}</span>
       ${_btnRetirer}
     </div>`;
   }).join('');
@@ -9290,7 +9287,7 @@ function _pvGestionCampagneRepriseDetail(name) {
     </div>
 
     <div style="font-size:10px; color:#94a3b8; font-weight:700; text-transform:uppercase; margin-bottom:4px;">Produits dans la campagne (${entry.actions.length})</div>
-    <div style="max-height:300px; overflow-y:auto; padding-right:4px;">${_productsHtml || '<div style="color:#64748b; font-size:11px; font-style:italic; padding:8px;">Aucun produit.</div>'}</div>`;
+    <div>${_productsHtml || '<div style="color:#64748b; font-size:11px; font-style:italic; padding:8px;">Aucun produit.</div>'}</div>`;
   _pvModal(html, [{ label: '← Retour à la liste', color: '#475569' }, { label: 'Fermer' }], idx => {
     if (idx === 0) { setTimeout(() => gestionCampagnesReprise(), 50); }
   });
