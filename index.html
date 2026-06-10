@@ -121,7 +121,8 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 22:50</span>
+    <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 23:01</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -827,7 +828,9 @@ function applyRoleUI() {
   headerBtns.forEach(btn => {
     const txt = (btn.textContent || '').trim();
     const onclick = btn.getAttribute('onclick') || '';
-    if (onclick.includes('saveData') || onclick.includes('exportData') || onclick.includes('importFile') || onclick.includes('openSettings') || onclick.includes('forcerVersionAdminPartout')) {
+    // Chantier B (2026-06-10) : "Exporter" retiré de la liste des boutons masqués —
+    // les boutiques peuvent désormais faire leur propre copie de secours.
+    if (onclick.includes('saveData') || onclick.includes('importFile') || onclick.includes('openSettings') || onclick.includes('forcerVersionAdminPartout')) {
       btn.style.display = isAdmin() ? '' : 'none';
     }
   });
@@ -8050,9 +8053,14 @@ function saveData() {
     console.error('[SAVE] Échec localStorage (quota dépassé ?):', e.message);
     pvAlert('⚠️ Impossible de sauvegarder localement — stockage plein.\nExportez vos données immédiatement via le bouton Export.');
   }
-  const msg = document.getElementById('saveMsg');
-  msg.style.display = 'block';
-  setTimeout(() => msg.style.display = 'none', 2000);
+  // Message honnête (chantier B) : à ce stade c'est enregistré ICI, pas encore au serveur.
+  // Le "✓ Synchronisé" vert ne s'affiche qu'après confirmation du serveur (_saveToSupabase).
+  if (_syncOk === false || _syncFailStreak >= 2) {
+    _showSaveMsg('💾 Enregistré ici · hors ligne, partira tout seul', '#78350f', '#fcd34d', 3000);
+  } else {
+    _showSaveMsg('💾 Enregistré ici · envoi…', '#334155', '#e2e8f0', 2000);
+  }
+  if (typeof _updateSyncIndicator === 'function') _updateSyncIndicator();
   // Sauvegarde Supabase avec debounce (1s)
   _savePending = true;
   _lastPayload = payload; // garder le dernier payload pour flush avant fermeture
@@ -8087,6 +8095,73 @@ window.addEventListener('visibilitychange', function() {
 });
 // Aussi flusher quand la page perd le focus (extra sécurité pour mobiles)
 window.addEventListener('pagehide', _flushPendingSave);
+
+// ═══════════════════════════════════════════════════════════════
+// INDICATEUR DE SYNCHRO (chantier B — 2026-06-10)
+// Le point dans le header dit la vérité : vert = bien envoyé au serveur,
+// orange = envoi en cours/en attente, rouge = hors ligne ou échecs répétés.
+// Avant, "Sauvegardé !" s'affichait même quand rien ne partait au serveur.
+// ═══════════════════════════════════════════════════════════════
+let _syncFailStreak = 0;        // échecs d'envoi consécutifs (remis à 0 au premier succès)
+let _lastSyncWriteOk = null;    // dernière écriture serveur réussie
+let _lastSyncReadOk = null;     // dernière lecture serveur réussie
+
+function _updateSyncIndicator() {
+  const dot = document.getElementById('syncDot');
+  if (!dot) return;
+  let etat, couleur, fond;
+  if (_syncOk === false || _syncFailStreak >= 2) {
+    etat = '● Hors ligne'; couleur = '#fca5a5'; fond = '#7f1d1d40';
+  } else if (_savePending || _saveTimer || _saveInFlight) {
+    etat = '● Envoi…'; couleur = '#fcd34d'; fond = '#78350f40';
+  } else if (_syncOk === null) {
+    etat = '● …'; couleur = '#94a3b8'; fond = 'transparent';
+  } else {
+    etat = '● Synchro'; couleur = '#4ade80'; fond = '#14532d30';
+  }
+  if (dot.textContent !== etat) dot.textContent = etat;
+  dot.style.color = couleur;
+  dot.style.background = fond;
+  dot.style.borderColor = couleur + '50';
+}
+setInterval(_updateSyncIndicator, 2000);
+
+function _fmtHeure(d) {
+  if (!d) return 'jamais depuis l\'ouverture de la page';
+  const dt = (d instanceof Date) ? d : new Date(d);
+  return dt.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+function expliquerSyncDot() {
+  let titre, explication;
+  if (_syncOk === false || _syncFailStreak >= 2) {
+    titre = '🔴 Hors ligne';
+    explication = 'Le serveur est injoignable pour le moment.\n\nTout ce que tu fais est enregistré sur CET appareil et partira automatiquement dès que la connexion reviendra — tu n\'as rien à faire. Les autres postes ne voient pas encore tes dernières modifications.';
+  } else if (_savePending || _saveTimer || _saveInFlight) {
+    titre = '🟠 Envoi en cours';
+    explication = 'Tes dernières modifications sont enregistrées sur cet appareil et sont en train de partir vers le serveur. Dans quelques secondes, le point repassera au vert.';
+  } else if (_syncOk === null) {
+    titre = '⚪ Démarrage';
+    explication = 'La première connexion au serveur n\'a pas encore eu lieu.';
+  } else {
+    titre = '🟢 Synchronisé';
+    explication = 'Tout est à jour : tes modifications sont sur le serveur et visibles des autres postes.';
+  }
+  pvAlert(titre + '\n\n' + explication
+    + '\n\n— Dernier envoi réussi : ' + _fmtHeure(_lastSyncWriteOk)
+    + '\n— Dernière réception : ' + _fmtHeure(_lastSyncReadOk));
+}
+
+// Petit message sous le header (remplace le "Sauvegardé !" trompeur — chantier B)
+function _showSaveMsg(texte, fond, couleur, dureeMs) {
+  const msg = document.getElementById('saveMsg');
+  if (!msg) return;
+  msg.textContent = texte;
+  msg.style.background = fond;
+  msg.style.color = couleur;
+  msg.style.display = 'block';
+  if (msg._timer) clearTimeout(msg._timer);
+  msg._timer = setTimeout(() => { msg.style.display = 'none'; }, dureeMs || 2000);
+}
 
 // ── Fusion des coches (merge-on-save) ──
 // Principe : une coche cochée (true) gagne toujours sur false.
@@ -8647,11 +8722,25 @@ async function _saveToSupabase(payload, _retryCount) {
     // Écrire les données fusionnées
     await _syncWrite(payload);
     _syncOk = true; _savePending = false;
+    // Indicateur honnête (chantier B) : LÀ c'est vraiment parti au serveur.
+    const _etaitEnPanne = _syncFailStreak >= 2;
+    _syncFailStreak = 0;
+    _lastSyncWriteOk = new Date();
+    _showSaveMsg(_etaitEnPanne ? '✓ Connexion retrouvée — tout est synchronisé' : '✓ Synchronisé', '#22c55e', '#0f172a', _etaitEnPanne ? 4000 : 1500);
+    _updateSyncIndicator();
     console.log('[SYNC] Sauvegardé (avec merge)');
   } catch(e) {
     console.warn('[SYNC] Erreur:', e.message);
     if (retryCount < 1) {
       setTimeout(() => _saveToSupabase(payload, retryCount + 1), 5000);
+    } else {
+      // Échec définitif de cette tentative (chantier B) : on le dit, une fois, sans spammer.
+      // Le poll relancera l'envoi automatiquement (cf. _doSyncPoll), rien n'est perdu.
+      _syncFailStreak++;
+      if (_syncFailStreak === 2) {
+        _showSaveMsg('⚠️ Pas encore envoyé au serveur — nouvel essai automatique', '#7f1d1d', '#fecaca', 5000);
+      }
+      _updateSyncIndicator();
     }
   } finally {
     // Libérer le verrou dans tous les cas (succès, erreur, retry)
@@ -8675,6 +8764,9 @@ async function _doSyncPoll() {
     try {
       await _syncRead();
       _syncOk = true;
+      _syncFailStreak = 0;
+      _lastSyncReadOk = new Date();
+      _updateSyncIndicator();
       console.log('[SYNC] Connexion serveur retrouvée — synchronisation réactivée');
       // Une sauvegarde était restée en attente pendant la coupure ? On l'envoie maintenant
       // (passe par le chemin normal avec fusion, donc sans écraser le travail des autres).
@@ -8695,6 +8787,7 @@ async function _doSyncPoll() {
   }
   try {
     const remoteResult = await _syncRead();
+    _lastSyncReadOk = new Date(); // pour le détail de l'indicateur de synchro (chantier B)
     if (!remoteResult || !remoteResult.data) return;
       // Ne traiter que si le timestamp distant est plus récent que notre dernier sync
       const remoteTs = remoteResult.updated_at;
@@ -8923,7 +9016,9 @@ setTimeout(_checkForUpdate, 30000); // premier check à 30s
 // Export complet : on inclut AUSSI actions + nextActionId pour préserver l'historique et
 // l'état d'avancement terrain (sinon un import écraserait tout ce travail).
 function exportData() {
-  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  // Chantier B (2026-06-10) : export ouvert aux boutiques aussi. C'est une copie de
+  // secours en lecture seule — aucune raison de la réserver à l'admin. Le chargement
+  // (import), lui, reste admin-only car il écrase des données.
   const bom = '\ufeff';
   const payload = { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX), exportedAt: new Date().toISOString() };
   const json = JSON.stringify(payload, null, 2);
