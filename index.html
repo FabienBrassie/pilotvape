@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:39</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 02:41</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -14678,10 +14678,14 @@ function renderDashboard() {
   // - label : titre court (ex : "À sortir")
   // - color : couleur principale (#hex)
   // - count : nombre affiché en gros à droite
-  // - actionsForDots : tableau d'actions pour calculer les dots P/M/L (peut être [])
+  // - dotsHtmlOrActions : soit un Array d'actions (les dots seront calculés via _renderDashCardDots),
+  //                       soit une string HTML déjà rendue (cas des sections OP qui réutilisent
+  //                       renderAveragedShopDots(opsList, fShop) qui retourne du HTML).
   // - contextLine : phrase courte d'info contextuelle (peut être vide)
-  function _renderDashSectionCard(key, label, color, count, actionsForDots, contextLine) {
-    const _dots = _renderDashCardDots(actionsForDots);
+  function _renderDashSectionCard(key, label, color, count, dotsHtmlOrActions, contextLine) {
+    const _dots = (typeof dotsHtmlOrActions === 'string')
+      ? dotsHtmlOrActions
+      : _renderDashCardDots(dotsHtmlOrActions);
     const _ctxHtml = contextLine ? `<div style="font-size:10px; color:#94a3b8; margin-top:6px; line-height:1.3;">${contextLine}</div>` : '';
     return `<div onclick="openDashSectionDetail('${key}')"
       style="background:#1e293b; border:1px solid ${color}40; border-left:3px solid ${color}; border-radius:6px; padding:10px 12px; cursor:pointer; transition:background 0.1s, border-color 0.1s;"
