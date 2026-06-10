@@ -119,10 +119,10 @@
     <button onclick="document.getElementById('importFile').click()">📂 Charger</button>
     <input type="file" id="importFile" style="display:none;" accept=".json">
     <button onclick="exportData()">📤 Exporter</button>
-    <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
+    <button onclick="forcerVersionAdminPartout()" style="border:1px solid #ef444470; color:#fca5a5;" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 23:13</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 23:22</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -7986,7 +7986,14 @@ async function forcerVersionAdminPartout() {
   const _liq = (typeof baseLiq !== 'undefined' && Array.isArray(baseLiq)) ? baseLiq.length : 0;
   const _pd = (typeof basePD !== 'undefined' && Array.isArray(basePD)) ? basePD.length : 0;
   const _camp = (typeof campagnes !== 'undefined' && Array.isArray(campagnes)) ? campagnes.length : 0;
-  const ok = await pvConfirm('Forcer ta version actuelle sur toutes les boutiques ?\n\n• ' + ops.length + ' OPs, ' + actions.length + ' actions\n• ' + _kits + ' kits, ' + _liq + ' liquides, ' + _pd + ' pièces détachées\n• ' + _camp + ' campagnes\n\nseront marquées avec ton timestamp. Les boutiques adopteront ta version en moins de 60s, sans rien faire. Leurs cochages d\'étapes seront préservés.');
+  // Garde renforcée (chantier C — 2026-06-10) : cette action écrase tout avec la version
+  // de CET appareil. Si cet appareil n'est pas à jour, elle propage du périmé partout.
+  const _recep = (typeof _lastSyncReadOk !== 'undefined' && _lastSyncReadOk) ? _fmtHeure(_lastSyncReadOk) : 'JAMAIS depuis l\'ouverture de la page';
+  const _enLigne = (typeof _syncOk !== 'undefined') && _syncOk === true && (typeof _syncFailStreak === 'undefined' || _syncFailStreak < 2);
+  const _avertissement = _enLigne
+    ? 'Dernière réception serveur sur cet appareil : ' + _recep + '.'
+    : '🔴 ATTENTION : cet appareil semble HORS LIGNE (dernière réception : ' + _recep + ').\nSa version est peut-être périmée — forcer maintenant écraserait du travail récent des boutiques.\nSauf cas de force majeure, annule et attends que le point de synchro repasse au vert.';
+  const ok = await pvConfirm('Tu vas imposer la version de CET appareil à toutes les boutiques.\n\n' + _avertissement + '\n\n• ' + ops.length + ' OPs, ' + actions.length + ' actions\n• ' + _kits + ' kits, ' + _liq + ' liquides, ' + _pd + ' pièces détachées\n• ' + _camp + ' campagnes\n\nseront marquées avec ton timestamp. Les boutiques adopteront ta version en moins de 60s, sans rien faire. Leurs cochages d\'étapes seront préservés.\n\n(En cas d\'erreur : Paramètres ⚙️ → 🕘 Historique serveur pour revenir en arrière.)', { title: '🔒 Forcer ma version — action lourde', okColor: '#ef4444', ok: 'Forcer ma version' });
   if (!ok) return;
   const _now = new Date().toISOString();
   let total = 0;
@@ -8150,6 +8157,67 @@ function expliquerSyncDot() {
   pvAlert(titre + '\n\n' + explication
     + '\n\n— Dernier envoi réussi : ' + _fmtHeure(_lastSyncWriteOk)
     + '\n— Dernière réception : ' + _fmtHeure(_lastSyncReadOk));
+}
+
+// ═══════════════════════════════════════════════════════════════
+// HISTORIQUE SERVEUR (chantier C — 2026-06-10)
+// Le serveur photographie les données avant écrasement (au plus 1 photo / 30 min,
+// 20 conservées). Cette fenêtre permet de voir les photos et d'en restaurer une :
+// c'est l'assurance-vie contre les écrasements (bug, fausse manip, "Forcer ma
+// version" depuis un poste périmé). Nécessite le Worker version chantier C.
+// ═══════════════════════════════════════════════════════════════
+async function ouvrirHistoriqueServeur() {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  let liste;
+  try {
+    const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/backups', { method: 'GET', headers: _syncHeaders() });
+    if (res.status === 404) {
+      pvAlert('L\'historique n\'est pas encore disponible : la nouvelle version du serveur n\'a pas encore été déployée.\n\nVoir le guide DEPLOIEMENT_WORKER.md dans le dossier du projet.');
+      return;
+    }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    liste = (await res.json()).backups || [];
+  } catch (e) {
+    pvAlert('Impossible de joindre le serveur : ' + e.message);
+    return;
+  }
+  if (liste.length === 0) {
+    pvAlert('Aucune photo de sécurité pour le moment.\n\nLe serveur en prendra une automatiquement à la prochaine sauvegarde (au plus une toutes les 30 minutes).');
+    return;
+  }
+  const lignes = liste.map(b => {
+    const estPreRestau = b.id.indexOf('_avant-restauration') !== -1;
+    const d = new Date(b.id.replace('_avant-restauration', ''));
+    const label = isNaN(d) ? b.id : d.toLocaleString('fr-FR', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const tag = estPreRestau ? ' <span style="color:#f59e0b; font-size:10px;">(état juste avant une restauration)</span>' : '';
+    return `<div style="display:flex; align-items:center; gap:10px; padding:7px 4px; border-bottom:1px solid #1e293b;">
+      <span style="flex:1; color:#e2e8f0; font-size:12px;">📸 ${label}${tag}</span>
+      <button onclick="restaurerVersionServeur('${b.id}')" style="padding:4px 12px; font-size:11px; background:#7f1d1d30; color:#fca5a5; border:1px solid #ef444460; border-radius:4px; cursor:pointer;">Restaurer</button>
+    </div>`;
+  }).join('');
+  _pvModal(`<div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:6px;">🕘 Historique serveur — ${liste.length} photo(s) de sécurité</div>
+    <div style="color:#94a3b8; font-size:11px; margin-bottom:12px;">Le serveur photographie les données avant de les remplacer (au plus 1 photo / 30 min, 20 conservées, effacées après 30 jours). Restaurer une photo remet les données de TOUS les postes dans cet état — l'état actuel est photographié avant, donc c'est réversible.</div>
+    ${lignes}`, [{ label: 'Fermer' }]);
+}
+
+async function restaurerVersionServeur(id) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const d = new Date(id.replace('_avant-restauration', ''));
+  const label = isNaN(d) ? id : d.toLocaleString('fr-FR');
+  const ok = await pvConfirm('Remettre les données dans l\'état du ' + label + ' ?\n\nTout ce qui a été fait APRÈS ce moment (coches, OPs, modifications) disparaîtra des données courantes. Une photo de l\'état actuel est prise juste avant, donc tu pourras revenir en arrière si besoin.\n\nAprès la restauration, la page se recharge avec les données restaurées. ENSUITE, clique sur "🔒 Forcer ma version" pour que toutes les boutiques adoptent cette version.', { title: '⚠️ Restauration serveur', ok: 'Restaurer', okColor: '#ef4444' });
+  if (!ok) return;
+  try {
+    const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/restore', {
+      method: 'POST', headers: _syncHeaders(), body: JSON.stringify({ id: id })
+    }, 20000);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    // Cet appareil doit repartir de la version restaurée, pas re-fusionner son ancien état local
+    localStorage.removeItem('pilotVapeData');
+    await pvAlert('✓ Version restaurée sur le serveur.\n\nLa page va se recharger avec ces données.\n\nÉTAPE SUIVANTE : clique sur "🔒 Forcer ma version" pour que les boutiques l\'adoptent en moins d\'une minute.');
+    location.reload();
+  } catch (e) {
+    pvAlert('Échec de la restauration : ' + e.message);
+  }
 }
 
 // Petit message sous le header (remplace le "Sauvegardé !" trompeur — chantier B)
@@ -8632,9 +8700,14 @@ async function _syncRead() {
 }
 
 // ── Écrire les données vers le Worker Cloudflare ──
-async function _syncWrite(payload) {
+// baseUpdatedAt (chantier C) : le tampon qu'on avait LU avant de fusionner. Le serveur
+// compare : si quelqu'un a écrit entre notre lecture et notre écriture, il répond 409
+// et on refusionne au lieu d'écraser son travail en silence. Ancien serveur : ignore le header.
+async function _syncWrite(payload, baseUpdatedAt) {
+  const headers = _syncHeaders();
+  if (baseUpdatedAt) headers['X-Base-Updated-At'] = baseUpdatedAt;
   const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', {
-    method: 'PUT', headers: _syncHeaders(),
+    method: 'PUT', headers: headers,
     body: JSON.stringify({ data: payload })
   }, 20000);
   if (!res.ok) throw new Error('Sync write ' + res.status);
@@ -8683,6 +8756,7 @@ async function _saveToSupabase(payload, _retryCount) {
     }
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
     const remoteResult = await _syncRead();
+    const _baseUpdatedAt = remoteResult ? remoteResult.updated_at : null; // pour la détection de conflit (chantier C)
     if (remoteResult && remoteResult.data) {
       const remote = remoteResult.data;
       // 0. Intégrer les tombstones distants avant fusion
@@ -8721,7 +8795,7 @@ async function _saveToSupabase(payload, _retryCount) {
       if (typeof remote.nextCampagneId === 'number') payload.nextCampagneId = Math.max(payload.nextCampagneId || 0, remote.nextCampagneId);
     }
     // Écrire les données fusionnées
-    await _syncWrite(payload);
+    await _syncWrite(payload, _baseUpdatedAt);
     _syncOk = true; _savePending = false;
     // Indicateur honnête (chantier B, allégé 23:14) : le point vert du header suffit dans le
     // cas normal — aucun message. On ne signale que le retour après une panne.
@@ -8733,7 +8807,16 @@ async function _saveToSupabase(payload, _retryCount) {
     console.log('[SYNC] Sauvegardé (avec merge)');
   } catch(e) {
     console.warn('[SYNC] Erreur:', e.message);
-    if (retryCount < 1) {
+    if (/409/.test(String(e && e.message))) {
+      // Conflit détecté par le serveur (chantier C) : un autre poste a écrit pendant
+      // notre fusion. Pas une panne → on recommence aussitôt (relire → refusionner →
+      // réécrire), sans compter d'échec. Délai aléatoire court pour désynchroniser les postes.
+      if (retryCount < 3) {
+        setTimeout(() => _saveToSupabase(payload, retryCount + 1), 400 + Math.floor(Math.random() * 800));
+      } else {
+        console.warn('[SYNC] Conflits répétés — cette tentative s\'arrête, le poll reprendra l\'envoi.');
+      }
+    } else if (retryCount < 1) {
       setTimeout(() => _saveToSupabase(payload, retryCount + 1), 5000);
     } else {
       // Échec définitif de cette tentative (chantier B) : on le dit, une fois, sans spammer.
@@ -24195,6 +24278,12 @@ function closeSettings() {
 function renderSettingsBaremes() {
   const container = document.getElementById('settingsContent');
   let html = '';
+
+  // === HISTORIQUE SERVEUR (chantier C — 2026-06-10) ===
+  html += `<div style="display:flex; align-items:center; gap:10px; margin-bottom:18px; padding:10px 12px; background:#1e293b60; border:1px solid #33415580; border-radius:6px;">
+    <button onclick="ouvrirHistoriqueServeur()" style="padding:6px 14px; font-size:12px; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:4px; cursor:pointer; font-weight:700; white-space:nowrap;">🕘 Historique serveur</button>
+    <span style="color:#64748b; font-size:11px;">Photos de sécurité automatiques des données (1 / 30 min max, 20 conservées). Pour revenir en arrière après une fausse manip ou un écrasement.</span>
+  </div>`;
 
   // === BARÈME LIQUIDES ===
   html += `<h3>🧪 Barème Liquides</h3>`;
