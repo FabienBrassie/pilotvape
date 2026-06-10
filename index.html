@@ -121,7 +121,7 @@
     <button onclick="exportData()">📤 Exporter</button>
     <button onclick="forcerVersionAdminPartout()" title="Forcer ta version actuelle (dates, OPs, actions) sur toutes les boutiques sans qu'elles aient à rafraîchir manuellement">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
-    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 03:21</span>
+    <span id="appVersionTag" style="margin-left:auto; font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-10 22:50</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -448,6 +448,44 @@
 
   </script>
   <script>
+// ═══════════════════════════════════════════════════════════════
+// FILET GLOBAL D'ERREURS (chantier A — 2026-06-10)
+// Attrape toute erreur imprévue et affiche un bandeau clair au lieu
+// d'un écran mort / onglet blanc. Volontairement autonome : ne dépend
+// d'aucune fonction de l'app (qui peut être cassée au moment où ça tourne).
+// ═══════════════════════════════════════════════════════════════
+let _pvErrCount = 0;
+function _pvShowErrorBanner(titre, detail) {
+  try {
+    _pvErrCount++;
+    if (_pvErrCount > 3) return; // pas de pluie de bandeaux si l'erreur boucle
+    let b = document.getElementById('pvErrorBanner');
+    if (!b) {
+      b = document.createElement('div');
+      b.id = 'pvErrorBanner';
+      b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:100000;background:#7f1d1d;color:#fecaca;padding:10px 16px;font-size:13px;font-family:inherit;display:flex;align-items:center;gap:12px;box-shadow:0 2px 8px rgba(0,0,0,0.5);';
+      (document.body || document.documentElement).appendChild(b);
+    }
+    b.innerHTML = '<span style="font-size:16px;">⚠️</span>'
+      + '<span style="flex:1;"><b>' + titre + '</b> — tes données sont en sécurité (sauvegardées localement). '
+      + 'Recharge la page. Si ça se reproduit, préviens Fabien / Claude.'
+      + '<span style="opacity:0.6;font-size:10px;display:block;margin-top:2px;font-family:monospace;">' + String(detail).slice(0, 200) + '</span></span>'
+      + '<button onclick="location.reload()" style="background:#fecaca;color:#7f1d1d;border:none;border-radius:4px;padding:6px 14px;font-weight:bold;cursor:pointer;">Recharger</button>'
+      + '<button onclick="this.parentNode.remove()" style="background:transparent;color:#fecaca;border:1px solid #fecaca66;border-radius:4px;padding:6px 10px;cursor:pointer;">✕</button>';
+  } catch (e) { /* le filet ne doit jamais lui-même planter */ }
+}
+window.addEventListener('error', function(ev) {
+  // Ignore les erreurs de chargement de ressources (images, etc.) : pas du JS
+  if (!ev || !ev.message) return;
+  console.error('[FILET] Erreur non rattrapée :', ev.message, ev.filename, ev.lineno);
+  _pvShowErrorBanner('Une erreur imprévue est survenue', ev.message + ' (ligne ' + ev.lineno + ')');
+});
+window.addEventListener('unhandledrejection', function(ev) {
+  const msg = (ev && ev.reason && (ev.reason.message || ev.reason)) || 'raison inconnue';
+  console.error('[FILET] Promesse rejetée non rattrapée :', msg);
+  _pvShowErrorBanner('Une opération a échoué de façon imprévue', msg);
+});
+
 // ═══════════════════════════════════════════════════════════════
 // SYSTÈME DE LOGIN — Admin / Boutique
 // ═══════════════════════════════════════════════════════════════
@@ -7026,7 +7064,7 @@ async function loadData() {
       if (_deletedIds.has(o.id)) return; // déjà tombstonée
       const prodId = o.produitIds && o.produitIds[0];
       if (!prodId) { _deletedIds.add(o.id); return; } // pas de produit → poubelle
-      const prod = baseKits.find(k => k.id === prodId) || baseLiq.find(l => l.id === prodId) || basePd.find(p => p.id === prodId);
+      const prod = baseKits.find(k => k.id === prodId) || baseLiq.find(l => l.id === prodId) || basePD.find(p => p.id === prodId);
       if (!prod) { _deletedIds.add(o.id); return; } // produit disparu → poubelle
       if (prod.oneShotOpId && prod.oneShotOpId !== o.id) {
         // Le produit a une OP plus récente → cette ancienne est orpheline
@@ -7234,7 +7272,7 @@ async function loadData() {
       if (op.type !== 'COUP' || (op.produitIds && op.produitIds.length > 0)) return;
       const src = baseKits.find(k => k.oneShotOpId === op.id)
                || baseLiq.find(l => l.oneShotOpId === op.id)
-               || basePd.find(p => p.oneShotOpId === op.id);
+               || basePD.find(p => p.oneShotOpId === op.id);
       if (src) {
         op.produitIds = [src.id];
         console.log('[AUTO-HEAL] Restauré produitIds=[' + src.id + '] sur COUP ' + op.id);
@@ -8026,18 +8064,19 @@ function saveData() {
 // Empêche la perte de données si la page est fermée pendant le debounce 1s.
 var _lastPayload = null;
 function _flushPendingSave() {
+  // Réécrit (chantier A — 2026-06-10). L'ancienne version envoyait tout l'état au serveur
+  // en mode "dernière chance" (keepalive) : (1) les navigateurs refusent ce mode au-delà de
+  // 64 Ko — notre paquet en fait des centaines, donc l'envoi échouait quasi toujours en
+  // silence ; (2) elle marquait quand même la sauvegarde comme faite (_savePending=false à
+  // tort) ; (3) si l'envoi était passé, il aurait écrasé le serveur SANS fusion (coches des
+  // autres boutiques perdues). Nouvelle logique : déclencher immédiatement la sauvegarde
+  // NORMALE (avec fusion). Si la page se ferme vraiment avant la fin de l'envoi, les données
+  // restent en localStorage et repartiront à la prochaine ouverture — aucune perte.
   if (!_savePending || !_lastPayload || _syncOk === false) return;
   if (_saveTimer) { clearTimeout(_saveTimer); _saveTimer = null; }
-  // Utilise fetch keepalive (fonctionne en beforeunload, contrairement à async)
   try {
-    fetch(SYNC_WORKER_URL + '/data', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': SYNC_API_KEY },
-      body: JSON.stringify({ data: _lastPayload }),
-      keepalive: true  // crucial : permet au navigateur d'envoyer même après fermeture
-    }).catch(function() {}); // fire-and-forget
-    _savePending = false;
-    console.log('[FLUSH] Save envoyé avant fermeture (keepalive)');
+    _saveToSupabase(_lastPayload); // async ; ne pose _savePending=false QUE si l'envoi réussit
+    console.log('[FLUSH] Sauvegarde immédiate déclenchée (fermeture / arrière-plan)');
   } catch(e) {
     console.warn('[FLUSH] Échec:', e.message);
   }
@@ -8501,18 +8540,27 @@ function _syncHeaders() {
 }
 
 // ── Lire les données depuis le Worker Cloudflare ──
+// ── Délai limite réseau (chantier A — 2026-06-10) : sans ça, un serveur qui "pend"
+// bloque l'app plusieurs minutes au démarrage, sans message. 15 s max par appel.
+function _fetchAvecTimeout(url, options, timeoutMs) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs || 15000);
+  return fetch(url, Object.assign({}, options, { signal: ctrl.signal }))
+    .finally(() => clearTimeout(t));
+}
+
 async function _syncRead() {
-  const res = await fetch(SYNC_WORKER_URL + '/data', { method: 'GET', headers: _syncHeaders() });
+  const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', { method: 'GET', headers: _syncHeaders() });
   if (!res.ok) throw new Error('Sync read ' + res.status);
   return await res.json(); // { data, updated_at }
 }
 
 // ── Écrire les données vers le Worker Cloudflare ──
 async function _syncWrite(payload) {
-  const res = await fetch(SYNC_WORKER_URL + '/data', {
+  const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', {
     method: 'PUT', headers: _syncHeaders(),
     body: JSON.stringify({ data: payload })
-  });
+  }, 20000);
   if (!res.ok) throw new Error('Sync write ' + res.status);
   return await res.json(); // { success, updated_at }
 }
@@ -8620,7 +8668,31 @@ let _syncInterval = null;
 // minuteries en arrière-plan en veille profonde, donc le setInterval seul ne
 // suffit pas à garantir un sync au retour sur l'onglet.
 async function _doSyncPoll() {
-  if (_syncOk === false || _savePending) return;
+  // Retest de connexion (chantier A — 2026-06-10) : avant, un échec réseau au chargement
+  // mettait l'app en "mode local" pour toute la journée, sans jamais retester. Désormais,
+  // chaque poll retente la connexion ; dès qu'elle revient, la synchro repart toute seule.
+  if (_syncOk === false) {
+    try {
+      await _syncRead();
+      _syncOk = true;
+      console.log('[SYNC] Connexion serveur retrouvée — synchronisation réactivée');
+      // Une sauvegarde était restée en attente pendant la coupure ? On l'envoie maintenant
+      // (passe par le chemin normal avec fusion, donc sans écraser le travail des autres).
+      if (_savePending && _lastPayload) {
+        try { await _saveToSupabase(_lastPayload); } catch (e) { /* retentée au prochain poll via _savePending */ }
+        return;
+      }
+    } catch (e) { return; } // toujours hors ligne — on retentera au prochain poll
+  }
+  if (_savePending) {
+    // Une sauvegarde est en attente. Si elle est coincée (échec passé, plus aucun envoi
+    // programmé ni en vol), on la relance au lieu de bloquer la réception indéfiniment
+    // (chantier A — avant, un échec d'envoi gelait la réception jusqu'à la prochaine modif).
+    if (_lastPayload && !_saveTimer && !_saveInFlight) {
+      try { await _saveToSupabase(_lastPayload); } catch (e) { /* réessaiera au prochain poll */ }
+    }
+    return;
+  }
   try {
     const remoteResult = await _syncRead();
     if (!remoteResult || !remoteResult.data) return;
@@ -13571,7 +13643,7 @@ function renderDashboard() {
     if (fPrio && effectivePrio(a) !== fPrio) return false;
     if (fShop) {
       // Ne pas afficher si le shop filtré a déjà fait cette action (et qu'on n'affiche pas les clôturées)
-      if (a.etats[fShop].done && !showDone) return false;
+      if (a.etats[fShop] && a.etats[fShop].done && !showDone) return false; // garde : etats[shop] peut manquer sur une vieille donnée
     }
     // One-shot / COUP : masquer la ligne SORTIR tant que la RENTRER du même coup
     // n'est pas FAIT. Objectif : vue dashboard séquentielle (1 ligne active à la fois)
@@ -13976,7 +14048,16 @@ function renderDashboard() {
     return `<span style="font-size:10px; color:#64748b;">${promptLabel}</span>${chips}${opLink}`;
   }
 
+  // Blindage (chantier A — 2026-06-10) : une carte action illisible ne tue plus le dashboard.
   function renderActionCard(a, _opts) {
+    try {
+      return _renderActionCardInner(a, _opts);
+    } catch (e) {
+      console.error('[FILET] Carte action illisible :', a && a.id, e);
+      return '<div class="card" style="border-left:3px solid #ef4444;padding:8px 12px;font-size:11px;color:#fca5a5;">⚠️ Carte action illisible (' + ((a && (a.type + ' ' + (a.produitId || a.id))) || '?') + ') — le reste du dashboard s\'affiche normalement. Détail en console.</div>';
+    }
+  }
+  function _renderActionCardInner(a, _opts) {
     // Cherche le produit : liquide, kit ou PD
     const isLiq = a.produitType === 'liq';
     const isPd = a.produitType === 'pd';
@@ -20431,10 +20512,20 @@ function _getOpStepChecked(op, sh, stepDef) {
   return st && st.steps && st.steps[stepDef.key] === true;
 }
 
+// Blindage (chantier A — 2026-06-10) : une carte OP illisible ne tue plus tout l'onglet,
+// elle est remplacée par une petite carte d'avertissement et le reste s'affiche normalement.
 function renderOpCardHtml(op, options) {
+  try {
+    return _renderOpCardHtmlInner(op, options);
+  } catch (e) {
+    console.error('[FILET] Carte OP illisible :', op && op.id, e);
+    return '<div class="card" style="border-left:3px solid #ef4444;padding:8px 12px;font-size:11px;color:#fca5a5;">⚠️ Carte OP illisible (' + ((op && (op.nom || op.id)) || '?') + ') — le reste de l\'onglet s\'affiche normalement. Détail en console.</div>';
+  }
+}
+function _renderOpCardHtmlInner(op, options) {
   ensureOpSteps(op);
   const meta = OP_TYPE_META[op.type] || { label: op.type, color: '#64748b' };
-  const kit = baseKits.find(k => k.id === op.produitIds[0]);
+  const kit = baseKits.find(k => k.id === (op.produitIds && op.produitIds[0]));
   const isActive = !op.dateFin;
   const shopFilter = (options && options.shopFilter) || '';
   const mecaMeta = MECA_META[op.mecanique && op.mecanique.type] || null;
@@ -22900,6 +22991,12 @@ loadData().then(async () => {
   }
   requestAnimationFrame(_updateStickyTopH);
   window.addEventListener('resize', _updateStickyTopH);
+}).catch(function(e) {
+  // Filet de démarrage (chantier A — 2026-06-10) : si le chargement plante,
+  // on affiche un message clair + l'écran de login au lieu d'une page morte.
+  console.error('[FILET] Échec du chargement :', e);
+  _pvShowErrorBanner('Le chargement de PilotVape a échoué', (e && e.message) || e);
+  try { showLoginScreen(); } catch (e2) { /* même le login peut être cassé : le bandeau reste */ }
 });
 
 // ═══════════════════════════════════════════════════════════════
