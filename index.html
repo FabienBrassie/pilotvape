@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:14</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:19</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -14589,7 +14589,7 @@ function renderDashboard() {
         style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'}; border-radius:3px; user-select:none;"
         onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'">
         ${box}
-        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}${!checked ? stepBadgeAttente(d, (a.etats[sh] || {}).steps) + stepBadgeAdmin(d) : ''}</span>
+        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}${!checked ? stepBadgeAttente(d, (a.etats[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}</span>
         ${qteField}
       </div>`;
     }).join('');
@@ -21226,7 +21226,7 @@ function _renderOpCardHtmlInner(op, options) {
           style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_stepGrey} ${_stepHighlight}"
           ${_isClickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'"` : ''}>
           ${box}
-          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}${!checked ? stepBadgeAttente(d, ((op.etats || {})[sh] || {}).steps) + stepBadgeAdmin(d) : ''}</span>
+          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}${!checked ? stepBadgeAttente(d, ((op.etats || {})[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}</span>
         </div>`;
       }).join('');
     return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${rows}</div>`;
@@ -22015,7 +22015,7 @@ function renderGlobalStepsBlock(op, gdefs) {
     return `<label onclick="event.stopPropagation(); toggleOpGlobalStep('${op.id}','${d.key}', ${!checked})"
       style="display:flex; align-items:center; gap:6px; padding:2px 0; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'};">
       ${box}
-      <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${!checked ? stepBadgeAdmin(d) : ''}</span>
+      <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${stepBadgeAdmin(d)}</span>
     </label>`;
   }).join('');
   return `<div style="margin-top:8px; padding:6px 8px; background:#0f172a; border:1px solid #0ea5e930; border-radius:4px;">
