@@ -2382,7 +2382,10 @@ function computeOpShopStepDefs(op, shop) {
     const mt = op.mecanique.type;
     const isRegleComplexe = (mt === 'SECOND_REMISE' || mt === 'X_POUR_Y');
     const label = isRegleComplexe ? 'Promo configurée sur Swappy' : 'Prix modifié sur Swappy';
-    defs.push({ key: 'swappy', label: label, kind: 'swappy' });
+    // Règle Fabien (2026-06-11) : la PROMO (mécanique complexe 2+1, 2e à -X%…) est configurée
+    // par FABIEN — l'étape reste visible chez les équipes comme CONFIRMATION (badge 👤,
+    // non cliquable côté boutique). Le simple changement de prix reste boutique.
+    defs.push({ key: 'swappy', label: label, kind: 'swappy', nat: 'imm', resp: isRegleComplexe ? 'admin' : undefined });
   }
   // OP COUP : les steps par shop sont dérivés des 2 actions liées (RENTRER + SORTIR),
   // pour que les cases vues côté OP et côté Dashboard soient les mêmes (mirror bidirectionnel,
@@ -21200,11 +21203,14 @@ function _renderOpCardHtmlInner(op, options) {
         const box = checked
           ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:${_dashCol}; color:#0f172a; border:1px solid ${_dashCol}; border-radius:3px; font-size:${isDesinstall ? '11' : '10'}px; font-weight:700;">✓</span>`
           : `<span style="display:inline-block; width:${isDesinstall ? '16' : '14'}px; height:${isDesinstall ? '16' : '14'}px; background:transparent; border:${isDesinstall ? '2' : '1'}px solid ${isDashboardStep ? '#475569' : (isDesinstall ? col : col + '80')}; border-radius:3px;"></span>`;
-        // Pas de clic si : produit absent, ou step du dashboard (lecture seule)
-        const clickAttr = (_absentShop || isDashboardStep)
-          ? `title="${isDashboardStep ? 'Géré dans le dashboard — coche côté action' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
+        // Pas de clic si : produit absent, step du dashboard (lecture seule), ou étape ADMIN
+        // vue depuis un poste boutique (règle Fabien 2026-06-11 : les équipes VOIENT la
+        // confirmation que Fabien a fait, elles ne cochent pas à sa place).
+        const _adminStepReadOnly = d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin();
+        const clickAttr = (_absentShop || isDashboardStep || _adminStepReadOnly)
+          ? `title="${isDashboardStep ? 'Géré dans le dashboard — coche côté action' : _adminStepReadOnly ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
           : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"`;
-        const _isClickable = !_absentShop && !isDashboardStep;
+        const _isClickable = !_absentShop && !isDashboardStep && !_adminStepReadOnly;
         const _dashLabel = isDashboardStep ? ` <span onclick="event.stopPropagation(); goToActionFromOp('${op.id}','${d.kind}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à l'action dans le dashboard">← dashboard</span>` : '';
         return `<div class="pv-step-row" ${clickAttr}
           style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_stepGrey} ${_stepHighlight}"
