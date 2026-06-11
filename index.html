@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 18:57</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 19:03</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3206,6 +3206,14 @@ function isKitPresentAtShop(kit, shop) {
   const sv = kit.statutVie;
   // SORTI globalement → jamais présent
   if (sv === 'SORTI') return false;
+  // ONE-SHOT (règle Fabien 2026-06-11, dictionnaire §3.h) : le kit reste DANS_OFFRE pendant
+  // le coup, mais si CETTE boutique a validé toute la sortie de stock (② SORTIR cochée),
+  // le one-shot est terminé chez elle → plus présent : sa case FT redevient vide (ou au
+  // titulaire). Les autres boutiques continuent leur écoulement normalement.
+  if (kit.oneShot === true) {
+    const sortirOS = actions.find(a => a.type === 'SORTIR' && a.produitId === kit.id && !a.annulee);
+    if (sortirOS && sortirOS.etats && sortirOS.etats[shop] && sortirOS.etats[shop].done) return false;
+  }
   // A_SORTIR ou FIN_DE_VIE → présent SAUF si SORTIR est fait à cette boutique
   if (sv === 'A_SORTIR' || sv === 'FIN_DE_VIE') {
     const sortirAct = actions.find(a => a.type === 'SORTIR' && a.produitId === kit.id && !a.annulee);
@@ -13549,7 +13557,10 @@ function renderWalls() {
       ${lbl && isEnAttente ? `<span style="position:absolute; right:3px; top:2px; font-size:7px; font-weight:700; color:${col}; background:#0f172a; padding:0px 4px; border-radius:2px; border:1px solid ${col}80; letter-spacing:0.2px;">${lbl}</span>` : ''}
     </div>`;
   };
-  const _wallShopFilter = document.getElementById('kitShopFilter')?.value || '';
+  // Vue FT par boutique (2026-06-11) : sur un poste boutique, la vue mur montre par défaut
+  // SA boutique (c'est "son mur") — le filtre reste utilisable pour regarder les autres.
+  const _wallShopFilter = document.getElementById('kitShopFilter')?.value
+    || ((typeof isAdmin === 'function' && !isAdmin() && typeof currentShop !== 'undefined' && currentShop) ? currentShop : '');
   const _wallStatutFilter = kitStatutFilter || [];
   const renderCell = (offreKey) => {
     let _allRaw = findAllProductsForSlot(offreKey);
