@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:37</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:14</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -9495,14 +9495,21 @@ window.addEventListener('focus', _maybeSyncOnReturn);
 const _APP_BUILD = Date.now(); // timestamp de CE chargement
 let _lastHtmlSize = null;
 function _checkForUpdate() {
-  fetch(location.href.split('?')[0].split('#')[0] + '?_nocache=' + Date.now(), { method: 'HEAD', cache: 'no-store' })
-    .then(r => {
-      const size = r.headers.get('content-length');
-      if (!size) return;
-      const sizeNum = parseInt(size);
-      if (_lastHtmlSize === null) { _lastHtmlSize = sizeNum; return; }
-      if (sizeNum !== _lastHtmlSize) {
-        console.log('[AUTO-UPDATE] Nouvelle version détectée (' + _lastHtmlSize + ' → ' + sizeNum + ')');
+  // Réécrit 2026-06-12 : on compare désormais les HORODATAGES DE VERSION eux-mêmes
+  // (le span appVersionTag), pas les tailles de fichier. Contexte découvert ce soir :
+  // le site est sur GitHub Pages, qui IGNORE le fichier _headers anti-cache (dispositif
+  // Cloudflare Pages) et met index.html en cache ~10 min. Ce check contourne le cache
+  // (?_nocache + no-store) et ne télécharge que les ~25 premiers Ko (Range), où vit le tag.
+  const _maVersion = (document.getElementById('appVersionTag') || {}).textContent || '';
+  fetch(location.href.split('?')[0].split('#')[0] + '?_nocache=' + Date.now(),
+    { cache: 'no-store', headers: { 'Range': 'bytes=0-30000' } })
+    .then(r => r.text())
+    .then(texte => {
+      const m = texte.match(/>v (20\d\d-\d\d-\d\d \d\d:\d\d)</);
+      if (!m || !_maVersion) return;
+      const _versionServeur = 'v ' + m[1];
+      if (_versionServeur !== _maVersion.trim()) {
+        console.log('[AUTO-UPDATE] Nouvelle version détectée (' + _maVersion.trim() + ' → ' + _versionServeur + ')');
         // Ne pas recharger si un modal, une saisie ou un formulaire est actif
         const activeEl = document.activeElement;
         const isEditing = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT' || activeEl.isContentEditable);
@@ -9513,17 +9520,20 @@ function _checkForUpdate() {
             const b = document.createElement('div');
             b.id = 'updateBanner';
             b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#0ea5e9;color:white;text-align:center;padding:6px 12px;font-size:12px;font-weight:600;';
-            b.innerHTML = '🔄 Mise à jour disponible — <a href="#" onclick="location.reload();return false;" style="color:white;text-decoration:underline;">Recharger maintenant</a> <span onclick="this.parentElement.remove()" style="cursor:pointer;margin-left:12px;">✕</span>';
+            b.innerHTML = '🔄 Mise à jour disponible — <a href="#" onclick="_pvRechargerFrais();return false;" style="color:white;text-decoration:underline;">Recharger maintenant</a> <span onclick="this.parentElement.remove()" style="cursor:pointer;margin-left:12px;">✕</span>';
             document.body.prepend(b);
           }
         } else {
-          // Reload automatique silencieux
-          location.reload();
+          // Reload automatique silencieux — VERSION FRAÎCHE garantie
+          _pvRechargerFrais();
         }
       }
     })
     .catch(() => {}); // réseau indisponible → on ignore
 }
+// Recharge en contournant le cache GitHub Pages (un reload normal resservirait l'ancienne
+// version → boucle infinie de détection). Le paramètre ?maj force le CDN et le navigateur.
+function _pvRechargerFrais() { location.href = location.pathname + '?maj=' + Date.now(); }
 setInterval(_checkForUpdate, 5 * 60 * 1000); // toutes les 5 minutes
 setTimeout(_checkForUpdate, 30000); // premier check à 30s
 
