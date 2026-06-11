@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 22:20</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 22:36</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3148,6 +3148,62 @@ const ACTION_STEPS_REPRISE = [
 // Accepte soit un type ('SORTIR'...), soit une action entière (pour gérer les flags
 // instance-specific, ex: PRIX avec etiquetteRouge → le label de l'étape étiquette est ajusté ;
 // SORTIR avec motifSortie='REPRISE' → 5 étapes spécifiques au workflow reprise).
+// ══════════════════════════════════════════════════════════════════════════════
+// STATUT "COMMANDE CLIENT" PAR BOUTIQUE (spéc validée Fabien 2026-06-11)
+// Une réf sortie des linéaires mais gardée en tiroir pour des clients attachés.
+// PAR boutique : gardée à Pessac ≠ sortie à Mérignac. Règles validées :
+//  - la boutique propose, Fabien valide (v1 : toggle admin) ;
+//  - ne compte PLUS dans la grille d'offre ;
+//  - chez cette boutique : pas en linéaire (invisible au mur FT) mais visible dans
+//    la base avec le badge 🗄️ (elle est dans le tiroir, dispo à la commande).
+// Stockage : prod.commandeClient = { pessac: true, ... } (kits, gammes liquides, PD).
+// ══════════════════════════════════════════════════════════════════════════════
+function estCommandeClient(prod, shop) {
+  return !!(prod && prod.commandeClient && prod.commandeClient[shop]);
+}
+function badgeCommandeClient(prod) {
+  if (!prod || !prod.commandeClient) return '';
+  const shops = SHOPS.filter(sh => prod.commandeClient[sh]);
+  if (shops.length === 0) return '';
+  const lbl = shops.map(sh => (SHOP_LABELS[sh] || sh).charAt(0)).join('·');
+  return `<span style="font-size:9px; padding:1px 6px; border-radius:3px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; white-space:nowrap;" title="Commande client : gardé en tiroir à ${shops.map(sh => SHOP_LABELS[sh] || sh).join(', ')} — hors linéaire, hors grille d'offre">🗄️ CC ${lbl}</span>`;
+}
+async function ouvrirCommandeClient(produitType, produitId) {
+  if (!isAdmin()) { pvAlert('La boutique propose, Fabien valide — réglage réservé à l\'admin.'); return; }
+  const prod = produitType === 'kit' ? baseKits.find(k => k.id === produitId)
+    : produitType === 'liq' ? baseLiq.find(g => g.id === produitId)
+    : basePD.find(p => p.id === produitId);
+  if (!prod) return;
+  const cur = prod.commandeClient || {};
+  const checks = SHOPS.map(sh => `<label style="display:flex; align-items:center; gap:8px; padding:6px 4px; cursor:pointer; font-size:13px; color:#e2e8f0;">
+      <input type="checkbox" id="_cc_${sh}" ${cur[sh] ? 'checked' : ''} style="width:16px; height:16px;">
+      <span style="color:${SHOP_COLORS[sh]}; font-weight:700;">${SHOP_LABELS[sh] || sh}</span>
+      <span style="font-size:11px; color:#64748b;">garde la réf en tiroir (commande client)</span>
+    </label>`).join('');
+  const nom = (prod.marque || '') + ' ' + (prod.modele || prod.gamme || '');
+  return new Promise(resolve => {
+    const overlay = _pvModal(`<div style="color:#67e8f9; font-weight:700; font-size:14px; margin-bottom:6px;">🗄️ Commande client — ${nom}</div>
+      <div style="font-size:11px; color:#94a3b8; margin-bottom:10px;">Hors linéaire (disparaît du mur FT de la boutique) et hors grille d'offre, mais gardé en tiroir pour les clients attachés. La sortie suit son cours dans les autres boutiques.</div>
+      ${checks}`,
+      [{ label: 'Enregistrer', color: '#06b6d4' }, { label: 'Annuler' }],
+      idx => {
+        if (idx !== 0) { resolve(false); return; }
+        const cc = {};
+        let un = false;
+        SHOPS.forEach(sh => { const el = overlay.querySelector('#_cc_' + sh); if (el && el.checked) { cc[sh] = true; un = true; } });
+        prod.commandeClient = un ? cc : null;
+        prod._ts = new Date().toISOString();
+        if (typeof logAction === 'function') logAction('Commande client', nom + ' → ' + (un ? Object.keys(cc).join(', ') : 'aucune boutique'));
+        saveData();
+        if (typeof renderKits === 'function') renderKits();
+        if (typeof renderLiqAll === 'function') renderLiqAll();
+        if (typeof renderBasePD === 'function') renderBasePD();
+        if (typeof renderWalls === 'function') renderWalls();
+        resolve(true);
+      });
+  });
+}
+
 // ── Helpers natures d'étapes (chantier intelligence métier — 2026-06-11) ─────────
 // Une étape est "en attente" (⏳/📦) si elle n'est pas encore déblocable :
 //  - nat 'evt' : on attend un événement extérieur (livraison) → jamais un retard d'équipe
@@ -3270,6 +3326,10 @@ function actionGlobalState(a) {
 // Logique : on part du statutVie global, puis on regarde les actions SORTIR/RENTRER par shop.
 function isKitPresentAtShop(kit, shop) {
   if (!kit || !shop) return true;
+  // COMMANDE CLIENT (spéc 2026-06-11) : gardé en tiroir dans CETTE boutique → présent
+  // (visible dans sa base avec le badge 🗄️), même si le statut global est SORTI.
+  // Le mur FT, lui, l'exclut explicitement (hors linéaire) — voir renderWalls.
+  if (estCommandeClient(kit, shop)) return true;
   const sv = kit.statutVie;
   // SORTI globalement → jamais présent
   if (sv === 'SORTI') return false;
@@ -11670,6 +11730,8 @@ function renderKits() {
             <input type="checkbox" ${k.oneShot ? 'checked' : ''} onchange="toggleKitOneShot('${k.id}')" style="margin:0; cursor:pointer; accent-color:#fcd34d;">
             ⚡ One-shot
           </label>
+          <button onclick="event.stopPropagation(); ouvrirCommandeClient('kit','${k.id}')" style="padding:2px 8px; font-size:10px; background:${k.commandeClient && SHOPS.some(s => k.commandeClient[s]) ? '#0e749022' : '#0f172a'}; color:${k.commandeClient && SHOPS.some(s => k.commandeClient[s]) ? '#67e8f9' : '#94a3b8'}; border:1px solid ${k.commandeClient && SHOPS.some(s => k.commandeClient[s]) ? '#06b6d460' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Commande client : garder la réf en tiroir dans certaines boutiques (hors linéaire, hors grille d'offre)">🗄️ Cmd client</button>
+          ${badgeCommandeClient(k)}
           ${(() => {
             const _murOv = k.caseMurOverride || '';
             const _realCt = getEffectiveCaseTech(k);
@@ -12790,6 +12852,8 @@ function renderLiqGammeDetail(g) {
     </label>`;
     if (isAdmin()) {
       html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}',null)" style="padding:2px 8px; font-size:10px; background:#0c4a6e22; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;" title="Lancer une reprise fournisseur sur la gamme entière">📦 Reprise</button>`;
+      html += `<button onclick="event.stopPropagation(); ouvrirCommandeClient('liq','${g.id}')" style="padding:2px 8px; font-size:10px; background:${g.commandeClient && SHOPS.some(s => g.commandeClient[s]) ? '#0e749022' : 'none'}; color:${g.commandeClient && SHOPS.some(s => g.commandeClient[s]) ? '#67e8f9' : '#94a3b8'}; border:1px solid ${g.commandeClient && SHOPS.some(s => g.commandeClient[s]) ? '#06b6d460' : '#47556960'}; border-radius:3px; cursor:pointer; font-weight:600;" title="Commande client : garder la gamme en tiroir dans certaines boutiques (hors linéaire, hors grille d'offre)">🗄️ Cmd client</button>`;
+      html += badgeCommandeClient(g);
     }
     html += `</div>`;
 
@@ -13635,7 +13699,9 @@ function renderWalls() {
   const renderCell = (offreKey) => {
     let _allRaw = findAllProductsForSlot(offreKey);
     if (_wallStatutFilter.length > 0) _allRaw = _allRaw.filter(k => _wallStatutFilter.includes(k.statutVie));
-    const all = _wallShopFilter ? _allRaw.filter(k => isKitPresentAtShop(k, _wallShopFilter)) : _allRaw;
+    const all = _wallShopFilter
+      ? _allRaw.filter(k => isKitPresentAtShop(k, _wallShopFilter) && !estCommandeClient(k, _wallShopFilter)) // CC = en tiroir, PAS en linéaire (spéc 2026-06-11)
+      : _allRaw;
     const parsed = parseOffreKey(offreKey);
     const profilColor = parsed ? PROFIL_COLORS[parsed.profil] || '#334155' : '#334155';
     const ctParts = parsed ? parsed.caseTech.split('_') : [];
@@ -16905,7 +16971,41 @@ function renderDashboard() {
     console.error('[DASH-RENDER] Erreur dans la vue cards/détail, fallback mode legacy :', _err);
     _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
   }
-  document.getElementById('dashContent').innerHTML = _dashHtml;
+  // ── ALERTE ÉCOULEMENT TROP LENT (spéc Fabien 2026-06-11, classeur onglets A SORTIR
+  // et Destockage kit) : un destockage qui traîne au-delà du seuil remonte chez l'admin
+  // avec l'invitation à changer de stratégie (PR ? reprise ? forcer ?). Admin uniquement.
+  let _alerteLenteHtml = '';
+  try {
+    if (typeof isAdmin === 'function' && isAdmin()) {
+      const SEUIL_ECOULEMENT_J = 30;
+      const _today = Date.now();
+      const _age = (dIso) => dIso ? Math.floor((_today - new Date(dIso).getTime()) / 86400000) : 0;
+      const _lents = [];
+      actions.forEach(a => {
+        if (a.type !== 'SORTIR' || a.annulee || a._archived || a.motifSortie === 'REPRISE') return;
+        if (actionGlobalState(a) === 'FAIT') return;
+        const age = _age(a.dateCreation);
+        if (age < SEUIL_ECOULEMENT_J) return;
+        const restants = SHOPS.filter(sh => !(a.etats && a.etats[sh] && a.etats[sh].done));
+        if (restants.length === 0) return;
+        _lents.push({ nom: (typeof _logProdName === 'function' ? _logProdName(a.produitId) : a.produitId) + (a.parfumNom ? ' — ' + a.parfumNom : ''), age: age, shops: restants, id: a.id });
+      });
+      _lents.sort((x, y) => y.age - x.age);
+      if (_lents.length > 0) {
+        const _lignes = _lents.slice(0, 6).map(l =>
+          `<div style="display:flex; align-items:center; gap:8px; padding:2px 0; font-size:11px;">
+            <span style="color:#fbbf24; font-weight:700; min-width:42px;">${l.age} j</span>
+            <span style="color:#e2e8f0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.nom}</span>
+            <span style="display:inline-flex; gap:3px;">${l.shops.map(sh => `<span style="width:7px;height:7px;border-radius:50%;background:${SHOP_COLORS[sh]};" title="${SHOP_LABELS[sh] || sh} n'a pas fini"></span>`).join('')}</span>
+          </div>`).join('');
+        _alerteLenteHtml = `<div style="margin-bottom:10px; padding:8px 12px; background:#78350f18; border:1px solid #f59e0b50; border-left:3px solid #f59e0b; border-radius:0 5px 5px 0;">
+          <div style="font-size:11px; font-weight:700; color:#fbbf24; margin-bottom:4px;">🐌 ÉCOULEMENTS LENTS — ${_lents.length} destockage${_lents.length > 1 ? 's' : ''} > ${SEUIL_ECOULEMENT_J} j · à requalifier : prix rouge ? reprise ? forcer ?</div>
+          ${_lignes}${_lents.length > 6 ? `<div style="font-size:10px; color:#94a3b8;">… et ${_lents.length - 6} autre${_lents.length - 6 > 1 ? 's' : ''}</div>` : ''}
+        </div>`;
+      }
+    }
+  } catch (e) { console.error('[ECOULEMENT-LENT]', e); }
+  document.getElementById('dashContent').innerHTML = _alerteLenteHtml + _dashHtml;
 
   // Summary top right — chips cliquables qui amènent vers la section correspondante
   const chip = (color, label, key) =>
@@ -23488,6 +23588,8 @@ function renderBasePD() {
           '<input type="checkbox" ' + (pd.oneShot ? 'checked' : '') + ' onchange="togglePdOneShot(\'' + pd.id + '\')" style="margin:0; cursor:pointer; accent-color:#fcd34d;">' +
           ' ⚡ One-shot' +
         '</label>' +
+        '<button onclick="event.stopPropagation(); ouvrirCommandeClient(\'pd\',\'' + pd.id + '\')" style="padding:2px 8px; font-size:10px; background:' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#0e749022' : '#0f172a') + '; color:' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#67e8f9' : '#94a3b8') + '; border:1px solid ' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#06b6d460' : '#47556960') + '; border-radius:3px; cursor:pointer;" title="Commande client : garder la réf en tiroir dans certaines boutiques">🗄️ Cmd client</button>' +
+        badgeCommandeClient(pd) +
       '</div>' +
     '</div>';
   };
