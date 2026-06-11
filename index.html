@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 11:52</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 18:57</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -20605,10 +20605,29 @@ function _getOpStepChecked(op, sh, stepDef) {
   return st && st.steps && st.steps[stepDef.key] === true;
 }
 
+// ── Règle métier (Fabien, 2026-06-11) : une OP de destockage (PRIX_ROUGE ou COUP liée
+// à une action SORTIR) ne concerne PLUS une boutique qui a tout coché sur cette SORTIR :
+// son stock est écoulé, le prix rouge n'existe plus chez elle. La carte devient donc
+// invisible pour cette boutique — y compris dans les campagnes. L'admin sans filtre
+// boutique continue de tout voir (il pilote l'ensemble).
+function _opPrEpuiseePourShop(op, sh) {
+  if (!op || !sh) return false;
+  if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return false;
+  if (!op.sortirActionId) return false;
+  const a = actions.find(x => x.id === op.sortirActionId);
+  if (!a || !a.etats || !a.etats[sh]) return false;
+  return a.etats[sh].done === true;
+}
+
 // Blindage (chantier A — 2026-06-10) : une carte OP illisible ne tue plus tout l'onglet,
 // elle est remplacée par une petite carte d'avertissement et le reste s'affiche normalement.
 function renderOpCardHtml(op, options) {
   try {
+    // Masquage "stock écoulé" (règle 2026-06-11) : en vue filtrée sur une boutique,
+    // ou côté poste boutique connecté, la carte d'un destockage épuisé chez elle disparaît.
+    const _shopVue = (options && options.shopFilter) || '';
+    if (_shopVue && _opPrEpuiseePourShop(op, _shopVue)) return '';
+    if (typeof isAdmin === 'function' && !isAdmin() && typeof currentShop !== 'undefined' && currentShop && _opPrEpuiseePourShop(op, currentShop)) return '';
     return _renderOpCardHtmlInner(op, options);
   } catch (e) {
     console.error('[FILET] Carte OP illisible :', op && op.id, e);
