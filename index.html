@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:19</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:27</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -21168,9 +21168,11 @@ function _renderOpCardHtmlInner(op, options) {
         })()
       : '';
 
-  // Steps globaux (amont)
+  // Steps globaux (amont) — rendu aussi quand il n'y a QUE des étapes admin par boutique
+  // (ex. PR avec promo Swappy sans pièce PLV) : le bloc Amont les porte désormais.
   const gdefs = computeOpGlobalStepDefs(op);
-  const globalStepsHtml = (gdefs.length > 0 && !shopFilter)
+  const _hasAdminShopSteps = computeOpShopStepDefs(op, SHOPS[0]).some(d => d.resp === 'admin');
+  const globalStepsHtml = ((gdefs.length > 0 || _hasAdminShopSteps) && !shopFilter)
     ? renderGlobalStepsBlock(op, gdefs)
     : '';
 
@@ -21179,7 +21181,11 @@ function _renderOpCardHtmlInner(op, options) {
   const _detailPid = op.produitIds && op.produitIds[0];
   const _detailProd = _detailPid ? (baseKits.find(k => k.id === _detailPid) || baseLiq.find(l => l.id === _detailPid) || basePD.find(p => p.id === _detailPid)) : null;
   const stepsPerShop = SHOPS.filter(sh => !shopFilter || sh === shopFilter).map(sh => {
-    const defs = computeOpShopStepDefs(op, sh);
+    // Les étapes ADMIN (resp:'admin', ex. promo Swappy) ne s'affichent plus dans les blocs
+    // boutiques : elles vivent dans le bloc Amont avec leurs 3 coches P/M/L (demande Fabien
+    // 2026-06-12 : "mes actions ensemble"). La logique de complétion (opAllStepsDone,
+    // cascades) reste inchangée — seul l'AFFICHAGE est regroupé.
+    const defs = computeOpShopStepDefs(op, sh).filter(d => d.resp !== 'admin');
     const st = op.etats[sh];
     const col = SHOP_COLORS[sh];
     const label = SHOP_LABELS[sh];
@@ -22018,6 +22024,31 @@ function renderGlobalStepsBlock(op, gdefs) {
       <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${stepBadgeAdmin(d)}</span>
     </label>`;
   }).join('');
+  // ── Étapes admin PAR BOUTIQUE (déplacées ici depuis les blocs boutiques — Fabien 2026-06-12).
+  // Ex. "Promo configurée sur Swappy" : une ligne, trois coches P/M/L (l'étape a un état par
+  // boutique). Mêmes clés, mêmes toggles (toggleOpStep) : rien ne change pour le merge ni les
+  // cascades, seul l'emplacement d'affichage bouge.
+  let adminShopRows = '';
+  try {
+    const adminDefs = computeOpShopStepDefs(op, SHOPS[0]).filter(d => d.resp === 'admin');
+    adminShopRows = adminDefs.map(d => {
+      const boxes = SHOPS.map(sh => {
+        const c = _getOpStepChecked(op, sh, d);
+        const col = SHOP_COLORS[sh];
+        const init = (SHOP_LABELS[sh] || sh).charAt(0);
+        const box = c
+          ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:${col}; color:#0f172a; border:1px solid ${col}; border-radius:3px; font-size:10px; font-weight:700;">✓</span>`
+          : `<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid ${col}; border-radius:3px;"></span>`;
+        const clickable = (typeof isAdmin === 'function' && isAdmin());
+        return `<span ${clickable ? `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!c})" style="cursor:pointer;` : `title="Géré par Fabien" style="`} display:inline-flex; align-items:center; gap:3px;"><span style="font-size:9px; font-weight:700; color:${col};">${init}</span>${box}</span>`;
+      }).join('');
+      return `<div style="display:flex; align-items:center; gap:6px; padding:3px 0; font-size:11px; color:#e2e8f0;">
+        <span style="flex:1;">${d.label}${stepBadgeAdmin(d)}</span>
+        <span style="display:inline-flex; gap:8px; align-items:center;">${boxes}</span>
+      </div>`;
+    }).join('');
+  } catch (e) { console.error('[AMONT-ADMIN]', e); }
+  if (!gdefs.length && !adminShopRows) return '';
   return `<div style="margin-top:8px; padding:6px 8px; background:#0f172a; border:1px solid #0ea5e930; border-radius:4px;">
     <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
       <span style="width:6px; height:14px; background:#0ea5e9; border-radius:2px;"></span>
@@ -22025,6 +22056,7 @@ function renderGlobalStepsBlock(op, gdefs) {
       <span style="font-size:9px; padding:1px 6px; background:#0ea5e922; color:#0ea5e9; border-radius:999px; font-weight:700;">${nbDone}/${gdefs.length}</span>
     </div>
     ${rows}
+    ${adminShopRows}
   </div>`;
 }
 
