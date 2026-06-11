@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 22:52</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:02</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3214,6 +3214,57 @@ async function ouvrirCommandeClient(produitType, produitId, parfumId) {
         resolve(true);
       });
   });
+}
+
+// ── 🗄️ Court-circuit "garder en tiroir" (correctif 2026-06-11 soir, demande Fabien) ──
+// Dans la ligne À SORTIR dépliée, à côté des coches d'une boutique : un bouton qui dit
+// "cette boutique garde la réf pour ses clients" → pose le statut commande client pour
+// cette boutique ET court-circuite ses coches (toutes faites, horodatées comme un vrai
+// cochage → merge-safe). La ligne est réglée pour elle, la sortie continue ailleurs.
+async function garderEnTiroir(actionId, shop) {
+  if (!isAdmin()) { pvAlert('La boutique propose, Fabien valide — réglage réservé à l\'admin.'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'SORTIR') return;
+  const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
+    : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
+    : baseKits.find(k => k.id === a.produitId);
+  if (!prod) return;
+  // Cible : le parfum si l'action est parfumée, sinon le produit entier (gamme/kit/PD).
+  let cible = prod;
+  let nom = (prod.marque || '') + ' ' + (prod.modele || prod.gamme || '');
+  let porteeGamme = false;
+  if (a.produitType === 'liq' && a.produitParfumId && Array.isArray(prod.parfums)) {
+    const pf = prod.parfums.find(x => x.id === a.produitParfumId);
+    if (pf) { cible = pf; nom += ' — ' + (pf.n || pf.nom || 'parfum'); }
+  } else if (a.produitType === 'liq' && Array.isArray(prod.parfums) && prod.parfums.length > 1) {
+    porteeGamme = true; // action gamme entière : le court-circuit porte sur TOUTE la gamme
+  }
+  const ok = await pvConfirm((SHOP_LABELS[shop] || shop) + ' garde « ' + nom + ' »' + (porteeGamme ? ' (GAMME ENTIÈRE)' : '') + ' en tiroir (commande client) ?\n\nSes coches de sortie sont court-circuitées : la ligne est réglée pour cette boutique. La réf reste commandable chez elle (ne PAS la désactiver sur Swappy), disparaît de son linéaire, et la sortie continue normalement dans les autres boutiques.' + (porteeGamme ? '\n\n⚠️ Pour garder UN SEUL parfum, utilise le bouton 🗄️ de la ligne du parfum (pas de court-circuit dans ce cas).' : ''), { title: '🗄️ Commande client — ' + (SHOP_LABELS[shop] || shop), ok: 'Garder en tiroir', okColor: '#06b6d4' });
+  if (!ok) return;
+  const nowIso = new Date().toISOString();
+  if (!cible.commandeClient) cible.commandeClient = {};
+  cible.commandeClient[shop] = true;
+  cible._ts = nowIso;
+  prod._ts = nowIso;
+  // Court-circuit des coches de CETTE boutique — même mécanique que toggleActionStep
+  ensureActionSteps(a);
+  const st = a.etats[shop];
+  if (st) {
+    if (!st.steps) st.steps = makeStepMap(a);
+    if (!st._stepTs) st._stepTs = {};
+    getActionSteps(a).forEach(s => { st.steps[s.key] = true; st._stepTs[s.key] = nowIso; });
+    a._ts = nowIso;
+    _applyActionShopChange(a, shop);
+    syncActionStepsToOp(a);
+    if (typeof checkOneShotAutoClose === 'function') checkOneShotAutoClose(a);
+  }
+  if (typeof logAction === 'function') logAction('Commande client', (SHOP_LABELS[shop] || shop) + ' garde en tiroir : ' + nom + ' (coches court-circuitées)');
+  saveData();
+  try { renderDashboard(); } catch (e) { console.error(e); }
+  try { if (typeof renderKits === 'function') renderKits(); } catch (e) {}
+  try { if (typeof renderLiqAll === 'function') renderLiqAll(); } catch (e) {}
+  try { if (typeof renderWalls === 'function') renderWalls(); } catch (e) {}
+  try { if (typeof renderOps === 'function') renderOps(); } catch (e) {}
 }
 
 // ── Helpers natures d'étapes (chantier intelligence métier — 2026-06-11) ─────────
@@ -14506,9 +14557,28 @@ function renderDashboard() {
         ${qteField}
       </div>`;
     }).join('');
+    // ── 🗄️ Commande client AU CŒUR du bloc de coches (correctif 2026-06-11 soir) ──
+    // C'est ici que ça se joue : si cette boutique garde la réf pour ses clients, un
+    // bouton court-circuite ses coches. Bandeau si c'est déjà fait.
+    let ccZone = '';
+    if (a.type === 'SORTIR' && a.motifSortie !== 'REPRISE') {
+      const _ccProd = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
+        : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
+        : baseKits.find(k => k.id === a.produitId);
+      let _ccCible = _ccProd;
+      if (_ccProd && a.produitType === 'liq' && a.produitParfumId && Array.isArray(_ccProd.parfums)) {
+        _ccCible = _ccProd.parfums.find(x => x.id === a.produitParfumId) || _ccProd;
+      }
+      if (_ccCible && estCommandeClient(_ccCible, sh)) {
+        ccZone = `<div style="margin-top:5px; padding:4px 8px; background:#0e749022; border:1px solid #06b6d450; border-radius:3px; font-size:10px; color:#67e8f9; font-weight:600;">🗄️ Gardé en tiroir ici (commande client) — réf commandable, ne PAS la désactiver sur Swappy</div>`;
+      } else if (typeof isAdmin === 'function' && isAdmin()) {
+        ccZone = `<button onclick="event.stopPropagation(); garderEnTiroir('${a.id}','${sh}')" style="margin-top:5px; width:100%; padding:4px 8px; font-size:10px; background:transparent; color:#67e8f9; border:1px dashed #06b6d450; border-radius:3px; cursor:pointer; text-align:left;" title="Cette boutique garde la réf pour ses clients : ses coches de sortie sont court-circuitées, la ligne est réglée pour elle, la sortie continue ailleurs">🗄️ ${label} garde la réf en tiroir → court-circuiter ses coches</button>`;
+      }
+    }
     return `<div style="padding:6px 8px; background:#1e293b; border:1px solid ${col}30; border-radius:4px;">
       ${header}
       ${rows}
+      ${ccZone}
     </div>`;
   }
 
@@ -14930,7 +15000,7 @@ function renderDashboard() {
         const _ccOn = _ccObj.commandeClient && SHOPS.some(s => _ccObj.commandeClient[s]);
         if (_ccOn) badgeTag += badgeCommandeClient(_ccObj);
         if (typeof isAdmin === 'function' && isAdmin()) {
-          badgeTag += `<span onclick="event.stopPropagation(); ouvrirCommandeClient('${a.produitType || 'kit'}','${a.produitId}'${_ccParfumId ? `,'${_ccParfumId}'` : ''})" style="cursor:pointer; font-size:9px; padding:1px 6px; background:${_ccOn ? '#0e749022' : 'transparent'}; color:${_ccOn ? '#67e8f9' : '#64748b'}; border:1px solid ${_ccOn ? '#06b6d460' : '#47556940'}; border-radius:3px; white-space:nowrap;" title="Commande client : garder ${_ccParfumId ? 'CE PARFUM' : 'cette réf'} en tiroir dans certaines boutiques — la sortie continue pour le reste. Chez la boutique qui garde : ne pas désactiver la réf sur Swappy.">🗄️</span>`;
+          badgeTag += `<span onclick="event.stopPropagation(); ouvrirCommandeClient('${a.produitType || 'kit'}','${a.produitId}'${_ccParfumId ? `,'${_ccParfumId}'` : ''})" style="cursor:pointer; font-size:9px; padding:1px 6px; background:${_ccOn ? '#0e749022' : 'transparent'}; color:${_ccOn ? '#67e8f9' : '#64748b'}; border:1px solid ${_ccOn ? '#06b6d460' : '#47556940'}; border-radius:3px; white-space:nowrap; font-weight:600;" title="Commande client : garder ${_ccParfumId ? 'CE PARFUM' : 'cette réf'} en tiroir dans certaines boutiques — la sortie continue pour le reste. Chez la boutique qui garde : ne pas désactiver la réf sur Swappy.">🗄️ tiroir ?</span>`;
         }
       }
     }
