@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 19:16</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 22:20</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -1897,10 +1897,10 @@ const OP_TYPES = [
   {
     key: 'NATIONALE', label: 'OP nationale', color: '#3b82f6', auto: false,
     steps: [
-      { key: 'stock',  label: 'Stock reçu',             hint: 'Livraison centrale Cigusto' },
-      { key: 'plv',    label: 'PLV nationale posée',    hint: 'Matériel fourni par la centrale' },
-      { key: 'tarif',  label: 'Tarif OP appliqué',      hint: 'Swappy + étiquette' },
-      { key: 'com',    label: 'Com clients',            hint: 'Insta / affichage comptoir / briefing équipe' }
+      { key: 'stock',  label: 'Stock reçu',             hint: 'Livraison centrale Cigusto (+ PLV possible)', nat: 'evt', condLabel: 'attend la livraison centrale' },
+      { key: 'plv',    label: 'PLV nationale posée',    hint: 'Matériel fourni par la centrale', nat: 'cond', condKey: 'stock', condLabel: 'après réception' },
+      { key: 'tarif',  label: 'Tarif OP appliqué',      hint: 'Swappy + étiquette (promo parfois auto par la centrale)', nat: 'imm' },
+      { key: 'com',    label: 'Com clients',            hint: 'Insta / affichage comptoir / briefing équipe', nat: 'imm' }
     ]
   },
   {
@@ -1939,7 +1939,7 @@ const OP_TYPES = [
     // en fonction du flag k.oneShot sur le kit.
     key: 'COUP', label: 'One-shot', color: '#f59e0b', auto: true,
     steps: [
-      { key: 'stock',         label: 'Stock reçu',              hint: 'Bon plan achat pour ce one-shot' },
+      { key: 'stock',         label: 'Stock reçu',              hint: 'Bon plan achat pour ce one-shot', nat: 'evt', condLabel: 'attend la livraison' },
       { key: 'facing',        label: 'Produit posé en rayon',   hint: 'One-shot installé (prioritaire sur le titulaire)' },
       { key: 'signaletique',  label: 'Signalétique one-shot',   hint: 'PLV / étiquette « one-shot / bon plan »' },
       { key: 'etiquette',     label: 'Étiquette prix rouge',    hint: 'Prévue pour destockage fin de one-shot' },
@@ -2314,16 +2314,18 @@ function computeOpGlobalStepDefs(op) {
       // les steps Commander/Réceptionner sont déjà gérés par-shop (Commandé sur Swappy / Reçu en boutique).
       // On ne les duplique pas en amont global.
       if (!(p.type === 'PRODUIT' && produitDejaGere)) {
-        // Commander = global (on commande une fois pour toutes les boutiques)
-        defs.push({ key: 'plv_' + p.id + '_commandee', label: 'Commander ' + pieceLabel(p),    pieceId: p.id });
+        // Commander = global (on commande une fois pour toutes les boutiques).
+        // resp:'admin' (spéc 2026-06-11) : la commande amont est de Fabien par défaut —
+        // ne compte jamais comme travail/retard boutique.
+        defs.push({ key: 'plv_' + p.id + '_commandee', label: 'Commander ' + pieceLabel(p),    pieceId: p.id, nat: 'imm', resp: 'admin' });
         // Réceptionner = par shop (chaque boutique reçoit indépendamment) → voir computeOpShopStepDefs
       }
     } else if (p.source === 'custom') {
-      defs.push({ key: 'plv_' + p.id + '_visuelCree', label: 'Créer le visuel ' + pieceLabel(p), pieceId: p.id });
+      defs.push({ key: 'plv_' + p.id + '_visuelCree', label: 'Créer le visuel ' + pieceLabel(p), pieceId: p.id, nat: 'imm', resp: 'admin' });
     }
     // freetouch et stock : aucun step amont (freetouch = généré par l'app, stock = déjà là)
     if (!pieceIsPerShop(p)) {
-      defs.push({ key: 'plv_' + p.id + '_diffusee', label: pieceDiffuseeVerbe(p.type), pieceId: p.id });
+      defs.push({ key: 'plv_' + p.id + '_diffusee', label: pieceDiffuseeVerbe(p.type), pieceId: p.id, nat: 'imm', resp: 'admin' });
     }
   });
   return defs;
@@ -2340,7 +2342,8 @@ function computeOpShopStepDefs(op, shop) {
     const aRF = actions.find(x => x.id === op.rentrerActionId);
     if (aRF) {
       (ACTION_STEPS.RENTRER || []).forEach(s => {
-        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key });
+        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key,
+          nat: s.nat, condLabel: s.condLabel, condKey: s.condKey ? 'rentrer_' + s.condKey : undefined });
       });
     }
   }
@@ -2348,25 +2351,31 @@ function computeOpShopStepDefs(op, shop) {
   // Non-COUP avec commanderProduits (sans rentrerActionId fanfare) :
   if (op.prep && op.prep.commanderProduits && op.type !== 'COUP' &&
       !((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId)) {
-    defs.push({ key: 'prod_commandee', label: 'Commandé sur Swappy', kind: 'prod' });
-    defs.push({ key: 'prod_recue',     label: 'Reçu en boutique',    kind: 'prod' });
+    defs.push({ key: 'prod_commandee', label: 'Commandé sur Swappy', kind: 'prod', nat: 'imm' });
+    defs.push({ key: 'prod_recue',     label: 'Reçu en boutique',    kind: 'prod', nat: 'evt', condLabel: 'attend la livraison' });
   }
   // ── ÉTAPE 2 : Réceptionner et installer le matériel (pièces PLV) ──
   (op.pieces || []).forEach(p => {
     if (p.source !== 'fournie') return;
     if (p.type === 'PRODUIT' && op.prep && op.prep.commanderProduits) return; // géré par prod_recue
-    defs.push({ key: 'plv_' + p.id + '_recue', label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id, kind: 'reception' });
+    defs.push({ key: 'plv_' + p.id + '_recue', label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id, kind: 'reception', nat: 'evt', condLabel: 'attend la livraison' });
   });
   (op.pieces || []).forEach(p => {
     if (!pieceIsPerShop(p)) return;
     const aff = p.affectations && p.affectations[shop];
     if (!aff || !aff.emplacement) return;
     if (p.source === 'custom' || p.source === 'freetouch') {
-      defs.push({ key: 'plv_' + p.id + '_imprimee', label: 'Imprimer ' + pieceLabel(p), pieceId: p.id });
+      defs.push({ key: 'plv_' + p.id + '_imprimee', label: 'Imprimer ' + pieceLabel(p), pieceId: p.id, nat: 'imm' });
     }
     const emplLabel = (EMPLACEMENT_META[aff.emplacement] || {}).label || aff.emplacement;
     const verbe = p.source === 'stock' ? 'Installer ' : 'Poser ';
-    defs.push({ key: 'plv_' + p.id + '_posee', label: verbe + pieceLabel(p) + ' → ' + emplLabel, pieceId: p.id });
+    // Nature (spéc 2026-06-11) : on ne peut poser qu'une pièce reçue (fournie) ou imprimée
+    // (custom/freetouch). Une pièce de stock est déjà là → immédiate.
+    const _poseCondKey = p.source === 'fournie' ? ('plv_' + p.id + '_recue')
+      : (p.source === 'custom' || p.source === 'freetouch') ? ('plv_' + p.id + '_imprimee') : null;
+    defs.push({ key: 'plv_' + p.id + '_posee', label: verbe + pieceLabel(p) + ' → ' + emplLabel, pieceId: p.id,
+      nat: _poseCondKey ? 'cond' : 'imm', condKey: _poseCondKey || undefined,
+      condLabel: _poseCondKey ? (p.source === 'fournie' ? 'après réception' : 'après impression') : undefined });
   });
   // ── ÉTAPE 3 : Configuration Swappy (prix, promo) ──
   if (op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE') {
@@ -2384,7 +2393,8 @@ function computeOpShopStepDefs(op, shop) {
     const aS = op.sortirActionId  ? actions.find(x => x.id === op.sortirActionId)  : null;
     if (aR) {
       (ACTION_STEPS.RENTRER || []).forEach(s => {
-        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'coup_rentrer', actionStep: s.key });
+        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'coup_rentrer', actionStep: s.key,
+          nat: s.nat, condLabel: s.condLabel, condKey: s.condKey ? 'rentrer_' + s.condKey : undefined });
       });
     }
     // Steps prix rouge : entre RENTRER et SORTIR (on reçoit → on étiquette PR → on sort)
@@ -2404,7 +2414,8 @@ function computeOpShopStepDefs(op, shop) {
     }
     if (aS) {
       (ACTION_STEPS.SORTIR || []).forEach(s => {
-        defs.push({ key: 'sortir_' + s.key, label: '② ' + s.label, kind: 'coup_sortir', actionStep: s.key });
+        defs.push({ key: 'sortir_' + s.key, label: '② ' + s.label, kind: 'coup_sortir', actionStep: s.key,
+          nat: s.nat, condLabel: s.condLabel, condKey: s.condKey ? 'sortir_' + s.condKey : undefined });
       });
     }
   }
@@ -3101,30 +3112,73 @@ function updateVerdictChangedIndicator() {
 
 // Sous-étapes par type d'action — une shop n'est "done" que quand toutes ses sous-étapes sont cochées.
 // Non ordonnées : l'équipe peut cocher dans n'importe quel ordre (la réalité terrain ne suit pas toujours l'ordre).
+// ── NATURES D'ÉTAPES (chantier "intelligence métier", spéc validée par Fabien 2026-06-11) ──
+// Chaque étape porte sa nature, qui décide si elle peut être "en retard" :
+//   nat: 'imm'  = immédiate (faisable maintenant — la SEULE nature qui peut être en retard)
+//   nat: 'cond' = conditionnelle (attend un état métier ; condKey = autre étape qui doit être
+//                 cochée d'abord, sinon condLabel = condition appréciée par la boutique, ex stock=0)
+//   nat: 'evt'  = sur événement extérieur (livraison…) — jamais un retard d'équipe
+//   (les étapes de fin d'OP, kind 'desinstall', deviennent immédiates à la date de fin)
+// resp: 'admin' = étape de Fabien, pas du travail boutique.
+// Sans nat → 'imm' par défaut (comportement historique).
 const ACTION_STEPS = {
-  SORTIR:        [{ key: 'vendu',     label: 'Réappro coupée sur Swappy' },
-                  { key: 'swappyOff', label: 'Désactivé sur Swappy' }],
-  RENTRER:       [{ key: 'commande',  label: 'Commandé sur Swappy' },
-                  { key: 'recu',      label: 'Reçu en boutique' }],
-  MISE_EN_PLACE: [{ key: 'monte',     label: 'Monté sur le mur' }],
-  PRIX:          [{ key: 'etiquette', label: 'Étiquette faite' },
-                  { key: 'rayon',     label: 'Changée en rayon' },
-                  { key: 'swappy',    label: 'Mis à jour sur Swappy' }],
-  SWAP_COMPOSANT:[{ key: 'swap',      label: 'Composant changé sur le kit' },
-                  { key: 'etiquette', label: 'Nouvelle étiquette imprimée' }]
+  SORTIR:        [{ key: 'vendu',     label: 'Réappro coupée sur Swappy', nat: 'imm' },
+                  { key: 'swappyOff', label: 'Désactivé sur Swappy', nat: 'cond', condLabel: 'quand le stock atteint 0' }],
+  RENTRER:       [{ key: 'commande',  label: 'Commandé sur Swappy', nat: 'imm' },
+                  { key: 'recu',      label: 'Reçu en boutique', nat: 'evt', condLabel: 'attend la livraison' }],
+  MISE_EN_PLACE: [{ key: 'monte',     label: 'Monté sur le mur', nat: 'imm' }],
+  PRIX:          [{ key: 'etiquette', label: 'Étiquette faite', nat: 'imm' },
+                  { key: 'rayon',     label: 'Changée en rayon', nat: 'imm' },
+                  { key: 'swappy',    label: 'Mis à jour sur Swappy', nat: 'imm' }],
+  SWAP_COMPOSANT:[{ key: 'swap',      label: 'Composant changé sur le kit', nat: 'imm' },
+                  { key: 'etiquette', label: 'Nouvelle étiquette imprimée', nat: 'imm' }]
 };
 // Étapes spécifiques pour une SORTIR de motif REPRISE (reprise fournisseur — séparée du destockage commercial).
 // L'étape "comptage" est éditable : la boutique saisit la quantité reprise dans steps[sh].comptageQte.
+// Ordre corrigé (spéc Fabien 2026-06-11) : le COMPTAGE vient AVANT la mise à zéro du stock.
+// Les clés sont inchangées (les coches existantes restent valides) — seul l'ordre d'affichage
+// et la numérotation des libellés changent.
 const ACTION_STEPS_REPRISE = [
-  { key: 'reappro_off', label: '1. Réappro coupée sur Swappy' },
-  { key: 'stock_zero',  label: '2. Stock à zéro sur Swappy' },
-  { key: 'swappy_off',  label: '3. Produit désactivé sur Swappy' },
-  { key: 'comptage',    label: '4. Comptage des références', editableQte: true },
-  { key: 'mis_de_cote', label: '5. Mis de côté dans le carton' }
+  { key: 'reappro_off', label: '1. Réappro coupée sur Swappy', nat: 'imm' },
+  { key: 'comptage',    label: '2. Comptage des références', editableQte: true, nat: 'imm' },
+  { key: 'stock_zero',  label: '3. Stock à zéro sur Swappy', nat: 'cond', condKey: 'comptage', condLabel: 'après le comptage' },
+  { key: 'swappy_off',  label: '4. Produit désactivé sur Swappy', nat: 'cond', condKey: 'stock_zero', condLabel: 'après le stock à zéro' },
+  { key: 'mis_de_cote', label: '5. Mis de côté dans le carton', nat: 'cond', condKey: 'comptage', condLabel: 'après le comptage' }
 ];
 // Accepte soit un type ('SORTIR'...), soit une action entière (pour gérer les flags
 // instance-specific, ex: PRIX avec etiquetteRouge → le label de l'étape étiquette est ajusté ;
 // SORTIR avec motifSortie='REPRISE' → 5 étapes spécifiques au workflow reprise).
+// ── Helpers natures d'étapes (chantier intelligence métier — 2026-06-11) ─────────
+// Une étape est "en attente" (⏳/📦) si elle n'est pas encore déblocable :
+//  - nat 'evt' : on attend un événement extérieur (livraison) → jamais un retard d'équipe
+//  - nat 'cond' avec condKey : l'étape préalable n'est pas cochée → en attente
+//  - nat 'cond' sans condKey (ex : stock = 0, apprécié par la boutique) : toujours
+//    affichée avec sa condition, jamais comptée en retard.
+// stepsObj = l'objet steps de l'action/OP pour la boutique (ex : a.etats[sh].steps).
+function stepEstEnAttente(def, stepsObj) {
+  if (!def || !def.nat) return false;
+  if (def.nat === 'evt') return true;
+  if (def.nat === 'cond') {
+    if (def.condKey) return !(stepsObj && stepsObj[def.condKey] === true);
+    return true;
+  }
+  return false;
+}
+// Badge HTML "⏳ après le comptage" / "📦 attend la livraison" pour une étape NON cochée
+// en attente. Retourne '' si l'étape est débloquée (ou cochée — à gérer par l'appelant).
+function stepBadgeAttente(def, stepsObj) {
+  if (!stepEstEnAttente(def, stepsObj)) return '';
+  const evt = def.nat === 'evt';
+  const lbl = def.condLabel || (evt ? 'attend la livraison' : 'en attente');
+  return ' <span style="font-size:9px; color:#fbbf24; background:#78350f30; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Pas un retard : cette étape attend son déclencheur (spéc métier 2026-06-11)">' + (evt ? '📦' : '⏳') + ' ' + lbl + '</span>';
+}
+// Badge "👤 Fabien" pour une étape dont le responsable est l'admin (resp:'admin') :
+// visible partout pour la transparence, mais ce n'est PAS du travail boutique.
+function stepBadgeAdmin(def) {
+  if (!def || def.resp !== 'admin') return '';
+  return ' <span style="font-size:9px; color:#c4b5fd; background:#4c1d9530; border:1px solid #8b5cf640; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Étape gérée par Fabien — pas du travail boutique">👤 Fabien</span>';
+}
+
 function getActionSteps(typeOrAction) {
   const type = typeof typeOrAction === 'string' ? typeOrAction : (typeOrAction && typeOrAction.type);
   const motif = (typeof typeOrAction === 'object' && typeOrAction) ? typeOrAction.motifSortie : null;
@@ -14370,7 +14424,7 @@ function renderDashboard() {
         style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'}; border-radius:3px; user-select:none;"
         onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'">
         ${box}
-        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}</span>
+        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}${!checked ? stepBadgeAttente(d, (a.etats[sh] || {}).steps) + stepBadgeAdmin(d) : ''}</span>
         ${qteField}
       </div>`;
     }).join('');
@@ -20961,7 +21015,7 @@ function _renderOpCardHtmlInner(op, options) {
           style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_stepGrey} ${_stepHighlight}"
           ${_isClickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'"` : ''}>
           ${box}
-          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}</span>
+          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}${!checked ? stepBadgeAttente(d, ((op.etats || {})[sh] || {}).steps) + stepBadgeAdmin(d) : ''}</span>
         </div>`;
       }).join('');
     return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${rows}</div>`;
@@ -21750,7 +21804,7 @@ function renderGlobalStepsBlock(op, gdefs) {
     return `<label onclick="event.stopPropagation(); toggleOpGlobalStep('${op.id}','${d.key}', ${!checked})"
       style="display:flex; align-items:center; gap:6px; padding:2px 0; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'};">
       ${box}
-      <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}</span>
+      <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${!checked ? stepBadgeAdmin(d) : ''}</span>
     </label>`;
   }).join('');
   return `<div style="margin-top:8px; padding:6px 8px; background:#0f172a; border:1px solid #0ea5e930; border-radius:4px;">
