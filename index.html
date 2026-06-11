@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:14</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:37</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3214,6 +3214,29 @@ async function ouvrirCommandeClient(produitType, produitId, parfumId) {
         resolve(true);
       });
   });
+}
+
+// ── RÈGLE DE COMPTAGE LIQUIDES (Fabien 2026-06-11, DÉFINITIVE — balayage §0.12 du 12/06) ──
+// On compte les PARFUMS UNITAIRES — tous les parfums vivants des gammes entières + les
+// parfums ciblés individuellement, dédupliqués — VENTILÉS PAR FORMAT. Jamais "X gammes"
+// ni "X liquides" dans un compteur. SEUL compteur autorisé : cette fonction. Tout nouveau
+// badge/compteur liquides DOIT l'appeler.
+function _libelleParfumsParFormat(liqActions) {
+  const parFormat = {};
+  (liqActions || []).forEach(a => {
+    if (!a || a.annulee || (a.produitType || 'kit') !== 'liq') return;
+    const g = baseLiq.find(x => x.id === a.produitId);
+    if (!g) return;
+    const f = g.format || '?';
+    if (!parFormat[f]) parFormat[f] = new Set();
+    if (a.produitParfumId) parFormat[f].add(a.produitParfumId);
+    else (g.parfums || []).forEach(p => { if (p && p.id && p.s !== 'SORTI') parFormat[f].add(p.id); });
+  });
+  const lbl = (typeof LIQ_FORMAT_LABELS !== 'undefined') ? LIQ_FORMAT_LABELS : {};
+  return Object.keys(parFormat).sort().map(f => {
+    const n = parFormat[f].size;
+    return n + ' parfum' + (n > 1 ? 's' : '') + ' ' + (lbl[f] || f);
+  }).join(' · ');
 }
 
 // ── 🗄️ Court-circuit "garder en tiroir" (correctif 2026-06-11 soir, demande Fabien) ──
@@ -15819,8 +15842,8 @@ function renderDashboard() {
     marques.forEach((marque, mIdx) => {
       const marqueActions = byMarque[marque];
       if (_showMarqueHeaders) {
-        const gammeIds = new Set(marqueActions.map(a => a.produitId));
-        const gammeLabel = gammeIds.size === 1 ? '1 gamme' : gammeIds.size + ' gammes';
+        // Compteur canonique parfums/format (règle Fabien 2026-06-11, balayage §0.12)
+        const gammeLabel = _libelleParfumsParFormat(marqueActions) || '—';
         const actionLabel = marqueActions.length === 1 ? '1 action' : marqueActions.length + ' actions';
         // Séparateur marque discret (non-cliquable)
         liqInnerHtml += `<div style="display:flex; align-items:center; gap:8px; padding:${mIdx > 0 ? '8' : '4'}px 6px 3px;">
@@ -15833,9 +15856,8 @@ function renderDashboard() {
       liqInnerHtml += _renderLiqActionsInner(marqueActions);
     });
 
-    // Nombre de gammes distinctes pour le badge
-    const _liqGammeIds = new Set(liqActions.map(a => a.produitId));
-    const _liqGammeLabel = _liqGammeIds.size === 1 ? '1 gamme' : _liqGammeIds.size + ' gammes';
+    // Badge en-tête : compteur canonique parfums/format (règle Fabien 2026-06-11, balayage §0.12)
+    const _liqGammeLabel = _libelleParfumsParFormat(liqActions) || '—';
 
     html += `<div style="margin-bottom:4px;">
       <div onclick="toggleActionExpand('${liqSubKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:5px 10px; background:#0f172a; border:1px solid #33415560; border-radius:4px; cursor:pointer;">
@@ -17002,12 +17024,6 @@ function renderDashboard() {
       // · 5 parfums 100 mL". Jamais de "liquide" ambigu.
       const _countByProdType = (actionsArr) => {
         const _kit = new Set(), _pd = new Set();
-        const _parfumsParFormat = {}; // format → Set(parfumId)
-        const _ajouterParfum = (format, pid) => {
-          const f = format || '?';
-          if (!_parfumsParFormat[f]) _parfumsParFormat[f] = new Set();
-          _parfumsParFormat[f].add(pid);
-        };
         (actionsArr || []).forEach(a => {
           if (a.annulee) return;
           const t = a.produitType || 'kit'; // legacy : actions sans produitType = kit
@@ -17015,25 +17031,13 @@ function renderDashboard() {
             if (baseKits.find(k => k.id === a.produitId)) _kit.add(a.produitId);
           } else if (t === 'pd') {
             if (basePD.find(p => p.id === a.produitId)) _pd.add(a.produitId);
-          } else if (t === 'liq') {
-            const g = baseLiq.find(x => x.id === a.produitId);
-            if (!g) return;
-            if (a.produitParfumId) {
-              _ajouterParfum(g.format, a.produitParfumId);
-            } else {
-              // Gamme entière → tous ses parfums vivants comptent unitairement
-              (g.parfums || []).forEach(p => { if (p && p.id && p.s !== 'SORTI') _ajouterParfum(g.format, p.id); });
-            }
           }
         });
         const parts = [];
         if (_kit.size > 0) parts.push(_kit.size + ' kit' + (_kit.size > 1 ? 's' : ''));
         if (_pd.size > 0) parts.push(_pd.size + ' PD');
-        const _fmtLbl = (typeof LIQ_FORMAT_LABELS !== 'undefined') ? LIQ_FORMAT_LABELS : {};
-        Object.keys(_parfumsParFormat).sort().forEach(f => {
-          const n = _parfumsParFormat[f].size;
-          parts.push(n + ' parfum' + (n > 1 ? 's' : '') + ' ' + (_fmtLbl[f] || f));
-        });
+        const liqPart = _libelleParfumsParFormat(actionsArr); // compteur canonique (règle 2026-06-11)
+        if (liqPart) parts.push(liqPart);
         return parts.join(' · ');
       };
       // Indication temporelle pour la card "À installer" (aujourd'hui / demain).
