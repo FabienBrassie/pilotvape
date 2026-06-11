@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:02</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:07</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -17075,41 +17075,7 @@ function renderDashboard() {
     console.error('[DASH-RENDER] Erreur dans la vue cards/détail, fallback mode legacy :', _err);
     _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
   }
-  // ── ALERTE ÉCOULEMENT TROP LENT (spéc Fabien 2026-06-11, classeur onglets A SORTIR
-  // et Destockage kit) : un destockage qui traîne au-delà du seuil remonte chez l'admin
-  // avec l'invitation à changer de stratégie (PR ? reprise ? forcer ?). Admin uniquement.
-  let _alerteLenteHtml = '';
-  try {
-    if (typeof isAdmin === 'function' && isAdmin()) {
-      const SEUIL_ECOULEMENT_J = 30;
-      const _today = Date.now();
-      const _age = (dIso) => dIso ? Math.floor((_today - new Date(dIso).getTime()) / 86400000) : 0;
-      const _lents = [];
-      actions.forEach(a => {
-        if (a.type !== 'SORTIR' || a.annulee || a._archived || a.motifSortie === 'REPRISE') return;
-        if (actionGlobalState(a) === 'FAIT') return;
-        const age = _age(a.dateCreation);
-        if (age < SEUIL_ECOULEMENT_J) return;
-        const restants = SHOPS.filter(sh => !(a.etats && a.etats[sh] && a.etats[sh].done));
-        if (restants.length === 0) return;
-        _lents.push({ nom: (typeof _logProdName === 'function' ? _logProdName(a.produitId) : a.produitId) + (a.parfumNom ? ' — ' + a.parfumNom : ''), age: age, shops: restants, id: a.id });
-      });
-      _lents.sort((x, y) => y.age - x.age);
-      if (_lents.length > 0) {
-        const _lignes = _lents.slice(0, 6).map(l =>
-          `<div style="display:flex; align-items:center; gap:8px; padding:2px 0; font-size:11px;">
-            <span style="color:#fbbf24; font-weight:700; min-width:42px;">${l.age} j</span>
-            <span style="color:#e2e8f0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.nom}</span>
-            <span style="display:inline-flex; gap:3px;">${l.shops.map(sh => `<span style="width:7px;height:7px;border-radius:50%;background:${SHOP_COLORS[sh]};" title="${SHOP_LABELS[sh] || sh} n'a pas fini"></span>`).join('')}</span>
-          </div>`).join('');
-        _alerteLenteHtml = `<div style="margin-bottom:10px; padding:8px 12px; background:#78350f18; border:1px solid #f59e0b50; border-left:3px solid #f59e0b; border-radius:0 5px 5px 0;">
-          <div style="font-size:11px; font-weight:700; color:#fbbf24; margin-bottom:4px;">🐌 ÉCOULEMENTS LENTS — ${_lents.length} destockage${_lents.length > 1 ? 's' : ''} > ${SEUIL_ECOULEMENT_J} j · à requalifier : prix rouge ? reprise ? forcer ?</div>
-          ${_lignes}${_lents.length > 6 ? `<div style="font-size:10px; color:#94a3b8;">… et ${_lents.length - 6} autre${_lents.length - 6 > 1 ? 's' : ''}</div>` : ''}
-        </div>`;
-      }
-    }
-  } catch (e) { console.error('[ECOULEMENT-LENT]', e); }
-  document.getElementById('dashContent').innerHTML = _alerteLenteHtml + _dashHtml;
+  document.getElementById('dashContent').innerHTML = _dashHtml;
 
   // Summary top right — chips cliquables qui amènent vers la section correspondante
   const chip = (color, label, key) =>
