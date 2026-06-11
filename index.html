@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:27</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:31</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -21172,8 +21172,11 @@ function _renderOpCardHtmlInner(op, options) {
   // (ex. PR avec promo Swappy sans pièce PLV) : le bloc Amont les porte désormais.
   const gdefs = computeOpGlobalStepDefs(op);
   const _hasAdminShopSteps = computeOpShopStepDefs(op, SHOPS[0]).some(d => d.resp === 'admin');
-  const globalStepsHtml = ((gdefs.length > 0 || _hasAdminShopSteps) && !shopFilter)
-    ? renderGlobalStepsBlock(op, gdefs)
+  // Fix 2026-06-12 00:35 (retour Fabien) : le bloc Amont s'affiche AUSSI en vue filtrée
+  // boutique (lecture seule, état de LEUR boutique) — sinon les équipes ne voient plus
+  // ce que Fabien a validé (ex. promo configurée ou pas).
+  const globalStepsHtml = (gdefs.length > 0 || _hasAdminShopSteps)
+    ? renderGlobalStepsBlock(op, gdefs, shopFilter)
     : '';
 
   // Steps par shop
@@ -22010,16 +22013,19 @@ function setPieceEmplacementCommun(opId, pieceId, empl) {
   saveData(); renderDashboard(); renderOps && renderOps();
 }
 
-// Bloc steps globaux (amont) : cases cochables dans op.progress.global
-function renderGlobalStepsBlock(op, gdefs) {
+// Bloc steps globaux (amont) : cases cochables dans op.progress.global.
+// shopFilter (2026-06-12) : en vue filtrée boutique, le bloc s'affiche en LECTURE SEULE
+// (les équipes voient ce que Fabien a validé, sans pouvoir cocher à sa place).
+function renderGlobalStepsBlock(op, gdefs, shopFilter) {
+  const _lectureSeule = !!shopFilter;
   const nbDone = gdefs.filter(d => op.progress.global[d.key] === true).length;
   const rows = gdefs.map(d => {
     const checked = op.progress.global[d.key] === true;
     const box = checked
       ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:#0ea5e9; color:#0f172a; border:1px solid #0ea5e9; border-radius:3px; font-size:10px; font-weight:700;">✓</span>`
       : `<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid #0ea5e980; border-radius:3px;"></span>`;
-    return `<label onclick="event.stopPropagation(); toggleOpGlobalStep('${op.id}','${d.key}', ${!checked})"
-      style="display:flex; align-items:center; gap:6px; padding:2px 0; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'};">
+    return `<label ${_lectureSeule ? `title="Géré par Fabien — la coche apparaîtra une fois fait de son côté"` : `onclick="event.stopPropagation(); toggleOpGlobalStep('${op.id}','${d.key}', ${!checked})"`}
+      style="display:flex; align-items:center; gap:6px; padding:2px 0; ${_lectureSeule ? '' : 'cursor:pointer;'} font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'};">
       ${box}
       <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${stepBadgeAdmin(d)}</span>
     </label>`;
@@ -22031,16 +22037,18 @@ function renderGlobalStepsBlock(op, gdefs) {
   let adminShopRows = '';
   try {
     const adminDefs = computeOpShopStepDefs(op, SHOPS[0]).filter(d => d.resp === 'admin');
+    // En vue filtrée boutique : seule LEUR coche est montrée (lecture seule).
+    const _shopsAffiches = shopFilter ? [shopFilter] : SHOPS;
     adminShopRows = adminDefs.map(d => {
-      const boxes = SHOPS.map(sh => {
+      const boxes = _shopsAffiches.map(sh => {
         const c = _getOpStepChecked(op, sh, d);
         const col = SHOP_COLORS[sh];
         const init = (SHOP_LABELS[sh] || sh).charAt(0);
         const box = c
           ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:${col}; color:#0f172a; border:1px solid ${col}; border-radius:3px; font-size:10px; font-weight:700;">✓</span>`
           : `<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid ${col}; border-radius:3px;"></span>`;
-        const clickable = (typeof isAdmin === 'function' && isAdmin());
-        return `<span ${clickable ? `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!c})" style="cursor:pointer;` : `title="Géré par Fabien" style="`} display:inline-flex; align-items:center; gap:3px;"><span style="font-size:9px; font-weight:700; color:${col};">${init}</span>${box}</span>`;
+        const clickable = !_lectureSeule && (typeof isAdmin === 'function' && isAdmin());
+        return `<span ${clickable ? `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!c})" style="cursor:pointer;` : `title="Géré par Fabien — la coche apparaîtra une fois fait de son côté" style="`} display:inline-flex; align-items:center; gap:3px;"><span style="font-size:9px; font-weight:700; color:${col};">${init}</span>${box}</span>`;
       }).join('');
       return `<div style="display:flex; align-items:center; gap:6px; padding:3px 0; font-size:11px; color:#e2e8f0;">
         <span style="flex:1;">${d.label}${stepBadgeAdmin(d)}</span>
