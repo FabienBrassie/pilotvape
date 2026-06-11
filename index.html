@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:07</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 23:10</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -16996,8 +16996,14 @@ function renderDashboard() {
       // Comptage par PRODUITID DISTINCT au lieu d'actions : 1 gamme avec 5 parfums RENTRER = 1
       // liquide, pas 5. Aligne le décompte avec ce que Fabien perçoit comme "1 gamme".
       // Anti-fantôme bonus : actions résiduelles (annulées ou sur produit inexistant) écartées.
+      // Vocabulaire précis (demande Fabien 2026-06-11) : pour les liquides on parle de
+      // GAMMES ENTIÈRES et de PARFUMS, jamais de "liquides" ambigus. "5 parfums (1 gamme)"
+      // = 5 actions parfum réparties sur 1 gamme ; "1 gamme entière" = action gamme complète.
       const _countByProdType = (actionsArr) => {
-        const _kit = new Set(), _pd = new Set(), _liq = new Set();
+        const _kit = new Set(), _pd = new Set();
+        const _gammesEntieres = new Set(); // actions liq sans parfum ciblé
+        const _parfums = new Set();        // parfums distincts (actions parfumées)
+        const _gammesDesParfums = new Set();
         (actionsArr || []).forEach(a => {
           if (a.annulee) return;
           const t = a.produitType || 'kit'; // legacy : actions sans produitType = kit
@@ -17006,13 +17012,16 @@ function renderDashboard() {
           } else if (t === 'pd') {
             if (basePD.find(p => p.id === a.produitId)) _pd.add(a.produitId);
           } else if (t === 'liq') {
-            if (baseLiq.find(g => g.id === a.produitId)) _liq.add(a.produitId);
+            if (!baseLiq.find(g => g.id === a.produitId)) return;
+            if (a.produitParfumId) { _parfums.add(a.produitParfumId); _gammesDesParfums.add(a.produitId); }
+            else _gammesEntieres.add(a.produitId);
           }
         });
         const parts = [];
         if (_kit.size > 0) parts.push(_kit.size + ' kit' + (_kit.size > 1 ? 's' : ''));
         if (_pd.size > 0) parts.push(_pd.size + ' PD');
-        if (_liq.size > 0) parts.push(_liq.size + ' liquide' + (_liq.size > 1 ? 's' : ''));
+        if (_gammesEntieres.size > 0) parts.push(_gammesEntieres.size + ' gamme' + (_gammesEntieres.size > 1 ? 's' : '') + ' entière' + (_gammesEntieres.size > 1 ? 's' : ''));
+        if (_parfums.size > 0) parts.push(_parfums.size + ' parfum' + (_parfums.size > 1 ? 's' : '') + ' (' + _gammesDesParfums.size + ' gamme' + (_gammesDesParfums.size > 1 ? 's' : '') + ')');
         return parts.join(' · ');
       };
       // Indication temporelle pour la card "À installer" (aujourd'hui / demain).
