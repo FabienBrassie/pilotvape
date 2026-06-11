@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 00:12</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 11:52</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -481,7 +481,26 @@
        la lib était collée DANS index.html, 525 Ko = 25 % du fichier, alors que le fichier
        séparé existait déjà à la racine et est déployé avec le dossier). Si le fichier
        manque sur le serveur, un message clair s'affiche au lieu d'un échec silencieux. -->
-  <script src="pdf-lib.min.js" onerror="window._pdfLibKO=true;console.error('[PDF-LIB] pdf-lib.min.js introuvable — la génération d\'étiquettes PDF est indisponible. Vérifier que le fichier est bien déployé à la racine.')"></script>
+  <script src="pdf-lib.min.js" onerror="window._pdfLibLocalKO=true"></script>
+  <script>
+  // Filet pdf-lib (fix 2026-06-11 après test 5 raté) : si le fichier local manque
+  // (déploiement incomplet, test local hors dossier), on charge la même bibliothèque
+  // depuis un CDN public. Message clair seulement si les DEUX sources échouent.
+  (function() {
+    function chargerSecours() {
+      var s = document.createElement('script');
+      s.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js';
+      s.onload = function() { console.log('[PDF-LIB] Chargée depuis le CDN de secours.'); };
+      s.onerror = function() { console.error('[PDF-LIB] Local ET CDN indisponibles — étiquettes PDF hors service.'); };
+      document.head.appendChild(s);
+    }
+    if (window._pdfLibLocalKO) { chargerSecours(); }
+    else {
+      // Le onerror ne suffit pas toujours (cache, MIME) : re-vérifier après chargement complet.
+      window.addEventListener('load', function() { if (!window.PDFLib) chargerSecours(); });
+    }
+  })();
+  </script>
   <script>
 // ═══════════════════════════════════════════════════════════════
 // FILET GLOBAL D'ERREURS (chantier A — 2026-06-10)
@@ -8295,9 +8314,29 @@ function expliquerSyncDot() {
     titre = '🟢 Synchronisé';
     explication = 'Tout est à jour : tes modifications sont sur le serveur et visibles des autres postes.';
   }
-  pvAlert(titre + '\n\n' + explication
-    + '\n\n— Dernier envoi réussi : ' + _fmtHeure(_lastSyncWriteOk)
-    + '\n— Dernière réception : ' + _fmtHeure(_lastSyncReadOk));
+  _pvModal('<div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:8px;">' + titre + '</div>'
+    + (explication + '\n\n— Dernier envoi réussi : ' + _fmtHeure(_lastSyncWriteOk)
+    + '\n— Dernière réception : ' + _fmtHeure(_lastSyncReadOk)),
+    [{ label: '🔄 Relancer la synchro', color: '#3b82f6' }, { label: 'Fermer' }],
+    async function(idx) {
+      if (idx !== 0) return;
+      // Déblocage manuel (fix 2026-06-11) : remet les compteurs à zéro et relance
+      // lecture + envoi immédiatement — plus besoin de recharger la page.
+      _syncFailStreak = 0;
+      _syncOk = null;
+      try {
+        await _syncRead();
+        _syncOk = true;
+        _lastSyncReadOk = new Date();
+        if (_savePending && _lastPayload && !_saveInFlight) await _saveToSupabase(_lastPayload);
+        _updateSyncIndicator();
+        _showSaveMsg('✓ Synchro relancée', '#22c55e', '#0f172a', 2500);
+      } catch (e) {
+        _syncOk = false;
+        _updateSyncIndicator();
+        _showSaveMsg('Serveur toujours injoignable — nouvel essai auto toutes les 15 s', '#7f1d1d', '#fecaca', 4000);
+      }
+    });
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -8866,7 +8905,7 @@ async function _syncWrite(payload, baseUpdatedAt) {
   const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', {
     method: 'PUT', headers: headers,
     body: JSON.stringify({ data: payload })
-  }, 20000);
+  }, 45000); // 45 s (était 20 s) : les données font ~1,3 Mo, un wifi lent pouvait dépasser et compter de faux échecs (fix 2026-06-11)
   if (!res.ok) throw new Error('Sync write ' + res.status);
   return await res.json(); // { success, updated_at }
 }
