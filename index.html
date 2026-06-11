@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 19:03</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-11 19:16</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -842,6 +842,19 @@ function applyRoleUI() {
   // F2 (2026-06-10) : classe CSS sur le body selon le rôle — permet des styles dédiés
   // boutique (cibles tactiles plus grandes) sans toucher la densité admin.
   document.body.classList.toggle('role-boutique', !isAdmin());
+  // Règle "sa vue d'abord" (Fabien, 2026-06-11) : sur un poste boutique, les filtres
+  // boutique se calent d'office sur SA boutique à la connexion (un produit écoulé chez
+  // elle disparaît donc de ses vues — base, FT, dashboard). Réglage fait une seule fois :
+  // l'équipe peut ensuite changer le filtre pour regarder ailleurs.
+  if (!isAdmin() && typeof currentShop !== 'undefined' && currentShop) {
+    ['kitShopFilter', 'dashShop'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el && !el.dataset.pvShopInit) {
+        if (!el.value) el.value = currentShop;
+        el.dataset.pvShopInit = '1';
+      }
+    });
+  }
   // Badge rôle dans le header
   const header = document.querySelector('header');
   if (header) {
@@ -3214,10 +3227,13 @@ function isKitPresentAtShop(kit, shop) {
     const sortirOS = actions.find(a => a.type === 'SORTIR' && a.produitId === kit.id && !a.annulee);
     if (sortirOS && sortirOS.etats && sortirOS.etats[shop] && sortirOS.etats[shop].done) return false;
   }
-  // A_SORTIR ou FIN_DE_VIE → présent SAUF si SORTIR est fait à cette boutique
-  if (sv === 'A_SORTIR' || sv === 'FIN_DE_VIE') {
-    const sortirAct = actions.find(a => a.type === 'SORTIR' && a.produitId === kit.id && !a.annulee);
-    if (sortirAct && sortirAct.etats[shop] && sortirAct.etats[shop].done) return false;
+  // A_SORTIR, FIN_DE_VIE ou A_REMPLACER → présent SAUF si une SORTIR est faite à cette boutique.
+  // Généralisé 2026-06-11 (règle "écoulé chez moi = invisible chez moi", dictionnaire §3.h) :
+  // A_REMPLACER ajouté (un kit à remplacer déjà sorti chez une boutique n'y est plus), et on
+  // regarde TOUTES les actions SORTIR du kit (il peut y en avoir plusieurs : classique, reprise).
+  if (sv === 'A_SORTIR' || sv === 'FIN_DE_VIE' || sv === 'A_REMPLACER') {
+    const _sortirsKit = actions.filter(a => a.type === 'SORTIR' && a.produitId === kit.id && !a.annulee);
+    if (_sortirsKit.some(a => a.etats && a.etats[shop] && a.etats[shop].done)) return false;
     return true; // pas encore sorti ici
   }
   // A_RENTRER → présent SEULEMENT si RENTRER est fait à cette boutique
