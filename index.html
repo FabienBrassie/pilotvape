@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 19:04</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 19:15</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3370,6 +3370,21 @@ function stepBadgeDispatch(a, sh, def, checked) {
   return ' <span style="font-size:9px; color:#fbbf24; background:#78350f25; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée à ' + _hubLbl + ' : le lot arrive par rétrocession (transport Fabien) — attente, pas un retard">⏳ attend le dispatch depuis ' + _hubLbl + '</span>';
 }
 
+// Même logique pour les étapes de réception d'une OP en réception centralisée (2026-06-12) :
+// "Stock reçu" et "Réceptionner <pièce PLV>" — le hub reçoit tout (stock + PLV), les autres
+// attendent leur lot/PLV apportés par Fabien.
+function opStepBadgeDispatch(op, sh, def, checked) {
+  if (!op || !op.dispatchHub || !def) return '';
+  const _isRecep = def.key === 'stock' || def.kind === 'reception' || /_recue$/.test(def.key || '');
+  if (!_isRecep) return '';
+  if (sh === op.dispatchHub) {
+    return ' <span style="font-size:9px; color:#67e8f9; background:#0e749022; border:1px solid #06b6d440; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée : tout arrive ici (stock + PLV), puis dispatch vers les autres boutiques (transport Fabien)">📦 tout arrive ici</span>';
+  }
+  if (checked) return '';
+  const _hubLbl = SHOP_LABELS[op.dispatchHub] || op.dispatchHub;
+  return ' <span style="font-size:9px; color:#fbbf24; background:#78350f25; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée à ' + _hubLbl + ' : arrive avec le dispatch (transport Fabien) — attente, pas un retard">⏳ attend le dispatch depuis ' + _hubLbl + '</span>';
+}
+
 function getActionSteps(typeOrAction) {
   const type = typeof typeOrAction === 'string' ? typeOrAction : (typeOrAction && typeOrAction.type);
   const motif = (typeof typeOrAction === 'object' && typeOrAction) ? typeOrAction.motifSortie : null;
@@ -6425,6 +6440,7 @@ function creerPaireRetro(opts) {
       _ts: nowIso, _adminTs: nowIso
     };
     if (opts.rentrerActionId) a.retroRentrerActionId = opts.rentrerActionId;
+    if (opts.opId) a.retroOpId = opts.opId;
     if (opts.parfumId) { a.produitParfumId = opts.parfumId; a._parfumNom = opts.parfumNom || null; }
     // Court-circuit des boutiques NON concernées : tout coché, donc done → invisibles chez elles.
     SHOPS.forEach(sh => {
@@ -6492,6 +6508,56 @@ async function setDispatchHub(actionId, hub) {
   saveData();
   try { renderDashboard(); } catch(e) {}
   pvAlert('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' activée.\nLes transferts vers les autres boutiques sont créés (section 🔁 Rétrocessions).');
+}
+
+// ── RÉCEPTION CENTRALISÉE sur une OP (2026-06-12, demande Fabien : "et pour les OP, stock
+// ET PLV ?"). Pose op.dispatchHub : les étapes "Stock reçu" / "Réceptionner PLV" des autres
+// boutiques passent en "attend le dispatch" (badges via opStepBadgeDispatch). Pour le STOCK
+// produits : rétrocessions Swappy hub → boutiques créées (liées par retroOpId) — SAUF si
+// l'OP a déjà une ligne À rentrer liée (c'est elle qui porte le dispatch, pas de doublon).
+// La PLV n'a pas de stock Swappy : pas de rétrocession, juste l'info + transport Fabien.
+async function setOpDispatchHub(opId, hub) {
+  if (!isAdmin()) { pvAlert('La réception centralisée est décidée par Fabien.'); return; }
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  const nowIso = new Date().toISOString();
+  const _lies = () => actions.filter(x => x.retroOpId === op.id && !x.annulee);
+  if (!hub) {
+    const lies = _lies();
+    if (lies.length > 0) {
+      const ok = await pvConfirm('Retirer la réception centralisée ?\n\n' + lies.length + ' rétrocession(s) de stock liée(s) seront annulées.');
+      if (!ok) return;
+      lies.forEach(x => _cancelAction(x));
+    }
+    op.dispatchHub = null;
+    op._ts = nowIso; op._adminTs = nowIso;
+    logAction('Réception centralisée OP retirée', op.nom || op.id);
+    saveData(); try { renderDashboard(); } catch(e) {} try { typeof renderOps === 'function' && renderOps(); } catch(e) {}
+    return;
+  }
+  const _hasRentrerLie = !!(op.rentrerActionId && actions.find(x => x.id === op.rentrerActionId && !x.annulee));
+  const ok = await pvConfirm('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' pour l\'OP « ' + (op.nom || op.id) + ' » ?\n\nStock + PLV arrivent à ' + (SHOP_LABELS[hub] || hub) + ' ; Fabien dispatche vers les autres boutiques.' + (_hasRentrerLie ? '\n\n(Le stock est suivi par la ligne À rentrer liée — pense à y choisir le même hub. Ici : info PLV/réception.)' : '\nLes rétrocessions Swappy du stock seront créées (section 🔁).'), { title: '📦 Réception centralisée — OP', ok: 'Lancer', okColor: '#06b6d4' });
+  if (!ok) return;
+  _lies().forEach(x => _cancelAction(x));
+  op.dispatchHub = hub;
+  op._ts = nowIso; op._adminTs = nowIso;
+  let _nbRetros = 0;
+  if (!_hasRentrerLie) {
+    (op.produitIds || []).forEach(pid => {
+      const _t = baseKits.find(k => k.id === pid) ? 'kit' : baseLiq.find(l => l.id === pid) ? 'liq' : basePD.find(p => p.id === pid) ? 'pd' : null;
+      if (!_t) return; // produit hors bases (accessoire) : pas de stock Swappy à rétrocéder
+      SHOPS.forEach(sh => {
+        if (sh === hub) return;
+        creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id });
+        _nbRetros++;
+      });
+    });
+  }
+  logAction('Réception centralisée OP', (op.nom || op.id) + ' → hub ' + (SHOP_LABELS[hub] || hub) + (_nbRetros ? ' · ' + _nbRetros + ' rétrocession(s) de stock créée(s)' : ' (PLV/info seulement)'));
+  saveData();
+  try { renderDashboard(); } catch(e) {}
+  try { typeof renderOps === 'function' && renderOps(); } catch(e) {}
+  pvAlert('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' activée sur l\'OP.' + (_nbRetros ? '\n' + _nbRetros + ' transfert(s) de stock créé(s) (section 🔁 Rétrocessions).' : ''));
 }
 
 async function lancerRetrocession(produitType, produitId, parfumId) {
@@ -21778,7 +21844,7 @@ function _renderOpCardHtmlInner(op, options) {
           style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_stepGrey} ${_stepHighlight}"
           ${_isClickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='${_isTerminee && isDesinstall && !checked ? '#1c1117' : 'transparent'}'"` : ''}>
           ${box}
-          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}${!checked ? stepBadgeAttente(d, ((op.etats || {})[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}</span>
+          <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}${!checked ? stepBadgeAttente(d, ((op.etats || {})[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}${opStepBadgeDispatch(op, sh, d, checked)}</span>
         </div>`;
       }).join('');
     return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${rows}</div>`;
@@ -21876,6 +21942,28 @@ function _renderOpCardHtmlInner(op, options) {
     ${piecesHtml}
     ${freetouchBtnsHtml}
     ${globalStepsHtml}
+    ${(() => {
+      // ── 📦 Réception centralisée de l'OP (2026-06-12) : stock + PLV arrivent à un hub,
+      // dispatch vers les autres. Sélecteur admin ; info pour les boutiques quand actif.
+      const _dh = op.dispatchHub || '';
+      if (typeof isAdmin === 'function' && isAdmin() && isActive && !noEdit) {
+        const _dhLies = actions.filter(x => x.retroOpId === op.id && !x.annulee);
+        const _dhDone = _dhLies.filter(x => actionGlobalState(x) === 'FAIT').length;
+        const _dhStatus = _dh && _dhLies.length > 0 ? `<span style="font-size:10px; color:#67e8f9;">${_dhDone}/${_dhLies.length} transfert${_dhLies.length>1?'s':''} de stock terminé${_dhDone>1?'s':''} · section 🔁</span>` : '';
+        return `<div style="margin-top:6px; padding:6px 8px; background:#0f172a; border:1px solid ${_dh ? '#06b6d440' : '#33415560'}; border-radius:4px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;" onclick="event.stopPropagation()">
+          <span style="font-size:10px; color:#64748b;">📦 Réception centralisée ?</span>
+          <select onchange="setOpDispatchHub('${op.id}', this.value || null)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${_dh ? '#06b6d460' : '#475569'}; color:${_dh ? '#67e8f9' : '#cbd5e1'}; border-radius:3px;">
+            <option value="">Non — chaque boutique reçoit sa livraison</option>
+            ${SHOPS.map(sh => `<option value="${sh}" ${_dh === sh ? 'selected' : ''}>Tout arrive à ${SHOP_LABELS[sh] || sh} → dispatch (stock + PLV)</option>`).join('')}
+          </select>
+          ${_dhStatus}
+        </div>`;
+      }
+      if (_dh) {
+        return `<div style="margin-top:6px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:4px; font-size:10px; color:#67e8f9;">📦 Réception centralisée à ${SHOP_LABELS[_dh] || _dh} — stock et PLV arrivent là-bas, Fabien dispatche vers les autres boutiques.</div>`;
+      }
+      return '';
+    })()}
     <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:6px; margin-top:8px;">
       ${stepsPerShop}
     </div>
