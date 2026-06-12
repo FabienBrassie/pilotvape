@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 18:33</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 19:04</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3137,7 +3137,17 @@ const ACTION_STEPS = {
                   { key: 'rayon',     label: 'Changée en rayon', nat: 'imm' },
                   { key: 'swappy',    label: 'Mis à jour sur Swappy', nat: 'imm' }],
   SWAP_COMPOSANT:[{ key: 'swap',      label: 'Composant changé sur le kit', nat: 'imm' },
-                  { key: 'etiquette', label: 'Nouvelle étiquette imprimée', nat: 'imm' }]
+                  { key: 'etiquette', label: 'Nouvelle étiquette imprimée', nat: 'imm' }],
+  // ── Rétrocession inter-boutiques (chantier 2026-06-12, spéc classeur onglet Dispatch +
+  // décision 5 du dictionnaire : transporteur = Fabien, rétrocession Swappy = étape dédiée).
+  // Une rétrocession = paire d'actions liées par retroId : l'ENVOI vit chez la boutique
+  // source (les 2 autres boutiques sont court-circuitées à la création), la RÉCEPTION chez
+  // la destination. Champs : retroId, retroFrom, retroTo, retroQte, retroDate.
+  RETRO_ENVOI:   [{ key: 'lot_prepare',  label: '1. Lot préparé', nat: 'imm' },
+                  { key: 'retro_swappy', label: '2. Rétrocession faite sur Swappy', nat: 'cond', condKey: 'lot_prepare', condLabel: 'après la préparation du lot' },
+                  { key: 'transporte',   label: '3. Transporté', nat: 'cond', condKey: 'retro_swappy', condLabel: 'après la rétrocession Swappy', resp: 'admin' }],
+  RETRO_RECEPTION:[{ key: 'recu_retro',  label: '1. Reçu en boutique', nat: 'evt', condLabel: 'attend le transport' },
+                  { key: 'stock_ok',    label: '2. Stock vérifié sur Swappy', nat: 'cond', condKey: 'recu_retro', condLabel: 'après réception' }]
 };
 // Étapes spécifiques pour une SORTIR de motif REPRISE (reprise fournisseur — séparée du destockage commercial).
 // L'étape "comptage" est éditable : la boutique saisit la quantité reprise dans steps[sh].comptageQte.
@@ -3346,6 +3356,18 @@ function stepBadgeAttente(def, stepsObj) {
 function stepBadgeAdmin(def) {
   if (!def || def.resp !== 'admin') return '';
   return ' <span style="font-size:9px; color:#c4b5fd; background:#4c1d9530; border:1px solid #8b5cf640; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Étape gérée par Fabien — pas du travail boutique">👤 Fabien</span>';
+}
+
+// Badge dispatch sur l'étape "Reçu en boutique" d'un À rentrer en réception centralisée
+// (2026-06-12) : le hub sait qu'il reçoit TOUT, les autres savent qu'elles attendent leur lot.
+function stepBadgeDispatch(a, sh, def, checked) {
+  if (!a || a.type !== 'RENTRER' || !a.dispatchHub || !def || def.key !== 'recu') return '';
+  if (sh === a.dispatchHub) {
+    return ' <span style="font-size:9px; color:#67e8f9; background:#0e749022; border:1px solid #06b6d440; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée : cette boutique reçoit TOUT le stock, puis prépare les lots et fait les rétrocessions Swappy (section 🔁)">📦 tout le stock ici</span>';
+  }
+  if (checked) return '';
+  const _hubLbl = SHOP_LABELS[a.dispatchHub] || a.dispatchHub;
+  return ' <span style="font-size:9px; color:#fbbf24; background:#78350f25; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée à ' + _hubLbl + ' : le lot arrive par rétrocession (transport Fabien) — attente, pas un retard">⏳ attend le dispatch depuis ' + _hubLbl + '</span>';
 }
 
 function getActionSteps(typeOrAction) {
@@ -3709,6 +3731,8 @@ function cleanupActionsForKit(kit) {
     if (actionGlobalState(a) === 'FAIT') return;
     // ── Reprise fournisseur : protégée tant que le statut est REPRISE ──
     if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && kit.statutVie === 'REPRISE') return;
+    // ── Rétrocession inter-boutiques : vit sa vie, annulée seulement si le produit est Sorti ──
+    if (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') { if (kit.statutVie === 'SORTI') _cancelAction(a); return; }
     // Pour un kit "one-shot" actif (DANS_OFFRE/A_RENTRER), on maintient à la fois
     // la RENTRER (poser le kit) et la SORTIR (prix rouge + retirer en fin de coup).
     const isOneShotActif = kit.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(kit.statutVie);
@@ -3732,6 +3756,8 @@ function cleanupActionsForLiq(gamme) {
     if (actionGlobalState(a) === 'FAIT') return;
     // ── Reprise fournisseur : protégée tant que le statut est REPRISE ──
     if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && gamme.statutVie === 'REPRISE') return;
+    // ── Rétrocession inter-boutiques : vit sa vie, annulée seulement si le produit est Sorti ──
+    if (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') { if (gamme.statutVie === 'SORTI') _cancelAction(a); return; }
     if (a.type === 'PRIX') {
       if (gamme.statutVie === 'SORTI') _cancelAction(a);
       return;
@@ -3762,6 +3788,8 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
     if (actionGlobalState(a) === 'FAIT') return;
     // ── Reprise fournisseur : protégée tant que le parfum est en statut REPRISE ──
     if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && parfumStatus === 'REPRISE') return;
+    // ── Rétrocession inter-boutiques : vit sa vie, annulée seulement si le parfum est Sorti ──
+    if (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') { if (parfumStatus === 'SORTI') _cancelAction(a); return; }
     if (a.type === 'PRIX') {
       if (parfumStatus === 'SORTI') _cancelAction(a);
       return;
@@ -3788,6 +3816,8 @@ function cleanupActionsForPd(pd) {
     if (actionGlobalState(a) === 'FAIT') return;
     // ── Reprise fournisseur : protégée tant que le statut est REPRISE ──
     if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && pd.statutVie === 'REPRISE') return;
+    // ── Rétrocession inter-boutiques : vit sa vie, annulée seulement si le produit est Sorti ──
+    if (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') { if (pd.statutVie === 'SORTI') _cancelAction(a); return; }
     if (a.type === 'PRIX') {
       if (pd.statutVie === 'SORTI') _cancelAction(a);
       return;
@@ -6365,6 +6395,152 @@ function setRepriseComptageParfum(actionId, shop, parfumId, value) {
   // Pas de re-render systématique : le champ reste cohérent en place (comme setActionStepQte)
 }
 
+// ══ RÉTROCESSION INTER-BOUTIQUES (chantier 2026-06-12, décisions Fabien : v1 ponctuelle
+// A → B, tous produits au parfum près avec quantité, déclenchée par Fabien seul) ══
+// Spéc : classeur onglet Dispatch + dictionnaire décision 5 (transporteur = Fabien,
+// rétrocession Swappy = étape dédiée). Modèle : une PAIRE d'actions liées par retroId —
+// RETRO_ENVOI (travail de la boutique source + transport Fabien) et RETRO_RECEPTION
+// (travail de la destination). Les boutiques non concernées sont court-circuitées à la
+// création (même mécanique que garderEnTiroir) : chez elles l'action est "done", donc
+// invisible dans leurs vues filtrées.
+// LA fonction canonique de création d'une paire de rétrocession (règle 8) : utilisée par
+// la rétrocession ponctuelle (lancerRetrocession) ET par la réception centralisée d'un
+// À rentrer (setDispatchHub). opts : { produitType, produitId, parfumId, parfumNom,
+// from, to, qte, date, rentrerActionId (si dispatch lié à un À rentrer) }.
+function creerPaireRetro(opts) {
+  const nowIso = new Date().toISOString();
+  const retroId = 'RETRO-' + Date.now().toString(36) + '-' + Math.floor(Math.random() * 1296).toString(36);
+  const _mk = (type, shopActive) => {
+    const a = {
+      id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
+      type, produitId: opts.produitId, produitType: opts.produitType,
+      priorite: 'AUTO',
+      dateCreation: ymd(new Date()),
+      auteur: 'Manuel',
+      etats: makeShopStates(type),
+      dateCloture: null, annulee: false, lienOP: null,
+      retroId, retroFrom: opts.from, retroTo: opts.to,
+      retroQte: (typeof opts.qte === 'number') ? opts.qte : null,
+      retroDate: opts.date || null,
+      _ts: nowIso, _adminTs: nowIso
+    };
+    if (opts.rentrerActionId) a.retroRentrerActionId = opts.rentrerActionId;
+    if (opts.parfumId) { a.produitParfumId = opts.parfumId; a._parfumNom = opts.parfumNom || null; }
+    // Court-circuit des boutiques NON concernées : tout coché, donc done → invisibles chez elles.
+    SHOPS.forEach(sh => {
+      if (sh === shopActive) return;
+      const st = a.etats[sh];
+      if (!st._stepTs) st._stepTs = {};
+      Object.keys(st.steps).forEach(k => { st.steps[k] = true; st._stepTs[k] = nowIso; });
+      st.done = true; st.dateFait = ymd(new Date());
+    });
+    actions.push(a);
+    return a;
+  };
+  _mk('RETRO_ENVOI', opts.from);
+  _mk('RETRO_RECEPTION', opts.to);
+  return retroId;
+}
+
+// ── RÉCEPTION CENTRALISÉE sur un À RENTRER (recadrage Fabien 2026-06-12 : "la rétrocession
+// c'est juste pour les OP ou les à rentrer, quand une boutique reçoit tout le stock à
+// dispatcher — une étape de plus dans les processus existants"). La décision se prend SUR la
+// ligne À rentrer (règle 6) : choisir la boutique hub crée les rétrocessions hub → autres
+// boutiques, liées par retroRentrerActionId. Annuler le choix annule les rétros non entamées.
+async function setDispatchHub(actionId, hub) {
+  if (!isAdmin()) { pvAlert('La réception centralisée est décidée par Fabien.'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'RENTRER') return;
+  const nowIso = new Date().toISOString();
+  const _linked = () => actions.filter(x => x.retroRentrerActionId === a.id && !x.annulee);
+  if (!hub) {
+    // Retirer la réception centralisée : annuler les rétros liées (sauf travail déjà commencé)
+    const lies = _linked();
+    const entamees = lies.filter(x => SHOPS.some(sh => { const st = x.etats && x.etats[sh]; return st && st._stepTs && Object.keys(st._stepTs).length > 0 && !st.done; }));
+    let okAnnule = true;
+    if (lies.length > 0) {
+      okAnnule = await pvConfirm('Retirer la réception centralisée ?\n\n' + lies.length + ' rétrocession(s) liée(s) seront annulées.');
+      if (!okAnnule) return;
+      lies.forEach(x => _cancelAction(x));
+    }
+    a.dispatchHub = null;
+    a._ts = nowIso; a._adminTs = nowIso;
+    logAction('Réception centralisée retirée', _logActionLabel(actionId));
+    saveData(); try { renderDashboard(); } catch(e) {}
+    return;
+  }
+  const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
+    : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
+    : baseKits.find(k => k.id === a.produitId);
+  const nom = prod ? ((prod.marque || '') + ' ' + (prod.modele || prod.gamme || '')) : a.produitId;
+  const ok = await pvConfirm('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' pour « ' + nom + ' » ?\n\n' + (SHOP_LABELS[hub] || hub) + ' reçoit TOUT le stock, prépare les lots et fait les rétrocessions Swappy ; Fabien transporte ; les autres boutiques reçoivent leur lot et vérifient leur stock. Le suivi des transferts apparaît dans la section 🔁 Rétrocessions.', { title: '📦 Réception centralisée', ok: 'Lancer', okColor: '#06b6d4' });
+  if (!ok) return;
+  // Annuler les éventuelles rétros d'un ancien hub avant de recréer
+  _linked().forEach(x => _cancelAction(x));
+  a.dispatchHub = hub;
+  a._ts = nowIso; a._adminTs = nowIso;
+  let _pfNom = null;
+  if (a.produitParfumId && prod && Array.isArray(prod.parfums)) {
+    const pf = prod.parfums.find(x => x.id === a.produitParfumId);
+    _pfNom = pf ? (pf.n || null) : (a._parfumNom || null);
+  }
+  SHOPS.forEach(sh => {
+    if (sh === hub) return;
+    creerPaireRetro({ produitType: a.produitType || 'kit', produitId: a.produitId, parfumId: a.produitParfumId || null, parfumNom: _pfNom, from: hub, to: sh, qte: null, date: null, rentrerActionId: a.id });
+  });
+  logAction('Réception centralisée', nom + ' → hub ' + (SHOP_LABELS[hub] || hub) + ', rétrocessions créées vers ' + SHOPS.filter(s => s !== hub).map(s => SHOP_LABELS[s] || s).join(' et '));
+  saveData();
+  try { renderDashboard(); } catch(e) {}
+  pvAlert('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' activée.\nLes transferts vers les autres boutiques sont créés (section 🔁 Rétrocessions).');
+}
+
+async function lancerRetrocession(produitType, produitId, parfumId) {
+  if (!isAdmin()) { pvAlert('La rétrocession est décidée par Fabien (transport lors de ses passages).'); return; }
+  const prod = produitType === 'kit' ? baseKits.find(k => k.id === produitId)
+    : produitType === 'liq' ? baseLiq.find(g => g.id === produitId)
+    : basePD.find(p => p.id === produitId);
+  if (!prod) { pvAlert('Produit introuvable.'); return; }
+  let nom = (prod.marque || '') + ' ' + (prod.modele || prod.gamme || '');
+  let parfumNom = null;
+  if (produitType === 'liq' && parfumId && Array.isArray(prod.parfums)) {
+    const pf = prod.parfums.find(x => x.id === parfumId);
+    if (!pf) { pvAlert('Parfum introuvable.'); return; }
+    parfumNom = pf.n || '(sans nom)';
+    nom += ' — ' + parfumNom;
+  }
+  const _shopOpts = sel => SHOPS.map(sh => `<option value="${sh}" ${sel === sh ? 'selected' : ''}>${SHOP_LABELS[sh] || sh}</option>`).join('');
+  const _selStyle = 'padding:4px 8px; font-size:12px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;';
+  return new Promise(resolve => {
+    const overlay = _pvModal(`<div style="color:#67e8f9; font-weight:700; font-size:14px; margin-bottom:6px;">🔁 Rétrocession — ${nom}</div>
+      <div style="font-size:11px; color:#94a3b8; margin-bottom:10px;">La source prépare le lot et fait la rétrocession sur Swappy, Fabien transporte, la destination reçoit et vérifie son stock.</div>
+      <div style="display:flex; flex-direction:column; gap:8px;">
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:#e2e8f0;">Depuis <select id="_retro_from" style="${_selStyle}">${_shopOpts(SHOPS[0])}</select>
+          vers <select id="_retro_to" style="${_selStyle}">${_shopOpts(SHOPS[1])}</select></label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:#e2e8f0;">Quantité <input id="_retro_qte" type="number" min="1" step="1" placeholder="nb réf." style="width:80px; ${_selStyle} text-align:right;"></label>
+        <label style="display:flex; align-items:center; gap:8px; font-size:12px; color:#e2e8f0;">Transport prévu le <input id="_retro_date" type="date" style="${_selStyle}"></label>
+      </div>`,
+      [{ label: 'Lancer la rétrocession', color: '#06b6d4' }, { label: 'Annuler' }],
+      idx => {
+        if (idx !== 0) { resolve(false); return; }
+        const from = overlay.querySelector('#_retro_from').value;
+        const to = overlay.querySelector('#_retro_to').value;
+        if (from === to) { pvAlert('La source et la destination doivent être différentes.'); resolve(false); return; }
+        const qteRaw = overlay.querySelector('#_retro_qte').value;
+        const qte = qteRaw === '' ? null : Math.max(1, parseInt(qteRaw, 10) || 1);
+        const dateT = overlay.querySelector('#_retro_date').value || null;
+        const retroId = creerPaireRetro({ produitType, produitId, parfumId, parfumNom, from, to, qte, date: dateT });
+        logAction('Rétrocession lancée', nom + ' : ' + (SHOP_LABELS[from] || from) + ' → ' + (SHOP_LABELS[to] || to) + (qte ? ' · ' + qte + ' réf.' : '') + (dateT ? ' · transport ' + fmtFR(dateT) : '') + ' (' + retroId + ')');
+        saveData();
+        try { renderDashboard(); } catch(e) {}
+        try { renderLiqAll && renderLiqAll(); } catch(e) {}
+        try { renderKits && renderKits(); } catch(e) {}
+        try { renderBasePD && renderBasePD(); } catch(e) {}
+        pvAlert('Rétrocession lancée : ' + (SHOP_LABELS[from] || from) + ' → ' + (SHOP_LABELS[to] || to) + '.\nSection "🔁 Rétrocessions" du dashboard pour suivre.');
+        resolve(true);
+      });
+  });
+}
+
 // Toggle rapide d'une shop entière : coche/décoche TOUTES les sous-étapes.
 // Comportement : si toutes faites → on décoche tout ; sinon → on coche tout.
 function toggleActionShop(actionId, shop) {
@@ -8876,7 +9052,9 @@ function _mergeEtats(localActions, remoteActions) {
   // On détecte les doublons (même produitId + type + produitParfumId, non annulée) et on fusionne
   // les steps dans le plus avancé, puis on ANNULE le doublon (pas tombstone pour éviter la boucle
   // syncAutoActions → recreate → dedup → tombstone → recreate).
-  const _semKey = a => (a.produitId || '') + '|' + (a.type || '') + '|' + (a.produitParfumId || '');
+  // retroId inclus dans la clé (2026-06-12) : deux rétrocessions distinctes du même
+  // produit/parfum sont des objets différents — sans ça le dédoublonnage les fusionnerait.
+  const _semKey = a => (a.produitId || '') + '|' + (a.type || '') + '|' + (a.produitParfumId || '') + '|' + (a.retroId || '');
   const _semMap = {};
   let _dedupCount = 0;
   localActions.forEach(a => {
@@ -11984,6 +12162,7 @@ function renderKits() {
             ⚡ One-shot
           </label>
           <button onclick="event.stopPropagation(); ouvrirCommandeClient('kit','${k.id}')" style="padding:2px 8px; font-size:10px; background:${k.commandeClient && SHOPS.some(s => k.commandeClient[s]) ? '#0e749022' : '#0f172a'}; color:${k.commandeClient && SHOPS.some(s => k.commandeClient[s]) ? '#67e8f9' : '#94a3b8'}; border:1px solid ${k.commandeClient && SHOPS.some(s => k.commandeClient[s]) ? '#06b6d460' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Commande client : garder la réf en tiroir dans certaines boutiques (hors linéaire, hors grille d'offre)">🗄️ Cmd client</button>
+          ${(typeof isAdmin === 'function' && isAdmin()) ? `<button onclick="event.stopPropagation(); lancerRetrocession('kit','${k.id}')" style="padding:2px 8px; font-size:10px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; cursor:pointer;" title="Rétrocession : transférer ce kit d'une boutique à une autre">🔁 Rétrocession</button>` : ''}
           ${badgeCommandeClient(k)}
           ${(() => {
             const _murOv = k.caseMurOverride || '';
@@ -13120,6 +13299,7 @@ function renderLiqGammeDetail(g) {
           <input type="checkbox" ${p.exclu ? 'checked' : ''} onchange="updateLiqParfumField('${g.id}',${pi},'exclu',this.checked)" style="margin:0; cursor:pointer; accent-color:#64748b; transform:scale(0.8);">Exclu</label>`;
         if (isAdmin()) {
           html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #0ea5e960; color:#7dd3fc; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:600;" title="Lancer une reprise fournisseur sur ce parfum">📦</button>`;
+          html += `<button onclick="event.stopPropagation(); lancerRetrocession('liq','${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #06b6d460; color:#67e8f9; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:600;" title="Rétrocession : transférer ce parfum d'une boutique à une autre">🔁</button>`;
         }
         html += `<button onclick="removeLiqParfum('${g.id}',${pi})" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #ef444440; color:#ef4444; border-radius:2px; cursor:pointer; line-height:1.2;" title="Retirer">×</button>`;
         html += `</div>`;
@@ -13139,6 +13319,7 @@ function renderLiqGammeDetail(g) {
     </label>`;
     if (isAdmin()) {
       html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}',null)" style="padding:2px 8px; font-size:10px; background:#0c4a6e22; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;" title="Lancer une reprise fournisseur sur la gamme entière">📦 Reprise</button>`;
+      html += `<button onclick="event.stopPropagation(); lancerRetrocession('liq','${g.id}',null)" style="padding:2px 8px; font-size:10px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; cursor:pointer; font-weight:600;" title="Transférer du stock de cette gamme d'une boutique à une autre (rétrocession Swappy + transport Fabien)">🔁 Rétrocession</button>`;
     }
     // Commande client : admin OU poste boutique (règle révisée 2026-06-12 — chaque boutique
     // gère SON tiroir ; la modale grise les cases des autres boutiques).
@@ -14581,6 +14762,9 @@ function renderDashboard() {
     return true;
   };
   const reprises = actions.filter(a => a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && _isReprisesVisible(a));
+  // Rétrocessions inter-boutiques (2026-06-12) : la paire envoi/réception. Les boutiques non
+  // concernées sont court-circuitées à la création → isVisible (fShop done) les masque chez elles.
+  const retros = actions.filter(a => (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') && isVisible(a));
   const rentrer = actions.filter(a => a.type === 'RENTRER' && isVisible(a));
   const meps = actions.filter(a => a.type === 'MISE_EN_PLACE' && isVisible(a));
   const prix = actions.filter(a => a.type === 'PRIX' && isVisible(a));
@@ -14595,7 +14779,8 @@ function renderDashboard() {
   // Appliqué AVANT tout comptage (block badges, chips Summary, cards de la vue Cards).
   // ═══════════════════════════════════════════════════════════════════════
   const _filterAntiDoublonLiq = (actionsArr) => {
-    const _ptmKey = a => a.produitId + '::' + a.type + '::' + (a.motifSortie || '');
+    // retroId inclus (2026-06-12) : deux rétrocessions distinctes ne se masquent pas entre elles.
+    const _ptmKey = a => a.produitId + '::' + a.type + '::' + (a.motifSortie || '') + '::' + (a.retroId || '');
     const _parfCov = new Set();
     actions.forEach(a => {
       if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfCov.add(_ptmKey(a));
@@ -14607,6 +14792,7 @@ function renderDashboard() {
   };
   const sortirAffich   = _filterAntiDoublonLiq(sortir);
   const reprisesAffich = _filterAntiDoublonLiq(reprises);
+  const retrosAffich   = _filterAntiDoublonLiq(retros);
   const rentrerAffich  = _filterAntiDoublonLiq(rentrer);
   const prixAffich     = _filterAntiDoublonLiq(prix);
 
@@ -14664,6 +14850,10 @@ function renderDashboard() {
 
   function renderShopDot(a, sh) {
     if (fShop && sh !== fShop) return '';
+    // Rétrocession : ne montrer que le rond de la boutique concernée (les autres sont
+    // court-circuitées à la création — un rond plein chez elles serait un faux signal).
+    if (a.type === 'RETRO_ENVOI' && sh !== a.retroFrom) return '';
+    if (a.type === 'RETRO_RECEPTION' && sh !== a.retroTo) return '';
     ensureActionSteps(a);
     const st = a.etats[sh];
     const col = SHOP_COLORS[sh];
@@ -14764,6 +14954,10 @@ function renderDashboard() {
 
   // Rend une ligne de sous-étapes cochables par shop (utilisé dans le panneau déplié)
   function renderShopSteps(a, sh) {
+    // Rétrocession : seule la boutique concernée a du travail (envoi → source, réception →
+    // destination). Les autres ont été court-circuitées à la création : pas de bloc affiché.
+    if (a.type === 'RETRO_ENVOI' && sh !== a.retroFrom) return '';
+    if (a.type === 'RETRO_RECEPTION' && sh !== a.retroTo) return '';
     ensureActionSteps(a);
     const defs = getActionSteps(a);
     const st = a.etats[sh];
@@ -14815,7 +15009,7 @@ function renderDashboard() {
         style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; cursor:pointer; font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'}; border-radius:3px; user-select:none;"
         onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'">
         ${box}
-        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}${!checked ? stepBadgeAttente(d, (a.etats[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}</span>
+        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}${!checked ? stepBadgeAttente(d, (a.etats[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}${stepBadgeDispatch(a, sh, d, checked)}</span>
         ${qteField}
       </div>`;
     }).join('');
@@ -14863,7 +15057,9 @@ function renderDashboard() {
     BESOIN_A_COMBLER: { verb: 'Besoin à combler', icon: '⚠',  color: '#fb923c' },
     MISE_EN_PLACE:    { verb: 'Monte',            icon: '🔧', color: '#8b5cf6' },
     PRIX:             { verb: 'Ajuste prix',       icon: '€',  color: '#f59e0b' },
-    SWAP_COMPOSANT:   { verb: 'Swap',             icon: '🔄', color: '#6366f1' }
+    SWAP_COMPOSANT:   { verb: 'Swap',             icon: '🔄', color: '#6366f1' },
+    RETRO_ENVOI:      { verb: 'Envoie',           icon: '🔁', color: '#06b6d4' },
+    RETRO_RECEPTION:  { verb: 'Réceptionne',      icon: '📥', color: '#06b6d4' }
   };
   // Pour les actions PRIX, le verbe/couleur/icône se spécialise selon la décision prise.
   // On dérive de DECISION_META global (source de vérité partagée avec Relevé de prix).
@@ -15257,6 +15453,18 @@ function renderDashboard() {
       }
     }
 
+    // ── 📦 RÉCEPTION CENTRALISÉE : badge hub sur la ligne À rentrer ──
+    if (a.type === 'RENTRER' && a.dispatchHub) {
+      badgeTag += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; white-space:nowrap;" title="Réception centralisée : tout le stock arrive à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub}, puis dispatch par rétrocession vers les autres boutiques">📦 hub ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub}</span>`;
+    }
+
+    // ── 🔁 RÉTROCESSION : trajet A → B + quantité + date de transport sur la ligne ──
+    if (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') {
+      const _rFrom = SHOP_LABELS[a.retroFrom] || a.retroFrom || '?';
+      const _rTo = SHOP_LABELS[a.retroTo] || a.retroTo || '?';
+      badgeTag += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; white-space:nowrap;" title="Rétrocession inter-boutiques${a.retroDate ? ' — transport prévu le ' + fmtFR(a.retroDate) : ''}">🔁 ${_rFrom} → ${_rTo}${typeof a.retroQte === 'number' ? ' · ' + a.retroQte + ' réf' : ''}${a.retroDate ? ' · 🚚 ' + fmtFR(a.retroDate) : ''}</span>`;
+    }
+
     // ── 🗄️ COMMANDE CLIENT sur la ligne À SORTIR (correctif 2026-06-11, retour Fabien) ──
     // C'est ICI que la boutique dit "je garde cette réf en tiroir pour un client" — au
     // moment de la sortie, pas dans la base. Niveau PARFUM si la ligne est un parfum d'une
@@ -15494,7 +15702,29 @@ function renderDashboard() {
           <span style="font-size:10px; color:#64748b;">Prix rouge ?</span>
           <span onclick="event.stopPropagation(); initRentrerPrixRouge('${a.id}')" style="cursor:pointer; padding:2px 8px; font-size:10.5px; font-weight:700; border-radius:3px; background:transparent; color:#ef4444; border:1px solid #ef444480;">🔴 Prix rouge</span>
         </div>` : '';
-        return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        // ── 📦 Réception centralisée (dispatch, 2026-06-12) : la décision se prend ICI, sur
+        // le À rentrer. Hub choisi → rétrocessions hub → autres boutiques créées et suivies.
+        let dispatchBlock = '';
+        if (typeof isAdmin === 'function' && isAdmin()) {
+          const _dh = a.dispatchHub || '';
+          const _dhLies = actions.filter(x => x.retroRentrerActionId === a.id && !x.annulee);
+          let _dhStatus = '';
+          if (_dh && _dhLies.length > 0) {
+            const _dhDone = _dhLies.filter(x => actionGlobalState(x) === 'FAIT').length;
+            _dhStatus = `<span style="font-size:10px; color:#67e8f9;">${_dhDone}/${_dhLies.length} transfert${_dhLies.length>1?'s':''} terminé${_dhDone>1?'s':''} · suivi section 🔁</span>`;
+          }
+          dispatchBlock = `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+            <span style="font-size:10px; color:#64748b;">📦 Réception centralisée ?</span>
+            <select onclick="event.stopPropagation()" onchange="setDispatchHub('${a.id}', this.value || null)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${_dh ? '#06b6d460' : '#475569'}; color:${_dh ? '#67e8f9' : '#cbd5e1'}; border-radius:3px;">
+              <option value="">Non — chaque boutique reçoit sa commande</option>
+              ${SHOPS.map(sh => `<option value="${sh}" ${_dh === sh ? 'selected' : ''}>Tout arrive à ${SHOP_LABELS[sh] || sh} → dispatch</option>`).join('')}
+            </select>
+            ${_dhStatus}
+          </div>`;
+        } else if (a.dispatchHub) {
+          dispatchBlock = `<div style="margin-bottom:6px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:3px; font-size:10px; color:#67e8f9;">📦 Réception centralisée à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub} — les autres boutiques reçoivent leur lot par rétrocession (transport Fabien).</div>`;
+        }
+        return dispatchBlock + `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
           ${remplBlock}
           <span style="font-size:10px; color:#64748b;">Entrée en fanfare ?</span>
           ${fanfareChips}
@@ -16202,6 +16432,14 @@ function renderDashboard() {
     reprisesBlock = block('reprises', '📦 À reprendre', '#0ea5e9', reprisesAffich.length,
       _exportReprisesBtn + renderGroupedActionCards(reprises),
       'Workflow reprise fournisseur — 5 étapes par boutique : réappro coupé · stock zéro · produit désactivé sur Swappy · comptage des références · mis de côté dans le carton.');
+  }
+  // --- Section "Rétrocessions" (transfert inter-boutiques, 2026-06-12) ---
+  // Masquée quand vide, comme À reprendre.
+  let retrosBlock = '';
+  if (retros.length > 0) {
+    retrosBlock = block('retros', '🔁 Rétrocessions', '#06b6d4', retrosAffich.length,
+      renderGroupedActionCards(retros),
+      'Transfert entre boutiques — source : lot préparé · rétrocession Swappy · transport (Fabien) ; destination : reçu · stock vérifié.');
   }
   const rentrerBlock = block('rentrer', 'À rentrer', '#22c55e', rentrerAffich.length,
     rentrer.length === 0 ? emptyState('Rien à rentrer ✓') : renderGroupedActionCards(rentrer),
@@ -17295,6 +17533,7 @@ function renderDashboard() {
     opEnCours:  opEnCoursBlock,
     sortir:     sortirBlock,
     reprises:   reprisesBlock,
+    retros:     retrosBlock,
     rentrer:    rentrerBlock,
     prix:       prixBlock,
     besoins:    besoinsBlock,
@@ -17319,7 +17558,7 @@ function renderDashboard() {
       _dashHtml = urgenceBlock + _retourBtn + (_sectionContent || `<div style="text-align:center; padding:30px; color:#64748b;">Cette section n'a pas de contenu actuellement.</div>`);
     } else if (dashViewMode === 'all') {
       // Mode legacy : toutes les sections empilées (comme avant la refonte)
-      _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+      _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
     } else {
       // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
       // Le filtre anti-doublon a déjà été appliqué en amont (sortirAffich/reprisesAffich/etc.).
@@ -17387,6 +17626,14 @@ function renderDashboard() {
         if (_campsR.size > 0) _ctxParts.push(_campsR.size + ' campagne' + (_campsR.size > 1 ? 's' : ''));
         _cards.push(_renderDashSectionCard('reprises', '📦 À reprendre', '#0ea5e9', reprisesAffich.length, reprisesAffich, _ctxParts.join(' · ')));
       }
+      if (retrosAffich.length > 0) {
+        const _retroCtxParts = [];
+        const _retroByType = _countByProdType(retrosAffich);
+        if (_retroByType) _retroCtxParts.push(_retroByType);
+        const _retroIds = new Set(); retrosAffich.forEach(a => { if (a.retroId) _retroIds.add(a.retroId); });
+        if (_retroIds.size > 0) _retroCtxParts.push(_retroIds.size + ' transfert' + (_retroIds.size > 1 ? 's' : ''));
+        _cards.push(_renderDashSectionCard('retros', '🔁 Rétrocessions', '#06b6d4', retrosAffich.length, retrosAffich, _retroCtxParts.join(' · ')));
+      }
       if (rentrerAffich.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrerAffich.length, rentrerAffich, _countByProdType(rentrerAffich)));
       if (prixAffich.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prixAffich.length, prixAffich, _countByProdType(prixAffich)));
       // « Besoins à combler » et « Historique » ne sont pas rendus en vue cards (décision Fabien
@@ -17406,7 +17653,7 @@ function renderDashboard() {
     // l'ancien comportement (toutes sections empilées) pour ne PAS bloquer le dashboard.
     // L'erreur reste visible en console pour diagnostic.
     console.error('[DASH-RENDER] Erreur dans la vue cards/détail, fallback mode legacy :', _err);
-    _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
   }
   document.getElementById('dashContent').innerHTML = _dashHtml;
 
@@ -17420,6 +17667,7 @@ function renderDashboard() {
   if (opsInstallVisibles.length) summaryParts.push(chip('#f472b6', `${opsInstallVisibles.length} à installer`, 'install'));
   if (opsDesinstVisibles.length) summaryParts.push(chip('#f97316', `${opsDesinstVisibles.length} à désinstaller`, 'desinstall'));
   if (sortirAffich.length) summaryParts.push(chip('#ef4444', `${sortirAffich.length} à sortir`, 'sortir'));
+  if (retrosAffich.length) summaryParts.push(chip('#06b6d4', `${retrosAffich.length} rétrocession${retrosAffich.length > 1 ? 's' : ''}`, 'retros'));
   if (rentrerAffich.length) summaryParts.push(chip('#22c55e', `${rentrerAffich.length} à rentrer`, 'rentrer'));
   if (totalBesoins && fProdType !== 'liq') {
     // Si au moins une case pure vide (aucun sortant), on remonte l'urgence en rouge.
@@ -24035,6 +24283,7 @@ function renderBasePD() {
           ' ⚡ One-shot' +
         '</label>' +
         '<button onclick="event.stopPropagation(); ouvrirCommandeClient(\'pd\',\'' + pd.id + '\')" style="padding:2px 8px; font-size:10px; background:' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#0e749022' : '#0f172a') + '; color:' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#67e8f9' : '#94a3b8') + '; border:1px solid ' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#06b6d460' : '#47556960') + '; border-radius:3px; cursor:pointer;" title="Commande client : garder la réf en tiroir dans certaines boutiques">🗄️ Cmd client</button>' +
+        ((typeof isAdmin === 'function' && isAdmin()) ? '<button onclick="event.stopPropagation(); lancerRetrocession(\'pd\',\'' + pd.id + '\')" style="padding:2px 8px; font-size:10px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; cursor:pointer;" title="Rétrocession : transférer cette pièce d\'une boutique à une autre">🔁 Rétrocession</button>' : '') +
         badgeCommandeClient(pd) +
       '</div>' +
     '</div>';
