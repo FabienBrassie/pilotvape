@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 18:20</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 18:33</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -3486,7 +3486,9 @@ function situationParfumChezShop(g, p, shop) {
   // Le tiroir prime : une boutique qui garde la réf la voit en tiroir, même si la sortie
   // de la gamme est cochée chez elle (c'est précisément le sens du court-circuit).
   if (estCommandeClient(p, shop) || estCommandeClient(g, shop)) return 'TIROIR';
-  if (p.s === 'SORTI') return 'SORTIE_FAITE';
+  // Parfum sorti OU gamme passée Sorti globalement (cascade) : sortie partout — même si les
+  // actions SORTIR ont été nettoyées depuis (le statut fait foi).
+  if (p.s === 'SORTI' || g.statutVie === 'SORTI') return 'SORTIE_FAITE';
   const _sortirsP = actions.filter(a => a.produitType === 'liq' && a.type === 'SORTIR'
     && a.produitId === g.id && !a.annulee
     && (!a.produitParfumId || a.produitParfumId === p.id));
@@ -3504,6 +3506,14 @@ function situationParfumChezShop(g, p, shop) {
 function isLiqParfumPresentAtShop(g, p, shop) {
   const s = situationParfumChezShop(g, p, shop);
   return s === 'PRESENT' || s === 'TIROIR';
+}
+// Une gamme a-t-elle un tiroir commande client encore actif ? (gamme entière ou parfum)
+// shop fourni → chez CETTE boutique ; sinon → chez n'importe laquelle. Sert à ne PAS envoyer
+// dans l'historique une gamme sortie dont une réf vit encore en tiroir quelque part.
+function gammeTiroirActif(g, shop) {
+  if (!g) return false;
+  const _shops = shop ? [shop] : SHOPS;
+  return _shops.some(sh => estCommandeClient(g, sh) || (g.parfums || []).some(p => estCommandeClient(p, sh)));
 }
 
 // ── Produit SORTI d'une boutique (pour auto-complétion OP) ──
@@ -13746,18 +13756,35 @@ function renderLiqAll() {
     });
   }
 
+  // ── Sorties avec TIROIR encore actif (2026-06-12, question Fabien : "si la gamme disparaît,
+  // la boutique au tiroir voit-elle encore son parfum ?") : une gamme sortie dont une réf vit
+  // encore en tiroir n'est PAS de l'histoire — section dédiée, toujours visible, toutes vues.
+  // En vue boutique : seulement si le tiroir est chez ELLE. Sans filtre (admin) : tous les tiroirs.
+  const _tiroirsActifs = sortis.filter(g => gammeTiroirActif(g, fShopLiq));
+  const _sortisHisto = sortis.filter(g => !gammeTiroirActif(g, fShopLiq));
+  if (_tiroirsActifs.length > 0) {
+    html += `<div style="margin-top:16px;">`;
+    html += `<div style="padding:6px 12px; background:#0e749015; border:1px solid #06b6d440; border-radius:4px; display:flex; align-items:center; gap:8px;">
+      <span style="font-size:12px; color:#67e8f9; font-weight:600;">🗄️ Gammes sorties mais en tiroir (commande client) — ${_tiroirsActifs.length}</span>
+      <span style="font-size:10px; color:#64748b;">la réf vit encore chez ${fShopLiq ? (SHOP_LABELS[fShopLiq] || fShopLiq) : 'au moins une boutique'} : commandable en tiroir, hors linéaire</span>
+    </div>`;
+    html += `<div style="padding:4px 0;">`;
+    _tiroirsActifs.forEach(g => { html += renderLiqGammeCard(g, false); });
+    html += `</div></div>`;
+  }
+
   // Gammes sorties (toutes vues)
-  if (sortis.length > 0) {
+  if (_sortisHisto.length > 0) {
     html += `<div style="margin-top:16px; opacity:0.5;">`;
     const sKey = 'liq-sortis';
     const sExpanded = isLiqExpanded(sKey);
     html += `<div onclick="toggleLiqSection('${sKey}')" style="padding:6px 12px; background:#1e293b; border:1px solid #475569; border-radius:4px; cursor:pointer; display:flex; align-items:center; gap:8px; user-select:none;">
       <span style="font-size:10px;">${sExpanded ? '▾' : '▸'}</span>
-      <span style="font-size:12px; color:#64748b; font-weight:600;">Historique gammes sorties (${sortis.length})</span>
+      <span style="font-size:12px; color:#64748b; font-weight:600;">Historique gammes sorties (${_sortisHisto.length})</span>
     </div>`;
     if (sExpanded) {
       html += `<div style="padding:4px 8px; display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:4px;">`;
-      sortis.forEach(g => { html += renderLiqGammeCard(g, false); });
+      _sortisHisto.forEach(g => { html += renderLiqGammeCard(g, false); });
       html += `</div>`;
     }
     html += `</div>`;
