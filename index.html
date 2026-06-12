@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 17:15</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 18:18</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -427,6 +427,9 @@
       </select>
       <select id="liqFilterRole" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option><option value="COMPLEMENT">Complément</option><option value="NOTORIETE">Notoriété</option><option value="COUP">One-shot</option>
+      </select>
+      <select id="liqShopFilter" onchange="renderLiqAll();saveUiState();" title="Vue boutique : ne montrer que ce qui est présent chez elle, avec la situation de chaque parfum (tiroir commande client, sortie faite, pas encore reçu)" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
+        <option value="">Toutes boutiques</option><option value="pessac">🏪 Pessac</option><option value="merignac">🏪 Mérignac</option><option value="langon">🏪 Langon</option>
       </select>
       <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
@@ -847,7 +850,7 @@ function applyRoleUI() {
   // elle disparaît donc de ses vues — base, FT, dashboard). Réglage fait une seule fois :
   // l'équipe peut ensuite changer le filtre pour regarder ailleurs.
   if (!isAdmin() && typeof currentShop !== 'undefined' && currentShop) {
-    ['kitShopFilter', 'dashShop'].forEach(function(id) {
+    ['kitShopFilter', 'dashShop', 'liqShopFilter'].forEach(function(id) {
       const el = document.getElementById(id);
       if (el && !el.dataset.pvShopInit) {
         if (!el.value) el.value = currentShop;
@@ -3155,7 +3158,8 @@ const ACTION_STEPS_REPRISE = [
 // STATUT "COMMANDE CLIENT" PAR BOUTIQUE (spéc validée Fabien 2026-06-11)
 // Une réf sortie des linéaires mais gardée en tiroir pour des clients attachés.
 // PAR boutique : gardée à Pessac ≠ sortie à Mérignac. Règles validées :
-//  - la boutique propose, Fabien valide (v1 : toggle admin) ;
+//  - RÈGLE RÉVISÉE 2026-06-12 : chaque boutique gère le tiroir de SA boutique (c'est elle
+//    qui sait quel parfum garder), l'admin gère tout — cf. peutGererCommandeClient() ;
 //  - ne compte PLUS dans la grille d'offre ;
 //  - chez cette boutique : pas en linéaire (invisible au mur FT) mais visible dans
 //    la base avec le badge 🗄️ (elle est dans le tiroir, dispo à la commande).
@@ -3171,8 +3175,18 @@ function badgeCommandeClient(prod) {
   const lbl = shops.map(sh => (SHOP_LABELS[sh] || sh).charAt(0)).join('·');
   return `<span style="font-size:9px; padding:1px 6px; border-radius:3px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; white-space:nowrap;" title="Commande client : gardé en tiroir à ${shops.map(sh => SHOP_LABELS[sh] || sh).join(', ')} — hors linéaire, hors grille d'offre">🗄️ CC ${lbl}</span>`;
 }
+// ── Qui peut gérer la commande client d'une boutique ? (règle RÉVISÉE par Fabien 2026-06-12,
+// remplace "la boutique propose, Fabien valide") : chaque boutique gère le tiroir DE SA
+// boutique — c'est elle qui sait quel parfum ne pas désactiver sur une gamme qui sort.
+// L'admin gère les trois. Fonction canonique (règle 8) : tout contrôle de droit CC passe ici.
+function peutGererCommandeClient(shop) {
+  if (typeof isAdmin === 'function' && isAdmin()) return true;
+  return !!(typeof currentShop !== 'undefined' && currentShop && shop && currentShop === shop);
+}
+
 async function ouvrirCommandeClient(produitType, produitId, parfumId) {
-  if (!isAdmin()) { pvAlert('La boutique propose, Fabien valide — réglage réservé à l\'admin.'); return; }
+  // Boutique : autorisée pour SA boutique (les cases des autres sont en lecture seule).
+  if (!isAdmin() && !(typeof currentShop !== 'undefined' && currentShop)) { pvAlert('Connecte-toi en boutique ou en admin pour gérer la commande client.'); return; }
   const prod = produitType === 'kit' ? baseKits.find(k => k.id === produitId)
     : produitType === 'liq' ? baseLiq.find(g => g.id === produitId)
     : basePD.find(p => p.id === produitId);
@@ -3188,11 +3202,16 @@ async function ouvrirCommandeClient(produitType, produitId, parfumId) {
     nomParfum = ' — ' + (pf.n || pf.nom || 'parfum');
   }
   const cur = cible.commandeClient || {};
-  const checks = SHOPS.map(sh => `<label style="display:flex; align-items:center; gap:8px; padding:6px 4px; cursor:pointer; font-size:13px; color:#e2e8f0;">
-      <input type="checkbox" id="_cc_${sh}" ${cur[sh] ? 'checked' : ''} style="width:16px; height:16px;">
+  // Cases : éditables seulement pour les boutiques qu'on a le droit de gérer (la sienne,
+  // ou toutes pour l'admin). Les autres restent visibles mais grisées.
+  const checks = SHOPS.map(sh => {
+    const _edit = peutGererCommandeClient(sh);
+    return `<label style="display:flex; align-items:center; gap:8px; padding:6px 4px; cursor:${_edit ? 'pointer' : 'default'}; font-size:13px; color:#e2e8f0;${_edit ? '' : ' opacity:0.45;'}">
+      <input type="checkbox" id="_cc_${sh}" ${cur[sh] ? 'checked' : ''} ${_edit ? '' : 'disabled'} style="width:16px; height:16px;">
       <span style="color:${SHOP_COLORS[sh]}; font-weight:700;">${SHOP_LABELS[sh] || sh}</span>
-      <span style="font-size:11px; color:#64748b;">garde la réf en tiroir (commande client)</span>
-    </label>`).join('');
+      <span style="font-size:11px; color:#64748b;">garde la réf en tiroir (commande client)${_edit ? '' : ' — géré par cette boutique ou Fabien'}</span>
+    </label>`;
+  }).join('');
   const nom = (prod.marque || '') + ' ' + (prod.modele || prod.gamme || '') + nomParfum;
   return new Promise(resolve => {
     const overlay = _pvModal(`<div style="color:#67e8f9; font-weight:700; font-size:14px; margin-bottom:6px;">🗄️ Commande client — ${nom}</div>
@@ -3203,7 +3222,11 @@ async function ouvrirCommandeClient(produitType, produitId, parfumId) {
         if (idx !== 0) { resolve(false); return; }
         const cc = {};
         let un = false;
-        SHOPS.forEach(sh => { const el = overlay.querySelector('#_cc_' + sh); if (el && el.checked) { cc[sh] = true; un = true; } });
+        SHOPS.forEach(sh => {
+          // Boutique non gérable par l'utilisateur : on PRÉSERVE son réglage actuel.
+          if (!peutGererCommandeClient(sh)) { if (cur[sh]) { cc[sh] = true; un = true; } return; }
+          const el = overlay.querySelector('#_cc_' + sh); if (el && el.checked) { cc[sh] = true; un = true; }
+        });
         cible.commandeClient = un ? cc : null;
         cible._ts = new Date().toISOString();
         prod._ts = new Date().toISOString(); // propage aussi la gamme (merge parfums par _ts)
@@ -3248,7 +3271,8 @@ function _libelleParfumsParFormat(liqActions) {
 // cette boutique ET court-circuite ses coches (toutes faites, horodatées comme un vrai
 // cochage → merge-safe). La ligne est réglée pour elle, la sortie continue ailleurs.
 async function garderEnTiroir(actionId, shop) {
-  if (!isAdmin()) { pvAlert('La boutique propose, Fabien valide — réglage réservé à l\'admin.'); return; }
+  // Règle révisée Fabien 2026-06-12 : chaque boutique gère SON tiroir, l'admin gère tout.
+  if (!peutGererCommandeClient(shop)) { pvAlert('Le tiroir de ' + (SHOP_LABELS[shop] || shop) + ' se gère depuis son poste (ou par Fabien).'); return; }
   const a = actions.find(x => x.id === actionId);
   if (!a || a.type !== 'SORTIR') return;
   const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
@@ -3447,6 +3471,39 @@ function isKitPresentAtShop(kit, shop) {
   }
   // DANS_OFFRE, A_REMPLACER → présent partout
   return true;
+}
+
+// ── Situation d'un PARFUM liquide chez une boutique (fondation backlog n°7, 2026-06-12) ──
+// LA fonction canonique, équivalent parfum de isKitPresentAtShop (règle 8). Règles métier du
+// dictionnaire : "écoulé chez moi = invisible chez moi" + commande client PAR boutique.
+//   'TIROIR'       → gardé en tiroir ici (commande client) : commandable, hors linéaire
+//   'SORTIE_FAITE' → la sortie (classique ou reprise) est cochée done chez cette boutique,
+//                    ou le parfum est Sorti globalement : plus présent ici
+//   'PAS_RECU'     → parfum à rentrer pas encore reçu ici (RENTRER pas coché done)
+//   'PRESENT'      → présent normalement en linéaire
+function situationParfumChezShop(g, p, shop) {
+  if (!g || !p || !shop) return 'PRESENT';
+  // Le tiroir prime : une boutique qui garde la réf la voit en tiroir, même si la sortie
+  // de la gamme est cochée chez elle (c'est précisément le sens du court-circuit).
+  if (estCommandeClient(p, shop) || estCommandeClient(g, shop)) return 'TIROIR';
+  if (p.s === 'SORTI') return 'SORTIE_FAITE';
+  const _sortirsP = actions.filter(a => a.produitType === 'liq' && a.type === 'SORTIR'
+    && a.produitId === g.id && !a.annulee
+    && (!a.produitParfumId || a.produitParfumId === p.id));
+  if (_sortirsP.some(a => a.etats && a.etats[shop] && a.etats[shop].done)) return 'SORTIE_FAITE';
+  if (p.s === 'A_RENTRER' || p.s === 'EN_ATTENTE') {
+    const _rentrersP = actions.filter(a => a.produitType === 'liq' && a.type === 'RENTRER'
+      && a.produitId === g.id && !a.annulee
+      && (!a.produitParfumId || a.produitParfumId === p.id));
+    if (_rentrersP.some(a => a.etats && a.etats[shop] && a.etats[shop].done)) return 'PRESENT';
+    return 'PAS_RECU';
+  }
+  return 'PRESENT';
+}
+// Présence simple (même contrat que isKitPresentAtShop) : présent = en linéaire OU en tiroir.
+function isLiqParfumPresentAtShop(g, p, shop) {
+  const s = situationParfumChezShop(g, p, shop);
+  return s === 'PRESENT' || s === 'TIROIR';
 }
 
 // ── Produit SORTI d'une boutique (pour auto-complétion OP) ──
@@ -6935,6 +6992,7 @@ function saveUiState() {
     liqFilterFormat: document.getElementById('liqFilterFormat')?.value || '',
     liqFilterProfil: document.getElementById('liqFilterProfil')?.value || '',
     liqFilterRole: document.getElementById('liqFilterRole')?.value || '',
+    liqShopFilter: document.getElementById('liqShopFilter')?.value || '',
     liqFilterStatut: liqStatutFilter,
     liqViewMode: document.getElementById('liqSort')?.value || 'grille',
     liqSortCol, liqSortDir,
@@ -6973,6 +7031,7 @@ function restoreUiState() {
     if (s.liqFilterFormat) { const el = document.getElementById('liqFilterFormat'); if (el) el.value = s.liqFilterFormat; }
     if (s.liqFilterProfil) { const el = document.getElementById('liqFilterProfil'); if (el) el.value = s.liqFilterProfil; }
     if (s.liqFilterRole) { const el = document.getElementById('liqFilterRole'); if (el) el.value = s.liqFilterRole; }
+    if (s.liqShopFilter) { const el = document.getElementById('liqShopFilter'); if (el) el.value = s.liqShopFilter; }
     if (s.liqFilterStatut) { liqStatutFilter = Array.isArray(s.liqFilterStatut) ? s.liqFilterStatut : (s.liqFilterStatut ? [s.liqFilterStatut] : []); }
     if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) el.value = s.liqViewMode; }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
@@ -12992,13 +13051,27 @@ function renderLiqGammeDetail(g) {
       var _detailFStatut = liqStatutFilter;
       var _filterParfums = _detailFStatut.length > 0;
       var _hiddenCount = 0;
+      // Vue boutique active : situation de chaque parfum CHEZ ELLE (tiroir / sortie / pas reçu)
+      const _detailShop = document.getElementById('liqShopFilter')?.value || '';
       g.parfums.forEach((p, pi) => {
         if (_filterParfums && !_detailFStatut.includes(p.s)) { _hiddenCount++; return; }
         const pSc = liqGammeStatusColor(p.s || 'OK');
         const pCtColor = LIQ_GOUT_COLORS[p.ct] || '#94a3b8';
-        const dimStyle = p.s === 'SORTI' ? 'opacity:0.4;' : (p.exclu ? 'opacity:0.55;' : '');
+        let dimStyle = p.s === 'SORTI' ? 'opacity:0.4;' : (p.exclu ? 'opacity:0.55;' : '');
         const _isPr = _parfumPrSet.has(p.id);
-        const _prBadge = _isPr ? `<span style="font-size:8px; color:#ef4444; flex-shrink:0;" title="Prix rouge actif">🔴</span>` : '';
+        let _prBadge = _isPr ? `<span style="font-size:8px; color:#ef4444; flex-shrink:0;" title="Prix rouge actif">🔴</span>` : '';
+        if (_detailShop) {
+          const _sit = situationParfumChezShop(g, p, _detailShop);
+          const _shopLbl = SHOP_LABELS[_detailShop] || _detailShop;
+          if (_sit === 'TIROIR') {
+            _prBadge += `<span style="font-size:8px; padding:1px 5px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:2px; white-space:nowrap; flex-shrink:0;" title="Commande client à ${_shopLbl} : gardé en tiroir, commandable, hors linéaire">🗄️ tiroir ici</span>`;
+          } else if (_sit === 'SORTIE_FAITE') {
+            _prBadge += `<span style="font-size:8px; padding:1px 5px; background:#33415540; color:#94a3b8; border:1px solid #47556950; border-radius:2px; white-space:nowrap; flex-shrink:0;" title="Sortie cochée à ${_shopLbl} : plus présent chez elle">✓ sorti ici</span>`;
+            if (!dimStyle) dimStyle = 'opacity:0.45;';
+          } else if (_sit === 'PAS_RECU') {
+            _prBadge += `<span style="font-size:8px; padding:1px 5px; background:#78350f25; color:#fbbf24; border:1px solid #f59e0b40; border-radius:2px; white-space:nowrap; flex-shrink:0;" title="À rentrer : pas encore reçu à ${_shopLbl}">⏳ pas reçu ici</span>`;
+          }
+        }
         html += `<div style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}">`;
         html += `<span style="width:2px; height:18px; background:${pSc}; border-radius:1px; flex-shrink:0;"></span>`;
         html += `<input value="${(p.n||'').replace(/"/g,'&quot;')}" onblur="updateLiqParfumField('${g.id}',${pi},'n',this.value)" style="flex:1; min-width:100px; padding:2px 4px; font-size:11px; background:#0f172a; border:1px solid #33415580; color:#cbd5e1; border-radius:2px;">`;
@@ -13036,6 +13109,10 @@ function renderLiqGammeDetail(g) {
     </label>`;
     if (isAdmin()) {
       html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}',null)" style="padding:2px 8px; font-size:10px; background:#0c4a6e22; color:#7dd3fc; border:1px solid #0ea5e960; border-radius:3px; cursor:pointer; font-weight:600;" title="Lancer une reprise fournisseur sur la gamme entière">📦 Reprise</button>`;
+    }
+    // Commande client : admin OU poste boutique (règle révisée 2026-06-12 — chaque boutique
+    // gère SON tiroir ; la modale grise les cases des autres boutiques).
+    if (isAdmin() || (typeof currentShop !== 'undefined' && currentShop)) {
       html += `<button onclick="event.stopPropagation(); ouvrirCommandeClient('liq','${g.id}')" style="padding:2px 8px; font-size:10px; background:${g.commandeClient && SHOPS.some(s => g.commandeClient[s]) ? '#0e749022' : 'none'}; color:${g.commandeClient && SHOPS.some(s => g.commandeClient[s]) ? '#67e8f9' : '#94a3b8'}; border:1px solid ${g.commandeClient && SHOPS.some(s => g.commandeClient[s]) ? '#06b6d460' : '#47556960'}; border-radius:3px; cursor:pointer; font-weight:600;" title="Commande client : garder la gamme en tiroir dans certaines boutiques (hors linéaire, hors grille d'offre)">🗄️ Cmd client</button>`;
       html += badgeCommandeClient(g);
     }
@@ -13051,6 +13128,7 @@ function renderLiqAll() {
   const fProfil = document.getElementById('liqFilterProfil')?.value || '';
   const fRole = document.getElementById('liqFilterRole')?.value || '';
   const fStatut = liqStatutFilter;
+  const fShopLiq = document.getElementById('liqShopFilter')?.value || '';
   const viewMode = document.getElementById('liqSort')?.value || 'grille';
 
   let filtered = baseLiq.filter(g => {
@@ -13063,7 +13141,11 @@ function renderLiqAll() {
     // Statut : match sur la gamme OU sur au moins un parfum ayant ce statut
     const matchStatut = fStatut.length === 0 || fStatut.includes(g.statutVie)
       || (g.parfums || []).some(function(p) { return fStatut.includes(p.s); });
-    return matchSearch && matchFormat && matchProfil && matchRole && matchStatut;
+    // Vue boutique (backlog n°7) : garder la gamme si au moins un parfum est présent ou en
+    // tiroir chez elle (gammes sans parfums listés : on garde, pas d'info pour trancher).
+    const matchShop = !fShopLiq || !(g.parfums || []).length
+      || (g.parfums || []).some(p => isLiqParfumPresentAtShop(g, p, fShopLiq));
+    return matchSearch && matchFormat && matchProfil && matchRole && matchStatut && matchShop;
   });
 
   // Exclure les lignes séparateurs/placeholder (marque vide, "autre" avec PA +/-, etc.)
@@ -13076,7 +13158,12 @@ function renderLiqAll() {
   const totalParfums = baseLiq.reduce((s,g) => s + (g.parfums||[]).filter(p=>p.s!=='SORTI').length, 0);
   const statsEl = document.getElementById('liqStats');
   if (statsEl) {
-    statsEl.innerHTML = `<div style="display:flex; gap:12px; font-size:10px; color:#94a3b8; padding:4px 8px; background:#1e293b; border-radius:4px;">
+    // Bandeau vue boutique : dire ce que la vue fait (et ses limites v1 : les compteurs
+    // gammes/parfums restent globaux — situation par parfum visible dans le détail déplié).
+    const _shopBanner = fShopLiq ? `<div style="display:flex; gap:8px; align-items:center; font-size:10px; color:#67e8f9; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:4px; margin-bottom:4px;">
+      🏪 <b>Vue ${SHOP_LABELS[fShopLiq] || fShopLiq}</b> — seules les gammes avec au moins un parfum présent (ou en tiroir) chez elle sont listées. Déplier une gamme : chaque parfum affiche sa situation ici → 🗄️ tiroir (commande client) · ✓ sorti · ⏳ pas reçu.
+    </div>` : '';
+    statsEl.innerHTML = _shopBanner + `<div style="display:flex; gap:12px; font-size:10px; color:#94a3b8; padding:4px 8px; background:#1e293b; border-radius:4px;">
       <span>${totalGammes} gammes</span><span>${totalParfums} parfums actifs</span>
       <span style="margin-left:auto;">${actifs.length} affichées / ${filtered.length} filtrées</span>
     </div>`;
@@ -14699,8 +14786,20 @@ function renderDashboard() {
       }
       if (_ccCible && estCommandeClient(_ccCible, sh)) {
         ccZone = `<div style="margin-top:5px; padding:4px 8px; background:#0e749022; border:1px solid #06b6d450; border-radius:3px; font-size:10px; color:#67e8f9; font-weight:600;">🗄️ Gardé en tiroir ici (commande client) — réf commandable, ne PAS la désactiver sur Swappy</div>`;
-      } else if (typeof isAdmin === 'function' && isAdmin()) {
+      } else if (peutGererCommandeClient(sh)) {
+        // Visible pour l'admin (toutes boutiques) ET pour la boutique elle-même (règle révisée 2026-06-12)
         ccZone = `<button onclick="event.stopPropagation(); garderEnTiroir('${a.id}','${sh}')" style="margin-top:5px; width:100%; padding:4px 8px; font-size:10px; background:transparent; color:#67e8f9; border:1px dashed #06b6d450; border-radius:3px; cursor:pointer; text-align:left;" title="Cette boutique garde la réf pour ses clients : ses coches de sortie sont court-circuitées, la ligne est réglée pour elle, la sortie continue ailleurs">🗄️ ${label} garde la réf en tiroir → court-circuiter ses coches</button>`;
+      }
+      // ── Exception parfum(s) en commande client sur une action GAMME ENTIÈRE (2026-06-12) ──
+      // Les coches de la boutique portent sur toute la gamme, mais elle garde tel ou tel parfum
+      // en tiroir : rappel AU MOMENT DU GESTE (règle 6) pour qu'elle ne coupe pas ces réfs sur
+      // Swappy en cochant "Réappro coupée" / "Désactivé".
+      if (a.produitType === 'liq' && !a.produitParfumId && _ccProd && Array.isArray(_ccProd.parfums)) {
+        const _ccKeeps = _ccProd.parfums.filter(p => p.s !== 'SORTI' && estCommandeClient(p, sh));
+        if (_ccKeeps.length > 0) {
+          const _ccPl = _ccKeeps.length > 1;
+          ccZone = `<div style="margin-top:5px; padding:4px 8px; background:#0e749022; border:1px solid #06b6d450; border-radius:3px; font-size:10px; color:#67e8f9; font-weight:600;">🗄️ SAUF ${_ccKeeps.map(p => p.n || '(sans nom)').join(', ')} — commande client ici : garder ce${_ccPl ? 's' : ''} parfum${_ccPl ? 's' : ''} actif${_ccPl ? 's' : ''} sur Swappy, ne sortir que le reste</div>` + ccZone;
+        }
       }
     }
     return `<div style="padding:6px 8px; background:#1e293b; border:1px solid ${col}30; border-radius:4px;">
@@ -15127,7 +15226,9 @@ function renderDashboard() {
       if (_ccObj) {
         const _ccOn = _ccObj.commandeClient && SHOPS.some(s => _ccObj.commandeClient[s]);
         if (_ccOn) badgeTag += badgeCommandeClient(_ccObj);
-        if (typeof isAdmin === 'function' && isAdmin()) {
+        if ((typeof isAdmin === 'function' && isAdmin()) || (typeof currentShop !== 'undefined' && currentShop)) {
+          // Admin OU poste boutique (règle révisée 2026-06-12 : la boutique gère SON tiroir,
+          // la modale grise les cases des autres boutiques).
           badgeTag += `<span onclick="event.stopPropagation(); ouvrirCommandeClient('${a.produitType || 'kit'}','${a.produitId}'${_ccParfumId ? `,'${_ccParfumId}'` : ''})" style="cursor:pointer; font-size:9px; padding:1px 6px; background:${_ccOn ? '#0e749022' : 'transparent'}; color:${_ccOn ? '#67e8f9' : '#64748b'}; border:1px solid ${_ccOn ? '#06b6d460' : '#47556940'}; border-radius:3px; white-space:nowrap; font-weight:600;" title="Commande client : garder ${_ccParfumId ? 'CE PARFUM' : 'cette réf'} en tiroir dans certaines boutiques — la sortie continue pour le reste. Chez la boutique qui garde : ne pas désactiver la réf sur Swappy.">🗄️ tiroir ?</span>`;
         }
       }
