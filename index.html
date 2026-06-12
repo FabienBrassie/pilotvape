@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 16:30</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 17:15</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -6269,6 +6269,35 @@ function setActionStepQte(actionId, shop, stepKey, value) {
   // Pas de re-render systématique : le champ reste cohérent en place
 }
 
+// Comptage PAR PARFUM pour une reprise gamme entière (décision Fabien 2026-06-12) :
+// chaque ligne parfum dépliée a son champ de quantité par boutique. Stocké dans
+// etats[shop].comptageParfums[parfumId] avec timestamps dédiés (_comptageParfumsTs) pour
+// le merge. Le total etats[shop].comptageQte (étape 2 « Comptage des références ») est
+// recalculé = somme des parfums saisis — l'export Excel et les affichages existants
+// restent justes sans changer leur code.
+function setRepriseComptageParfum(actionId, shop, parfumId, value) {
+  const a = actions.find(x => x.id === actionId && !x.annulee) || actions.find(x => x.id === actionId);
+  if (!a) return;
+  ensureActionSteps(a);
+  const st = a.etats[shop];
+  if (!st) return;
+  const _v = (value === '' || value === null) ? null : Math.max(0, parseInt(value, 10) || 0);
+  if (!st.comptageParfums) st.comptageParfums = {};
+  if (!st._comptageParfumsTs) st._comptageParfumsTs = {};
+  st.comptageParfums[parfumId] = _v;
+  st._comptageParfumsTs[parfumId] = new Date().toISOString();
+  // Total = somme des quantités saisies (null si aucune saisie nulle part)
+  const _vals = Object.values(st.comptageParfums).filter(v => typeof v === 'number');
+  st.comptageQte = _vals.length ? _vals.reduce((s, v) => s + v, 0) : null;
+  st._comptageQteTs = new Date().toISOString();
+  a._ts = new Date().toISOString();
+  const _g = baseLiq.find(l => l.id === a.produitId);
+  const _pf = (_g && Array.isArray(_g.parfums)) ? _g.parfums.find(p => p.id === parfumId) : null;
+  logAction('Comptage reprise (parfum)', _logShopName(shop) + ' → ' + (_pf ? _pf.n : parfumId) + ' : ' + (_v === null ? 'vide' : _v + ' réf.') + ' sur ' + _logActionLabel(actionId));
+  saveData();
+  // Pas de re-render systématique : le champ reste cohérent en place (comme setActionStepQte)
+}
+
 // Toggle rapide d'une shop entière : coche/décoche TOUTES les sous-étapes.
 // Comportement : si toutes faites → on décoche tout ; sinon → on coche tout.
 function toggleActionShop(actionId, shop) {
@@ -8725,6 +8754,29 @@ function _mergeEtats(localActions, remoteActions) {
       if (rs.commentaire && (!ls.commentaire || rs.commentaire.length > ls.commentaire.length)) {
         ls.commentaire = rs.commentaire;
       }
+      // ── Comptage reprise (ajout 2026-06-12, bloc ADDITIF — ne touche pas aux merges existants) ──
+      // TROU BOUCHÉ : comptageQte n'était fusionné nulle part → la quantité comptée par une
+      // boutique n'arrivait JAMAIS sur les autres postes. Fusion par timestamp dédié, le plus
+      // récent gagne (même logique que les steps).
+      if (rs._comptageQteTs && (!ls._comptageQteTs || rs._comptageQteTs > ls._comptageQteTs)) {
+        ls.comptageQte = (typeof rs.comptageQte === 'number') ? rs.comptageQte : null;
+        ls._comptageQteTs = rs._comptageQteTs;
+        mergeCount++;
+      }
+      // Détail par parfum (comptageParfums) : fusion clé par clé, timestamp par parfum.
+      if (rs._comptageParfumsTs) {
+        Object.keys(rs._comptageParfumsTs).forEach(pid => {
+          const _rts = rs._comptageParfumsTs[pid] || '';
+          const _lts = (ls._comptageParfumsTs && ls._comptageParfumsTs[pid]) || '';
+          if (_rts > _lts) {
+            if (!ls.comptageParfums) ls.comptageParfums = {};
+            if (!ls._comptageParfumsTs) ls._comptageParfumsTs = {};
+            ls.comptageParfums[pid] = (rs.comptageParfums && typeof rs.comptageParfums[pid] === 'number') ? rs.comptageParfums[pid] : null;
+            ls._comptageParfumsTs[pid] = _rts;
+            mergeCount++;
+          }
+        });
+      }
     });
     // Fusionner replaceParId : garder le non-nul (le local prime, sinon prendre le remote)
     if (!a.replaceParId && remote.replaceParId) {
@@ -9640,6 +9692,25 @@ function exportReprisesExcel() {
         etat,
         a.id
       ].map(_esc).join(';'));
+      // Détail par parfum (gamme entière en reprise, 2026-06-12) : une ligne par parfum
+      // compté — le fournisseur reçoit le décompte référence par référence.
+      if (a.produitType === 'liq' && !a.produitParfumId && st.comptageParfums) {
+        const _gd = baseLiq.find(x => x.id === a.produitId);
+        Object.keys(st.comptageParfums).forEach(pid => {
+          const _q = st.comptageParfums[pid];
+          if (typeof _q !== 'number') return;
+          const _pd = (_gd && Array.isArray(_gd.parfums)) ? _gd.parfums.find(x => x.id === pid) : null;
+          rows.push([
+            a.campagneReprise || '',
+            a.dateCreation || '',
+            prodType, marque, label, format,
+            '↳ ' + (_pd ? (_pd.n || '(sans nom)') : pid),
+            SHOP_LABELS[sh] || sh,
+            _q,
+            '', '', etat, a.id
+          ].map(_esc).join(';'));
+        });
+      }
     });
   });
   const _bom = '﻿';
@@ -10206,6 +10277,16 @@ window._pvExporterCampagneReprise = function(name) {
       const nbDone = defs.filter(d => st.steps && st.steps[d.key] === true).length;
       const qte = (typeof st.comptageQte === 'number') ? st.comptageQte : '';
       rows.push([a.campagneReprise || '', a.campagneRepriseComment || '', a.dateCreation || '', prodType, marque, label, format, parfum, SHOP_LABELS[sh] || sh, qte, nbDone + '/' + defs.length, st.dateFait || '', etat, a.id].map(_esc).join(';'));
+      // Détail par parfum (gamme entière en reprise, 2026-06-12) : une ligne par parfum compté.
+      if (a.produitType === 'liq' && !a.produitParfumId && st.comptageParfums) {
+        const _gd = baseLiq.find(x => x.id === a.produitId);
+        Object.keys(st.comptageParfums).forEach(pid => {
+          const _q = st.comptageParfums[pid];
+          if (typeof _q !== 'number') return;
+          const _pd = (_gd && Array.isArray(_gd.parfums)) ? _gd.parfums.find(x => x.id === pid) : null;
+          rows.push([a.campagneReprise || '', a.campagneRepriseComment || '', a.dateCreation || '', prodType, marque, label, format, '↳ ' + (_pd ? (_pd.n || '(sans nom)') : pid), SHOP_LABELS[sh] || sh, _q, '', '', etat, a.id].map(_esc).join(';'));
+        });
+      }
     });
   });
   const _bom = '﻿';
@@ -14584,7 +14665,14 @@ function renderDashboard() {
       let qteField = '';
       if (d.editableQte) {
         const _curQte = (st && typeof st.comptageQte === 'number') ? st.comptageQte : '';
-        qteField = `<input type="number" min="0" step="1" value="${_curQte}" placeholder="qté"
+        // Gamme entière liquide en reprise avec parfums actifs : le total est calculé depuis
+        // le comptage par parfum (lignes dépliées dans À reprendre) — lecture seule ici pour
+        // qu'il n'y ait qu'une seule saisie possible du même chiffre (2026-06-12).
+        const _qteGamme = (a.produitType === 'liq' && !a.produitParfumId && a.motifSortie === 'REPRISE') ? baseLiq.find(l => l.id === a.produitId) : null;
+        const _totalAuto = !!(_qteGamme && Array.isArray(_qteGamme.parfums) && _qteGamme.parfums.some(p => p.s !== 'SORTI'));
+        qteField = _totalAuto
+          ? `<span title="Total calculé automatiquement depuis le comptage par parfum — déplier la gamme dans la section À reprendre pour saisir les quantités." style="font-size:10px; color:#e2e8f0; padding:2px 6px; border:1px dashed ${col}60; border-radius:3px; white-space:nowrap;">Σ ${_curQte === '' ? '—' : _curQte}</span>`
+          : `<input type="number" min="0" step="1" value="${_curQte}" placeholder="qté"
           onclick="event.stopPropagation();"
           onchange="event.stopPropagation(); setActionStepQte('${a.id}','${sh}','${d.key}', this.value)"
           style="width:54px; padding:2px 4px; font-size:10px; background:#0f172a; color:#e2e8f0; border:1px solid ${col}60; border-radius:3px; text-align:right;"/>`;
@@ -15043,6 +15131,21 @@ function renderDashboard() {
           badgeTag += `<span onclick="event.stopPropagation(); ouvrirCommandeClient('${a.produitType || 'kit'}','${a.produitId}'${_ccParfumId ? `,'${_ccParfumId}'` : ''})" style="cursor:pointer; font-size:9px; padding:1px 6px; background:${_ccOn ? '#0e749022' : 'transparent'}; color:${_ccOn ? '#67e8f9' : '#64748b'}; border:1px solid ${_ccOn ? '#06b6d460' : '#47556940'}; border-radius:3px; white-space:nowrap; font-weight:600;" title="Commande client : garder ${_ccParfumId ? 'CE PARFUM' : 'cette réf'} en tiroir dans certaines boutiques — la sortie continue pour le reste. Chez la boutique qui garde : ne pas désactiver la réf sur Swappy.">🗄️ tiroir ?</span>`;
         }
       }
+    }
+
+    // ── Comptage par parfum (reprise, décision Fabien 2026-06-12) ──
+    // Ligne parfum d'une gamme entière en reprise : un champ de quantité PAR boutique,
+    // posé là où la boutique compte (colonne badges prix, libre — pas de prix rouge en reprise).
+    // Stocké dans etats[shop].comptageParfums[parfumId] ; le total etats[shop].comptageQte
+    // (étape 2 du workflow) est recalculé automatiquement à chaque saisie.
+    if (_opts && _opts.comptageReprise && _opts.parfumId && a.motifSortie === 'REPRISE') {
+      badgePrix += SHOPS.map(sh => {
+        if (fShop && sh !== fShop) return '';
+        const _cCol = SHOP_COLORS[sh];
+        const _cSt = a.etats && a.etats[sh];
+        const _cV = (_cSt && _cSt.comptageParfums && typeof _cSt.comptageParfums[_opts.parfumId] === 'number') ? _cSt.comptageParfums[_opts.parfumId] : '';
+        return `<span style="display:inline-flex; align-items:center; gap:2px;" title="${SHOP_LABELS[sh]} — quantité comptée pour ce parfum"><span style="font-size:9px; font-weight:700; color:${_cCol};">${SHOP_LABELS[sh][0]}</span><input type="number" min="0" step="1" value="${_cV}" placeholder="qté" onclick="event.stopPropagation();" onchange="event.stopPropagation(); setRepriseComptageParfum('${a.id}','${sh}','${_opts.parfumId}', this.value)" style="width:44px; padding:1px 3px; font-size:10px; background:#0f172a; color:#e2e8f0; border:1px solid ${_cCol}60; border-radius:3px; text-align:right;"/></span>`;
+      }).join('');
     }
 
     const isExpanded = expandedActions.has(a.id);
@@ -15523,11 +15626,42 @@ function renderDashboard() {
   // --- Groupement des actions parfum d'une même gamme+format ---
   // Renvoie le HTML pour un tableau d'actions, en regroupant les parfums identiques gamme+format
   // sous un en-tête dépliable. Les actions non-parfum (gamme entière, kits) restent des cartes individuelles.
+  // ══ LA FONCTION CANONIQUE DE LIGNE LIQUIDE (refonte 2026-06-12, décision Fabien) ══
+  // Toute ligne liquide du dashboard passe par ce rendu : groupe de parfums, gamme entière,
+  // gamme sans parfum actif (ex "Petit nuage"), peu importe — même grille, mêmes colonnes,
+  // mêmes emplacements de badges/boutons. C'est la protection contre les affichages disparates
+  // (règle 8 : factoriser plutôt que discipliner).
+  // cfg : { groupKey, nom, badgesHtml, profShort, profColor, formatBadge:{bg,text}|null,
+  //         formatLabel, btnHtml, chipHtml, dotsHtml, innerHtml (contenu déplié, déjà indenté) }
+  function _ligneLiquide(cfg) {
+    const isExpanded = expandedActions.has(cfg.groupKey);
+    return `<div style="margin-bottom:1px;">
+      <div onclick="toggleActionExpand('${cfg.groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
+        <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
+        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${cfg.nom}</span>${cfg.badgesHtml || ''}</div>
+        <div style="font-size:9px; color:${cfg.profColor || '#64748b'}; font-weight:600; text-align:center;">${cfg.profShort || '—'}</div>
+        <div style="font-size:9px; text-align:center;">${cfg.formatBadge ? `<span style="padding:1px 5px; background:${cfg.formatBadge.bg}; color:${cfg.formatBadge.text}; border-radius:2px; white-space:nowrap;">${cfg.formatLabel}</span>` : ''}</div>
+        <div></div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${cfg.btnHtml || ''}</div>
+        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${cfg.chipHtml || ''}</div>
+        <div style="display:flex; gap:3px; justify-content:flex-end;">${cfg.dotsHtml || ''}</div>
+      </div>
+      ${isExpanded && cfg.innerHtml ? cfg.innerHtml : ''}
+    </div>`;
+  }
+  // Ligne d'avertissement VISIBLE quand la gamme d'une action n'existe pas dans la base.
+  // Avant la refonte, ce cas rendait des cartes invisibles (renderActionCard → '' si produit
+  // introuvable) : des lignes disparaissaient sans laisser de trace — exactement le genre
+  // d'écart silencieux entre postes qu'on veut voir au lieu de subir.
+  function _ligneLiqIntrouvable(gammeId, nbActions) {
+    return `<div style="margin-bottom:1px; padding:4px 10px; font-size:10px; color:#fbbf24; background:#78350f20; border:1px solid #f59e0b40; border-radius:3px;">⚠️ ${nbActions} action${nbActions > 1 ? 's' : ''} liquide sur une gamme introuvable dans la base (id ${gammeId}) — données probablement désynchronisées entre postes, à signaler.</div>`;
+  }
+
   // Rend un groupe de parfums d'une même gamme (accordéon gamme)
   function _renderGammeParfumGroup(grp) {
     const gammeId = grp[0].produitId;
     const g = baseLiq.find(l => l.id === gammeId);
-    if (!g) return grp.map(renderActionCard).join('');
+    if (!g) return _ligneLiqIntrouvable(gammeId, grp.length);
     const T = TYPE_META[grp[0].type] || TYPE_META.SORTIR;
     // Suffixe motif pour différencier les accordéons "À sortir" et "À reprendre" sur la même gamme :
     // sinon une seule clé `grp_<gammeId>_SORTIR` était partagée entre les deux sections du dashboard,
@@ -15600,33 +15734,29 @@ function renderDashboard() {
         background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
     }).join('');
 
-    const _gfb = _liqFormatBadge(g.format);
-    return `<div style="margin-bottom:1px;">
-      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
-        <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
-        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span><span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${grp.length} parfum${grp.length>1?'s':''}</span>${progressLabel}</div>
-        <div style="font-size:9px; color:${profColor}; font-weight:600; text-align:center;">${profShort}</div>
-        <div style="font-size:9px; text-align:center;"><span style="padding:1px 5px; background:${_gfb.bg}; color:${_gfb.text}; border-radius:2px; white-space:nowrap;">${formatLabel}</span></div>
-        <div></div>
-        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeBtn}</div>
-        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeChip}</div>
-        <div style="display:flex; gap:3px; justify-content:flex-end;">${_grpShopDots}</div>
-      </div>
-      ${isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">` + grp.map(renderActionCard).join('') + `</div>` : ''}
-    </div>`;
+    return _ligneLiquide({
+      groupKey,
+      nom: g.gamme,
+      badgesHtml: `<span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${grp.length} parfum${grp.length>1?'s':''}</span>${progressLabel}`,
+      profShort, profColor,
+      formatBadge: _liqFormatBadge(g.format), formatLabel,
+      btnHtml: prixRougeBtn,
+      chipHtml: prixRougeChip,
+      dotsHtml: _grpShopDots,
+      innerHtml: isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">` + grp.map(renderActionCard).join('') + `</div>` : ''
+    });
   }
 
   // Rend une action gamme-level comme un groupe de parfums (même format que _renderGammeParfumGroup)
   function _renderGammeLevelAsParfumGroup(a) {
     const g = baseLiq.find(l => l.id === a.produitId);
-    if (!g || !g.parfums || g.parfums.length === 0) return renderActionCard(a);
+    if (!g) return _ligneLiqIntrouvable(a.produitId, 1);
     const T = TYPE_META[a.type] || TYPE_META.SORTIR;
     // Filtrer parfums pertinents
     const parfums = (g.parfums || []).filter(p => {
       if (a.type === 'SORTIR' && p.s === 'SORTI') return false;
       return p.s !== 'SORTI' || a.type !== 'SORTIR';
     });
-    if (parfums.length === 0) return renderActionCard(a);
     const groupKey = 'grplvl_' + a.id;
     const isExpanded = expandedActions.has(groupKey);
     const profColor = g.profilChoisi ? PROFIL_COLORS[g.profilChoisi] : '#64748b';
@@ -15670,35 +15800,52 @@ function renderDashboard() {
     // Parfum lines (même format action card, cliquables → toggle section détail partagée)
     let parfumLinesHtml = '';
     if (isExpanded) {
-      // Toutes les lignes parfum en collapsedOnly (pas de section détail individuelle)
-      parfumLinesHtml = parfums.map(p => renderActionCard(a, { parfumId: p.id, collapsedOnly: true })).join('');
-      // Section détail partagée unique (étapes par shop, remplacé par, etc.)
-      // Cliquer sur n'importe quel parfum toggle a.id → affiche/masque cette section
-      const _detailExpanded = expandedActions.has(a.id);
-      const _fullCard = renderActionCard(a);
-      const _detailTag = 'id="action-detail-' + a.id + '"';
-      const _idx = _fullCard.indexOf(_detailTag);
-      if (_idx !== -1) {
-        // Extraire la section détail du rendu complet (tout depuis <div id="action-detail-...">)
-        const _start = _fullCard.lastIndexOf('<div', _idx);
-        parfumLinesHtml += _fullCard.substring(_start);
+      if (parfums.length > 0) {
+        // Toutes les lignes parfum en collapsedOnly (pas de section détail individuelle).
+        // En reprise : chaque ligne parfum porte ses champs de comptage par boutique
+        // (décision Fabien 2026-06-12 — le comptage se fait référence par référence).
+        const _avecComptage = a.motifSortie === 'REPRISE';
+        parfumLinesHtml = parfums.map(p => renderActionCard(a, { parfumId: p.id, collapsedOnly: true, comptageReprise: _avecComptage })).join('');
+        // Section détail partagée unique (étapes par shop, remplacé par, etc.)
+        // Cliquer sur n'importe quel parfum toggle a.id → affiche/masque cette section
+        const _fullCard = renderActionCard(a);
+        const _detailTag = 'id="action-detail-' + a.id + '"';
+        const _idx = _fullCard.indexOf(_detailTag);
+        if (_idx !== -1) {
+          // Extraire la section détail du rendu complet (tout depuis <div id="action-detail-...">)
+          const _start = _fullCard.lastIndexOf('<div', _idx);
+          parfumLinesHtml += _fullCard.substring(_start);
+        }
+      } else {
+        // Plus aucun parfum actif (ex : tout est passé SORTI mais la campagne n'est pas
+        // clôturée — cas "Petit nuage"). Avant la refonte : grosse carte de secours rouge,
+        // seul affichage différent de la section. Désormais : même ligne que les autres,
+        // la carte action complète (Sors, étapes…) vit dans le dépliage.
+        parfumLinesHtml = renderActionCard(a);
       }
     }
 
-    const _glFb = _liqFormatBadge(g.format);
-    return `<div style="margin-bottom:1px;">
-      <div onclick="toggleActionExpand('${groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='transparent'">
-        <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
-        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span><span style="font-size:9px; padding:1px 5px; background:#f5970b22; color:#fbbf24; border:1px solid #f5970b50; border-radius:2px; white-space:nowrap;">gamme entière</span><span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${parfums.length} parfum${parfums.length>1?'s':''}</span>${doneLabel}</div>
-        <div style="font-size:9px; color:${profColor}; font-weight:600; text-align:center;">${profShort}</div>
-        <div style="font-size:9px; text-align:center;"><span style="padding:1px 5px; background:${_glFb.bg}; color:${_glFb.text}; border-radius:2px; white-space:nowrap;">${formatLabel}</span></div>
-        <div></div>
-        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeBtn}</div>
-        <div style="display:flex; gap:3px; align-items:center; justify-content:flex-end; flex-wrap:nowrap;">${prixRougeChip}</div>
-        <div style="display:flex; gap:3px; justify-content:flex-end;">${_glShopDots}</div>
-      </div>
-      ${isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">${parfumLinesHtml}</div>` : ''}
-    </div>`;
+    // Badges de la ligne : gamme entière + nb de parfums (ou état) + statut de vie
+    let _glBadges = `<span style="font-size:9px; padding:1px 5px; background:#f5970b22; color:#fbbf24; border:1px solid #f5970b50; border-radius:2px; white-space:nowrap;">gamme entière</span>`;
+    _glBadges += parfums.length > 0
+      ? `<span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${parfums.length} parfum${parfums.length>1?'s':''}</span>`
+      : `<span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;" title="Tous les parfums sont passés Sorti — il reste les étapes de l'action à terminer.">plus de parfum actif</span>`;
+    if (g.statutVie === 'FIN_DE_VIE') {
+      _glBadges += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#78350f40; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">☠️ Fin de vie</span>`;
+    }
+    _glBadges += doneLabel;
+
+    return _ligneLiquide({
+      groupKey,
+      nom: g.gamme,
+      badgesHtml: _glBadges,
+      profShort, profColor,
+      formatBadge: _liqFormatBadge(g.format), formatLabel,
+      btnHtml: prixRougeBtn,
+      chipHtml: prixRougeChip,
+      dotsHtml: _glShopDots,
+      innerHtml: isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">${parfumLinesHtml}</div>` : ''
+    });
   }
 
   // Rend les cartes d'action d'un lot de liquides (gamme-level + parfum groups)
