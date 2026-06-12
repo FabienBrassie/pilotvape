@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 18:18</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 18:20</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -12918,6 +12918,22 @@ function renderLiqGammeCard(g, showDetail) {
       _cardParfumBadge += ' <span style="font-size:7px; padding:0 3px; background:' + _nsc + '22; color:' + _nsc + '; border:1px solid ' + _nsc + '70; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;">' + _nsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
     }
   });
+  // 🗄️ Tiroirs commande client (visu admin 2026-06-12, demande Fabien : "pas de visu chez les
+  // uns ou les autres") : agrégat gamme + parfums, par boutique, SANS avoir à déplier.
+  (function() {
+    var _ccShops = {};
+    SHOPS.forEach(function(sh) { if (estCommandeClient(g, sh)) _ccShops[sh] = ['gamme entière']; });
+    (g.parfums || []).forEach(function(p) {
+      SHOPS.forEach(function(sh) {
+        if (estCommandeClient(p, sh)) (_ccShops[sh] = _ccShops[sh] || []).push(p.n || '(sans nom)');
+      });
+    });
+    var _shKeys = SHOPS.filter(function(sh) { return _ccShops[sh]; });
+    if (_shKeys.length === 0) return;
+    var _tip = 'Commande client (tiroir) — ' + _shKeys.map(function(sh) { return (SHOP_LABELS[sh] || sh) + ' : ' + _ccShops[sh].join(', '); }).join(' · ');
+    var _lbl = _shKeys.map(function(sh) { return (SHOP_LABELS[sh] || sh).charAt(0); }).join('·');
+    _cardParfumBadge += ' <span title="' + _tip.replace(/"/g, '&quot;') + '" style="font-size:7px; padding:0 3px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;">🗄️ ' + _lbl + '</span>';
+  })();
   html += `<span style="font-size:11px; font-weight:600; color:#f1f5f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; display:flex; align-items:center; gap:4px;"><span style="overflow:hidden; text-overflow:ellipsis;">${g.gamme}</span>${_cardParfumBadge}</span>`;
   html += `<span style="display:flex; gap:3px; align-items:center;">${_opChips}</span>`;
   html += `<span style="font-size:8px; padding:1px 4px; background:${ctColor}15; color:${ctColor}; border:1px solid ${ctColor}30; border-radius:2px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${g.ct || '?'}</span>`;
@@ -13071,6 +13087,10 @@ function renderLiqGammeDetail(g) {
           } else if (_sit === 'PAS_RECU') {
             _prBadge += `<span style="font-size:8px; padding:1px 5px; background:#78350f25; color:#fbbf24; border:1px solid #f59e0b40; border-radius:2px; white-space:nowrap; flex-shrink:0;" title="À rentrer : pas encore reçu à ${_shopLbl}">⏳ pas reçu ici</span>`;
           }
+        } else {
+          // Vue toutes boutiques (admin) : montrer le tiroir commande client du parfum,
+          // avec les initiales des boutiques qui le gardent (demande Fabien 2026-06-12).
+          _prBadge += badgeCommandeClient(p);
         }
         html += `<div style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}">`;
         html += `<span style="width:2px; height:18px; background:${pSc}; border-radius:1px; flex-shrink:0;"></span>`;
