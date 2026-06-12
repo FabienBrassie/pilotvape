@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 00:31</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 16:30</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -5423,8 +5423,12 @@ function initRentrerPrixRouge(actionId) {
 function setGroupPrixRouge(actionIdsPiped) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const actionIds = actionIdsPiped.split('|');
-  const grpActions = actionIds.map(id => actions.find(a => a.id === id)).filter(Boolean);
+  let grpActions = actionIds.map(id => actions.find(a => a.id === id)).filter(Boolean);
   if (grpActions.length === 0) { pvAlert('Aucune action trouvée.'); return; }
+  // Garde-fou (2026-06-12) : une reprise fournisseur ne reçoit jamais de prix rouge
+  // (le produit part en destruction, pas en destockage) — même si un bouton traînait encore.
+  grpActions = grpActions.filter(a => a.motifSortie !== 'REPRISE');
+  if (grpActions.length === 0) { pvAlert('Produit(s) en reprise fournisseur — pas de prix rouge sur une reprise.'); return; }
   const dejaRouge = grpActions.filter(a => a.prixRouge).length;
   // Regrouper par gamme pour lister proprement
   const byGamme = {};
@@ -15311,23 +15315,26 @@ function renderDashboard() {
           '</div>';
         }
 
-        // SORTIR peut déclencher une OP Prix Rouge destockage (écouler le stock dormant)
+        // SORTIR peut déclencher une OP Prix Rouge destockage (écouler le stock dormant).
+        // Jamais sur une reprise fournisseur (2026-06-12) : le produit part en destruction,
+        // pas en destockage — ni picker, ni champ prix rouge dans le dépliage.
+        const _estReprise = a.motifSortie === 'REPRISE';
         const _pvRef = isLiq ? (prod.pv || 0) : (kit ? kit.pv : 0);
         const _pvInitLabel = _pvRef > 0 ? ' <span style="font-size:10px; color:#94a3b8; text-decoration:line-through; font-weight:400;">' + _pvRef.toFixed(2) + '€</span>' : '';
-        const picker = renderOpPromotionPicker(a, 'Destocker en prix rouge ?' + _pvInitLabel, [
+        const picker = _estReprise ? '' : renderOpPromotionPicker(a, 'Destocker en prix rouge ?' + _pvInitLabel, [
           { key: 'PRIX_ROUGE', label: 'Prix rouge', color: '#ef4444' }
         ]);
         // Champ prix rouge éditable (visible si OP PRIX_ROUGE active ou prix déjà renseigné)
-        const _hasDestockage = ops.some(o => o.sortirActionId === a.id && o.type === 'PRIX_ROUGE' && isOpOuverte(o)) || typeof a.prixRouge === 'number';
+        const _hasDestockage = !_estReprise && (ops.some(o => o.sortirActionId === a.id && o.type === 'PRIX_ROUGE' && isOpOuverte(o)) || typeof a.prixRouge === 'number');
         const prixRougeField = _hasDestockage ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
           <span style="font-size:10px; color:#ef4444; font-weight:600;">🔴 Prix rouge :</span>
           ${typeof a.prixAvantRouge === 'number' ? '<span style="font-size:10px; color:#94a3b8; text-decoration:line-through;">' + a.prixAvantRouge.toFixed(2) + '€</span> <span style="font-size:10px; color:#94a3b8;">→</span>' : '<span style="font-size:10px; color:#94a3b8; text-decoration:line-through;">' + _pvRef.toFixed(2) + '€</span> <span style="font-size:10px; color:#94a3b8;">→</span>'}
           <input type="number" step="0.01" min="0" value="${typeof a.prixRouge === 'number' ? a.prixRouge.toFixed(2) : ''}" placeholder="Prix rouge" onchange="updateActionPrixRouge('${a.id}', this.value)" onclick="event.stopPropagation()" style="width:80px; padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; font-weight:600; text-align:right;">
           <span style="font-size:10px; color:#64748b;">€</span>
         </div>` : '';
-        return parfumsListing + remplParBlock + `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        return parfumsListing + remplParBlock + (picker ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
           ${picker}
-        </div>` + prixRougeField;
+        </div>` : '') + prixRougeField;
       })() : ''}
       ${a.type === 'MISE_EN_PLACE' && !isLiq ? (() => {
         // Pendant la MEP on peut choisir d'accompagner par une OP de mise en avant / nouveauté / etc.
@@ -15533,8 +15540,10 @@ function renderDashboard() {
     const formatLabel = LIQ_FORMAT_LABELS[g.format] || g.format;
     const doneCount = grp.filter(a => actionGlobalState(a) === 'FAIT').length;
     const progressLabel = doneCount > 0 ? ` <span style="color:#64748b;">(${doneCount}/${grp.length} fait${doneCount>1?'s':''})</span>` : '';
-    // Prix rouge groupé : indicateur + bouton
-    const isSortir = grp[0].type === 'SORTIR';
+    // Prix rouge groupé : indicateur + bouton.
+    // Jamais sur une reprise fournisseur (2026-06-12) : le produit part en destruction,
+    // pas en destockage — proposer un prix rouge n'a aucun sens dans la section À reprendre.
+    const isSortir = grp[0].type === 'SORTIR' && grp[0].motifSortie !== 'REPRISE';
     const rougeCount = grp.filter(a => a.prixRouge).length;
     const allRouge = rougeCount === grp.length;
     const someRouge = rougeCount > 0 && !allRouge;
@@ -15625,9 +15634,9 @@ function renderDashboard() {
     const formatLabel = LIQ_FORMAT_LABELS[g.format] || g.format;
     const globalState = actionGlobalState(a);
     const doneLabel = globalState === 'FAIT' ? ` <span style="color:#4ade80; font-size:9px;">✓</span>` : '';
-    // Prix rouge chip (gamme-level — même format que kits)
+    // Prix rouge chip (gamme-level — même format que kits). Jamais sur une reprise (2026-06-12).
     let prixRougeChip = '';
-    if (a.type === 'SORTIR' && a.prixRouge) {
+    if (a.type === 'SORTIR' && a.motifSortie !== 'REPRISE' && a.prixRouge) {
       const _glOp = (() => { const ol = activeOpForAction(a.id); return ol ? ol.op : null; })();
       const _glEc = _glOp ? isPrixRougeEnCours(_glOp) : true;
       const _glColor = _glEc ? '#fca5a5' : '#94a3b8';
@@ -15638,9 +15647,9 @@ function renderDashboard() {
       const _glPvAvant = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
       prixRougeChip = `<span title="Prix rouge ${_glEc ? 'actif' : 'programmé'}${_glDateStr ? ' — dès ' + fmtFR(_glOp.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_glBg}; color:${_glColor}; border:1px solid ${_glBorder}; border-radius:3px; white-space:nowrap;${_glOpa}">🔴 ${_glPvAvant ? '<s style="color:#64748b; font-weight:400;">' + _glPvAvant + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_glDateStr}</span>`;
     }
-    // Prix rouge bouton groupé
+    // Prix rouge bouton groupé. Jamais sur une reprise (2026-06-12).
     let prixRougeBtn = '';
-    if (a.type === 'SORTIR' && !a.prixRouge) {
+    if (a.type === 'SORTIR' && a.motifSortie !== 'REPRISE' && !a.prixRouge) {
       const _glHasPr = (() => { const ol = activeOpForAction(a.id); return ol && ol.op.type === 'PRIX_ROUGE'; })();
       if (!_glHasPr) {
         prixRougeBtn = `<button onclick="event.stopPropagation(); setGroupPrixRouge('${a.id}')" style="font-size:9px; padding:2px 8px; background:#ef444422; color:#ef4444; border:1px solid #ef444450; border-radius:3px; cursor:pointer; font-weight:600; white-space:nowrap;" title="Appliquer un prix rouge">🔴 Prix rouge ?</button>`;
@@ -15706,14 +15715,12 @@ function renderDashboard() {
       groups[key].push(a);
     });
     // ── RÈGLE ANTI-DOUBLON : masquer gamme-level si des parfum-level existent ──
-    // On regarde TOUTES les actions liq non-annulées (même FAIT/hors section), pas juste celles passées ici.
-    const _parfumCoverage = new Set(); // "gammeId::TYPE"
-    actions.forEach(a => { if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfumCoverage.add(a.produitId + '::' + a.type); });
-    const gammeActions = liqActions.filter(a => {
-      if (a.produitParfumId) return false;
-      if (_parfumCoverage.has(a.produitId + '::' + a.type)) return false;
-      return true;
-    });
+    // Factorisé 2026-06-12 (règle 8) : on passe par _filterAntiDoublonLiq, LA fonction canonique
+    // (qui distingue le motif REPRISE). L'ancienne copie locale ignorait le motif : une action
+    // parfum de destockage classique masquait la ligne "gamme entière" de la section À reprendre,
+    // alors que les compteurs (calculés via la canonique) continuaient de la compter → en-têtes
+    // sans lignes, et affichage divergent entre postes dès que les données différaient un peu.
+    const gammeActions = _filterAntiDoublonLiq(liqActions).filter(a => !a.produitParfumId);
     // Gamme-level actions → rendu en groupe de parfums (même format)
     let html = gammeActions.map(a => _renderGammeLevelAsParfumGroup(a)).join('');
     // Trier les groupes par meilleure priorité
@@ -15734,17 +15741,10 @@ function renderDashboard() {
     const kitActions = actionList.filter(a => !a.produitType || a.produitType === 'kit');
     const pdActions  = actionList.filter(a => a.produitType === 'pd');
     // ── FILTRE ANTI-DOUBLON LIQUIDES : masquer gamme-level si parfum-level existent ──
-    // On regarde TOUTES les actions liq non-annulées (même FAIT), pas juste celles de la section.
-    // Sinon quand les parfums passent FAIT, la gamme-level réapparaît.
-    // Le motif (REPRISE ou vide) est inclus dans la clé pour ne pas mélanger une SORTIR classique
-    // et une SORTIR motif=REPRISE sur la même gamme.
-    const _allLiq = actionList.filter(a => a.produitType === 'liq');
-    const _parfCovGlobal = new Set();
-    const _ptmKey = a => a.produitId + '::' + a.type + '::' + (a.motifSortie || '');
-    actions.forEach(a => { if (a.produitType === 'liq' && a.produitParfumId && !a.annulee) _parfCovGlobal.add(_ptmKey(a)); });
-    const liqActions = _allLiq.filter(a =>
-      a.produitParfumId || !_parfCovGlobal.has(_ptmKey(a))
-    );
+    // Factorisé 2026-06-12 (règle 8) : _filterAntiDoublonLiq est LA fonction canonique
+    // (motif REPRISE distingué, actions FAIT incluses dans la couverture). Une seule règle
+    // partout = compteurs et lignes ne peuvent plus se contredire.
+    const liqActions = _filterAntiDoublonLiq(actionList.filter(a => a.produitType === 'liq'));
 
     let html = '';
 
