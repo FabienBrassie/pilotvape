@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 19:15</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-12 19:24</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -21946,7 +21946,10 @@ function _renderOpCardHtmlInner(op, options) {
       // ── 📦 Réception centralisée de l'OP (2026-06-12) : stock + PLV arrivent à un hub,
       // dispatch vers les autres. Sélecteur admin ; info pour les boutiques quand actif.
       const _dh = op.dispatchHub || '';
-      if (typeof isAdmin === 'function' && isAdmin() && isActive && !noEdit) {
+      // isOpOuverte (canonique) et non isActive (= !dateFin) : une OP bornée 15→20/06 est
+      // encore ouverte — le bug masquait le sélecteur sur toute OP avec date de fin (retour
+      // Fabien 2026-06-12, cas réel Tour de cou Chaîne).
+      if (typeof isAdmin === 'function' && isAdmin() && isOpOuverte(op) && !noEdit) {
         const _dhLies = actions.filter(x => x.retroOpId === op.id && !x.annulee);
         const _dhDone = _dhLies.filter(x => actionGlobalState(x) === 'FAIT').length;
         const _dhStatus = _dh && _dhLies.length > 0 ? `<span style="font-size:10px; color:#67e8f9;">${_dhDone}/${_dhLies.length} transfert${_dhLies.length>1?'s':''} de stock terminé${_dhDone>1?'s':''} · section 🔁</span>` : '';
