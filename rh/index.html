@@ -620,6 +620,44 @@ function nbJours(du,au){return Math.round((new Date(au)-new Date(du))/864e5)+1}
 function emp(id){return S.employees.find(e=>e.id===id)}
 function bout(id){return S.boutiques.find(b=>b.id===id)}
 function ferieOf(iso){return S.feries.find(f=>f.date===iso)}
+// Jours OUVRABLES (lundi→samedi, hors dimanches et hors fériés légaux) entre du et au,
+// éventuellement bornés à [clampDu, clampAu]. Sert à la règle des congés estivaux.
+function joursOuvrables(du,au,clampDu,clampAu){
+  let from=du,to=au;
+  if(clampDu&&from<clampDu)from=clampDu;
+  if(clampAu&&to>clampAu)to=clampAu;
+  if(from>to)return 0;
+  let n=0;
+  for(let d=from;d<=to;d=addD(d,1)){
+    if(wdOf(d)===7)continue;                       // dimanche = non ouvrable
+    const f=ferieOf(d);if(f&&f.type==='ferie')continue; // férié légal = non ouvrable
+    n++;
+  }
+  return n;
+}
+// Règle congés estivaux (fenêtre 1er mai → 31 octobre) :
+//  - minimum 12 jours ouvrables posés AU TOTAL dans la fenêtre → pastille verte
+//  - aucun congé d'un seul tenant ne doit dépasser 24 jours ouvrables → sinon croix rouge
+// "Posé" = congé non refusé (demandé ou accepté). Renvoie {total, maxRun, ok, depasse}.
+function etatEstival(empId,year){
+  const w0=year+'-05-01',w1=year+'-10-31';
+  let total=0,maxRun=0;
+  for(const c of S.conges){
+    if(c.empId!==empId||c.statut==='refuse')continue;
+    if(c.au<w0||c.du>w1)continue;                   // hors fenêtre
+    const ouv=joursOuvrables(c.du,c.au,w0,w1);
+    total+=ouv;
+    if(ouv>maxRun)maxRun=ouv;                        // congé d'un seul tenant
+  }
+  return {total,maxRun,ok:total>=12,depasse:maxRun>24};
+}
+// Pastille à afficher (admin + Mon espace) : verte / croix rouge / à poser
+function badgeEstival(empId,year){
+  const s=etatEstival(empId,year);
+  if(s.depasse)return '<span style="color:#dc2626;font-weight:700" title="Un congé dépasse 24 jours ouvrables d\'un seul tenant entre le 1er mai et le 31 octobre (maximum légal)">✗ été ('+s.maxRun+' j d\'affilée)</span>';
+  if(s.ok)return '<span class="ok" title="Au moins 12 jours ouvrables de congé posés entre le 1er mai et le 31 octobre">✓ été ('+s.total+' j)</span>';
+  return '<span class="warn" title="Il faut au moins 12 jours ouvrables de congé entre le 1er mai et le 31 octobre">été à poser ('+s.total+'/12 j)</span>';
+}
 function nextId(arr){return arr.reduce((m,x)=>Math.max(m,x.id||0),0)+1}
 
 // ============ MOTEUR D'EFFECTIFS ============
@@ -1891,12 +1929,11 @@ function renderAbs(){
     if(absType==='ALL'||absType==='ent')for(const x of ents)rows.push({t:'ent',r:x});
     rows.sort((a,b)=>a.r.du<b.r.du?-1:1);
     const totAn=cgs.filter(c=>c.statut==='accepte'&&c.du.startsWith(an)).reduce((t,c)=>t+nbJours(c.du,c.au),0);
-    const ete=cgs.some(c=>c.statut!=='refuse'&&c.du.slice(0,4)===an&&c.du.slice(5)>='05-01'&&c.au.slice(5)<='10-31');
     const mlAn=mls.filter(m=>m.du.startsWith(an)).reduce((t,m)=>t+nbJours(m.du,m.au),0);
     const ecAn=ecs.filter(x=>x.du.startsWith(an)).reduce((t,x)=>t+nbJours(x.du,x.au),0);
     h+='<div class="ecard" style="flex-direction:column;align-items:stretch">';
     h+='<div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+');font-weight:700">'+bout(e.b).nom+'</span>'+
-      '<span class="small" style="margin-left:auto"><b>'+totAn+' j</b> de congés acceptés en '+an+(mlAn?' · '+mlAn+' j maladie':'')+(ecAn?' · '+ecAn+' j école':'')+' · été '+(ete?'<span class="ok">✓</span>':'<span class="warn">à poser</span>')+'</span></div>';
+      '<span class="small" style="margin-left:auto"><b>'+totAn+' j</b> de congés acceptés en '+an+(mlAn?' · '+mlAn+' j maladie':'')+(ecAn?' · '+ecAn+' j école':'')+' · '+badgeEstival(e.id,an)+'</span></div>';
     if(!rows.length)h+='<div class="small" style="padding:2px 0 2px 18px">Aucune absence enregistrée.</div>';
     for(const x of rows){
       const r=x.r;const past=r.au<todayISO();
@@ -2920,57 +2957,60 @@ let mineMsg='';
 function togMine(){if(!ROLE||!ROLE.empId)return;const el=$('minepanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderMine();}
 function renderMine(){
   const e=emp(ROLE.empId);if(!e){$('minepanel').innerHTML='';return}
-  const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
-  const wk=sumNormHS(e,days);
-  const mo=sumNormHS(e,monthDays(curMonday));
+  const an=String(new Date().getFullYear());
   let h='<div class="phead"><h2>🙋 Mon espace — '+esc(e.nom)+'</h2>'+
     '<button class="act grey" style="margin-left:auto" onclick="$(\'minepanel\').style.display=\'none\'">Fermer</button></div>';
-  // compteurs
-  h+='<div id="hours" style="margin:0 0 10px"><div class="hcard"><span class="dot" style="background:'+colOf(e)+'"></span><b>Cette semaine</b><span class="big">'+fmtDur(wk.norm)+'</span><span class="small">normales</span>'+(wk.hs?'<span class="hsbadge">+ '+fmtDur(wk.hs)+' HS</span>':'')+'</div>'+
-    '<div class="hcard"><b>Ce mois ('+MOISN[+curMonday.slice(5,7)]+')</b><span class="big">'+fmtDur(mo.norm)+'</span><span class="small">normales</span>'+(mo.hs?'<span class="hsbadge">+ '+fmtDur(mo.hs)+' HS</span>':'')+(mo.fer?'<span class="small">· '+mo.fer+' fériés</span>':'')+(mo.dim?'<span class="small">· '+mo.dim+' dim.</span>':'')+'</div></div>';
-  // mon planning de la semaine (toutes boutiques)
-  h+='<div class="mhead">Mon planning — semaine du '+fmtFR(curMonday)+'</div>';
-  for(const d of days){
-    const p=presence(e,d);
-    h+='<div class="ecard" style="padding:8px 12px"><div class="dbadge" style="width:46px;min-width:46px;height:46px"><b style="font-size:16px">'+(+d.slice(8,10))+'</b><span>'+DAYJ[wdOf(d)]+'</span></div><div style="flex:1">';
-    if(p.st==='present'&&p.blocks&&p.blocks.length){
-      h+=p.blocks.map(bl=>'<span class="chipb" style="color:var(--'+bl[2]+')">'+bout(bl[2]).nom+'</span> '+fmtH(bl[0])+'-'+fmtH(bl[1])+(bl[3]?' <span class="hsbadge">HS</span>':'')).join(' &nbsp; ')+' <span class="small">('+fmtDur(blocksMin(p.blocks))+')</span>';
-    } else h+='<span class="small">'+(p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='ecole'?'🎓 école':p.st==='off'?'—':'repos')+'</span>';
-    h+='</div></div>';
+  // 1) FAIRE UNE DEMANDE (en haut)
+  if(!isAdmin()){
+    h+='<div class="mhead">✍️ Faire une demande</div>';
+    h+='<div class="small" style="margin-bottom:6px">💡 Astuce : pour déclarer une heure sup, clique directement sur le jour concerné dans le calendrier.</div>';
+    h+='<div class="addrow"><select id="rq-type" onchange="rqTypeChg()"><option value="conge">🏖 Demande de congé</option><option value="maladie">🤒 Déclarer un arrêt maladie</option></select>'+
+     'du <input type="date" id="rq-du"> au <input type="date" id="rq-au">'+
+     '<input id="rq-note" placeholder="Message (optionnel)" style="width:180px">'+
+     '<button class="act green" onclick="submitRequest()">Envoyer</button></div>';
+    h+='<div class="aline blue" id="rq-msg" style="'+(mineMsg?'':'display:none;')+'margin-top:6px">'+esc(mineMsg)+'</div>';mineMsg='';
   }
-  // mes congés
-  const an=String(new Date().getFullYear());
-  const cgs=S.conges.filter(c=>c.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
-  const tot=cgs.filter(c=>c.statut==='accepte'&&c.du.startsWith(an)).reduce((t,c)=>t+nbJours(c.du,c.au),0);
-  h+='<div class="mhead">Mes congés '+an+' — '+tot+' j acceptés</div>';
-  if(!cgs.length)h+='<div class="small">Aucun congé.</div>';
-  for(const c of cgs){
-    const past=c.au<todayISO();
-    h+='<div class="brow" style="padding-left:6px'+(past?';opacity:.45':'')+'"><span>🏖</span><span>'+fmtFR(c.du)+' → '+fmtFR(c.au)+'</span><span class="small"><b>'+nbJours(c.du,c.au)+' j</b></span>'+
-      (c.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':c.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>')+
-      (c.modifie?'<span class="modif" title="Demandé au départ : '+fmtFR(c.demande.du)+' → '+fmtFR(c.demande.au)+'">✏️ modifié par l\'employeur</span>':'')+'</div>';
+  // 2) MES CONGÉS & ABSENCES (intégrés, style cartes admin, lecture seule)
+  const cgs=S.conges.filter(c=>c.empId===e.id);
+  const mls=S.maladies.filter(m=>m.empId===e.id);
+  const ecs=(S.ecoles||[]).filter(x=>x.empId===e.id);
+  const ents=(S.entreprises||[]).filter(x=>x.empId===e.id);
+  const totC=cgs.filter(c=>c.statut==='accepte'&&c.du.startsWith(an)).reduce((t,c)=>t+nbJours(c.du,c.au),0);
+  const mlAn=mls.filter(m=>m.du.startsWith(an)).reduce((t,m)=>t+nbJours(m.du,m.au),0);
+  const rows=[];
+  for(const c of cgs)rows.push({t:'conge',r:c});
+  for(const m of mls)rows.push({t:'maladie',r:m});
+  for(const x of ecs)rows.push({t:'ecole',r:x});
+  for(const x of ents)rows.push({t:'ent',r:x});
+  rows.sort((a,b)=>a.r.du<b.r.du?-1:1);
+  h+='<div class="mhead">🏖 Mes congés & absences '+an+'</div>';
+  h+='<div class="ecard" style="flex-direction:column;align-items:stretch">';
+  h+='<div class="brow"><span class="small"><b>'+totC+' j</b> de congés acceptés'+(mlAn?' · '+mlAn+' j maladie':'')+'</span><span class="small" style="margin-left:auto">'+badgeEstival(e.id,an)+'</span></div>';
+  if(!rows.length)h+='<div class="small" style="padding:2px 0 2px 18px">Aucune absence enregistrée.</div>';
+  for(const x of rows){
+    const r=x.r;const past=r.au<todayISO();
+    h+='<div class="brow" style="padding-left:18px;border-radius:8px'+(past?';opacity:.5':'')+'">'+
+      '<span>'+(x.t==='conge'?'🏖':x.t==='ecole'?'🎓':x.t==='ent'?'🏭':'🤒')+'</span>'+
+      '<span>'+fmtFR(r.du)+' → '+fmtFR(r.au)+'</span><span class="small"><b>'+nbJours(r.du,r.au)+' j</b></span>';
+    if(x.t==='conge')h+=(r.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':r.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>');
+    if(x.t==='conge'&&r.modifie)h+='<span class="modif" title="Demande initiale : '+fmtFR(r.demande.du)+' → '+fmtFR(r.demande.au)+'">✏️ modifié par l\'employeur</span>';
+    if(r.note)h+='<span class="small">'+esc(r.note)+'</span>';
+    h+='</div>';
   }
-  // mes arrêts maladie (déclarés)
-  const mls=S.maladies.filter(m=>m.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
-  if(mls.length){h+='<div class="mhead">Mes arrêts maladie</div>';
-    for(const m of mls){const past=m.au<todayISO();
-      h+='<div class="brow" style="padding-left:6px'+(past?';opacity:.45':'')+'"><span>🤒</span><span>'+fmtFR(m.du)+' → '+fmtFR(m.au)+'</span><span class="small"><b>'+nbJours(m.du,m.au)+' j</b></span>'+(m.note?'<span class="small">'+esc(m.note)+'</span>':'')+'</div>';}}
-  // mes heures sup déclarées
+  h+='</div>';
+  // 3) MES HEURES SUP déclarées
   const myhs=(S.hsdemandes||[]).filter(x=>x.empId===e.id).sort((a,b)=>a.date<b.date?1:-1);
   if(myhs.length){h+='<div class="mhead">⏱ Mes heures sup</div>';
     for(const x of myhs){const past=x.date<todayISO();
       h+='<div class="brow" style="padding-left:6px'+(past&&x.statut!=='attente'?';opacity:.5':'')+'"><span>⏱</span><span>'+fmtFR(x.date)+'</span><span class="small" style="color:#0891b2;font-weight:700">'+hsLabel(x)+'</span>'+
         (x.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">acceptée ✓</span>':x.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusée</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>')+
         (x.statut==='attente'?' <button class="mini ghost" onclick="delHS('+x.id+')" title="Annuler ma demande">🗑</button>':'')+'</div>';}}
-  if(!isAdmin()){
-  h+='<div class="mhead">✍️ Faire une demande</div>';
-  h+='<div class="small" style="margin-bottom:6px">💡 Astuce : pour déclarer une heure sup, clique directement sur le jour concerné dans le calendrier.</div>';
-  h+='<div class="addrow"><select id="rq-type" onchange="rqTypeChg()"><option value="conge">🏖 Demande de congé</option><option value="maladie">🤒 Déclarer un arrêt maladie</option></select>'+
-   'du <input type="date" id="rq-du"> au <input type="date" id="rq-au">'+
-   '<input id="rq-note" placeholder="Message (optionnel)" style="width:180px">'+
-   '<button class="act green" onclick="submitRequest()">Envoyer</button></div>';
-  h+='<div class="aline blue" id="rq-msg" style="'+(mineMsg?'':'display:none;')+'margin-top:6px">'+esc(mineMsg)+'</div>';mineMsg='';
-  }
+  // 4) RÉCAP D'HEURES (compact, en bas)
+  const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
+  const wk=sumNormHS(e,days);const mo=sumNormHS(e,monthDays(curMonday));
+  h+='<div class="mhead">Mes heures</div>';
+  h+='<div id="hours" style="margin:0 0 10px"><div class="hcard"><span class="dot" style="background:'+colOf(e)+'"></span><b>Cette semaine</b><span class="big">'+fmtDur(wk.norm)+'</span><span class="small">normales</span>'+(wk.hs?'<span class="hsbadge">+ '+fmtDur(wk.hs)+' HS</span>':'')+'</div>'+
+    '<div class="hcard"><b>Ce mois ('+MOISN[+curMonday.slice(5,7)]+')</b><span class="big">'+fmtDur(mo.norm)+'</span><span class="small">normales</span>'+(mo.hs?'<span class="hsbadge">+ '+fmtDur(mo.hs)+' HS</span>':'')+(mo.fer?'<span class="small">· '+mo.fer+' fériés</span>':'')+(mo.dim?'<span class="small">· '+mo.dim+' dim.</span>':'')+'</div></div>';
   h+='<div class="small" style="margin-top:10px">Une demande de congé part en validation chez ton responsable. Un arrêt maladie est enregistré directement (pense à transmettre ton justificatif). Le planning reste en consultation : seules les modifications de l\'employeur s\'y appliquent.</div>';
   $('minepanel').innerHTML=h;
 }
