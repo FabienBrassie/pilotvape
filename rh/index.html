@@ -1260,6 +1260,8 @@ function render(){
   clampMonday();
   {const mn=navMin();const pv=document.getElementById('navprev');if(pv){const atMin=mn&&curMonday<=mn;pv.style.opacity=atMin?'.35':'';pv.style.pointerEvents=atMin?'none':'';}
    const gt=document.getElementById('goto');if(gt)gt.min=mn||'';}
+  // Console Boutique : toujours verrouillée sur SA boutique (restoreUI a pu réécrire curB avec une autre boutique mémorisée)
+  if(ROLE&&ROLE.type==='boutique'&&bout(ROLE.b))curB=ROLE.b;
   // Salarié en consultation : ne montrer que les boutiques où il travaille CETTE semaine (multisite dynamique)
   if(ROLE&&ROLE.type==='salarie'){
     const me=emp(ROLE.empId);
@@ -2031,9 +2033,18 @@ function renderPeople(days){
   if([...hidden].some(id=>emps.some(e=>e.id===id)))h+='<button class="mini" onclick="hidden.clear();try{localStorage.setItem(\'gestionrh-masques\',\'[]\')}catch(e){};render()">Tout afficher</button>';
   $('people').innerHTML=h;
 }
+// Qui apparaît dans le récap d'heures du bas, selon le RÔLE :
+//  - salarié connecté → lui seul (vue individuelle) ;
+//  - console boutique → les salariés de SA boutique (home + ceux qui y travaillent cette semaine) ;
+//  - admin / RH → la boutique affichée (curB).
+function recapEmps(days){
+  if(ROLE&&ROLE.type==='salarie'){const e=emp(ROLE.empId);return (e&&empVisibleWeek(e,curMonday))?[e]:[];}
+  const b=(ROLE&&ROLE.type==='boutique'&&bout(ROLE.b))?ROLE.b:curB;
+  return S.employees.filter(e=>empVisibleWeek(e,curMonday)&&(e.b===b||days.some(d=>{const p=presence(e,d);return p.st==='present'&&(p.blocks||[]).some(bl=>bl[2]===b)})));
+}
 function renderHoursBar(days){
   let h='';
-  const emps=S.employees.filter(e=>empVisibleWeek(e,curMonday)&&(e.b===curB||days.some(d=>{const p=presence(e,d);return p.st==='present'&&(p.blocks||[]).some(bl=>bl[2]===curB)})));
+  const emps=recapEmps(days);
   for(const e of emps){
     const tot=weekMin(e,curMonday);
     const hs=weekHSMin(e,curMonday);
