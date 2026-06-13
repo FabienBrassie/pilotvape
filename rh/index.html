@@ -208,6 +208,7 @@ th{background:var(--bg);font-weight:600}
 @keyframes pulseb{0%{box-shadow:0 0 0 0 rgba(220,38,38,.55)}70%{box-shadow:0 0 0 6px rgba(220,38,38,0)}100%{box-shadow:0 0 0 0 rgba(220,38,38,0)}}
 .adminonly.hide{display:none!important}
 .paieok.hide{display:none!important}
+.meonly.hide{display:none!important}
 #savestate{font-size:11.5px;color:var(--mut)}
 /* ---- sombre ---- */
 body.dark{--bg:#0e131c;--card:#171e2b;--txt:#e2e8f0;--mut:#8b97a8;--line:#27324a;--gridline:#1d2636;--closed:#131927;--P:#60a5fa;--M:#f87171;--L:#a78bfa;--green:#4ade80;--red:#f87171;--orange:#fbbf24}
@@ -250,7 +251,7 @@ body.dark .dayhead.today b{background:#3b82f6}
     <a href="/" class="nav" style="text-decoration:none;display:inline-block" title="Retour à PilotVape (pilotage commercial)">🏪 PilotVape</a>
     <span id="syncdot" style="font-size:11px;font-weight:600;color:#94a3b8;white-space:nowrap" title="État de la synchronisation entre les postes">● …</span>
     <span id="savestate"></span>
-    <div class="seg" style="--segc:var(--blue)"><button id="vw-week" onclick="setView('week')">Semaine</button><button id="vw-synth" class="adminonly" onclick="setView('synth')">3 boutiques</button><button id="vw-month" onclick="setView('month')">Mois</button></div>
+    <div class="seg" style="--segc:var(--blue)"><button id="vw-mine" class="meonly" onclick="setView('mine')">📍 Mon planning</button><button id="vw-week" onclick="setView('week')">Semaine</button><button id="vw-synth" class="adminonly" onclick="setView('synth')">3 boutiques</button><button id="vw-month" onclick="setView('month')">Mois</button></div>
     <button class="nav" id="navprev" onclick="navCal(-1)">◀</button>
     <button class="nav" onclick="curMonday=monday(todayISO());render()">Aujourd'hui</button>
     <button class="nav" onclick="navCal(1)">▶</button>
@@ -1174,6 +1175,38 @@ function renderSynth(){
   h+='</div>';
   $('monthwrap').innerHTML=h;
 }
+// Vue "Mon planning multisite" : la semaine du salarié connecté, toutes boutiques confondues
+// (où il se situe chaque jour). Clic sur un jour → vue Semaine de la boutique de ce jour
+// (il y voit l'équipe de cette boutique ce jour-là).
+function renderMineWeek(){
+  const e=emp(ROLE&&ROLE.empId);
+  $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
+  if(!e){$('monthwrap').innerHTML='<div class="small" style="padding:16px">Indisponible.</div>';return;}
+  const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
+  const today=todayISO();
+  let h='<div style="max-width:760px">';
+  h+='<div class="small" style="padding:2px 2px 10px;color:var(--mut)">📍 Ta semaine, toutes boutiques confondues — clique un jour pour voir l\'équipe de la boutique où tu travailles ce jour-là.</div>';
+  for(const d of days){
+    const p=presence(e,d);
+    let body='',bset=[];
+    if(p.st==='present'&&p.blocks&&p.blocks.length){
+      const byB={};p.blocks.forEach(bl=>{const b=bl[2];(byB[b]=byB[b]||[]).push(bl);});
+      bset=Object.keys(byB);
+      body=bset.map(b=>'<span class="chipb" style="color:var(--'+b+')">'+esc(bout(b).nom)+'</span> <span class="small">'+byB[b].map(bl=>fmtH(bl[0])+'-'+fmtH(bl[1])+(bl[3]?' HS':'')).join(' · ')+'</span>').join(' &nbsp;•&nbsp; ');
+    } else {
+      body='<span class="small">'+(p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='ecole'?'🎓 école':p.st==='off'?'—':'repos')+'</span>';
+    }
+    const multi=bset.length>1;
+    const jumpB=bset[0]||curB;
+    h+='<div class="ecard'+(d===today?' today':'')+(isLive(d)?'':' pre')+'" style="padding:8px 12px;cursor:pointer;align-items:center" onclick="curMonday=monday(\''+d+'\');curB=\''+jumpB+'\';setView(\'week\')">'+
+      '<div class="dbadge" style="width:46px;min-width:46px;height:46px"><b style="font-size:16px">'+(+d.slice(8,10))+'</b><span>'+DAYJ[wdOf(d)]+'</span></div>'+
+      '<div style="flex:1;min-width:0">'+body+(multi?' <span style="font-size:10px;font-weight:800;color:#fff;background:#7c3aed;padding:2px 7px;border-radius:10px;margin-left:4px">MULTISITE</span>':'')+'</div>'+
+      (p.st==='present'?'<span class="small" style="margin-left:auto;white-space:nowrap;font-weight:700">'+fmtDur(blocksMin(p.blocks))+'</span>':'')+
+    '</div>';
+  }
+  h+='</div>';
+  $('monthwrap').innerHTML=h;
+}
 function renderMonth(){
   const mid=addD(monday(curMonday),3); // un jour sûrement dans la bonne semaine
   // mois affiché : on prend le mois du jeudi de la semaine courante? Plutôt : le mois autour de curMonday
@@ -1227,16 +1260,24 @@ function render(){
   clampMonday();
   {const mn=navMin();const pv=document.getElementById('navprev');if(pv){const atMin=mn&&curMonday<=mn;pv.style.opacity=atMin?'.35':'';pv.style.pointerEvents=atMin?'none':'';}
    const gt=document.getElementById('goto');if(gt)gt.min=mn||'';}
+  // Salarié en consultation : ne montrer que les boutiques où il travaille CETTE semaine (multisite dynamique)
+  if(ROLE&&ROLE.type==='salarie'){
+    const me=emp(ROLE.empId);
+    const mine=me?Object.keys(weekBs(me,curMonday)):[];
+    if(mine.length&&!mine.includes(curB))curB=mine[0];
+    document.querySelectorAll('.bchip').forEach(c=>c.style.display=(mine.length&&!mine.includes(c.dataset.b))?'none':'');
+  }
   document.querySelectorAll('.bchip').forEach(c=>c.classList.toggle('on',c.dataset.b===curB));
-  const vw=document.getElementById('vw-week'),vm=document.getElementById('vw-month'),vs=document.getElementById('vw-synth');
-  if(vw)vw.classList.toggle('on',calView==='week');if(vm)vm.classList.toggle('on',calView==='month');if(vs)vs.classList.toggle('on',calView==='synth');
-  const month=calView==='month',synth=calView==='synth',grid=month||synth;
+  const vw=document.getElementById('vw-week'),vm=document.getElementById('vw-month'),vs=document.getElementById('vw-synth'),vmi=document.getElementById('vw-mine');
+  if(vw)vw.classList.toggle('on',calView==='week');if(vm)vm.classList.toggle('on',calView==='month');if(vs)vs.classList.toggle('on',calView==='synth');if(vmi)vmi.classList.toggle('on',calView==='mine');
+  const month=calView==='month',synth=calView==='synth',mine=calView==='mine',grid=month||synth||mine;
   $('calwrap').style.display=grid?'none':'';
   $('monthwrap').style.display=grid?'':'none';
   $('hours').style.display=grid?'none':'';
   $('alerts').style.display=(grid||!isAdmin())?'none':'';
   $('people').style.display=grid?'none':'';
   if(synth){renderSynth();saveUI();return;}
+  if(mine){renderMineWeek();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
   $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
@@ -3076,6 +3117,9 @@ function canPaie(){return ROLE&&(ROLE.type==='admin'||ROLE.type==='rh');}
 function applyRole(){
   const admin=isAdmin();
   if(!admin&&calView==='synth')calView='week';
+  const me=!!(ROLE&&ROLE.empId); // connecté lié à une fiche salarié (salarié OU admin-salarié)
+  if(calView==='mine'&&!me)calView='week';
+  document.querySelectorAll('.meonly').forEach(el=>el.classList.toggle('hide',!me)); // vue "Mon planning multisite"
   document.querySelectorAll('.adminonly').forEach(el=>el.classList.toggle('hide',!admin));
   document.querySelectorAll('.paieok').forEach(el=>el.classList.toggle('hide',!canPaie()));
   updateBadge();
