@@ -1220,6 +1220,8 @@ function renderMineWeek(){
     bb+='</div>';
   }
   $('calbody').innerHTML=bb;
+  // Bande d'événements (fériés, congés, OP…) — boutique du jour pour rester cohérent en multisite
+  renderEvBand(days,d=>{const mb=myBof(d);return mb[0]||curB;});
 }
 function renderMonth(){
   const mid=addD(monday(curMonday),3); // un jour sûrement dans la bonne semaine
@@ -1386,12 +1388,13 @@ function render(){
   saveUI();
 }
 function periodeTxt(du,au){return du===au?'le '+fmtFR(du):'du '+fmtFR(du)+' au '+fmtFR(au);}
-function dayEvents(d){
+function dayEvents(d,b){
+  b=b||curB; // boutique de référence (par défaut la boutique affichée ; en "Mon planning" = celle du jour)
   const out=[];
   const f=ferieOf(d);
-  if(f){const stat=f.b[curB]||'Fermé';const affecte=!/normal/i.test(stat);
-    if(f.type==='ferie'||affecte){const hrs=shopHours(curB,d);
-      out.push({cls:hrs?'ouvexc':'ferie',txt:(hrs?'🟢 ':'🔴 ')+f.nom+(f.type==='special'?' ✦':'')+(hrs?(hrs.exc?' · '+fmtH(hrs.open)+'-'+fmtH(hrs.close):' · ouvert'):' · fermé'),detail:(f.type==='special'?'Jour spécial : ':'Jour férié : ')+f.nom+' — '+bout(curB).nom+' '+(hrs?fmtH(hrs.open)+'-'+fmtH(hrs.close):'fermé')});}}
+  if(f){const stat=f.b[b]||'Fermé';const affecte=!/normal/i.test(stat);
+    if(f.type==='ferie'||affecte){const hrs=shopHours(b,d);
+      out.push({cls:hrs?'ouvexc':'ferie',txt:(hrs?'🟢 ':'🔴 ')+f.nom+(f.type==='special'?' ✦':'')+(hrs?(hrs.exc?' · '+fmtH(hrs.open)+'-'+fmtH(hrs.close):' · ouvert'):' · fermé'),detail:(f.type==='special'?'Jour spécial : ':'Jour férié : ')+f.nom+' — '+bout(b).nom+' '+(hrs?fmtH(hrs.open)+'-'+fmtH(hrs.close):'fermé')});}}
   const absEntries=[];const nbAbs={};
   for(const e of S.employees.filter(x=>x.actif)){ // toutes boutiques : un congé se voit partout
     const liseré='style="border-left:4px solid var(--'+e.b+')"';
@@ -1414,15 +1417,15 @@ function dayEvents(d){
   }
   for(const ev of S.events){
     if(d<ev.du||d>ev.au)continue;
-    if(ev.b&&ev.b!=='ALL'&&ev.b!==curB)continue;
+    if(ev.b&&ev.b!=='ALL'&&ev.b!==b)continue;
     out.push({cls:ev.type==='OP'?'op':'autre',txt:(ev.type==='OP'?'📣 ':'📌 ')+ev.label,detail:(ev.type==='OP'?'OP : ':'Événement : ')+esc(ev.label)+' '+periodeTxt(ev.du,ev.au)+(ev.b&&ev.b!=='ALL'?' · '+bout(ev.b).nom:' · toutes boutiques')});
   }
   return out;
 }
-function renderEvBand(days){
+function renderEvBand(days,bOf){
   let h='<div class="evlabel">événements</div>';
   for(const d of days){
-    const evs=dayEvents(d);
+    const evs=dayEvents(d,bOf?bOf(d):curB);
     h+='<div class="evcell" onclick="openEvEd(\''+d+'\')" title="Clique pour ajouter / gérer les événements de ce jour">'+
       evs.map(e=>'<span class="evc '+e.cls+'" '+(e.st||'')+' title="'+esc(e.detail||e.txt)+(e.jump?' — clique pour gérer':'')+'"'+(e.jump?' style="cursor:pointer" onclick="event.stopPropagation();jumpAbs(\''+e.jump.t+'\','+e.jump.id+',\''+e.jump.emp+'\')"':'')+'>'+esc(e.txt)+'</span>').join('')+'</div>';
   }
