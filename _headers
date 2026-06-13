@@ -20,5 +20,16 @@
   Pragma: no-cache
   Expires: 0
 
+# Outil RH co-hébergé (pilotvape.fr/rh) : même règle anti-cache
+/rh/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
+/rh/
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+  Expires: 0
+
 # Les fichiers statiques rarement modifiés peuvent être mis en cache
 # (à compléter plus tard si on ajoute des assets versionnés)
