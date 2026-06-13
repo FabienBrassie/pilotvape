@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 15:52</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 16:10</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -2070,6 +2070,12 @@ function getOpProductDisplay(op) {
     const fam = PRODUIT_LIBRE_FAMILLE_META[op.produitLibre.famille] || PRODUIT_LIBRE_FAMILLE_META.autre;
     return { label: op.produitLibre.libelle, icon: fam.icon, color: fam.color, isKit: false, famille: fam };
   }
+  // Produit décrit par une pièce 'PRODUIT' (legacy) : on le nomme au lieu d'afficher "—"
+  // (refonte produit/PLV 2026-06-13 — le produit n'est plus une simple pièce muette).
+  const _pp = (op.pieces || []).find(x => x.type === 'PRODUIT');
+  if (_pp) {
+    return { label: pieceLabel(_pp), icon: '📦', color: '#f1f5f9', isKit: false };
+  }
   return { label: (op.produitIds || []).join(', ') || '—', icon: '', color: '#94a3b8', isKit: false };
 }
 
@@ -2198,9 +2204,30 @@ function ensureOpModel(op) {
   } else if (op.produitLibre !== null) {
     op.produitLibre = null;
   }
+  // Réception centralisée (dispatch) SÉPARÉE produit / PLV (refonte 2026-06-13, demande Fabien :
+  // "la PLV peut être concernée par la rétro et pas le produit, ou l'inverse"). Deux hubs
+  // indépendants. Migration de l'ancien champ unique op.dispatchHub → produit (le stock).
+  if (op.dispatchHub && !op.dispatchProduit) { op.dispatchProduit = op.dispatchHub; }
+  if ('dispatchHub' in op) delete op.dispatchHub;
+  if (typeof op.dispatchProduit !== 'string' && op.dispatchProduit != null) op.dispatchProduit = '';
+  if (typeof op.dispatchPlv !== 'string' && op.dispatchPlv != null) op.dispatchPlv = '';
   // Progress global
   if (!op.progress || typeof op.progress !== 'object') op.progress = { global: {} };
   if (!op.progress.global || typeof op.progress.global !== 'object') op.progress.global = {};
+}
+
+// Une pièce de l'OP est-elle LE PRODUIT vendu (et non de la PLV) ? (refonte produit/PLV 2026-06-13)
+// Le produit hors base a longtemps été saisi comme une pièce type 'PRODUIT' mélangée à la PLV ;
+// on le re-distingue partout (affichage, désinstall, dispatch) via ce test canonique.
+function pieceEstProduit(p) { return !!(p && p.type === 'PRODUIT'); }
+// Retourne la/les pièce(s) PRODUIT d'une OP.
+function opPiecesProduit(op) { return (op && Array.isArray(op.pieces)) ? op.pieces.filter(pieceEstProduit) : []; }
+// Une étape de réception concerne-t-elle le PRODUIT (vs la PLV) ?
+function stepRecepEstProduit(op, d) {
+  if (!d) return false;
+  if (d.key === 'stock' || d.key === 'prod_recue') return true;
+  if (d.pieceId) { const _p = (op.pieces || []).find(x => x.id === d.pieceId); return pieceEstProduit(_p); }
+  return false;
 }
 
 function ensurePieceModel(p) {
@@ -2447,9 +2474,10 @@ function computeOpShopStepDefs(op, shop) {
     if (op.type === 'PRIX_ROUGE' && !_isDestockage) {
       defs.push({ key: 'fin_prix_swappy', label: '💰 Remettre le prix initial sur Swappy', kind: 'desinstall' });
     }
-    // "OP désinstallée" uniquement si l'OP a du matériel physique à retirer.
-    // Pas de pièce = rien à désinstaller → l'OP se clôture automatiquement.
-    const _hasPiecesPhysiques = op.pieces && op.pieces.length > 0;
+    // "OP désinstallée" uniquement si l'OP a du matériel PLV physique à retirer.
+    // Le PRODUIT vendu n'est PAS de la PLV : on ne le « désinstalle » pas comme une affiche
+    // (refonte produit/PLV 2026-06-13). On ne compte donc que les vraies pièces PLV.
+    const _hasPiecesPhysiques = (op.pieces || []).some(p => !pieceEstProduit(p));
     if (!_needFtLabel && !_isDestockage && _hasPiecesPhysiques) {
       defs.push({ key: 'desinstallation', label: '🔻 OP désinstallée', kind: 'desinstall' });
     }
@@ -3370,19 +3398,25 @@ function stepBadgeDispatch(a, sh, def, checked) {
   return ' <span style="font-size:9px; color:#fbbf24; background:#78350f25; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée à ' + _hubLbl + ' : le lot arrive par rétrocession (transport Fabien) — attente, pas un retard">⏳ attend le dispatch depuis ' + _hubLbl + '</span>';
 }
 
-// Même logique pour les étapes de réception d'une OP en réception centralisée (2026-06-12) :
-// "Stock reçu" et "Réceptionner <pièce PLV>" — le hub reçoit tout (stock + PLV), les autres
-// attendent leur lot/PLV apportés par Fabien.
-function opStepBadgeDispatch(op, sh, def, checked) {
-  if (!op || !op.dispatchHub || !def) return '';
+// Hub de réception centralisée applicable à une étape donnée (refonte 2026-06-13) : le PRODUIT
+// suit op.dispatchProduit, la PLV suit op.dispatchPlv. Retourne le hub (string) ou ''.
+function opDispatchHubForStep(op, def) {
+  if (!op || !def) return '';
   const _isRecep = def.key === 'stock' || def.kind === 'reception' || /_recue$/.test(def.key || '');
   if (!_isRecep) return '';
-  if (sh === op.dispatchHub) {
-    return ' <span style="font-size:9px; color:#67e8f9; background:#0e749022; border:1px solid #06b6d440; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée : tout arrive ici (stock + PLV), puis dispatch vers les autres boutiques (transport Fabien)">📦 tout arrive ici</span>';
+  return stepRecepEstProduit(op, def) ? (op.dispatchProduit || '') : (op.dispatchPlv || '');
+}
+// Badge dispatch sur une étape de réception d'OP — produit OU PLV selon l'étape (2026-06-13).
+function opStepBadgeDispatch(op, sh, def, checked) {
+  const _hub = opDispatchHubForStep(op, def);
+  if (!_hub) return '';
+  const _nat = stepRecepEstProduit(op, def) ? 'le produit' : 'la PLV';
+  if (sh === _hub) {
+    return ' <span style="font-size:9px; color:#67e8f9; background:#0e749022; border:1px solid #06b6d440; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée : ' + _nat + ' arrive ici, puis dispatch vers les autres boutiques (transport Fabien)">📦 arrive ici</span>';
   }
   if (checked) return '';
-  const _hubLbl = SHOP_LABELS[op.dispatchHub] || op.dispatchHub;
-  return ' <span style="font-size:9px; color:#fbbf24; background:#78350f25; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée à ' + _hubLbl + ' : arrive avec le dispatch (transport Fabien) — attente, pas un retard">⏳ attend le dispatch depuis ' + _hubLbl + '</span>';
+  const _hubLbl = SHOP_LABELS[_hub] || _hub;
+  return ' <span style="font-size:9px; color:#fbbf24; background:#78350f25; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Réception centralisée à ' + _hubLbl + ' : ' + _nat + ' arrive avec le dispatch (transport Fabien) — attente, pas un retard">⏳ attend le dispatch depuis ' + _hubLbl + '</span>';
 }
 
 function getActionSteps(typeOrAction) {
@@ -6442,6 +6476,7 @@ function creerPaireRetro(opts) {
     if (opts.rentrerActionId) a.retroRentrerActionId = opts.rentrerActionId;
     if (opts.opId) a.retroOpId = opts.opId;
     if (opts.retroLabel) a.retroLabel = opts.retroLabel;
+    if (opts.retroNature) a.retroNature = opts.retroNature;
     if (opts.parfumId) { a.produitParfumId = opts.parfumId; a._parfumNom = opts.parfumNom || null; }
     // Court-circuit des boutiques NON concernées : tout coché, donc done → invisibles chez elles.
     SHOPS.forEach(sh => {
@@ -6511,39 +6546,48 @@ async function setDispatchHub(actionId, hub) {
   pvAlert('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' activée.\nLes transferts vers les autres boutiques sont créés (section 🔁 Rétrocessions).');
 }
 
-// ── RÉCEPTION CENTRALISÉE sur une OP (2026-06-12, demande Fabien : "et pour les OP, stock
-// ET PLV ?"). Pose op.dispatchHub : les étapes "Stock reçu" / "Réceptionner PLV" des autres
-// boutiques passent en "attend le dispatch" (badges via opStepBadgeDispatch). Pour le STOCK
-// produits : rétrocessions Swappy hub → boutiques créées (liées par retroOpId) — SAUF si
-// l'OP a déjà une ligne À rentrer liée (c'est elle qui porte le dispatch, pas de doublon).
-// La PLV n'a pas de stock Swappy : pas de rétrocession, juste l'info + transport Fabien.
-async function setOpDispatchHub(opId, hub) {
+// ── RÉCEPTION CENTRALISÉE sur une OP, SÉPARÉE produit / PLV (refonte 2026-06-13, demande
+// Fabien : "la PLV peut être concernée par la rétro et pas le produit, ou l'inverse").
+// kind = 'produit' → pose op.dispatchProduit ; kind = 'plv' → pose op.dispatchPlv.
+//   • Produit : rétrocessions Swappy hub→boutiques pour le stock base (liées par retroOpId,
+//     nature 'produit'), SAUF si une ligne À rentrer liée porte déjà le dispatch ; produit hors
+//     base → ligne d'info. Verrouille/badge les étapes de réception PRODUIT des satellites.
+//   • PLV : pas de stock Swappy → ligne d'info de transport (nature 'plv') ; verrouille/badge
+//     les étapes de réception PLV des satellites.
+async function setOpDispatchHub(opId, kind, hub) {
   if (!isAdmin()) { pvAlert('La réception centralisée est décidée par Fabien.'); return; }
   const op = ops.find(o => o.id === opId);
   if (!op) return;
+  if (kind !== 'produit' && kind !== 'plv') kind = 'produit';
+  const _champ = kind === 'plv' ? 'dispatchPlv' : 'dispatchProduit';
+  const _natLbl = kind === 'plv' ? 'PLV' : 'produit';
   const nowIso = new Date().toISOString();
-  const _lies = () => actions.filter(x => x.retroOpId === op.id && !x.annulee);
+  const _lies = () => actions.filter(x => x.retroOpId === op.id && x.retroNature === kind && !x.annulee);
   if (!hub) {
     const lies = _lies();
     if (lies.length > 0) {
-      const ok = await pvConfirm('Retirer la réception centralisée ?\n\n' + lies.length + ' rétrocession(s) de stock liée(s) seront annulées.');
+      const ok = await pvConfirm('Retirer la réception centralisée ' + _natLbl + ' ?\n\n' + lies.length + ' ligne(s) de transfert liée(s) seront annulées.');
       if (!ok) return;
       lies.forEach(x => _cancelAction(x));
     }
-    op.dispatchHub = null;
+    op[_champ] = '';
     op._ts = nowIso; op._adminTs = nowIso;
-    logAction('Réception centralisée OP retirée', op.nom || op.id);
+    logAction('Réception centralisée OP retirée (' + _natLbl + ')', op.nom || op.id);
     saveData(); try { renderDashboard(); } catch(e) {} try { typeof renderOps === 'function' && renderOps(); } catch(e) {}
     return;
   }
-  const _hasRentrerLie = !!(op.rentrerActionId && actions.find(x => x.id === op.rentrerActionId && !x.annulee));
-  const ok = await pvConfirm('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' pour l\'OP « ' + (op.nom || op.id) + ' » ?\n\nStock + PLV arrivent à ' + (SHOP_LABELS[hub] || hub) + ' ; Fabien dispatche vers les autres boutiques.' + (_hasRentrerLie ? '\n\n(Le stock est suivi par la ligne À rentrer liée — pense à y choisir le même hub. Ici : info PLV/réception.)' : '\nLes rétrocessions Swappy du stock seront créées (section 🔁).'), { title: '📦 Réception centralisée — OP', ok: 'Lancer', okColor: '#06b6d4' });
+  const _hasRentrerLie = kind === 'produit' && !!(op.rentrerActionId && actions.find(x => x.id === op.rentrerActionId && !x.annulee));
+  const _msg = kind === 'plv'
+    ? 'La PLV arrive à ' + (SHOP_LABELS[hub] || hub) + ' ; Fabien la dispatche vers les autres boutiques. (La PLV n\'a pas de stock Swappy : transfert pour info/transport.)'
+    : 'Le stock produit arrive à ' + (SHOP_LABELS[hub] || hub) + ' ; Fabien dispatche vers les autres boutiques.' + (_hasRentrerLie ? '\n\n(Le stock est déjà suivi par la ligne À rentrer liée — pense à y choisir le même hub.)' : '\nLes rétrocessions Swappy du stock seront créées (section 🔁).');
+  const ok = await pvConfirm('Réception centralisée ' + _natLbl + ' à ' + (SHOP_LABELS[hub] || hub) + ' pour l\'OP « ' + (op.nom || op.id) + ' » ?\n\n' + _msg, { title: '📦 Réception centralisée ' + _natLbl, ok: 'Lancer', okColor: '#06b6d4' });
   if (!ok) return;
-  _lies().forEach(x => _cancelAction(x));
-  op.dispatchHub = hub;
+  _lies().forEach(x => _cancelAction(x)); // repartir propre si on change de hub
+  op[_champ] = hub;
   op._ts = nowIso; op._adminTs = nowIso;
   let _nbRetros = 0;
-  if (!_hasRentrerLie) {
+  const _label = (getOpProductDisplay(op).label) || op.nom || 'Produit OP';
+  if (kind === 'produit' && !_hasRentrerLie) {
     // Produits de la base liés à l'OP → une rétrocession par produit (stock Swappy suivi).
     const _baseProds = (op.produitIds || []).map(pid => {
       const _t = baseKits.find(k => k.id === pid) ? 'kit' : baseLiq.find(l => l.id === pid) ? 'liq' : basePD.find(p => p.id === pid) ? 'pd' : null;
@@ -6551,29 +6595,21 @@ async function setOpDispatchHub(opId, hub) {
     }).filter(Boolean);
     if (_baseProds.length > 0) {
       _baseProds.forEach(({ pid, _t }) => {
-        SHOPS.forEach(sh => {
-          if (sh === hub) return;
-          creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id });
-          _nbRetros++;
-        });
+        SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroNature: 'produit' }); _nbRetros++; });
       });
     } else {
-      // OP sans produit en base (accessoire/PLV, ex Banane, Tour de cou) : on crée quand même
-      // une ligne de dispatch par destination, labellisée par l'OP, pour suivre le transport
-      // physique (demande Fabien 2026-06-13 : "ça doit apparaître au moins pour info dans 🔁").
-      const _label = (getOpProductDisplay(op).label) || op.nom || 'Produit OP';
-      SHOPS.forEach(sh => {
-        if (sh === hub) return;
-        creerPaireRetro({ produitType: 'kit', produitId: 'OPGOODS-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: _label });
-        _nbRetros++;
-      });
+      // Produit hors base (accessoire, ex Banane/Tour de cou) : ligne d'info par destination.
+      SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPGOODS-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: _label, retroNature: 'produit' }); _nbRetros++; });
     }
+  } else if (kind === 'plv') {
+    // PLV : pas de stock Swappy → ligne d'info par destination pour suivre le transport.
+    SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPPLV-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: 'PLV — ' + _label, retroNature: 'plv' }); _nbRetros++; });
   }
-  logAction('Réception centralisée OP', (op.nom || op.id) + ' → hub ' + (SHOP_LABELS[hub] || hub) + (_nbRetros ? ' · ' + _nbRetros + ' rétrocession(s) de stock créée(s)' : ' (PLV/info seulement)'));
+  logAction('Réception centralisée OP (' + _natLbl + ')', (op.nom || op.id) + ' → hub ' + (SHOP_LABELS[hub] || hub) + (_nbRetros ? ' · ' + _nbRetros + ' transfert(s)' : ''));
   saveData();
   try { renderDashboard(); } catch(e) {}
   try { typeof renderOps === 'function' && renderOps(); } catch(e) {}
-  pvAlert('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' activée sur l\'OP.' + (_nbRetros ? '\n' + _nbRetros + ' transfert(s) de stock créé(s) (section 🔁 Rétrocessions).' : ''));
+  pvAlert('Réception centralisée ' + _natLbl + ' à ' + (SHOP_LABELS[hub] || hub) + ' activée.' + (_nbRetros ? '\n' + _nbRetros + ' transfert(s) créé(s) (section 🔁 Rétrocessions).' : ''));
 }
 
 async function lancerRetrocession(produitType, produitId, parfumId) {
@@ -15563,7 +15599,8 @@ function renderDashboard() {
       if (a.retroOpId) {
         const _srcOp = ops.find(o => o.id === a.retroOpId);
         const _srcLbl = _srcOp ? (_srcOp.nom || _srcOp.id) : a.retroOpId;
-        badgeSub += `<span style="font-size:8px; padding:1px 5px; background:#a855f720; color:#c4b5fd; border:1px solid #a855f750; border-radius:2px; white-space:nowrap;" title="Issue de la réception centralisée de l'OP « ${_srcLbl} »">📦 OP ${_srcLbl}</span>`;
+        const _natTag = a.retroNature === 'plv' ? ' · PLV' : (a.retroNature === 'produit' ? ' · produit' : '');
+        badgeSub += `<span style="font-size:8px; padding:1px 5px; background:#a855f720; color:#c4b5fd; border:1px solid #a855f750; border-radius:2px; white-space:nowrap;" title="Issue de la réception centralisée${a.retroNature === 'plv' ? ' (PLV)' : a.retroNature === 'produit' ? ' (produit)' : ''} de l'OP « ${_srcLbl} »">📦 OP ${_srcLbl}${_natTag}</span>`;
       } else if (a.retroRentrerActionId) {
         badgeSub += `<span style="font-size:8px; padding:1px 5px; background:#22c55e20; color:#86efac; border:1px solid #22c55e50; border-radius:2px; white-space:nowrap;" title="Issue de la réception centralisée d'un À rentrer">📦 dispatch réception</span>`;
       }
@@ -21873,13 +21910,14 @@ function _renderOpCardHtmlInner(op, options) {
         // vue depuis un poste boutique (règle Fabien 2026-06-11 : les équipes VOIENT la
         // confirmation que Fabien a fait, elles ne cochent pas à sa place).
         const _adminStepReadOnly = d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin();
-        // Réception centralisée (Fabien 2026-06-12) : la case de réception d'un satellite est
-        // VERROUILLÉE tant que le hub n'a pas déclaré SA réception — rien n'a pu arriver avant.
-        const _dispatchLocked = !!(op.dispatchHub && sh !== op.dispatchHub && !checked
-          && (d.key === 'stock' || d.kind === 'reception' || /_recue$/.test(d.key || ''))
-          && !_getOpStepChecked(op, op.dispatchHub, d));
+        // Réception centralisée (Fabien 2026-06-12, refonte produit/PLV 2026-06-13) : la case de
+        // réception d'un satellite est VERROUILLÉE tant que le hub (produit OU PLV selon l'étape)
+        // n'a pas déclaré SA réception — rien n'a pu arriver avant.
+        const _stepHub = opDispatchHubForStep(op, d);
+        const _dispatchLocked = !!(_stepHub && sh !== _stepHub && !checked
+          && !_getOpStepChecked(op, _stepHub, d));
         const clickAttr = (_absentShop || isDashboardStep || _adminStepReadOnly || _dispatchLocked)
-          ? `title="${isDashboardStep ? 'Géré dans le dashboard — coche côté action' : _adminStepReadOnly ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : _dispatchLocked ? 'Verrouillé : ' + (SHOP_LABELS[op.dispatchHub] || op.dispatchHub) + ' doit déclarer sa réception en premier, puis Fabien dispatche' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
+          ? `title="${isDashboardStep ? 'Géré dans le dashboard — coche côté action' : _adminStepReadOnly ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : _dispatchLocked ? 'Verrouillé : ' + (SHOP_LABELS[_stepHub] || _stepHub) + ' doit déclarer sa réception en premier, puis Fabien dispatche' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
           : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"`;
         const _isClickable = !_absentShop && !isDashboardStep && !_adminStepReadOnly && !_dispatchLocked;
         const _dashLabel = isDashboardStep ? ` <span onclick="event.stopPropagation(); goToActionFromOp('${op.id}','${d.kind}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à l'action dans le dashboard">← dashboard</span>` : '';
@@ -21986,27 +22024,39 @@ function _renderOpCardHtmlInner(op, options) {
     ${freetouchBtnsHtml}
     ${globalStepsHtml}
     ${(() => {
-      // ── 📦 Réception centralisée de l'OP (2026-06-12) : stock + PLV arrivent à un hub,
-      // dispatch vers les autres. Sélecteur admin ; info pour les boutiques quand actif.
-      const _dh = op.dispatchHub || '';
-      // isOpOuverte (canonique) et non isActive (= !dateFin) : une OP bornée 15→20/06 est
-      // encore ouverte — le bug masquait le sélecteur sur toute OP avec date de fin (retour
-      // Fabien 2026-06-12, cas réel Tour de cou Chaîne).
-      if (typeof isAdmin === 'function' && isAdmin() && isOpOuverte(op) && !noEdit) {
-        const _dhLies = actions.filter(x => x.retroOpId === op.id && !x.annulee);
-        const _dhDone = _dhLies.filter(x => actionGlobalState(x) === 'FAIT').length;
-        const _dhStatus = _dh && _dhLies.length > 0 ? `<span style="font-size:10px; color:#67e8f9;">${_dhDone}/${_dhLies.length} transfert${_dhLies.length>1?'s':''} de stock terminé${_dhDone>1?'s':''} · section 🔁</span>` : '';
-        return `<div style="margin-top:6px; padding:6px 8px; background:#0f172a; border:1px solid ${_dh ? '#06b6d440' : '#33415560'}; border-radius:4px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;" onclick="event.stopPropagation()">
-          <span style="font-size:10px; color:#64748b;">📦 Réception centralisée ?</span>
-          <select onchange="setOpDispatchHub('${op.id}', this.value || null)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${_dh ? '#06b6d460' : '#475569'}; color:${_dh ? '#67e8f9' : '#cbd5e1'}; border-radius:3px;">
-            <option value="">Non — chaque boutique reçoit sa livraison</option>
-            ${SHOPS.map(sh => `<option value="${sh}" ${_dh === sh ? 'selected' : ''}>Tout arrive à ${SHOP_LABELS[sh] || sh} → dispatch (stock + PLV)</option>`).join('')}
+      // ── 📦 Réception centralisée de l'OP, SÉPARÉE produit / PLV (refonte 2026-06-13) : le
+      // produit et la PLV peuvent arriver à des endroits différents (ou un seul des deux être
+      // centralisé). Deux sélecteurs indépendants. isOpOuverte (canonique, pas isActive).
+      const _dProd = op.dispatchProduit || '';
+      const _dPlv = op.dispatchPlv || '';
+      const _hasPlv = (op.pieces || []).some(p => !pieceEstProduit(p));
+      const _lignesNat = (nat) => actions.filter(x => x.retroOpId === op.id && x.retroNature === nat && !x.annulee);
+      const _selRow = (kind, cur, label, dispo) => {
+        if (!dispo) return '';
+        const _li = _lignesNat(kind);
+        const _done = _li.filter(x => actionGlobalState(x) === 'FAIT').length;
+        const _st = cur && _li.length > 0 ? `<span style="font-size:10px; color:#67e8f9;">${_done}/${_li.length} transfert${_li.length>1?'s':''} · 🔁</span>` : '';
+        return `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <span style="font-size:10px; color:#64748b; min-width:118px;">📦 ${label} centralisé ?</span>
+          <select onchange="setOpDispatchHub('${op.id}', '${kind}', this.value || null)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${cur ? '#06b6d460' : '#475569'}; color:${cur ? '#67e8f9' : '#cbd5e1'}; border-radius:3px;">
+            <option value="">Non — chaque boutique reçoit directement</option>
+            ${SHOPS.map(sh => `<option value="${sh}" ${cur === sh ? 'selected' : ''}>Tout arrive à ${SHOP_LABELS[sh] || sh} → dispatch</option>`).join('')}
           </select>
-          ${_dhStatus}
+          ${_st}
+        </div>`;
+      };
+      if (typeof isAdmin === 'function' && isAdmin() && isOpOuverte(op) && !noEdit) {
+        return `<div style="margin-top:6px; padding:6px 8px; background:#0f172a; border:1px solid ${(_dProd||_dPlv) ? '#06b6d440' : '#33415560'}; border-radius:4px; display:flex; flex-direction:column; gap:5px;" onclick="event.stopPropagation()">
+          ${_selRow('produit', _dProd, 'Produit', true)}
+          ${_selRow('plv', _dPlv, 'PLV', _hasPlv)}
         </div>`;
       }
-      if (_dh) {
-        return `<div style="margin-top:6px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:4px; font-size:10px; color:#67e8f9;">📦 Réception centralisée à ${SHOP_LABELS[_dh] || _dh} — stock et PLV arrivent là-bas, Fabien dispatche vers les autres boutiques.</div>`;
+      // Vue boutique : bandeau info si l'un ou l'autre est centralisé.
+      const _info = [];
+      if (_dProd) _info.push(`le produit arrive à ${SHOP_LABELS[_dProd] || _dProd}`);
+      if (_dPlv) _info.push(`la PLV arrive à ${SHOP_LABELS[_dPlv] || _dPlv}`);
+      if (_info.length > 0) {
+        return `<div style="margin-top:6px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:4px; font-size:10px; color:#67e8f9;">📦 Réception centralisée — ${_info.join(' · ')}, Fabien dispatche vers les autres boutiques.</div>`;
       }
       return '';
     })()}
@@ -22261,7 +22311,10 @@ function renderPieceSummary(op, p, shopFilter) {
 // Panneau d'édition inline d'une OP : mécanique + pièces + prep + partenaire/challenge + dates
 function renderOpEditPanel(op) {
   const mecaOpts = MECA_TYPES.map(m => `<option value="${m.key}" ${op.mecanique.type === m.key ? 'selected' : ''}>${m.label}</option>`).join('');
-  const pieceTypeOpts = PIECE_TYPES.map(p => `<option value="${p.key}">${p.label}</option>`).join('');
+  // 'PRODUIT' retiré du picker d'ajout (refonte produit/PLV 2026-06-13) : le produit vendu se
+  // saisit à la création de l'OP (base ou produit libre), il n'est plus une pièce PLV. Le type
+  // reste connu de PIECE_TYPE_META pour afficher les pièces PRODUIT héritées sans les casser.
+  const pieceTypeOpts = PIECE_TYPES.filter(p => p.key !== 'PRODUIT').map(p => `<option value="${p.key}">${p.label}</option>`).join('');
 
   // Liste des pièces éditables
   const piecesRows = op.pieces.map(p => {
