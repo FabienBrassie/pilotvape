@@ -1175,37 +1175,51 @@ function renderSynth(){
   h+='</div>';
   $('monthwrap').innerHTML=h;
 }
-// Vue "Mon planning multisite" : la semaine du salarié connecté, toutes boutiques confondues
-// (où il se situe chaque jour). Clic sur un jour → vue Semaine de la boutique de ce jour
-// (il y voit l'équipe de cette boutique ce jour-là).
+// Vue "Mon planning" : un VRAI calendrier (comme les plannings boutique), mais où chaque jour
+// affiche l'équipe de la boutique où LE salarié connecté travaille ce jour-là. En-tête de jour
+// coloré + 📍 nom de la boutique = où aller. Ses propres blocs sont surlignés (★ + contour).
 function renderMineWeek(){
-  const e=emp(ROLE&&ROLE.empId);
-  $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
-  if(!e){$('monthwrap').innerHTML='<div class="small" style="padding:16px">Indisponible.</div>';return;}
+  const me=emp(ROLE&&ROLE.empId);
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const today=todayISO();
-  let h='<div style="max-width:760px">';
-  h+='<div class="small" style="padding:2px 2px 10px;color:var(--mut)">📍 Ta semaine, toutes boutiques confondues — clique un jour pour voir l\'équipe de la boutique où tu travailles ce jour-là.</div>';
+  $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
+  if(!me){$('calhead').innerHTML='<div></div>';$('calbody').innerHTML='<div class="small" style="padding:16px">Indisponible.</div>';return;}
+  const myBof=d=>{const p=presence(me,d);return (p.st==='present'&&p.blocks)?[...new Set(p.blocks.map(bl=>bl[2]))]:[];};
+  // EN-TÊTES : jour + boutique(s) où aller (couleur de la boutique)
+  let hh='<div></div>';
   for(const d of days){
-    const p=presence(e,d);
-    let body='',bset=[];
-    if(p.st==='present'&&p.blocks&&p.blocks.length){
-      const byB={};p.blocks.forEach(bl=>{const b=bl[2];(byB[b]=byB[b]||[]).push(bl);});
-      bset=Object.keys(byB);
-      body=bset.map(b=>'<span class="chipb" style="color:var(--'+b+')">'+esc(bout(b).nom)+'</span> <span class="small">'+byB[b].map(bl=>fmtH(bl[0])+'-'+fmtH(bl[1])+(bl[3]?' HS':'')).join(' · ')+'</span>').join(' &nbsp;•&nbsp; ');
-    } else {
-      body='<span class="small">'+(p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='ecole'?'🎓 école':p.st==='off'?'—':'repos')+'</span>';
-    }
-    const multi=bset.length>1;
-    const jumpB=bset[0]||curB;
-    h+='<div class="ecard'+(d===today?' today':'')+(isLive(d)?'':' pre')+'" style="padding:8px 12px;cursor:pointer;align-items:center" onclick="curMonday=monday(\''+d+'\');curB=\''+jumpB+'\';setView(\'week\')">'+
-      '<div class="dbadge" style="width:46px;min-width:46px;height:46px"><b style="font-size:16px">'+(+d.slice(8,10))+'</b><span>'+DAYJ[wdOf(d)]+'</span></div>'+
-      '<div style="flex:1;min-width:0">'+body+(multi?' <span style="font-size:10px;font-weight:800;color:#fff;background:#7c3aed;padding:2px 7px;border-radius:10px;margin-left:4px">MULTISITE</span>':'')+'</div>'+
-      (p.st==='present'?'<span class="small" style="margin-left:auto;white-space:nowrap;font-weight:700">'+fmtDur(blocksMin(p.blocks))+'</span>':'')+
-    '</div>';
+    const mb=myBof(d),p=presence(me,d);
+    let accent='',tag;
+    if(mb.length){tag=mb.map(b=>'<span class="chipb" style="color:var(--'+b+')">📍 '+esc(bout(b).nom)+'</span>').join(' + ');accent='box-shadow:inset 0 -4px 0 var(--'+mb[0]+')';}
+    else tag='<span class="fer">'+(p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='ecole'?'🎓 école':p.st==='off'?'—':'repos')+'</span>';
+    hh+='<div class="dayhead'+(d===today?' today':'')+(isLive(d)?'':' pre')+'" style="'+accent+'"><b>'+DAYJ[wdOf(d)]+' '+(+d.slice(8,10))+'</b><span class="fer">'+tag+'</span></div>';
   }
-  h+='</div>';
-  $('monthwrap').innerHTML=h;
+  $('calhead').innerHTML=hh;
+  // CORPS : pour chaque jour, l'équipe de la/les boutique(s) où je suis ce jour-là
+  let bb='<div class="hourcol">';
+  for(let m=540;m<CAL_END;m+=60)bb+='<div class="hlabel" style="top:'+((m-CAL_START)*PX)+'px">'+fmtH(m2t(m))+'</div>';
+  bb+='</div>';
+  for(const d of days){
+    const mb=new Set(myBof(d));
+    bb+='<div class="daycol'+(mb.size?'':' closed')+(isLive(d)?'':' pre')+'">';
+    for(let m=540;m<CAL_END;m+=60)bb+='<div class="hline" style="top:'+((m-CAL_START)*PX)+'px"></div>';
+    if(mb.size){
+      const evs=[];
+      for(const e of S.employees.filter(x=>x.actif)){
+        const p=presence(e,d);if(p.st!=='present'||!p.blocks)continue;
+        p.blocks.forEach(bl=>{if(!mb.has(bl[2]))return;evs.push({e,bl,me:e.id===me.id,s:t2m(bl[0]),f:t2m(bl[1]),hs:!!bl[3]});});
+      }
+      evs.sort((a,b)=>a.s-b.s||b.f-a.f);
+      const colsEnd=[];for(const ev of evs){let c=0;while(c<colsEnd.length&&colsEnd[c]>ev.s)c++;ev.col=c;colsEnd[c]=ev.f;}
+      for(const ev of evs){
+        const top=(ev.s-CAL_START)*PX,hpx=(ev.f-ev.s)*PX,l=Math.min(ev.col*24,64);
+        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'">'+
+          '<b>'+(ev.me?'★ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
+      }
+    }
+    bb+='</div>';
+  }
+  $('calbody').innerHTML=bb;
 }
 function renderMonth(){
   const mid=addD(monday(curMonday),3); // un jour sûrement dans la bonne semaine
@@ -1272,15 +1286,15 @@ function render(){
   document.querySelectorAll('.bchip').forEach(c=>c.classList.toggle('on',c.dataset.b===curB));
   const vw=document.getElementById('vw-week'),vm=document.getElementById('vw-month'),vs=document.getElementById('vw-synth'),vmi=document.getElementById('vw-mine');
   if(vw)vw.classList.toggle('on',calView==='week');if(vm)vm.classList.toggle('on',calView==='month');if(vs)vs.classList.toggle('on',calView==='synth');if(vmi)vmi.classList.toggle('on',calView==='mine');
-  const month=calView==='month',synth=calView==='synth',mine=calView==='mine',grid=month||synth||mine;
-  $('calwrap').style.display=grid?'none':'';
+  const month=calView==='month',synth=calView==='synth',mine=calView==='mine',grid=month||synth;
+  $('calwrap').style.display=grid?'none':'';          // le calendrier sert pour Semaine ET Mon planning
   $('monthwrap').style.display=grid?'':'none';
-  $('hours').style.display=grid?'none':'';
-  $('alerts').style.display=(grid||!isAdmin())?'none':'';
-  $('people').style.display=grid?'none':'';
+  $('hours').style.display=grid?'none':'';            // récap d'heures visible aussi en Mon planning (= mes heures)
+  $('alerts').style.display=(grid||mine||!isAdmin())?'none':'';
+  $('people').style.display=(grid||mine)?'none':'';   // pas de chips de masquage en Mon planning
   if(synth){renderSynth();saveUI();return;}
-  if(mine){renderMineWeek();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
+  if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);saveUI();return;}
   $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const today=todayISO();
