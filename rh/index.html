@@ -898,7 +898,7 @@ function migrate(S){
   S.hsdemandes=S.hsdemandes||[];
   if(!S.goLive)S.goLive='2026-06-01';
   S.boutiques.forEach(b=>{if(b.pin===undefined)b.pin=''});
-  S.employees.forEach(e=>{if(e.pin===undefined)e.pin='';if(e.admin===undefined)e.admin=false;if(e.ecoleMin===undefined)e.ecoleMin=420});
+  S.employees.forEach(e=>{if(e.pin===undefined)e.pin='';if(e.admin===undefined)e.admin=false;if(e.resp===undefined)e.resp=false;if(e.ecoleMin===undefined)e.ecoleMin=420});
   if(!S._patchEnriqueEcole8){const en=S.employees.find(x=>x.id==='enrique');if(en){en.ecoleMin=480;en._ts=NOW();}S._patchEnriqueEcole8=true;}
   if(!S._patchEnrique35){
     const en=S.employees.find(x=>x.id==='enrique');
@@ -978,7 +978,7 @@ function presence(e,iso){
     return{st:'present',b:xb,blocks:(ex.blocks||[]).map(bl=>[bl[0],bl[1],bl[2]||xb,bl[3]?1:0,bl[4]||0]),ex:true,note:ex.note};
   }
   if(!day)return{st:'repos',b:e.b};
-  if(S.maladies.some(m=>m.empId===e.id&&iso>=m.du&&iso<=m.au))return{st:'maladie',b:day.b};
+  if(S.maladies.some(m=>m.empId===e.id&&iso>=m.du&&iso<=m.au&&m.statut!=='attente'))return{st:'maladie',b:day.b};
   if((S.ecoles||[]).some(x=>x.empId===e.id&&iso>=x.du&&iso<=x.au))return{st:'ecole',b:day.b};
   if(S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='accepte'))return{st:'conge',b:day.b};
   const pend=S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='attente');
@@ -1400,7 +1400,7 @@ function dayEvents(d,b){
     let entry=null;
     let cg=S.conges.find(c=>c.empId===e.id&&d>=c.du&&d<=c.au&&c.statut==='accepte')||S.conges.find(c=>c.empId===e.id&&d>=c.du&&d<=c.au&&c.statut==='attente');
     if(cg)entry={cls:cg.statut==='accepte'?'conge':'attente',txt:'🏖 '+e.nom+(cg.statut==='attente'?' ?':''),st:liseré,b:e.b,jump:{t:'conge',id:cg.id,emp:e.id},detail:esc(e.nom)+' — Congé '+(cg.statut==='accepte'?'accepté':'en attente')+' '+periodeTxt(cg.du,cg.au)+' ('+nbJours(cg.du,cg.au)+' j)'+(cg.note?' · « '+esc(cg.note)+' »':'')};
-    const ml=S.maladies.find(m=>m.empId===e.id&&d>=m.du&&d<=m.au);
+    const ml=S.maladies.find(m=>m.empId===e.id&&d>=m.du&&d<=m.au&&m.statut!=='attente');
     if(ml)entry={cls:'maladie',txt:'🤒 '+e.nom,st:liseré,b:e.b,jump:{t:'maladie',id:ml.id,emp:e.id},detail:esc(e.nom)+' — Arrêt maladie '+periodeTxt(ml.du,ml.au)+' ('+nbJours(ml.du,ml.au)+' j)'+(ml.note?' · '+esc(ml.note):'')};
     const ec=(S.ecoles||[]).find(x=>x.empId===e.id&&d>=x.du&&d<=x.au);
     if(ec)entry={cls:'ecole',txt:'🎓 '+e.nom,st:liseré,b:e.b,jump:{t:'ecole',id:ec.id,emp:e.id},detail:esc(e.nom)+' — École '+periodeTxt(ec.du,ec.au)};
@@ -1910,6 +1910,9 @@ function saveEditCg(id,accept){
 }
 function delCg(id){if(!confirm('Supprimer ce congé ?'))return;S.tomb['cg|'+id]=NOW();S.conges=S.conges.filter(c=>c.id!==id);save();renderAbs();render()}
 function delMl(id){if(!confirm('Supprimer cette absence maladie ?'))return;S.tomb['ml|'+id]=NOW();S.maladies=S.maladies.filter(m=>m.id!==id);save();renderAbs();render()}
+// Validation d'une maladie déclarée par un responsable
+function acceptMl(id){const m=(S.maladies||[]).find(x=>x.id===id);if(!m)return;delete m.statut;m._ts=NOW();save();render();if($('abspanel').style.display==='block')renderAbs();}
+function refuseMl(id){const m=(S.maladies||[]).find(x=>x.id===id);if(!m)return;S.tomb['ml|'+id]=NOW();S.maladies=S.maladies.filter(x=>x.id!==id);save();render();if($('abspanel').style.display==='block')renderAbs();}
 function delEc(id){if(!confirm('Supprimer cette période d\'école ?'))return;S.tomb['ec|'+id]=NOW();S.ecoles=S.ecoles.filter(x=>x.id!==id);save();renderAbs();render()}
 function delEnt(id){if(!confirm('Supprimer cette période entreprise ? (retour au rythme de base sur la période)'))return;S.tomb['en|'+id]=NOW();S.entreprises=S.entreprises.filter(x=>x.id!==id);save();renderAbs();render()}
 function renderAbs(){
@@ -1946,6 +1949,7 @@ function renderAbs(){
         '<span class="small" title="Date de la demande">🕓 demandé '+(c._ts?'le '+fmtFR(c._ts.slice(0,10))+' à '+c._ts.slice(11,13)+'h'+c._ts.slice(14,16):'(date inconnue)')+'</span>'+
         (riv.length?(prio?'<span class="modif" style="background:var(--green)">✓ prioritaire (1er)</span>':'<span class="modif" style="background:var(--orange)">⚠ concurrence — '+esc(emp(riv.sort((a,b)=>(a._ts||'')<(b._ts||'')?-1:1)[0].empId).nom)+' a demandé avant</span>'):'')+
         (c.parSalarie?'<span class="modif" style="background:#0891b2">🙋 demande du salarié</span>':'')+
+        (c.parResp&&emp(c.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(c.parResp).nom)+'</span>':'')+
         (c.note?'<span class="small">« '+esc(c.note)+' »</span>':'')+
         '<span style="margin-left:auto"><button class="act green" onclick="setCongeStatut('+c.id+',\'accepte\')">✓ Accepter</button> <button class="act" onclick="startEditCg('+c.id+')">✎ Modifier</button> <button class="act red" onclick="setCongeStatut('+c.id+',\'refuse\')">✗ Refuser</button></span></div>';
       if(c.demande)h+='<div class="brow" style="padding-top:0"><span class="modif">✏️ modifié</span><span class="small">demande initiale du salarié : '+fmtFR(c.demande.du)+' → '+fmtFR(c.demande.au)+'</span></div>';
@@ -1972,7 +1976,15 @@ function renderAbs(){
   if(hsatt.length){
     h+='<div class="mhead">⏱ Heures sup à valider ('+hsatt.length+')</div>';
     for(const x of hsatt){const e=emp(x.empId);
-      h+='<div class="datecard" style="border-left:4px solid #0891b2"><div class="dbadge"><b>'+(+x.date.slice(8,10))+'</b><span>'+DAYJ[wdOf(x.date)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(x.date)+'</span><span style="color:#0891b2;font-weight:800">'+hsLabel(x)+'</span>'+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptHS('+x.id+')">✓ Accepter</button> <button class="act red" onclick="refuseHS('+x.id+')">✗ Refuser</button></span></div></div></div>';
+      h+='<div class="datecard" style="border-left:4px solid #0891b2"><div class="dbadge"><b>'+(+x.date.slice(8,10))+'</b><span>'+DAYJ[wdOf(x.date)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(x.date)+'</span><span style="color:#0891b2;font-weight:800">'+hsLabel(x)+'</span>'+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+(x.parResp&&emp(x.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(x.parResp).nom)+'</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptHS('+x.id+')">✓ Accepter</button> <button class="act red" onclick="refuseHS('+x.id+')">✗ Refuser</button></span></div></div></div>';
+    }
+  }
+  // maladies déclarées par un responsable, en attente de validation
+  const mlatt=(S.maladies||[]).filter(m=>m.statut==='attente'&&emp(m.empId)&&absSel.has(emp(m.empId).b)).sort((a,b)=>a.du<b.du?-1:1);
+  if(mlatt.length){
+    h+='<div class="mhead">🤒 Maladies à valider ('+mlatt.length+')</div>';
+    for(const m of mlatt){const e=emp(m.empId);
+      h+='<div class="datecard" style="border-left:4px solid var(--orange)"><div class="dbadge"><b>'+(+m.du.slice(8,10))+'</b><span>'+DAYJ[wdOf(m.du)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(m.du)+' → '+fmtFR(m.au)+' · <b>'+nbJours(m.du,m.au)+' j</b></span>'+(m.parResp&&emp(m.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(m.parResp).nom)+'</span>':'')+(m.note?'<span class="small">« '+esc(m.note)+' »</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptMl('+m.id+')">✓ Accepter</button> <button class="act red" onclick="refuseMl('+m.id+')">✗ Refuser</button></span></div></div></div>';
     }
   }
   h+='<div class="mhead">Par salarié</div>';
@@ -2325,6 +2337,7 @@ async function renderSettings(){
      '<input class="ninp sm" value="'+esc(e.note)+'" placeholder="note…" style="flex:1;min-width:110px" onchange="updE('+i+',\'note\',this.value)">'+
      '<span class="small" title="Code personnel du salarié (accès à son espace)">🔑<input value="'+esc(e.pin||'')+'" placeholder="code" inputmode="numeric" maxlength="6" style="width:60px" onchange="updE('+i+',\'pin\',this.value.trim())"></span>'+
      '<label class="small" title="Donne les droits admin (gère tout) à cette personne — son code la connecte en admin"><input type="checkbox" '+(e.admin?'checked':'')+' onchange="updE('+i+',\'admin\',this.checked)"> 👑 admin</label>'+
+     '<label class="small" title="Responsable de la boutique : peut déclarer congés / maladie / heures sup pour lui ET ses collègues de la même boutique. Tout part en validation chez l\'admin."><input type="checkbox" '+(e.resp?'checked':'')+' onchange="updE('+i+',\'resp\',this.checked)"> 🛡️ responsable</label>'+
      '<button class="mini ghost" onclick="delEmpl('+i+')" title="Supprimer définitivement (préférer archiver)">🗑</button>'+
      '<div class="brow" style="width:100%;padding-top:2px"><span class="small">📅 Entrée</span><input type="date" value="'+(e.dateIn||'')+'" onchange="updE('+i+',\'dateIn\',this.value)"><span class="small">Sortie</span><input type="date" value="'+(e.dateOut||'')+'" onchange="updE('+i+',\'dateOut\',this.value)"><span class="small">'+(e.dateOut?'— masqué du planning après cette date, historique conservé':'(laisser vide si toujours en poste)')+'</span></div></div>';
   });
@@ -2432,7 +2445,7 @@ function paieRow(e,days){
     norm:w.norm, hs:w.hs, fer:w.fer, dim:w.dim,
     ferchome:feriesOfMonth(days).filter(d=>inEmploi(e,d)&&dayWorkedMin(e,d)===0).length,
     conge:daysAbs(S.conges.filter(c=>c.statut==='accepte'),e.id,days),
-    maladie:daysAbs(S.maladies,e.id,days),
+    maladie:daysAbs(S.maladies.filter(m=>m.statut!=='attente'),e.id,days),
     ecole:daysAbs(S.ecoles||[],e.id,days)
   };
 }
@@ -2578,7 +2591,7 @@ function paieEvents(e,days){
     evs.push({d,label:frDate(d),txt:wm>0?'🟢 '+fmtHdec(wm)+' travaillées':'🔴 Chômé'});}
   for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]))
     evs.push({d:c.du,label:'🏖 Congés',txt:c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)});
-  for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.du<=days[days.length-1]&&m.au>=days[0]))
+  for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]))
     evs.push({d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
   const hw=hsByWeek(e,days);
   Object.keys(hw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏱ Semaine '+k,txt:'<span style="color:#0891b2;font-weight:700">'+fmtHdec(hw[k])+' sup</span>'});});
@@ -2628,7 +2641,7 @@ function paieTextStr(){
         out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du)+'.':'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)+'.')+'\n';
       }
       // arrêts maladie du mois
-      for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.du<=days[days.length-1]&&m.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
+      for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
         out+=(m.du===m.au?'  Arrêt maladie le '+fmtCourt(m.du)+'.':'  Arrêt maladie du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)+'.')+'\n';
       }
     }
@@ -2658,9 +2671,11 @@ let hsDate=null;
 function declareHS(iso){if(!ROLE||ROLE.type!=='salarie')return;hsDate=iso;renderHSPanel();}
 function renderHSPanel(){
   const e=emp(ROLE.empId);if(!e)return;
+  const resp=isResp();
   const presets=[[15,'¼h'],[30,'½h'],[45,'¾h'],[60,'1h'],[90,'1h30'],[120,'2h']];
   let h='<div class="phead"><h2>🕑 Déclarer un ajustement</h2><button class="act grey" style="margin-left:auto" onclick="$(\'hspanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:8px"><b>'+DAYJ[wdOf(hsDate)]+' '+fmtFR(hsDate)+'</b> — part en validation chez ton responsable.</div>';
+  h+='<div class="small" style="margin-bottom:8px"><b>'+DAYJ[wdOf(hsDate)]+' '+fmtFR(hsDate)+'</b> — part en validation chez l\'admin.</div>';
+  if(resp)h+='<div class="row"><span class="small">Pour qui ?</span><select id="hs-emp">'+respTeam().map(x=>'<option value="'+x.id+'"'+(x.id===ROLE.empId?' selected':'')+'>'+esc(x.nom)+(x.id===ROLE.empId?' (moi)':'')+'</option>').join('')+'</select></div>';
   h+='<div class="row"><select id="hs-sens"><option value="sup">⏱ Heures en plus (heures sup)</option><option value="fin">🌙 Parti plus tôt (fin de journée)</option><option value="debut">🌅 Arrivé plus tard (début de journée)</option></select></div>';
   h+='<div class="small" style="margin-bottom:4px">Combien de temps ?</div>';
   h+='<div class="row">'+presets.map(x=>'<button class="act" onclick="submitHS('+x[0]+')">'+x[1]+'</button>').join('')+'</div>';
@@ -2671,10 +2686,15 @@ function renderHSPanel(){
 }
 function submitHS(min){
   if(!ROLE||ROLE.type!=='salarie')return;
+  const resp=isResp();
+  let targetId=ROLE.empId;
+  if(resp&&$('hs-emp')){const v=$('hs-emp').value;if(respTeam().some(x=>x.id===v))targetId=v;}
   const m=min||parseInt($('hs-min')&&$('hs-min').value)||0;
   if(m<5){const el=$('hs-msg');if(el){el.style.display='block';el.textContent='Indique une durée (au moins 5 min).';}return;}
   const sens=($('hs-sens')&&$('hs-sens').value)||'sup';
-  S.hsdemandes.push({id:Date.now(),empId:ROLE.empId,date:hsDate,min:m,sens,note:($('hs-note')?$('hs-note').value:''),statut:'attente',_ts:NOW()});
+  const dem={id:Date.now(),empId:targetId,date:hsDate,min:m,sens,note:($('hs-note')?$('hs-note').value:''),statut:'attente',_ts:NOW()};
+  if(resp)dem.parResp=ROLE.empId;
+  S.hsdemandes.push(dem);
   $('hspanel').style.display='none';save();render();
   if($('minepanel')&&$('minepanel').style.display==='block')renderMine();
 }
@@ -3030,12 +3050,15 @@ function renderMine(){
     '<button class="act grey" style="margin-left:auto" onclick="$(\'minepanel\').style.display=\'none\'">Fermer</button></div>';
   // 1) FAIRE UNE DEMANDE (en haut)
   if(!isAdmin()){
-    h+='<div class="mhead">✍️ Faire une demande</div>';
-    h+='<div class="small" style="margin-bottom:6px">💡 Astuce : pour déclarer une heure sup, clique directement sur le jour concerné dans le calendrier.</div>';
-    h+='<div class="addrow"><select id="rq-type" onchange="rqTypeChg()"><option value="conge">🏖 Demande de congé</option><option value="maladie">🤒 Déclarer un arrêt maladie</option></select>'+
+    const resp=isResp();
+    h+='<div class="mhead">✍️ '+(resp?'Déclarer (moi ou mon équipe)':'Faire une demande')+'</div>';
+    h+='<div class="small" style="margin-bottom:6px">💡 Astuce : pour déclarer une heure sup, clique sur le jour concerné dans le planning'+(resp?' (tu choisiras le salarié)':'')+'.</div>';
+    h+='<div class="addrow"><select id="rq-type" onchange="rqTypeChg()"><option value="conge">🏖 Demande de congé</option><option value="maladie">🤒 Arrêt maladie</option></select>'+
+     (resp?'<select id="rq-emp" title="Pour qui ?">'+respTeam().map(x=>'<option value="'+x.id+'"'+(x.id===ROLE.empId?' selected':'')+'>'+esc(x.nom)+(x.id===ROLE.empId?' (moi)':'')+'</option>').join('')+'</select>':'')+
      'du <input type="date" id="rq-du"> au <input type="date" id="rq-au">'+
-     '<input id="rq-note" placeholder="Message (optionnel)" style="width:180px">'+
+     '<input id="rq-note" placeholder="Message (optionnel)" style="width:160px">'+
      '<button class="act green" onclick="submitRequest()">Envoyer</button></div>';
+    if(resp)h+='<div class="small" style="margin-top:4px;color:var(--mut)">En tant que responsable, tes déclarations (pour toi ou un collègue de ta boutique) partent en validation chez l\'admin.</div>';
     h+='<div class="aline blue" id="rq-msg" style="'+(mineMsg?'':'display:none;')+'margin-top:6px">'+esc(mineMsg)+'</div>';mineMsg='';
   }
   // 2) MES CONGÉS & ABSENCES (intégrés, style cartes admin, lecture seule)
@@ -3088,23 +3111,32 @@ function rqTypeChg(){const t=$('rq-type').value;$('rq-note').placeholder=t==='ma
 function rqMsg(txt,cls){const el=$('rq-msg');el.style.display='block';el.className='aline '+cls;el.innerHTML=txt;}
 function submitRequest(){
   if(!ROLE||ROLE.type!=='salarie')return;
-  const e=emp(ROLE.empId);const t=$('rq-type').value;
+  const resp=isResp();
+  // Cible : soi-même, ou (responsable) un collègue de sa boutique
+  let targetId=ROLE.empId;
+  if(resp&&$('rq-emp')){const v=$('rq-emp').value;if(respTeam().some(x=>x.id===v))targetId=v;}
+  const e=emp(targetId);if(!e)return;
+  const t=$('rq-type').value;
   const du=$('rq-du').value,au=$('rq-au').value||du;
   if(!du||au<du){rqMsg('Choisis des dates valides.','red');return}
-  // validation : côté salarié, une demande illogique OU qui casse la couverture est refusée
+  // validation de cohérence : une demande illogique OU qui casse la couverture est refusée
   const checks=checkAbsence(e.id,du,au,t);
   const dur=checks.filter(c=>c.sev==='block'||(t==='conge'&&c.cov));
   if(dur.length){rqMsg('Demande impossible :<br>• '+dur.map(x=>esc(x.txt)).join('<br>• '),'red');return}
+  const pourQui=targetId===ROLE.empId?'':' pour '+esc(e.nom);
   if(t==='conge'){
-    S.conges.push({id:Date.now(),empId:e.id,du,au,statut:'attente',note:$('rq-note').value,parSalarie:true,_ts:NOW()});
-    mineMsg='✓ Demande de congé envoyée ('+fmtFR(du)+' → '+fmtFR(au)+'). En attente de validation.';
+    S.conges.push({id:Date.now(),empId:e.id,du,au,statut:'attente',note:$('rq-note').value,parSalarie:!resp,parResp:resp?ROLE.empId:undefined,_ts:NOW()});
+    mineMsg='✓ Demande de congé'+pourQui+' envoyée ('+fmtFR(du)+' → '+fmtFR(au)+'). En attente de validation.';
   }else{
-    S.maladies.push({id:Date.now(),empId:e.id,du,au,note:$('rq-note').value,parSalarie:true,_ts:NOW()});
-    mineMsg='✓ Arrêt maladie enregistré ('+fmtFR(du)+' → '+fmtFR(au)+'). Transmets ton justificatif.';
+    // maladie : déclarée par un responsable → passe en validation (statut attente) ; salarié normal → directe
+    const ml={id:Date.now(),empId:e.id,du,au,note:$('rq-note').value,_ts:NOW()};
+    if(resp){ml.statut='attente';ml.parResp=ROLE.empId;}else{ml.parSalarie=true;}
+    S.maladies.push(ml);
+    mineMsg=resp?('✓ Arrêt maladie déclaré'+pourQui+' ('+fmtFR(du)+' → '+fmtFR(au)+'). En attente de validation.'):('✓ Arrêt maladie enregistré ('+fmtFR(du)+' → '+fmtFR(au)+'). Transmets ton justificatif.');
   }
   save();renderMine();render();
 }
-function pendingCount(){return S.conges.filter(c=>c.statut==='attente').length+(S.hsdemandes||[]).filter(x=>x.statut==='attente').length;}
+function pendingCount(){return S.conges.filter(c=>c.statut==='attente').length+(S.hsdemandes||[]).filter(x=>x.statut==='attente').length+(S.maladies||[]).filter(m=>m.statut==='attente').length;}
 function updateBadge(){
   const btn=document.querySelector('button[onclick="togAbs()"]');if(!btn)return;
   const n=pendingCount();
@@ -3114,6 +3146,10 @@ function updateBadge(){
 // ============ RÔLES & LOGIN ============
 let ROLE=null; // {type:'admin'} | {type:'salarie', empId}
 function isAdmin(){return ROLE&&ROLE.type==='admin'}
+// Responsable de boutique : un salarié connecté avec la coche "responsable". Il peut déclarer
+// (congé/maladie/HS) pour LUI et les collègues de SA boutique — tout part en validation admin.
+function isResp(){return !!(ROLE&&ROLE.type==='salarie'&&emp(ROLE.empId)&&emp(ROLE.empId).resp);}
+function respTeam(){if(!isResp())return [];const b=emp(ROLE.empId).b;return S.employees.filter(e=>e.actif&&e.b===b);}
 function renderLoginBq(){const el=document.getElementById('loginbq');if(!el||!S)return;
   el.innerHTML=S.boutiques.map(b=>'<button class="bchip '+b.id+' on" style="padding:7px 16px" onclick="openBoutique(\''+b.id+'\')">'+esc(b.nom)+'</button>').join('');}
 function openBoutique(bId){if(!bout(bId))return;setRole({type:'boutique',b:bId});}
