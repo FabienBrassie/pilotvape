@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 16:10</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 16:47</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -6554,6 +6554,52 @@ async function setDispatchHub(actionId, hub) {
 //     base → ligne d'info. Verrouille/badge les étapes de réception PRODUIT des satellites.
 //   • PLV : pas de stock Swappy → ligne d'info de transport (nature 'plv') ; verrouille/badge
 //     les étapes de réception PLV des satellites.
+// Crée les lignes de rétrocession d'un dispatch d'OP (fonction canonique, règle 8) — partagée
+// par setOpDispatchHub (action utilisateur) et reconcileOpDispatch (auto-cohérence au chargement).
+// Retourne le nombre de lignes créées. Ne crée RIEN pour le produit si une ligne À rentrer liée
+// porte déjà le dispatch (pas de doublon).
+function creerRetrosDispatchOp(op, kind, hub) {
+  let n = 0;
+  const _label = (getOpProductDisplay(op).label) || op.nom || 'Produit OP';
+  if (kind === 'produit') {
+    const _hasRentrerLie = !!(op.rentrerActionId && actions.find(x => x.id === op.rentrerActionId && !x.annulee));
+    if (_hasRentrerLie) return 0;
+    const _baseProds = (op.produitIds || []).map(pid => {
+      const _t = baseKits.find(k => k.id === pid) ? 'kit' : baseLiq.find(l => l.id === pid) ? 'liq' : basePD.find(p => p.id === pid) ? 'pd' : null;
+      return _t ? { pid, _t } : null;
+    }).filter(Boolean);
+    if (_baseProds.length > 0) {
+      _baseProds.forEach(({ pid, _t }) => {
+        SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroNature: 'produit' }); n++; });
+      });
+    } else {
+      SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPGOODS-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: _label, retroNature: 'produit' }); n++; });
+    }
+  } else if (kind === 'plv') {
+    SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPPLV-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: 'PLV — ' + _label, retroNature: 'plv' }); n++; });
+  }
+  return n;
+}
+
+// Auto-cohérence (2026-06-13) : une OP dont le dispatch est posé (champ dispatchProduit/Plv)
+// mais sans lignes de rétro correspondantes — typiquement après migration de l'ancien
+// op.dispatchHub — voit ses lignes recréées. Idempotent, admin uniquement (création d'actions).
+function reconcileOpDispatch(op) {
+  if (!op) return 0;
+  if (!(typeof isAdmin === 'function' && isAdmin())) return 0;
+  let created = 0;
+  [['produit', op.dispatchProduit], ['plv', op.dispatchPlv]].forEach(([kind, hub]) => {
+    if (!hub) return;
+    // Existe déjà ? Pour 'produit' on accepte aussi les anciennes lignes sans nature (legacy)
+    // afin de ne pas dupliquer ; pour 'plv' la nature est obligatoire (champ récent).
+    const _exists = actions.some(x => x.retroOpId === op.id && !x.annulee &&
+      (kind === 'produit' ? (x.retroNature === 'produit' || x.retroNature == null) : x.retroNature === 'plv'));
+    if (_exists) return;
+    created += creerRetrosDispatchOp(op, kind, hub);
+  });
+  return created;
+}
+
 async function setOpDispatchHub(opId, kind, hub) {
   if (!isAdmin()) { pvAlert('La réception centralisée est décidée par Fabien.'); return; }
   const op = ops.find(o => o.id === opId);
@@ -6585,26 +6631,7 @@ async function setOpDispatchHub(opId, kind, hub) {
   _lies().forEach(x => _cancelAction(x)); // repartir propre si on change de hub
   op[_champ] = hub;
   op._ts = nowIso; op._adminTs = nowIso;
-  let _nbRetros = 0;
-  const _label = (getOpProductDisplay(op).label) || op.nom || 'Produit OP';
-  if (kind === 'produit' && !_hasRentrerLie) {
-    // Produits de la base liés à l'OP → une rétrocession par produit (stock Swappy suivi).
-    const _baseProds = (op.produitIds || []).map(pid => {
-      const _t = baseKits.find(k => k.id === pid) ? 'kit' : baseLiq.find(l => l.id === pid) ? 'liq' : basePD.find(p => p.id === pid) ? 'pd' : null;
-      return _t ? { pid, _t } : null;
-    }).filter(Boolean);
-    if (_baseProds.length > 0) {
-      _baseProds.forEach(({ pid, _t }) => {
-        SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroNature: 'produit' }); _nbRetros++; });
-      });
-    } else {
-      // Produit hors base (accessoire, ex Banane/Tour de cou) : ligne d'info par destination.
-      SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPGOODS-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: _label, retroNature: 'produit' }); _nbRetros++; });
-    }
-  } else if (kind === 'plv') {
-    // PLV : pas de stock Swappy → ligne d'info par destination pour suivre le transport.
-    SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPPLV-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: 'PLV — ' + _label, retroNature: 'plv' }); _nbRetros++; });
-  }
+  const _nbRetros = creerRetrosDispatchOp(op, kind, hub);
   logAction('Réception centralisée OP (' + _natLbl + ')', (op.nom || op.id) + ' → hub ' + (SHOP_LABELS[hub] || hub) + (_nbRetros ? ' · ' + _nbRetros + ' transfert(s)' : ''));
   saveData();
   try { renderDashboard(); } catch(e) {}
@@ -8048,6 +8075,14 @@ async function loadData() {
     // 2026-05-28 Phase 2 hygiène : traceur PROP-010 (Coolfire Z60) retiré (diagnostic terminé).
     // Idem pour les OPs : chaque OP doit avoir etats[shop].steps cohérent avec son type.
     ops.forEach(op => ensureOpSteps(op));
+    // Auto-cohérence dispatch (2026-06-13) : recrée les lignes de rétro manquantes pour les OP
+    // dont le dispatch produit/PLV est posé mais sans transferts (ex. migration de l'ancien
+    // op.dispatchHub). Admin uniquement, idempotent.
+    try {
+      let _recoCreated = 0;
+      ops.forEach(op => { _recoCreated += reconcileOpDispatch(op); });
+      if (_recoCreated > 0) { console.log('[RECO-DISPATCH]', _recoCreated, 'ligne(s) de rétro recréée(s)'); saveData(); }
+    } catch (e) { console.error('[RECO-DISPATCH]', e); }
     // Migration : aligner la source des pièces au défaut sémantique de leur type.
     // Les étiquettes Freetouch/prix barré/spéciale sont générées par l'app → source='freetouch'.
     // Les bacs à fouille sont génériques → source='stock'. Évite "à créer manuellement" injustifié.
