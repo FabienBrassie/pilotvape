@@ -248,6 +248,7 @@ body.dark .dayhead.today b{background:#3b82f6}
   <button class="bchip L" data-b="L" onclick="curB='L';render()">Langon</button>
   <div class="wnav">
     <a href="/" class="nav" style="text-decoration:none;display:inline-block" title="Retour à PilotVape (pilotage commercial)">🏪 PilotVape</a>
+    <span id="syncdot" style="font-size:11px;font-weight:600;color:#94a3b8;white-space:nowrap" title="État de la synchronisation entre les postes">● …</span>
     <span id="savestate"></span>
     <div class="seg" style="--segc:var(--blue)"><button id="vw-week" onclick="setView('week')">Semaine</button><button id="vw-synth" class="adminonly" onclick="setView('synth')">3 boutiques</button><button id="vw-month" onclick="setView('month')">Mois</button></div>
     <button class="nav" id="navprev" onclick="navCal(-1)">◀</button>
@@ -516,9 +517,93 @@ async function _doSave(){
   setSave('✓ Enregistré');
 }
 function save(){clearTimeout(saveTimer);saveTimer=setTimeout(async()=>{
+  let ok=true;
   try{await _doSave()}
-  catch(e){idb=null;try{await _doSave()}catch(e2){setSave('⚠ Erreur de sauvegarde')}}},300)}
+  catch(e){idb=null;try{await _doSave()}catch(e2){ok=false;setSave('⚠ Erreur de sauvegarde')}}
+  if(ok)schedulePush(); // ...puis on propage aux autres postes (sans bloquer si le serveur dort)
+},300)}
 function setSave(t){document.getElementById('savestate').textContent=t;setTimeout(()=>{document.getElementById('savestate').textContent=''},2000)}
+
+// ============ SYNCHRO EN LIGNE (multi-poste) — Worker Cloudflare, clés RH dédiées ============
+// Greffée le 2026-06-13. Reprend le mécanisme éprouvé de PilotVape : à chaque sauvegarde
+// on lit l'état distant, on FUSIONNE (mergeData, inchangé), puis on réécrit ; un poll
+// régulier ramène les changements des autres postes. Le moteur de fusion (tampons _ts +
+// tombstones) était déjà prêt — il ne manquait que cette couche réseau.
+// PRINCIPE DE SÛRETÉ : si le serveur est injoignable, l'outil continue de marcher 100% en
+// local (IndexedDB). La synchro est un PLUS, jamais un blocage — toutes les erreurs réseau
+// sont avalées et réessayées au cycle suivant.
+const SYNC_WORKER_URL = 'https://pilotvape-sync.pilotvape.workers.dev';
+const SYNC_API_KEY = 'PilotVape2026Sync!';
+const SYNC_BASE = SYNC_WORKER_URL + '/rh';   // endpoints RH dédiés → clés KV séparées de PilotVape
+let _lastRemoteAt = null;     // updated_at de la dernière version vue côté serveur
+let _pushTimer = null;
+let _pushInFlight = null;     // verrou : un seul envoi à la fois
+
+function _syncHeaders(){return{'Content-Type':'application/json','X-API-Key':SYNC_API_KEY}}
+function _fetchTimeout(url,opt,ms){const c=new AbortController();const t=setTimeout(()=>c.abort(),ms||15000);
+  return fetch(url,Object.assign({},opt,{signal:c.signal})).finally(()=>clearTimeout(t));}
+async function _syncRead(){
+  const r=await _fetchTimeout(SYNC_BASE+'/data',{method:'GET',headers:_syncHeaders()});
+  if(!r.ok)throw new Error('read '+r.status);
+  return await r.json(); // {data, updated_at}
+}
+function _syncWrite(payload,baseAt){
+  const h=_syncHeaders();if(baseAt)h['X-Base-Updated-At']=baseAt;
+  return _fetchTimeout(SYNC_BASE+'/data',{method:'PUT',headers:h,body:JSON.stringify({data:payload})},45000);
+}
+// Écrit S en local SANS déclencher de push (utilisé par le pull, pour éviter une boucle)
+async function _saveLocalOnly(){try{await _doSave()}catch(e){idb=null;try{await _doSave()}catch(e2){}}}
+
+function _setSync(state){ // 'ok' | 'off' — petit point discret dans l'en-tête
+  const el=document.getElementById('syncdot');if(!el)return;
+  if(state==='ok'){el.textContent='● en ligne';el.style.color='#16a34a';el.title='Synchronisé avec les autres postes';}
+  else{el.textContent='● hors ligne';el.style.color='#94a3b8';el.title='Travail local — la synchro reprendra dès que le serveur répond';}
+}
+
+// Pull : récupère le distant ; si une version plus récente existe, fusionne dans S, persiste, rerend.
+async function pullFromServer(doRender){
+  let rr;try{rr=await _syncRead()}catch(e){_setSync('off');return false}
+  _setSync('ok');
+  if(!rr||!rr.data){if(rr)_lastRemoteAt=rr.updated_at;return false}
+  if(rr.updated_at && rr.updated_at===_lastRemoteAt)return false; // rien de neuf depuis la dernière fois
+  mergeData(S,rr.data);
+  _lastRemoteAt=rr.updated_at;
+  await _saveLocalOnly();
+  if(doRender){try{render()}catch(e){}}
+  return true;
+}
+
+// Push : lit le distant, fusionne, réécrit (verrou + gestion du conflit 409).
+function schedulePush(){clearTimeout(_pushTimer);_pushTimer=setTimeout(()=>{pushToServer()},800)}
+async function pushToServer(){
+  if(_pushInFlight){try{await _pushInFlight}catch(e){}}
+  let done;_pushInFlight=new Promise(r=>done=r);
+  try{
+    for(let attempt=0;attempt<2;attempt++){
+      const prevAt=_lastRemoteAt;
+      let rr;try{rr=await _syncRead()}catch(e){_setSync('off');return}
+      const baseAt=rr?rr.updated_at:null;
+      let remoteChanged=false;
+      if(rr&&rr.data){remoteChanged=(rr.updated_at!==prevAt);mergeData(S,rr.data);}
+      const payload=JSON.parse(JSON.stringify(S));
+      let res;try{res=await _syncWrite(payload,baseAt)}catch(e){_setSync('off');return}
+      if(res.status===409)continue; // quelqu'un a écrit entre-temps → on refusionne et on réessaie
+      if(!res.ok){_setSync('off');return}
+      let j=null;try{j=await res.json()}catch(e){}
+      if(j&&j.updated_at)_lastRemoteAt=j.updated_at;
+      _setSync('ok');
+      if(remoteChanged){await _saveLocalOnly();try{render()}catch(e){}} // un autre poste avait du neuf → on l'affiche
+      return;
+    }
+    _setSync('off'); // 2 conflits de suite : le prochain enregistrement réessaiera
+  }finally{done()}
+}
+
+function _startSync(){
+  setInterval(()=>{if(document.visibilityState==='visible')pullFromServer(true)},60000);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pullFromServer(true)});
+  window.addEventListener('focus',()=>pullFromServer(true));
+}
 
 
 // ============ HELPERS ============
@@ -681,6 +766,15 @@ function mergeData(L,R){
   L.primes=L.primes||{};L.solidarite=L.solidarite||{};
   for(const k in (R.primes||{}))if(!L.primes[k]||ts(R.primes[k])>ts(L.primes[k]))L.primes[k]=R.primes[k];
   for(const k in (R.solidarite||{}))if(!L.solidarite[k]||ts(R.solidarite[k])>ts(L.solidarite[k]))L.solidarite[k]=R.solidarite[k];
+  // réglages globaux (date de mise en service, codes d'accès) : chacun porte son propre tampon → le plus récemment changé gagne
+  for(const f of ['goLive','adminPin','rhPin']){const tf=f+'Ts';if((R[tf]||'')>(L[tf]||'')){L[f]=R[f];L[tf]=R[tf];}}
+  // bilan annuel (chiffres de paie hors-outil saisis à la main) : par année × salarié, le plus récent gagne
+  L.bilanHist=L.bilanHist||{};
+  for(const y in (R.bilanHist||{})){
+    L.bilanHist[y]=L.bilanHist[y]||{};
+    for(const id in R.bilanHist[y]){const rv=R.bilanHist[y][id],lv=L.bilanHist[y][id];
+      if(!lv||((rv&&rv._ts)||'')>((lv&&lv._ts)||''))L.bilanHist[y][id]=rv;}
+  }
   return L;
 }
 
@@ -2130,8 +2224,8 @@ async function renderSettings(){
      '<div class="brow" style="width:100%;padding-top:2px"><span class="small">📅 Entrée</span><input type="date" value="'+(e.dateIn||'')+'" onchange="updE('+i+',\'dateIn\',this.value)"><span class="small">Sortie</span><input type="date" value="'+(e.dateOut||'')+'" onchange="updE('+i+',\'dateOut\',this.value)"><span class="small">'+(e.dateOut?'— masqué du planning après cette date, historique conservé':'(laisser vide si toujours en poste)')+'</span></div></div>';
   });
   h+='<div class="addrow">➕ <input id="np-nom" placeholder="Prénom"> <select id="np-b">'+S.boutiques.map(b=>'<option value="'+b.id+'">'+b.nom+'</option>').join('')+'</select> <button class="act" onclick="addEmp()">Ajouter un salarié</button></div>';
-  h+='<div class="mhead">🚀 Mise en service</div><div class="row"><span class="small">Date de démarrage de l\'outil (avant, les plannings sont de l\'historique grisé, non contrôlé) :</span><input type="date" value="'+esc(S.goLive||'')+'" onchange="S.goLive=this.value||\'2026-06-01\';save();render()"></div>';
-  h+='<div class="mhead">🔐 Codes d\'accès</div><div class="row"><span class="small">Ton code admin :</span><input value="'+esc(S.adminPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.adminPin=this.value.trim()||\'1234\';save()"><span class="small">Les codes des salariés se règlent sur leur carte ci-dessus (🔑). Sans code, pas de connexion.</span> &nbsp; <span class="small">🔎 Code RH (lecture seule : calendrier + récap paie) :</span><input value="'+esc(S.rhPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.rhPin=this.value.trim();save()"></div>';
+  h+='<div class="mhead">🚀 Mise en service</div><div class="row"><span class="small">Date de démarrage de l\'outil (avant, les plannings sont de l\'historique grisé, non contrôlé) :</span><input type="date" value="'+esc(S.goLive||'')+'" onchange="S.goLive=this.value||\'2026-06-01\';S.goLiveTs=NOW();save();render()"></div>';
+  h+='<div class="mhead">🔐 Codes d\'accès</div><div class="row"><span class="small">Ton code admin :</span><input value="'+esc(S.adminPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.adminPin=this.value.trim()||\'1234\';S.adminPinTs=NOW();save()"><span class="small">Les codes des salariés se règlent sur leur carte ci-dessus (🔑). Sans code, pas de connexion.</span> &nbsp; <span class="small">🔎 Code RH (lecture seule : calendrier + récap paie) :</span><input value="'+esc(S.rhPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.rhPin=this.value.trim();S.rhPinTs=NOW();save()"></div>';
   h+='<div class="row"><span class="small">🏬 Codes boutique (vue planning + demandes de la boutique, lecture seule) :</span>'+S.boutiques.map((b,i)=>'<span style="white-space:nowrap"><span class="small" style="color:var(--'+b.id+')">'+b.nom+'</span> <input value="'+esc(b.pin||'')+'" inputmode="numeric" maxlength="6" style="width:70px" onchange="S.boutiques['+i+'].pin=this.value.trim();S.boutiques['+i+']._ts=NOW();save()"></span>').join(' ')+'</div>';
   h+='<div class="mhead">Horaires des boutiques</div><div class="row">';
   S.boutiques.forEach((b,i)=>{
@@ -2143,7 +2237,9 @@ async function renderSettings(){
    '<button class="act" onclick="exportJson()">⬇️ Exporter (sauvegarde)</button>'+
    '<label class="act grey" style="cursor:pointer">⬆️ Importer / fusionner <input type="file" accept=".json" style="display:none" onchange="importJson(this)"></label>'+
    '<button class="act red" onclick="resetSeed()">♻️ Réinitialiser</button></div>'+
-   '<div class="small">L\'import <b>fusionne</b> : pour chaque information, la version modifiée le plus récemment gagne (mêmes règles que PilotVape). Pour travailler sur 2 postes : exporte sur le poste A, importe sur le poste B.</div>';
+   '<div class="small">L\'import <b>fusionne</b> : pour chaque information, la version modifiée le plus récemment gagne (mêmes règles que PilotVape). « Remplacer entièrement » fait de ce fichier la référence (il gagne la synchro).</div>'+
+   '<div class="row" style="margin-top:8px"><button class="act" onclick="forceMyVersion()" title="Imposer les données de CE poste au serveur et à tous les autres — pour réparer une désynchro">🔒 Forcer ma version sur le serveur</button></div>'+
+   '<div class="small">À utiliser une seule fois si les postes ne sont pas d\'accord : impose les données de CE poste comme référence officielle. Les autres postes rechargent la page ensuite.</div>';
   let snaps=[];
   try{snaps=(await idbKeys()).map(String).filter(k=>k.startsWith('snap-')).sort().reverse()}catch(e){}
   h+='<div class="mhead">Photos de secours</div><div class="small" style="margin-bottom:6px">Un instantané automatique par jour, 7 conservés. Avant toute restauration, l\'état actuel est exporté en fichier.</div><div class="row">'+
@@ -2167,7 +2263,9 @@ function importJson(inp){const f=inp.files[0];if(!f)return;
     const fusion=confirm('Fusionner avec les données actuelles ?\n\nOK = fusionner (recommandé) : pour chaque information, on garde la version modifiée le plus récemment.\nAnnuler = remplacer entièrement par le contenu du fichier.');
     if(fusion)mergeData(S,d);
     else{if(!confirm('Vraiment TOUT remplacer par le fichier ? Les données actuelles seront écrasées.'))return;S=d}
-    migrate(S);save();render();renderSettings();alert('Import terminé ✓')}
+    migrate(S);
+    if(!fusion)_restampAll(); // remplacement total = ce fichier fait autorité → il doit gagner la synchro partout
+    save();render();renderSettings();alert('Import terminé ✓')}
     catch(e2){alert('Fichier invalide')}};r.readAsText(f);inp.value='';}
 async function restoreSnap(k){
   if(!confirm('Revenir aux données du '+fmtFR(k.replace('snap-',''))+' ? L\'état actuel est d\'abord exporté en fichier, par sécurité.'))return;
@@ -2176,6 +2274,36 @@ async function restoreSnap(k){
   if(d){S=d;migrate(S);save();render();renderSettings()}
 }
 function resetSeed(){if(confirm('Tout remplacer par les plannings types réels (données du 04/06/2026) ? Tes saisies seront perdues — exporte avant si besoin.')){S=JSON.parse(JSON.stringify(SEED));migrate(S);save();render()}}
+
+// Re-tamponne TOUTES les données de ce poste à un même instant (maintenant).
+// Pourquoi : un tampon _ts n'existe QUE là où une info a été modifiée depuis l'ajout du
+// système de tampons. Les plannings d'origine jamais re-touchés (et les données de démo)
+// n'ont pas de tampon → à la fusion, sur égalité (pas de tampon des deux côtés) c'est la
+// version DÉJÀ en place qui est gardée, donc l'import ne les écrase pas. Re-tamponner tout
+// à maintenant rend CE poste "le plus récent" partout → il gagne la fusion sans exception.
+function _restampAll(){
+  const t=NOW();
+  (S.employees||[]).forEach(x=>x._ts=t);
+  (S.boutiques||[]).forEach(x=>x._ts=t);
+  ['exceptions','events','hsdemandes','conges','maladies','ecoles','entreprises','feries'].forEach(k=>(S[k]||[]).forEach(x=>x._ts=t));
+  for(const k in (S.primes||{}))if(S.primes[k]&&typeof S.primes[k]==='object')S.primes[k]._ts=t;
+  for(const k in (S.solidarite||{}))if(S.solidarite[k]&&typeof S.solidarite[k]==='object')S.solidarite[k]._ts=t;
+  S.goLiveTs=t;S.adminPinTs=t;S.rhPinTs=t; // réglages globaux
+  for(const y in (S.bilanHist||{}))for(const id in S.bilanHist[y])if(S.bilanHist[y][id]&&typeof S.bilanHist[y][id]==='object')S.bilanHist[y][id]._ts=t;
+}
+
+// "Forcer ma version" : impose les données de CE poste au serveur (et donc aux autres).
+// À utiliser pour réparer une désynchro. Équivalent du "🔒 Forcer ma version" de PilotVape.
+async function forceMyVersion(){
+  if(!isAdmin()){alert('Réservé à l\'administrateur.');return;}
+  if(!confirm('FORCER les données de CE poste comme référence ?\n\nElles deviennent la version officielle et écrasent celles du serveur (donc des autres postes au prochain rafraîchissement).\n\nÀ utiliser pour réparer une désynchro. Les autres postes devront recharger la page.'))return;
+  _restampAll();
+  setSave('Envoi…');
+  try{await _doSave()}catch(e){}
+  await pushToServer();
+  try{render();renderSettings()}catch(e){}
+  alert('✅ Version de ce poste envoyée au serveur.\n\nSur les autres postes : recharge la page — les bonnes données apparaîtront.');
+}
 
 // ============ INIT ============
 // ============ RÉCAP PAIE MENSUEL (admin) ============
@@ -2210,7 +2338,7 @@ function bilanYear(){if(!bilanYearN)bilanYearN=+todayISO().slice(0,4);const y=bi
   const from=y+'-01-01',to=y+'-12-31';const days=[];let d=from;while(d<=to){days.push(d);d=addD(d,1);}
   return{from,to,days,weeks:Math.round(days.length/7),year:y};}
 function bilanNav(n){if(!bilanYearN)bilanYearN=+todayISO().slice(0,4);const y=bilanYearN+n;if(y<2025)return;bilanYearN=y;renderPaie();}
-function setBilanHist(year,id,key,val){S.bilanHist[year]=S.bilanHist[year]||{};S.bilanHist[year][id]=S.bilanHist[year][id]||{};S.bilanHist[year][id][key]=parseFloat(String(val).replace(',','.'))||0;save();}
+function setBilanHist(year,id,key,val){S.bilanHist[year]=S.bilanHist[year]||{};S.bilanHist[year][id]=S.bilanHist[year][id]||{};S.bilanHist[year][id][key]=parseFloat(String(val).replace(',','.'))||0;S.bilanHist[year][id]._ts=NOW();save();}
 function bilHistTog(bid,open){window._bilHistOpen=window._bilHistOpen||new Set();if(open)window._bilHistOpen.add(bid);else{window._bilHistOpen.delete(bid);renderPaie();}} // rafraîchit les barres à la fermeture du volet
 function bilanRow(e,days,year){
   const gl=S.goLive||'2026-06-01';
@@ -2936,8 +3064,19 @@ function restoreRole(){
 }
 
 (async function init(){
-  try{const saved=await idbGet('db');S=saved||JSON.parse(JSON.stringify(SEED));}
-  catch(e){S=JSON.parse(JSON.stringify(SEED));}
+  // 1) Données locales de ce navigateur (s'il y en a)
+  let saved=null;try{saved=await idbGet('db')}catch(e){}
+  // 2) État partagé sur le serveur (peut être absent si premier déploiement, ou injoignable)
+  let remote=null;try{remote=await _syncRead();_setSync('ok')}catch(e){_setSync('off')}
+  if(saved){
+    S=saved;
+    if(remote&&remote.data)mergeData(S,remote.data); // poste connu : on fusionne local + distant
+  }else if(remote&&remote.data){
+    S=remote.data;                                   // NAVIGATEUR NEUF : on adopte les données partagées (jamais le SEED par-dessus le réel)
+  }else{
+    S=JSON.parse(JSON.stringify(SEED));              // ni local ni serveur : tout premier démarrage
+  }
+  if(remote&&remote.updated_at)_lastRemoteAt=remote.updated_at;
   S.overrides=S.overrides||[];S.maladies=S.maladies||[];S.solidarite=S.solidarite||{};S.primes=S.primes||{};
   migrate(S);
   if(!S.theme)S.theme=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
@@ -2946,7 +3085,14 @@ function restoreRole(){
   restoreRole();
   restoreUI();
   render();
-  if(!await idbGet('db'))save();
+  // Persistance locale de l'état retenu
+  await _saveLocalOnly();
+  // Si le serveur est joignable mais VIDE (premier déploiement), on l'initialise — mais
+  // UNIQUEMENT depuis un poste qui a déjà de vraies données locales (jamais le SEED de démo,
+  // pour ne pas polluer le serveur si un navigateur neuf est ouvert avant la mise en service).
+  if(saved && remote!==null && !(remote&&remote.data))schedulePush();
+  // Démarre le poll + la synchro au retour sur l'onglet
+  _startSync();
 })();
 </script>
 </body>
