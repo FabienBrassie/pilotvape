@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 15:33</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 15:52</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -6441,6 +6441,7 @@ function creerPaireRetro(opts) {
     };
     if (opts.rentrerActionId) a.retroRentrerActionId = opts.rentrerActionId;
     if (opts.opId) a.retroOpId = opts.opId;
+    if (opts.retroLabel) a.retroLabel = opts.retroLabel;
     if (opts.parfumId) { a.produitParfumId = opts.parfumId; a._parfumNom = opts.parfumNom || null; }
     // Court-circuit des boutiques NON concernées : tout coché, donc done → invisibles chez elles.
     SHOPS.forEach(sh => {
@@ -6543,15 +6544,30 @@ async function setOpDispatchHub(opId, hub) {
   op._ts = nowIso; op._adminTs = nowIso;
   let _nbRetros = 0;
   if (!_hasRentrerLie) {
-    (op.produitIds || []).forEach(pid => {
+    // Produits de la base liés à l'OP → une rétrocession par produit (stock Swappy suivi).
+    const _baseProds = (op.produitIds || []).map(pid => {
       const _t = baseKits.find(k => k.id === pid) ? 'kit' : baseLiq.find(l => l.id === pid) ? 'liq' : basePD.find(p => p.id === pid) ? 'pd' : null;
-      if (!_t) return; // produit hors bases (accessoire) : pas de stock Swappy à rétrocéder
+      return _t ? { pid, _t } : null;
+    }).filter(Boolean);
+    if (_baseProds.length > 0) {
+      _baseProds.forEach(({ pid, _t }) => {
+        SHOPS.forEach(sh => {
+          if (sh === hub) return;
+          creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id });
+          _nbRetros++;
+        });
+      });
+    } else {
+      // OP sans produit en base (accessoire/PLV, ex Banane, Tour de cou) : on crée quand même
+      // une ligne de dispatch par destination, labellisée par l'OP, pour suivre le transport
+      // physique (demande Fabien 2026-06-13 : "ça doit apparaître au moins pour info dans 🔁").
+      const _label = (getOpProductDisplay(op).label) || op.nom || 'Produit OP';
       SHOPS.forEach(sh => {
         if (sh === hub) return;
-        creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id });
+        creerPaireRetro({ produitType: 'kit', produitId: 'OPGOODS-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: _label });
         _nbRetros++;
       });
-    });
+    }
   }
   logAction('Réception centralisée OP', (op.nom || op.id) + ' → hub ' + (SHOP_LABELS[hub] || hub) + (_nbRetros ? ' · ' + _nbRetros + ' rétrocession(s) de stock créée(s)' : ' (PLV/info seulement)'));
   saveData();
@@ -15179,9 +15195,15 @@ function renderDashboard() {
     // Cherche le produit : liquide, kit ou PD
     const isLiq = a.produitType === 'liq';
     const isPd = a.produitType === 'pd';
-    const prod = isLiq ? baseLiq.find(g => g.id === a.produitId)
+    let prod = isLiq ? baseLiq.find(g => g.id === a.produitId)
       : isPd ? basePD.find(p => p.id === a.produitId)
       : baseKits.find(k => k.id === a.produitId);
+    // Rétrocession d'un produit hors base (ex : accessoire/PLV d'une OP — Tour de cou, Banane) :
+    // pas d'entrée dans baseKits/Liq/PD, mais la ligne DOIT apparaître dans la section 🔁 pour
+    // que Fabien suive le transport. On fabrique un produit minimal depuis retroLabel (2026-06-13).
+    if (!prod && (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') && a.retroLabel) {
+      prod = { id: a.produitId, marque: '', modele: a.retroLabel, gamme: a.retroLabel, caseTech: '', pv: 0, statutVie: 'DANS_OFFRE', parfums: [] };
+    }
     if (!prod) return '';
     const kit = (!isLiq && !isPd) ? prod : null;  // Pour les retros-compatibilités avec les variables qui utilisent "kit"
     let T = TYPE_META[a.type] || TYPE_META.SORTIR;
