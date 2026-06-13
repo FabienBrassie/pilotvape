@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 16:47</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-13 16:55</span>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
 
@@ -6452,6 +6452,20 @@ function setRepriseComptageParfum(actionId, shop, parfumId, value) {
 // (travail de la destination). Les boutiques non concernées sont court-circuitées à la
 // création (même mécanique que garderEnTiroir) : chez elles l'action est "done", donc
 // invisible dans leurs vues filtrées.
+// Date de transport d'une rétrocession (éditable par Fabien — plus de date inventée, 2026-06-13).
+// Pose la date sur LES DEUX actions de la paire (envoi + réception) via retroId.
+function setRetroDate(actionId, value) {
+  const a = actions.find(x => x.id === actionId);
+  if (!a) return;
+  const _v = value || null;
+  const _nowIso = new Date().toISOString();
+  const _paire = a.retroId ? actions.filter(x => x.retroId === a.retroId) : [a];
+  _paire.forEach(x => { x.retroDate = _v; x._ts = _nowIso; x._adminTs = _nowIso; });
+  logAction('Date de transfert', _logActionLabel(actionId) + ' → ' + (_v ? fmtFR(_v) : 'effacée'));
+  saveData();
+  try { renderDashboard(); } catch(e) {}
+}
+
 // LA fonction canonique de création d'une paire de rétrocession (règle 8) : utilisée par
 // la rétrocession ponctuelle (lancerRetrocession) ET par la réception centralisée d'un
 // À rentrer (setDispatchHub). opts : { produitType, produitId, parfumId, parfumNom,
@@ -6570,13 +6584,16 @@ function creerRetrosDispatchOp(op, kind, hub) {
     }).filter(Boolean);
     if (_baseProds.length > 0) {
       _baseProds.forEach(({ pid, _t }) => {
-        SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroNature: 'produit' }); n++; });
+        SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: _t, produitId: pid, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: null, opId: op.id, retroNature: 'produit' }); n++; });
       });
     } else {
-      SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPGOODS-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: _label, retroNature: 'produit' }); n++; });
+      // Produit hors base (accessoire…) : produitType 'op' (PAS 'kit' — un accessoire n'est pas
+      // un kit, correctif Fabien 2026-06-13). Date laissée vide, à saisir par Fabien.
+      SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'op', produitId: 'OPGOODS-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: null, opId: op.id, retroLabel: _label, retroNature: 'produit' }); n++; });
     }
   } else if (kind === 'plv') {
-    SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'kit', produitId: 'OPPLV-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: op.dateDebut || null, opId: op.id, retroLabel: 'PLV — ' + _label, retroNature: 'plv' }); n++; });
+    // PLV : type 'op' (pas un kit), ligne d'info de transport.
+    SHOPS.forEach(sh => { if (sh === hub) return; creerPaireRetro({ produitType: 'op', produitId: 'OPPLV-' + op.id, parfumId: null, parfumNom: null, from: hub, to: sh, qte: null, date: null, opId: op.id, retroLabel: 'PLV — ' + _label, retroNature: 'plv' }); n++; });
   }
   return n;
 }
@@ -8075,6 +8092,16 @@ async function loadData() {
     // 2026-05-28 Phase 2 hygiène : traceur PROP-010 (Coolfire Z60) retiré (diagnostic terminé).
     // Idem pour les OPs : chaque OP doit avoir etats[shop].steps cohérent avec son type.
     ops.forEach(op => ensureOpSteps(op));
+    // Migration (2026-06-13) : les transferts d'accessoires/PLV d'OP créés en type 'kit' passent
+    // en type 'op' (un accessoire n'est pas un kit) — recatégorise les anciennes lignes.
+    actions.forEach(a => {
+      if ((a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') && typeof a.produitId === 'string'
+          && (a.produitId.indexOf('OPGOODS-') === 0 || a.produitId.indexOf('OPPLV-') === 0) && a.produitType !== 'op') {
+        a.produitType = 'op';
+        if (a.produitId.indexOf('OPPLV-') === 0 && !a.retroNature) a.retroNature = 'plv';
+        else if (!a.retroNature) a.retroNature = 'produit';
+      }
+    });
     // Auto-cohérence dispatch (2026-06-13) : recrée les lignes de rétro manquantes pour les OP
     // dont le dispatch produit/PLV est posé mais sans transferts (ex. migration de l'ancien
     // op.dispatchHub). Admin uniquement, idempotent.
@@ -15624,21 +15651,29 @@ function renderDashboard() {
       badgeTag += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; white-space:nowrap;" title="Réception centralisée : tout le stock arrive à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub}, puis dispatch par rétrocession vers les autres boutiques">📦 hub ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub}</span>`;
     }
 
-    // ── 🔁 RÉTROCESSION : trajet A → B + quantité + date de transport sur la ligne ──
+    // ── 🔁 RÉTROCESSION : tout sur une LIGNE PLEINE LARGEUR (subtitleRow2) pour ne pas
+    // chevaucher les colonnes étroites (correctif affichage Fabien 2026-06-13).
     if (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') {
       const _rFrom = SHOP_LABELS[a.retroFrom] || a.retroFrom || '?';
       const _rTo = SHOP_LABELS[a.retroTo] || a.retroTo || '?';
-      badgeTag += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; white-space:nowrap;" title="Rétrocession inter-boutiques${a.retroDate ? ' — transport prévu le ' + fmtFR(a.retroDate) : ''}">🔁 ${_rFrom} → ${_rTo}${typeof a.retroQte === 'number' ? ' · ' + a.retroQte + ' réf' : ''}${a.retroDate ? ' · 🚚 ' + fmtFR(a.retroDate) : ''}</span>`;
-      // Provenance : dispatch d'une réception centralisée (OP ou À rentrer) vs rétrocession
-      // ponctuelle. Pour info — le badge dit d'où vient le transfert (demande Fabien 2026-06-12).
+      const _parts = [`<span style="color:#67e8f9; font-weight:600;">🔁 ${_rFrom} → ${_rTo}</span>`];
+      if (typeof a.retroQte === 'number') _parts.push(`<span style="color:#94a3b8;">${a.retroQte} réf</span>`);
+      // Provenance (dispatch d'OP, dispatch d'À rentrer, ou rétrocession ponctuelle).
       if (a.retroOpId) {
         const _srcOp = ops.find(o => o.id === a.retroOpId);
         const _srcLbl = _srcOp ? (_srcOp.nom || _srcOp.id) : a.retroOpId;
         const _natTag = a.retroNature === 'plv' ? ' · PLV' : (a.retroNature === 'produit' ? ' · produit' : '');
-        badgeSub += `<span style="font-size:8px; padding:1px 5px; background:#a855f720; color:#c4b5fd; border:1px solid #a855f750; border-radius:2px; white-space:nowrap;" title="Issue de la réception centralisée${a.retroNature === 'plv' ? ' (PLV)' : a.retroNature === 'produit' ? ' (produit)' : ''} de l'OP « ${_srcLbl} »">📦 OP ${_srcLbl}${_natTag}</span>`;
+        _parts.push(`<span style="color:#c4b5fd;" title="Issue de la réception centralisée de l'OP « ${_srcLbl} »">📦 OP ${_srcLbl}${_natTag}</span>`);
       } else if (a.retroRentrerActionId) {
-        badgeSub += `<span style="font-size:8px; padding:1px 5px; background:#22c55e20; color:#86efac; border:1px solid #22c55e50; border-radius:2px; white-space:nowrap;" title="Issue de la réception centralisée d'un À rentrer">📦 dispatch réception</span>`;
+        _parts.push(`<span style="color:#86efac;">📦 dispatch réception</span>`);
       }
+      // Date de transport ÉDITABLE (admin) — plus de date inventée (correctif Fabien 2026-06-13).
+      if (typeof isAdmin === 'function' && isAdmin()) {
+        _parts.push(`🚚 <input type="date" value="${a.retroDate || ''}" onclick="event.stopPropagation();" onchange="event.stopPropagation(); setRetroDate('${a.id}', this.value)" style="padding:1px 4px; font-size:10px; background:#0f172a; color:#e2e8f0; border:1px solid #06b6d460; border-radius:3px;"/>`);
+      } else if (a.retroDate) {
+        _parts.push(`<span style="color:#94a3b8;">🚚 ${fmtFR(a.retroDate)}</span>`);
+      }
+      subtitleRow2 += `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; font-size:10px;">${_parts.join('<span style="color:#475569;">·</span>')}</div>`;
     }
 
     // ── 🗄️ COMMANDE CLIENT sur la ligne À SORTIR (correctif 2026-06-11, retour Fabien) ──
@@ -16441,6 +16476,9 @@ function renderDashboard() {
     // Séparer kits vs liquides vs PD
     const kitActions = actionList.filter(a => !a.produitType || a.produitType === 'kit');
     const pdActions  = actionList.filter(a => a.produitType === 'pd');
+    // Transferts d'accessoires / produits hors base / PLV d'OP (produitType 'op') : un accessoire
+    // n'est PAS un kit (correctif Fabien 2026-06-13) → sous-accordéon dédié.
+    const opActions  = actionList.filter(a => a.produitType === 'op');
     // ── FILTRE ANTI-DOUBLON LIQUIDES : masquer gamme-level si parfum-level existent ──
     // Factorisé 2026-06-12 (règle 8) : _filterAntiDoublonLiq est LA fonction canonique
     // (motif REPRISE distingué, actions FAIT incluses dans la couverture). Une seule règle
@@ -16509,6 +16547,9 @@ function renderDashboard() {
 
     // ── Sous-accordéon PD ──
     html += _renderSubAccordion('Pièces détachées', '🔩', pdActions, 'sub_pd');
+
+    // ── Sous-accordéon Accessoires & PLV d'OP (produits hors base) ──
+    html += _renderSubAccordion('Accessoires & PLV (OP)', '📦', opActions, 'sub_op');
 
     // ── Sous-accordéon Liquides ──
     if (liqActions.length === 0) return html;
