@@ -1199,7 +1199,39 @@ const CALPAL=['#2563eb','#dc2626','#7c3aed','#059669','#d97706','#0891b2','#db27
 function myCals(){return (S.calendars||[]).filter(c=>c.owner===(ROLE&&ROLE.empId)).sort((a,b)=>(a.name||'').localeCompare(b.name||''));}
 function calColor(id){const c=(S.calendars||[]).find(x=>x.id===id);return c?c.color:'#64748b';}
 function calName(id){const c=(S.calendars||[]).find(x=>x.id===id);return c?c.name:'?';}
-function myEntriesOn(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&x.date===d&&!calHidden.has(x.calId)).sort((a,b)=>a.du<b.du?-1:1);}
+function myEntriesOn(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&!x.allday&&x.date===d&&!calHidden.has(x.calId)).sort((a,b)=>a.du<b.du?-1:1);}
+// entrées "journée entière" du jour, pour la bande d'événements de Mon planning
+function myAllDayChips(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&x.allday&&x.date===d&&!calHidden.has(x.calId)).map(x=>({cls:'op',txt:'🗓️ '+x.title,st:'style="border-left:4px solid '+calColor(x.calId)+'"',detail:calName(x.calId)+' — '+x.title}));}
+// Glisser sur la grille → pré-remplit le formulaire d'entrée minutée (calendrier + titre à compléter)
+function openNewCalEntry(date,du,au){
+  if(!isAdmin())return;
+  if(!myCals().length){renderCalPanel();alert('Crée d\'abord un calendrier (bouton ＋), puis glisse à nouveau sur le planning.');return;}
+  renderCalPanel();
+  if($('ce-date'))$('ce-date').value=date;
+  if($('ce-du'))$('ce-du').value=du;
+  if($('ce-au'))$('ce-au').value=au;
+  if($('ce-title'))$('ce-title').focus();
+}
+// Clic sur la bande "événements" de Mon planning → entrées journée entière du jour
+function openMineDay(iso){
+  if(!isAdmin())return;
+  if(!myCals().length){renderCalPanel();alert('Crée d\'abord un calendrier (bouton ＋), puis reviens.');return;}
+  const cals=myCals();
+  const ex=(S.calEntries||[]).filter(x=>x.owner===ROLE.empId&&x.allday&&x.date===iso);
+  let h='<h2>🗓️ Journée entière — '+DAYJ[wdOf(iso)]+' '+fmtFR(iso)+'</h2>';
+  if(ex.length){h+='<table style="margin-bottom:8px">'+ex.map(x=>'<tr><td><span class="bdot" style="background:'+calColor(x.calId)+'"></span> '+esc(x.title)+'</td><td class="small">'+esc(calName(x.calId))+'</td><td><button class="mini" onclick="delCalEntry('+x.id+')">🗑</button></td></tr>').join('')+'</table>';}
+  h+='<div class="row"><select id="md-cal">'+cals.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('')+'</select>'+
+   '<input id="md-title" placeholder="Titre (ex : Salon pro, journée perso)" style="width:200px">'+
+   '<button class="act green" onclick="addAllDay(\''+iso+'\')">Ajouter</button>'+
+   '<button class="act grey" onclick="$(\'evpanel\').style.display=\'none\'">Fermer</button></div>';
+  $('evpanel').innerHTML=h;$('evpanel').style.display='block';
+}
+function addAllDay(iso){
+  const cal=$('md-cal')&&$('md-cal').value,title=$('md-title')&&$('md-title').value.trim();
+  if(!cal||!title){alert('Choisis un calendrier et un titre.');return;}
+  S.calEntries.push({id:Date.now(),calId:+cal,owner:ROLE.empId,date:iso,allday:true,title,_ts:NOW()});
+  save();openMineDay(iso);render();
+}
 function togCal(id){if(calHidden.has(id))calHidden.delete(id);else calHidden.add(id);try{localStorage.setItem('gestionrh-calhidden',JSON.stringify([...calHidden]))}catch(e){}render();}
 function addCal(){if(!isAdmin())return;const n=prompt('Nom du calendrier (ex : RDV pro, Orga perso…)');if(!n||!n.trim())return;const color=CALPAL[(myCals().length)%CALPAL.length];S.calendars.push({id:Date.now(),name:n.trim(),color,owner:ROLE.empId,_ts:NOW()});save();renderCalPanel();render();}
 function updCal(id,k,v){const c=(S.calendars||[]).find(x=>x.id===id);if(!c)return;c[k]=v;c._ts=NOW();save();renderCalPanel();render();}
@@ -1229,7 +1261,7 @@ function renderCalPanel(){
      '<button class="act green" onclick="addCalEntry()">Ajouter</button></div>';
     const ents=(S.calEntries||[]).filter(x=>x.owner===ROLE.empId).sort((a,b)=>(a.date+a.du)<(b.date+b.du)?-1:1);
     if(ents.length){h+='<div class="mhead">Mes entrées</div>';
-      for(const x of ents)h+='<div class="brow" style="padding-left:6px"><span class="bdot" style="background:'+calColor(x.calId)+'"></span><span class="small">'+fmtFR(x.date)+' '+x.du+'–'+x.au+'</span><b>'+esc(x.title)+'</b><span class="small" style="color:'+calColor(x.calId)+'">'+esc(calName(x.calId))+'</span><button class="mini ghost" style="margin-left:auto" onclick="delCalEntry('+x.id+')">🗑</button></div>';}
+      for(const x of ents)h+='<div class="brow" style="padding-left:6px"><span class="bdot" style="background:'+calColor(x.calId)+'"></span><span class="small">'+fmtFR(x.date)+' '+(x.allday?'journée':x.du+'–'+x.au)+'</span><b>'+esc(x.title)+'</b><span class="small" style="color:'+calColor(x.calId)+'">'+esc(calName(x.calId))+'</span><button class="mini ghost" style="margin-left:auto" onclick="delCalEntry('+x.id+')">🗑</button></div>';}
   }
   $('calpanel').innerHTML=h;$('calpanel').style.display='block';
 }
@@ -1262,7 +1294,7 @@ function renderMineWeek(){
   for(const d of days){
     const mb=new Set(myBof(d));
     const ents=myEntriesOn(d);
-    bb+='<div class="daycol'+((mb.size||ents.length)?'':' closed')+(isLive(d)?'':' pre')+'">';
+    bb+='<div class="daycol'+((mb.size||ents.length)?'':' closed')+(isLive(d)?'':' pre')+'" data-iso="'+d+'">';
     for(let m=540;m<CAL_END;m+=60)bb+='<div class="hline" style="top:'+((m-CAL_START)*PX)+'px"></div>';
     if(mb.size){
       const evs=[];
@@ -1296,8 +1328,8 @@ function renderMineWeek(){
     t+=' <button class="mini" onclick="togCalPanel()">＋ Gérer</button>';
     $('minetools').innerHTML=t;
   } else $('minetools').innerHTML='';
-  // Bande d'événements (fériés, congés, OP…) — boutique du jour pour rester cohérent en multisite
-  renderEvBand(days,d=>{const mb=myBof(d);return mb[0]||curB;});
+  // Bande d'événements (fériés, congés, OP… + mes journées entières perso ; clic = ajouter une journée perso)
+  renderEvBand(days,d=>{const mb=myBof(d);return mb[0]||curB;},isAdmin()?{extra:myAllDayChips,click:'openMineDay'}:undefined);
 }
 function renderMonth(){
   const mid=addD(monday(curMonday),3); // un jour sûrement dans la bonne semaine
@@ -1499,11 +1531,13 @@ function dayEvents(d,b){
   }
   return out;
 }
-function renderEvBand(days,bOf){
+function renderEvBand(days,bOf,opts){
   let h='<div class="evlabel">événements</div>';
   for(const d of days){
-    const evs=dayEvents(d,bOf?bOf(d):curB);
-    h+='<div class="evcell" onclick="openEvEd(\''+d+'\')" title="Clique pour ajouter / gérer les événements de ce jour">'+
+    let evs=dayEvents(d,bOf?bOf(d):curB);
+    if(opts&&opts.extra)evs=evs.concat(opts.extra(d));
+    const click=(opts&&opts.click)?opts.click+'(\''+d+'\')':'openEvEd(\''+d+'\')';
+    h+='<div class="evcell" onclick="'+click+'" title="Clique pour ajouter / gérer les événements de ce jour">'+
       evs.map(e=>'<span class="evc '+e.cls+'" '+(e.st||'')+' title="'+esc(e.detail||e.txt)+(e.jump?' — clique pour gérer':'')+'"'+(e.jump?' style="cursor:pointer" onclick="event.stopPropagation();jumpAbs(\''+e.jump.t+'\','+e.jump.id+',\''+e.jump.emp+'\')"':'')+'>'+esc(e.txt)+'</span>').join('')+'</div>';
   }
   $('evband').innerHTML=h;
@@ -2267,6 +2301,15 @@ document.addEventListener('mousedown',ev=>{
   if(!isAdmin())return; // salarié = lecture seule
   const col=ev.target.closest('.daycol');
   if(!col||ev.target.closest('.panel'))return;
+  // Vue "Mon planning" : glisser crée une ENTRÉE PERSO minutée (pas un créneau boutique)
+  if(calView==='mine'){
+    if(ev.target.closest('.blk'))return; // on ne déplace pas un bloc existant (v1)
+    if(!col.dataset.iso)return;
+    const r2=col.getBoundingClientRect();
+    const mn=clampM(snap15((ev.clientY-r2.top)/PX+CAL_START),CAL_START,CAL_END);
+    drag={mode:'newcal',iso:col.dataset.iso,curIso:col.dataset.iso,du:mn,au:mn+30,el:null,moved:false,sx:ev.clientX,sy:ev.clientY};
+    ev.preventDefault();return;
+  }
   const blk=ev.target.closest('.blk');
   const rect=col.getBoundingClientRect();
   const minute=clampM(snap15((ev.clientY-rect.top)/PX+CAL_START),CAL_START,CAL_END);
@@ -2298,12 +2341,12 @@ document.addEventListener('mousemove',ev=>{
     if(over)drag.curIso=over.dataset.iso;
   }else if(drag.mode==='rz'){drag.au=Math.max(drag.du+15,minute)}
   else if(drag.mode==='rzt'){drag.du=Math.min(drag.au-15,minute)}
-  else if(drag.mode==='new'){drag.au=Math.max(drag.du+15,minute);if(over)drag.curIso=over.dataset.iso}
+  else if(drag.mode==='new'||drag.mode==='newcal'){drag.au=Math.max(drag.du+15,minute);if(over)drag.curIso=over.dataset.iso}
   ghostRender(cols);
 });
 function ghostRender(cols){
   const top=(drag.du-CAL_START)*PX, hpx=(drag.au-drag.du)*PX;
-  if(drag.mode==='new'||drag.dup){
+  if(drag.mode==='new'||drag.mode==='newcal'||drag.dup){
     let g=$('ghost');
     const col=cols.find(c=>c.dataset.iso===drag.curIso)||cols[0];
     if(!g||g.parentNode!==col){if(g)g.remove();g=document.createElement('div');g.id='ghost';col.appendChild(g)}
@@ -2322,6 +2365,10 @@ document.addEventListener('mouseup',()=>{
   if(!drag)return;
   const d=drag;drag=null;
   const g=$('ghost');if(g)g.remove();
+  if(d.mode==='newcal'){
+    if(!d.moved)d.au=Math.min(d.du+60,CAL_END); // clic simple = 1h
+    openNewCalEntry(d.curIso,m2t(d.du),m2t(d.au));return;
+  }
   if(d.mode==='new'){
     if(!d.moved)d.au=Math.min(d.du+240,CAL_END); // clic simple = bloc de 4h par défaut
     const first=S.employees.find(x=>x.actif&&x.b===curB)||S.employees.find(x=>x.actif);
@@ -2386,6 +2433,7 @@ document.addEventListener('mousedown',ev=>{
 },true);
 document.addEventListener('click',ev=>{
   if(!ROLE||ROLE.type!=='salarie')return;
+  if(calView==='mine')return; // en "Mon planning", pas de déclaration HS au clic (réservé aux vues boutique)
   if(ev.target.closest('.panel')||ev.target.closest('header')||ev.target.closest('#login'))return;
   const col=ev.target.closest('.daycol');
   if(col&&col.dataset.iso)declareHS(col.dataset.iso);
