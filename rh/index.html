@@ -1378,11 +1378,17 @@ function renderMineWeek(){
           '<b>'+(ev.me?'★ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
       }
     }
-    // calendriers personnels (RDV, orga…) superposés à droite de la colonne
-    for(const x of ents){
-      const s=t2m(x.du),f=t2m(x.au);if(isNaN(s)||isNaN(f))continue;
-      const top=(s-CAL_START)*PX,hpx=(f-s)*PX;
-      bb+='<div class="blk" data-ce="'+x.id+'" title="'+esc(calName(x.calId))+' — '+esc(x.title)+' (glisse pour déplacer, étire le bas/haut pour la durée)" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:58%;width:40%;background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:30;cursor:grab"><b>'+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
+    // calendriers personnels (RDV, orga…) : pleine largeur s'il n'y a pas d'équipe ce jour,
+    // sinon bande de droite (pour ne pas recouvrir les collègues) ; chevauchements en colonnes.
+    const hasTeam=mb.size>0;
+    const baseL=hasTeam?56:1, baseW=hasTeam?42:98;
+    const pe=ents.map(x=>({x,s:t2m(x.du),f:t2m(x.au)})).filter(o=>!isNaN(o.s)&&!isNaN(o.f)).sort((a,b)=>a.s-b.s||b.f-a.f);
+    const peEnd=[];for(const o of pe){let c=0;while(c<peEnd.length&&peEnd[c]>o.s)c++;o.col=c;peEnd[c]=o.f;}
+    const peN=Math.max(1,peEnd.length);
+    for(const o of pe){
+      const x=o.x,top=(o.s-CAL_START)*PX,hpx=(o.f-o.s)*PX;
+      const w=baseW/peN,l=baseL+o.col*w;
+      bb+='<div class="blk" data-ce="'+x.id+'" title="'+esc(calName(x.calId))+' — '+esc(x.title)+' (glisse pour déplacer, étire le bas/haut pour la durée)" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 1px);width:calc('+w+'% - 3px);background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:30;cursor:grab"><b>'+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
     }
     bb+='</div>';
   }
