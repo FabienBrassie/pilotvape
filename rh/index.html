@@ -1011,6 +1011,7 @@ let curMonday=monday(todayISO());
 let curB='P';
 let edit=null;     // {empId, iso, bi|null, du, au}
 let pending=null;  // drag en attente de portée
+let pendingCal=null;  // déplacement d'une entrée perso récurrente en attente de portée
 let drag=null;
 let hidden=new Set();
 try{hidden=new Set(JSON.parse(localStorage.getItem('gestionrh-masques')||'[]'))}catch(e){}
@@ -1199,9 +1200,22 @@ const CALPAL=['#2563eb','#dc2626','#7c3aed','#059669','#d97706','#0891b2','#db27
 function myCals(){return (S.calendars||[]).filter(c=>c.owner===(ROLE&&ROLE.empId)).sort((a,b)=>(a.name||'').localeCompare(b.name||''));}
 function calColor(id){const c=(S.calendars||[]).find(x=>x.id===id);return c?c.color:'#64748b';}
 function calName(id){const c=(S.calendars||[]).find(x=>x.id===id);return c?c.name:'?';}
-function myEntriesOn(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&!x.allday&&x.date===d&&!calHidden.has(x.calId)).sort((a,b)=>a.du<b.du?-1:1);}
+// Une entrée a-t-elle lieu le jour d ? Ponctuelle (date) ou récurrente hebdo (wd/from/until),
+// en tenant compte des occurrences retirées/modifiées (skips). Comme un planning type de salarié.
+function calOccurs(x,d){
+  if(x.skip)return false;
+  if(x.rec){
+    if(wdOf(d)!==x.wd)return false;
+    if(x.from&&d<x.from)return false;
+    if(x.until&&d>x.until)return false;
+    if((S.calEntries||[]).some(s=>s.skip===x.id&&s.date===d))return false; // occurrence retirée (ce jour modifié/supprimé)
+    return true;
+  }
+  return x.date===d;
+}
+function myEntriesOn(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&!x.allday&&!x.skip&&!calHidden.has(x.calId)&&calOccurs(x,d)).sort((a,b)=>a.du<b.du?-1:1);}
 // entrées "journée entière" du jour, pour la bande d'événements de Mon planning
-function myAllDayChips(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&x.allday&&x.date===d&&!calHidden.has(x.calId)).map(x=>({cls:'op',txt:'🗓️ '+x.title,st:'style="border-left:4px solid '+calColor(x.calId)+'"',detail:calName(x.calId)+' — '+x.title}));}
+function myAllDayChips(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&x.allday&&!x.skip&&!calHidden.has(x.calId)&&calOccurs(x,d)).map(x=>({cls:'op',txt:'🗓️ '+x.title+(x.rec?' 🔁':''),st:'style="border-left:4px solid '+calColor(x.calId)+'"',detail:calName(x.calId)+' — '+x.title}));}
 // Glisser sur la grille → pré-remplit le formulaire d'entrée minutée (calendrier + titre à compléter)
 function openNewCalEntry(date,du,au){
   if(!isAdmin())return;
@@ -1233,24 +1247,57 @@ function addAllDay(iso){
   save();openMineDay(iso);render();
 }
 // Éditeur d'une entrée (clic sur un bloc) : calendrier, titre, date, horaire + supprimer
-function openCalEntryEdit(id){
+function openCalEntryEdit(id,occDate){
   if(!isAdmin())return;
   const x=(S.calEntries||[]).find(e=>e.id===id);if(!x)return;
+  const od=occDate||x.date||x.from||todayISO();
   const cals=myCals();
-  let h='<h2>🗓️ Modifier l\'entrée</h2>';
+  let h='<h2>🗓️ Modifier l\'entrée'+(x.rec?' 🔁':'')+'</h2>';
   h+='<div class="row"><select id="ee-cal">'+cals.map(c=>'<option value="'+c.id+'"'+(c.id===x.calId?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select>'+
    '<input id="ee-title" value="'+esc(x.title)+'" style="width:220px"></div>';
-  h+='<div class="row">le <input type="date" id="ee-date" value="'+x.date+'">'+(x.allday?' <span class="small">(journée entière)</span>':' de <input type="time" id="ee-du" value="'+x.du+'"> à <input type="time" id="ee-au" value="'+x.au+'">')+'</div>';
-  h+='<div class="row"><button class="act green" onclick="saveCalEntry('+id+')">Enregistrer</button> <button class="act red" onclick="delCalEntry('+id+');$(\'evpanel\').style.display=\'none\'">🗑 Supprimer</button> <button class="act grey" onclick="$(\'evpanel\').style.display=\'none\'">Fermer</button></div>';
+  h+='<div class="row">le <input type="date" id="ee-date" value="'+od+'">'+(x.allday?' <span class="small">(journée entière)</span>':' de <input type="time" id="ee-du" value="'+x.du+'"> à <input type="time" id="ee-au" value="'+x.au+'">')+'</div>';
+  if(!x.rec){
+    h+='<div class="row"><label class="small" title="Le transforme en événement qui revient chaque semaine, ce jour de la semaine"><input type="checkbox" id="ee-rec"> 🔁 Répéter chaque semaine</label></div>';
+    h+='<div class="row"><button class="act green" onclick="saveCalEntry('+id+',\''+od+'\')">Enregistrer</button> <button class="act red" onclick="delCalEntry('+id+');$(\'evpanel\').style.display=\'none\'">🗑 Supprimer</button> <button class="act grey" onclick="$(\'evpanel\').style.display=\'none\'">Fermer</button></div>';
+  }else{
+    h+='<div class="small" style="margin:4px 0;color:var(--mut)">🔁 Récurrent (chaque '+DAYJ[x.wd]+'). Enregistrer / supprimer en choisissant la portée :</div>';
+    h+='<div class="row">Enregistrer : <button class="act green" onclick="saveCalScope('+id+',\''+od+'\',\'jour\')">ce jour</button> <button class="act" onclick="saveCalScope('+id+',\''+od+'\',\'sem\')">toutes</button> <button class="act" onclick="saveCalScope('+id+',\''+od+'\',\'futur\')">à partir d\'ici</button></div>';
+    h+='<div class="row">Supprimer : <button class="act red" onclick="delCalScope('+id+',\''+od+'\',\'jour\')">ce jour</button> <button class="act red" onclick="delCalScope('+id+',\''+od+'\',\'sem\')">toutes</button> <button class="act red" onclick="delCalScope('+id+',\''+od+'\',\'futur\')">à partir d\'ici</button> <button class="act grey" onclick="$(\'evpanel\').style.display=\'none\'">Fermer</button></div>';
+  }
   $('evpanel').innerHTML=h;$('evpanel').style.display='block';
 }
-function saveCalEntry(id){
+function _eeVals(rec,od){
+  const calId=$('ee-cal')?+$('ee-cal').value:rec.calId;
+  const title=($('ee-title')&&$('ee-title').value.trim())||rec.title;
+  const date=($('ee-date')&&$('ee-date').value)||od;
+  let du=rec.du,au=rec.au;
+  if(!rec.allday&&$('ee-du')&&$('ee-au')){const a=$('ee-du').value,b=$('ee-au').value;if(a&&b&&b>a){du=a;au=b;}}
+  return {calId,title,date,du,au};
+}
+function saveCalEntry(id,od){
   const x=(S.calEntries||[]).find(e=>e.id===id);if(!x)return;
-  if($('ee-cal'))x.calId=+$('ee-cal').value;
-  if($('ee-title')&&$('ee-title').value.trim())x.title=$('ee-title').value.trim();
-  if($('ee-date')&&$('ee-date').value)x.date=$('ee-date').value;
-  if(!x.allday&&$('ee-du')&&$('ee-au')){const du=$('ee-du').value,au=$('ee-au').value;if(du&&au&&au>du){x.du=du;x.au=au;}}
+  const v=_eeVals(x,od);
+  x.calId=v.calId;x.title=v.title;if(!x.allday){x.du=v.du;x.au=v.au;}
+  if($('ee-rec')&&$('ee-rec').checked&&!x.rec){x.rec=true;x.wd=wdOf(v.date);x.from=v.date;delete x.date;}
+  else if(!x.rec){x.date=v.date;}
   x._ts=NOW();save();$('evpanel').style.display='none';render();
+}
+function saveCalScope(id,od,scope){const rec=(S.calEntries||[]).find(e=>e.id===id);if(!rec)return;applyCalChange(rec,od,scope,_eeVals(rec,od));$('evpanel').style.display='none';}
+function delCalScope(id,od,scope){const rec=(S.calEntries||[]).find(e=>e.id===id);if(!rec)return;applyCalChange(rec,od,scope,null);$('evpanel').style.display='none';}
+// Applique un changement (vals) ou une suppression (vals=null) à une entrée récurrente, selon la portée
+function applyCalChange(rec,od,scope,vals){
+  const t=NOW();
+  if(scope==='jour'){
+    S.calEntries.push({id:Date.now(),calId:rec.calId,owner:rec.owner,skip:rec.id,date:od,_ts:t}); // retire cette occurrence
+    if(vals)S.calEntries.push({id:Date.now()+1,calId:vals.calId,owner:rec.owner,date:vals.date||od,du:vals.du,au:vals.au,allday:rec.allday,title:vals.title,_ts:t});
+  }else if(scope==='sem'){
+    if(!vals){S.tomb['ce|'+rec.id]=t;(S.calEntries||[]).filter(x=>x.skip===rec.id).forEach(s=>S.tomb['ce|'+s.id]=t);S.calEntries=S.calEntries.filter(x=>x.id!==rec.id&&x.skip!==rec.id);}
+    else{rec.calId=vals.calId;rec.title=vals.title;if(!rec.allday){rec.du=vals.du;rec.au=vals.au;}if(vals.date)rec.wd=wdOf(vals.date);rec._ts=t;}
+  }else if(scope==='futur'){
+    rec.until=addD(od,-1);rec._ts=t;
+    if(vals)S.calEntries.push({id:Date.now(),calId:vals.calId,owner:rec.owner,rec:true,wd:wdOf(vals.date||od),du:vals.du,au:vals.au,allday:rec.allday,title:vals.title,from:od,_ts:t});
+  }
+  save();render();
 }
 function togCal(id){if(calHidden.has(id))calHidden.delete(id);else calHidden.add(id);try{localStorage.setItem('gestionrh-calhidden',JSON.stringify([...calHidden]))}catch(e){}render();}
 function addCal(){if(!isAdmin())return;const n=prompt('Nom du calendrier (ex : RDV pro, Orga perso…)');if(!n||!n.trim())return;const color=CALPAL[(myCals().length)%CALPAL.length];S.calendars.push({id:Date.now(),name:n.trim(),color,owner:ROLE.empId,_ts:NOW()});save();renderCalPanel();render();}
@@ -1259,7 +1306,7 @@ function delCal(id){if(!confirm('Supprimer ce calendrier et toutes ses entrées 
 function addCalEntry(){if(!isAdmin())return;const cal=$('ce-cal')&&$('ce-cal').value,date=$('ce-date')&&$('ce-date').value,du=$('ce-du')&&$('ce-du').value,au=$('ce-au')&&$('ce-au').value,title=$('ce-title')&&$('ce-title').value.trim();
   if(!cal||!date||!du||!au||au<=du||!title){alert('Choisis un calendrier, une date, un horaire (fin après début) et un titre.');return;}
   S.calEntries.push({id:Date.now(),calId:+cal,owner:ROLE.empId,date,du,au,title,_ts:NOW()});save();renderCalPanel();render();}
-function delCalEntry(id){S.tomb['ce|'+id]=NOW();S.calEntries=S.calEntries.filter(x=>x.id!==id);save();renderCalPanel();render();}
+function delCalEntry(id){const x=(S.calEntries||[]).find(e=>e.id===id);S.tomb['ce|'+id]=NOW();S.calEntries=S.calEntries.filter(e=>e.id!==id);if(x&&x.rec){(S.calEntries||[]).filter(s=>s.skip===id).forEach(s=>S.tomb['ce|'+s.id]=NOW());S.calEntries=S.calEntries.filter(s=>s.skip!==id);}save();renderCalPanel();render();}
 function togCalPanel(){if(!isAdmin())return;const el=$('calpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderCalPanel();}
 function renderCalPanel(){
   const cals=myCals();
@@ -1279,9 +1326,10 @@ function renderCalPanel(){
      '<input id="ce-title" placeholder="Titre (ex : RDV fournisseur)" style="width:180px">'+
      'le <input type="date" id="ce-date"> de <input type="time" id="ce-du"> à <input type="time" id="ce-au">'+
      '<button class="act green" onclick="addCalEntry()">Ajouter</button></div>';
-    const ents=(S.calEntries||[]).filter(x=>x.owner===ROLE.empId).sort((a,b)=>(a.date+a.du)<(b.date+b.du)?-1:1);
+    const ents=(S.calEntries||[]).filter(x=>x.owner===ROLE.empId&&!x.skip).sort((a,b)=>((a.date||a.from||'')+(a.du||''))<((b.date||b.from||'')+(b.du||''))?-1:1);
     if(ents.length){h+='<div class="mhead">Mes entrées</div>';
-      for(const x of ents)h+='<div class="brow" style="padding-left:6px"><span class="bdot" style="background:'+calColor(x.calId)+'"></span><span class="small">'+fmtFR(x.date)+' '+(x.allday?'journée':x.du+'–'+x.au)+'</span><b>'+esc(x.title)+'</b><span class="small" style="color:'+calColor(x.calId)+'">'+esc(calName(x.calId))+'</span><button class="mini ghost" style="margin-left:auto" onclick="delCalEntry('+x.id+')">🗑</button></div>';}
+      for(const x of ents){const quand=x.rec?('🔁 chaque '+DAYJ[x.wd]):fmtFR(x.date);
+        h+='<div class="brow" style="padding-left:6px"><span class="bdot" style="background:'+calColor(x.calId)+'"></span><span class="small">'+quand+' '+(x.allday?'journée':x.du+'–'+x.au)+'</span><b>'+esc(x.title)+'</b><span class="small" style="color:'+calColor(x.calId)+'">'+esc(calName(x.calId))+'</span><button class="mini" onclick="openCalEntryEdit('+x.id+')">✎</button><button class="mini ghost" onclick="delCalEntry('+x.id+')">🗑</button></div>';}}
   }
   $('calpanel').innerHTML=h;$('calpanel').style.display='block';
 }
@@ -2401,12 +2449,18 @@ document.addEventListener('mouseup',()=>{
   const g=$('ghost');if(g)g.remove();
   if(d.cal){ // entrée perso : copie (⌥+glisser) / déplacement-étirement / clic = éditeur
     const x=(S.calEntries||[]).find(e=>e.id===d.cal);
-    if(x&&d.dup&&d.moved){ // ⌥ Option + glisser = dupliquer (même logique que les plannings boutique)
-      S.calEntries.push({id:Date.now(),calId:x.calId,owner:x.owner,date:d.curIso,du:m2t(d.du),au:m2t(d.au),title:x.title,_ts:NOW()});save();render();
-    }else if(x&&d.moved){x.date=d.curIso;x.du=m2t(d.du);x.au=m2t(d.au);x._ts=NOW();save();render();}
-    else if(x){openCalEntryEdit(d.cal);}
-    else render();
-    return;
+    if(!x){render();return;}
+    if(d.dup&&d.moved){ // ⌥ Option + glisser = dupliquer (copie ponctuelle au point de dépôt)
+      S.calEntries.push({id:Date.now(),calId:x.calId,owner:x.owner,date:d.curIso,du:m2t(d.du),au:m2t(d.au),title:x.title,_ts:NOW()});save();render();return;
+    }
+    if(d.moved){
+      if(x.rec){ // récurrent déplacé → demander la portée (comme un planning boutique)
+        pendingCal={recId:x.id,origDate:d.iso,op:'move',vals:{calId:x.calId,title:x.title,date:d.curIso,du:m2t(d.du),au:m2t(d.au)}};
+        $('scopetitle').textContent='Déplacer « '+x.title+' » — appliquer à :';$('scopemodal').style.display='flex';return;
+      }
+      x.date=d.curIso;x.du=m2t(d.du);x.au=m2t(d.au);x._ts=NOW();save();render();return;
+    }
+    openCalEntryEdit(d.cal,d.curIso);return;
   }
   if(d.mode==='newcal'){
     if(!d.moved)d.au=Math.min(d.du+60,CAL_END); // clic simple = 1h
@@ -2424,6 +2478,12 @@ document.addEventListener('mouseup',()=>{
   $('scopemodal').style.display='flex';
 });
 function applyScope(scope){
+  if(pendingCal){ // déplacement d'une entrée perso récurrente
+    const p=pendingCal;pendingCal=null;$('scopemodal').style.display='none';
+    const rec=(S.calEntries||[]).find(e=>e.id===p.recId);
+    if(rec)applyCalChange(rec,p.origDate,scope,p.op==='del'?null:p.vals);else render();
+    return;
+  }
   if(!pending){$('scopemodal').style.display='none';return}
   const e=emp(pending.empId);
   if(pending.kind==='del'){
@@ -2457,7 +2517,7 @@ function applyScope(scope){
   }
   pending=null;$('scopemodal').style.display='none';
 }
-function cancelScope(){pending=null;$('scopemodal').style.display='none';render()}
+function cancelScope(){pending=null;pendingCal=null;$('scopemodal').style.display='none';render()}
 // Clic hors d'une fenêtre : on la ferme (le clic est absorbé, le suivant interagit)
 document.addEventListener('mousedown',ev=>{
   const ids=['settings','hdetail','evpanel','feriepanel','edpanel','abspanel','minepanel','paiepanel','reqpanel','hspanel','assistpanel'];
@@ -2481,7 +2541,7 @@ document.addEventListener('click',ev=>{
   const col=ev.target.closest('.daycol');
   if(col&&col.dataset.iso)declareHS(col.dataset.iso);
 });
-document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';render()}});
+document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';render()}});
 
 // ============ PARAMÈTRES (équipe & données) ============
 function togSettings(){if(!isAdmin())return;const el=$('settings');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderSettings();saveUI()}
