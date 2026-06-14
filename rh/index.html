@@ -285,9 +285,11 @@ body.dark .dayhead.today b{background:#3b82f6}
 <div id="assistpanel" class="panel" style="width:min(960px,97vw)"></div>
 <div id="reqpanel" class="panel" style="width:min(820px,96vw)"></div>
 <div id="hspanel" class="panel" style="width:min(440px,94vw)"></div>
+<div id="calpanel" class="panel" style="width:min(560px,96vw)"></div>
 <main>
   <div id="testbanner" style="display:none;background:#7c3aed;color:#fff;padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;margin-bottom:8px">🧪 Mode test actif — les alertes et l'assistant tournent sur toutes les dates (historique compris). Désactive-le avant l'usage réel.</div>
   <div id="people"></div>
+  <div id="minetools" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px"></div>
   <div id="calwrap"><div id="calhead"></div><div id="evband"></div><div id="calbody"></div></div>
   <div id="monthwrap" style="display:none"></div>
   <div id="hours"></div>
@@ -813,6 +815,13 @@ function mergeData(L,R){
     for(const id in R.bilanHist[y]){const rv=R.bilanHist[y][id],lv=L.bilanHist[y][id];
       if(!lv||((rv&&rv._ts)||'')>((lv&&lv._ts)||''))L.bilanHist[y][id]=rv;}
   }
+  // calendriers personnels + leurs entrées (par id, suppressions mémorisées)
+  L.calendars=L.calendars||[];
+  for(const rc of R.calendars||[]){if(L.tomb['cal|'+rc.id]&&L.tomb['cal|'+rc.id]>((rc&&rc._ts)||''))continue;const i=L.calendars.findIndex(x=>x.id===rc.id);if(i<0)L.calendars.push(rc);else if(((rc&&rc._ts)||'')>((L.calendars[i]&&L.calendars[i]._ts)||''))L.calendars[i]=rc;}
+  L.calendars=L.calendars.filter(x=>{const tk=L.tomb['cal|'+x.id];return !(tk&&tk>((x&&x._ts)||''))});
+  L.calEntries=L.calEntries||[];
+  for(const re of R.calEntries||[]){if(L.tomb['ce|'+re.id]&&L.tomb['ce|'+re.id]>((re&&re._ts)||''))continue;const i=L.calEntries.findIndex(x=>x.id===re.id);if(i<0)L.calEntries.push(re);else if(((re&&re._ts)||'')>((L.calEntries[i]&&L.calEntries[i]._ts)||''))L.calEntries[i]=re;}
+  L.calEntries=L.calEntries.filter(x=>{const tk=L.tomb['ce|'+x.id];return !(tk&&tk>((x&&x._ts)||''))});
   return L;
 }
 
@@ -893,6 +902,8 @@ function migrate(S){
   (S.overrides||[]).forEach(o=>{const bb=bout(o.b||emp(o.empId).b);
     S.exceptions.push(o.present?{empId:o.empId,date:o.date,b:bb.id,blocks:[[bb.open,bb.close]],hs:false,note:''}:{empId:o.empId,date:o.date,s:'R',note:''})});
   S.overrides=[];S.tomb=S.tomb||{};S.events=S.events||[];S.ecoles=S.ecoles||[];S.entreprises=S.entreprises||[];
+  S.calendars=S.calendars||[];   // calendriers personnels {id,name,color,owner,_ts}
+  S.calEntries=S.calEntries||[];  // entrées {id,calId,owner,date,du,au,title,_ts}
   if(S.rhPin===undefined)S.rhPin='';
   S.hsdemandes=S.hsdemandes||[];
   if(!S.goLive)S.goLive='2026-06-01';
@@ -1181,9 +1192,52 @@ function renderSynth(){
   h+='</div>';
   $('monthwrap').innerHTML=h;
 }
+// ============ CALENDRIERS PERSONNELS (patron) — privés, jamais comptés en heures ============
+let calHidden=new Set();
+try{calHidden=new Set(JSON.parse(localStorage.getItem('gestionrh-calhidden')||'[]'))}catch(e){}
+const CALPAL=['#2563eb','#dc2626','#7c3aed','#059669','#d97706','#0891b2','#db2777','#475569'];
+function myCals(){return (S.calendars||[]).filter(c=>c.owner===(ROLE&&ROLE.empId)).sort((a,b)=>(a.name||'').localeCompare(b.name||''));}
+function calColor(id){const c=(S.calendars||[]).find(x=>x.id===id);return c?c.color:'#64748b';}
+function calName(id){const c=(S.calendars||[]).find(x=>x.id===id);return c?c.name:'?';}
+function myEntriesOn(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&x.date===d&&!calHidden.has(x.calId)).sort((a,b)=>a.du<b.du?-1:1);}
+function togCal(id){if(calHidden.has(id))calHidden.delete(id);else calHidden.add(id);try{localStorage.setItem('gestionrh-calhidden',JSON.stringify([...calHidden]))}catch(e){}render();}
+function addCal(){if(!isAdmin())return;const n=prompt('Nom du calendrier (ex : RDV pro, Orga perso…)');if(!n||!n.trim())return;const color=CALPAL[(myCals().length)%CALPAL.length];S.calendars.push({id:Date.now(),name:n.trim(),color,owner:ROLE.empId,_ts:NOW()});save();renderCalPanel();render();}
+function updCal(id,k,v){const c=(S.calendars||[]).find(x=>x.id===id);if(!c)return;c[k]=v;c._ts=NOW();save();renderCalPanel();render();}
+function delCal(id){if(!confirm('Supprimer ce calendrier et toutes ses entrées ?'))return;S.tomb['cal|'+id]=NOW();S.calendars=S.calendars.filter(x=>x.id!==id);(S.calEntries||[]).filter(x=>x.calId===id).forEach(x=>S.tomb['ce|'+x.id]=NOW());S.calEntries=S.calEntries.filter(x=>x.calId!==id);save();renderCalPanel();render();}
+function addCalEntry(){if(!isAdmin())return;const cal=$('ce-cal')&&$('ce-cal').value,date=$('ce-date')&&$('ce-date').value,du=$('ce-du')&&$('ce-du').value,au=$('ce-au')&&$('ce-au').value,title=$('ce-title')&&$('ce-title').value.trim();
+  if(!cal||!date||!du||!au||au<=du||!title){alert('Choisis un calendrier, une date, un horaire (fin après début) et un titre.');return;}
+  S.calEntries.push({id:Date.now(),calId:+cal,owner:ROLE.empId,date,du,au,title,_ts:NOW()});save();renderCalPanel();render();}
+function delCalEntry(id){S.tomb['ce|'+id]=NOW();S.calEntries=S.calEntries.filter(x=>x.id!==id);save();renderCalPanel();render();}
+function togCalPanel(){if(!isAdmin())return;const el=$('calpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderCalPanel();}
+function renderCalPanel(){
+  const cals=myCals();
+  let h='<div class="phead"><h2>🗓️ Mes calendriers</h2><button class="act grey" style="margin-left:auto" onclick="$(\'calpanel\').style.display=\'none\'">Fermer</button></div>';
+  h+='<div class="small" style="margin-bottom:6px">Tes calendriers personnels (RDV, organisation…) — privés (toi seul), juste pour t\'organiser, jamais comptés en heures.</div>';
+  h+='<div class="mhead">Calendriers</div>';
+  if(!cals.length)h+='<div class="small">Aucun calendrier pour l\'instant.</div>';
+  for(const c of cals){
+    h+='<div class="brow"><label class="cwrap" title="Couleur"><span class="bdot big" style="background:'+c.color+'"></span><input type="color" value="'+c.color+'" onchange="updCal('+c.id+',\'color\',this.value)"></label>'+
+      '<input value="'+esc(c.name)+'" onchange="updCal('+c.id+',\'name\',this.value)" style="width:170px">'+
+      '<button class="mini ghost" style="margin-left:auto" onclick="delCal('+c.id+')" title="Supprimer">🗑</button></div>';
+  }
+  h+='<div class="row" style="margin-top:6px"><button class="act" onclick="addCal()">＋ Nouveau calendrier</button></div>';
+  if(cals.length){
+    h+='<div class="mhead">Ajouter une entrée</div>';
+    h+='<div class="addrow"><select id="ce-cal">'+cals.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('')+'</select>'+
+     '<input id="ce-title" placeholder="Titre (ex : RDV fournisseur)" style="width:180px">'+
+     'le <input type="date" id="ce-date"> de <input type="time" id="ce-du"> à <input type="time" id="ce-au">'+
+     '<button class="act green" onclick="addCalEntry()">Ajouter</button></div>';
+    const ents=(S.calEntries||[]).filter(x=>x.owner===ROLE.empId).sort((a,b)=>(a.date+a.du)<(b.date+b.du)?-1:1);
+    if(ents.length){h+='<div class="mhead">Mes entrées</div>';
+      for(const x of ents)h+='<div class="brow" style="padding-left:6px"><span class="bdot" style="background:'+calColor(x.calId)+'"></span><span class="small">'+fmtFR(x.date)+' '+x.du+'–'+x.au+'</span><b>'+esc(x.title)+'</b><span class="small" style="color:'+calColor(x.calId)+'">'+esc(calName(x.calId))+'</span><button class="mini ghost" style="margin-left:auto" onclick="delCalEntry('+x.id+')">🗑</button></div>';}
+  }
+  $('calpanel').innerHTML=h;$('calpanel').style.display='block';
+}
+
 // Vue "Mon planning" : un VRAI calendrier (comme les plannings boutique), mais où chaque jour
 // affiche l'équipe de la boutique où LE salarié connecté travaille ce jour-là. En-tête de jour
 // coloré + 📍 nom de la boutique = où aller. Ses propres blocs sont surlignés (★ + contour).
+// Ses calendriers personnels (RDV, orga…) sont superposés en blocs colorés à droite.
 function renderMineWeek(){
   const me=emp(ROLE&&ROLE.empId);
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
@@ -1207,7 +1261,8 @@ function renderMineWeek(){
   bb+='</div>';
   for(const d of days){
     const mb=new Set(myBof(d));
-    bb+='<div class="daycol'+(mb.size?'':' closed')+(isLive(d)?'':' pre')+'">';
+    const ents=myEntriesOn(d);
+    bb+='<div class="daycol'+((mb.size||ents.length)?'':' closed')+(isLive(d)?'':' pre')+'">';
     for(let m=540;m<CAL_END;m+=60)bb+='<div class="hline" style="top:'+((m-CAL_START)*PX)+'px"></div>';
     if(mb.size){
       const evs=[];
@@ -1223,9 +1278,24 @@ function renderMineWeek(){
           '<b>'+(ev.me?'★ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
       }
     }
+    // calendriers personnels (RDV, orga…) superposés à droite de la colonne
+    for(const x of ents){
+      const s=t2m(x.du),f=t2m(x.au);if(isNaN(s)||isNaN(f))continue;
+      const top=(s-CAL_START)*PX,hpx=(f-s)*PX;
+      bb+='<div class="blk" title="'+esc(calName(x.calId))+' — '+esc(x.title)+'" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:58%;width:40%;background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:30"><b>'+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
+    }
     bb+='</div>';
   }
   $('calbody').innerHTML=bb;
+  // Barre des calendriers perso (afficher/masquer + gérer) — patron uniquement
+  if(isAdmin()){
+    const cals=myCals();
+    let t='<span class="small" style="color:var(--mut)">🗓️ Mes calendriers :</span>';
+    t+=cals.map(c=>'<button class="bchip" style="background:'+c.color+';opacity:'+(calHidden.has(c.id)?'.4':'1')+'" onclick="togCal('+c.id+')" title="Afficher / masquer">'+esc(c.name)+'</button>').join('');
+    if(!cals.length)t+='<span class="small">aucun pour l\'instant</span>';
+    t+=' <button class="mini" onclick="togCalPanel()">＋ Gérer</button>';
+    $('minetools').innerHTML=t;
+  } else $('minetools').innerHTML='';
   // Bande d'événements (fériés, congés, OP…) — boutique du jour pour rester cohérent en multisite
   renderEvBand(days,d=>{const mb=myBof(d);return mb[0]||curB;});
 }
@@ -1300,6 +1370,7 @@ function render(){
   $('hours').style.display=grid?'none':'';            // récap d'heures visible aussi en Mon planning (= mes heures)
   $('alerts').style.display=(grid||mine||!isAdmin())?'none':'';
   $('people').style.display=(grid||mine)?'none':'';   // pas de chips de masquage en Mon planning
+  if($('minetools'))$('minetools').style.display=mine?'flex':'none'; // barre des calendriers perso (Mon planning)
   if(synth){renderSynth();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
   if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);saveUI();return;}
@@ -2421,6 +2492,7 @@ function _restampAll(){
   for(const k in (S.solidarite||{}))if(S.solidarite[k]&&typeof S.solidarite[k]==='object')S.solidarite[k]._ts=t;
   S.goLiveTs=t;S.adminPinTs=t;S.rhPinTs=t; // réglages globaux
   for(const y in (S.bilanHist||{}))for(const id in S.bilanHist[y])if(S.bilanHist[y][id]&&typeof S.bilanHist[y][id]==='object')S.bilanHist[y][id]._ts=t;
+  (S.calendars||[]).forEach(x=>x._ts=t);(S.calEntries||[]).forEach(x=>x._ts=t);
 }
 
 // "Forcer ma version" : impose les données de CE poste au serveur (et donc aux autres).
