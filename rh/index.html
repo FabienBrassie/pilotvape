@@ -2332,7 +2332,7 @@ document.addEventListener('mousedown',ev=>{
       const x=(S.calEntries||[]).find(e=>e.id===+ceId);if(!x||x.allday)return;
       const br=blk.getBoundingClientRect();
       const isRz=ev.clientY>br.bottom-9,isRzt=ev.clientY<br.top+9;
-      drag={mode:isRzt?'rzt':(isRz?'rz':'mv'),cal:x.id,iso:x.date,curIso:x.date,du:t2m(x.du),au:t2m(x.au),grab:mn-t2m(x.du),el:blk,moved:false,sx:ev.clientX,sy:ev.clientY};
+      drag={mode:isRzt?'rzt':(isRz?'rz':'mv'),cal:x.id,dup:(!isRz&&!isRzt&&ev.altKey),iso:x.date,curIso:x.date,du:t2m(x.du),au:t2m(x.au),grab:mn-t2m(x.du),el:blk,moved:false,sx:ev.clientX,sy:ev.clientY};
       ev.preventDefault();return;
     }
     if(!col.dataset.iso)return;
@@ -2380,8 +2380,13 @@ function ghostRender(cols){
     const col=cols.find(c=>c.dataset.iso===drag.curIso)||cols[0];
     if(!g||g.parentNode!==col){if(g)g.remove();g=document.createElement('div');g.id='ghost';col.appendChild(g)}
     g.style.top=top+'px';g.style.height=hpx+'px';g.style.left='2px';g.style.right='2px';
-    g.textContent=(drag.dup?'⧉ '+emp(drag.empId).nom+' · ':'')+fmtH(m2t(drag.du))+' – '+fmtH(m2t(drag.au));
-    if(drag.dup)g.style.background=colOf(emp(drag.empId));
+    let dupLbl='',dupBg='';
+    if(drag.dup){
+      if(drag.cal){const ce=(S.calEntries||[]).find(e=>e.id===drag.cal)||{};dupLbl='⧉ '+(ce.title||'')+' · ';dupBg=calColor(ce.calId);}
+      else{dupLbl='⧉ '+emp(drag.empId).nom+' · ';dupBg=colOf(emp(drag.empId));}
+    }
+    g.textContent=dupLbl+fmtH(m2t(drag.du))+' – '+fmtH(m2t(drag.au));
+    if(drag.dup)g.style.background=dupBg;
   }else{
     const el=drag.el;
     el.style.top=((drag.du-CAL_START)*PX)+'px';el.style.height=Math.max(hpx-2,14)+'px';
@@ -2394,9 +2399,11 @@ document.addEventListener('mouseup',()=>{
   if(!drag)return;
   const d=drag;drag=null;
   const g=$('ghost');if(g)g.remove();
-  if(d.cal){ // entrée perso : déplacée/étirée → enregistre ; clic simple → ouvre l'éditeur
+  if(d.cal){ // entrée perso : copie (⌥+glisser) / déplacement-étirement / clic = éditeur
     const x=(S.calEntries||[]).find(e=>e.id===d.cal);
-    if(x&&d.moved){x.date=d.curIso;x.du=m2t(d.du);x.au=m2t(d.au);x._ts=NOW();save();render();}
+    if(x&&d.dup&&d.moved){ // ⌥ Option + glisser = dupliquer (même logique que les plannings boutique)
+      S.calEntries.push({id:Date.now(),calId:x.calId,owner:x.owner,date:d.curIso,du:m2t(d.du),au:m2t(d.au),title:x.title,_ts:NOW()});save();render();
+    }else if(x&&d.moved){x.date=d.curIso;x.du=m2t(d.du);x.au=m2t(d.au);x._ts=NOW();save();render();}
     else if(x){openCalEntryEdit(d.cal);}
     else render();
     return;
