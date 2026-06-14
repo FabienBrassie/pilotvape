@@ -893,12 +893,19 @@ function migrate(S){
   (S.overrides||[]).forEach(o=>{const bb=bout(o.b||emp(o.empId).b);
     S.exceptions.push(o.present?{empId:o.empId,date:o.date,b:bb.id,blocks:[[bb.open,bb.close]],hs:false,note:''}:{empId:o.empId,date:o.date,s:'R',note:''})});
   S.overrides=[];S.tomb=S.tomb||{};S.events=S.events||[];S.ecoles=S.ecoles||[];S.entreprises=S.entreprises||[];
-  if(!S.adminPin)S.adminPin='1234';
   if(S.rhPin===undefined)S.rhPin='';
   S.hsdemandes=S.hsdemandes||[];
   if(!S.goLive)S.goLive='2026-06-01';
   S.boutiques.forEach(b=>{if(b.pin===undefined)b.pin=''});
   S.employees.forEach(e=>{if(e.pin===undefined)e.pin='';if(e.admin===undefined)e.admin=false;if(e.resp===undefined)e.resp=false;if(e.ecoleMin===undefined)e.ecoleMin=420});
+  // Code admin : plus de code maître. L'accès admin = coche 👑 + code PERSONNEL de la fiche.
+  // Migration : l'ancien code maître devient le code perso de l'admin qui n'en a pas (anti-verrouillage),
+  // puis on le retire — mais seulement une fois qu'un admin possède bien un code.
+  if(S.adminPin){
+    const ad=S.employees.find(e=>e.admin&&!e.pin);
+    if(ad){ad.pin=S.adminPin;ad._ts=NOW();}
+    if(S.employees.some(e=>e.admin&&e.actif&&e.pin)){S.adminPin='';S.adminPinTs=NOW();}
+  }
   if(!S._patchEnriqueEcole8){const en=S.employees.find(x=>x.id==='enrique');if(en){en.ecoleMin=480;en._ts=NOW();}S._patchEnriqueEcole8=true;}
   if(!S._patchEnrique35){
     const en=S.employees.find(x=>x.id==='enrique');
@@ -2316,7 +2323,13 @@ document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending
 
 // ============ PARAMÈTRES (équipe & données) ============
 function togSettings(){if(!isAdmin())return;const el=$('settings');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderSettings();saveUI()}
-function updE(i,k,v){S.employees[i][k]=v;S.employees[i]._ts=NOW();save();render();renderSettings()}
+function updE(i,k,v){
+  const e=S.employees[i];
+  // anti-verrouillage : ne pas retirer le dernier admin, ni vider le code d'un admin
+  if(k==='admin'&&v===false&&!S.employees.some((x,j)=>j!==i&&x.admin&&x.actif)){alert('Il faut au moins un administrateur. Désigne un autre admin (avec un code) avant de retirer celui-ci.');renderSettings();return;}
+  if(k==='pin'&&!String(v).trim()&&e.admin){alert('Un administrateur doit garder un code de connexion.');renderSettings();return;}
+  S.employees[i][k]=v;S.employees[i]._ts=NOW();save();render();renderSettings();
+}
 function updBout(i,k,v){S.boutiques[i][k]=v;S.boutiques[i]._ts=NOW();save();render();renderSettings()}
 async function renderSettings(){
   let h='<div class="phead"><h2>⚙️ Équipe & données</h2><button class="act grey" style="margin-left:auto" onclick="$(\'settings\').style.display=\'none\'">Fermer</button></div>';
@@ -2343,7 +2356,7 @@ async function renderSettings(){
   });
   h+='<div class="addrow">➕ <input id="np-nom" placeholder="Prénom"> <select id="np-b">'+S.boutiques.map(b=>'<option value="'+b.id+'">'+b.nom+'</option>').join('')+'</select> <button class="act" onclick="addEmp()">Ajouter un salarié</button></div>';
   h+='<div class="mhead">🚀 Mise en service</div><div class="row"><span class="small">Date de démarrage de l\'outil (avant, les plannings sont de l\'historique grisé, non contrôlé) :</span><input type="date" value="'+esc(S.goLive||'')+'" onchange="S.goLive=this.value||\'2026-06-01\';S.goLiveTs=NOW();save();render()"></div>';
-  h+='<div class="mhead">🔐 Codes d\'accès</div><div class="row"><span class="small">Ton code admin :</span><input value="'+esc(S.adminPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.adminPin=this.value.trim()||\'1234\';S.adminPinTs=NOW();save()"><span class="small">Les codes des salariés se règlent sur leur carte ci-dessus (🔑). Sans code, pas de connexion.</span> &nbsp; <span class="small">🔎 Code RH (lecture seule : calendrier + récap paie) :</span><input value="'+esc(S.rhPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.rhPin=this.value.trim();S.rhPinTs=NOW();save()"></div>';
+  h+='<div class="mhead">🔐 Codes d\'accès</div><div class="row"><span class="small">L\'accès admin se règle sur les fiches ci-dessus : coche 👑 + un code 🔑 personnel. La personne se connecte alors en admin avec SON code (plus de code maître).</span> &nbsp; <span class="small">🔎 Code RH (lecture seule : calendrier + récap paie) :</span><input value="'+esc(S.rhPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.rhPin=this.value.trim();S.rhPinTs=NOW();save()"></div>';
   h+='<div class="row"><span class="small">🏬 Codes boutique (vue planning + demandes de la boutique, lecture seule) :</span>'+S.boutiques.map((b,i)=>'<span style="white-space:nowrap"><span class="small" style="color:var(--'+b.id+')">'+b.nom+'</span> <input value="'+esc(b.pin||'')+'" inputmode="numeric" maxlength="6" style="width:70px" onchange="S.boutiques['+i+'].pin=this.value.trim();S.boutiques['+i+']._ts=NOW();save()"></span>').join(' ')+'</div>';
   h+='<div class="mhead">Horaires des boutiques</div><div class="row">';
   S.boutiques.forEach((b,i)=>{
@@ -3158,7 +3171,6 @@ function tryLogin(){
   if(!code){$('loginerr').textContent='Entre ton code';return}
   const ea=S.employees.find(x=>x.actif&&x.admin&&x.pin&&x.pin===code);
   if(ea){setRole({type:'admin',empId:ea.id});return}
-  if(code===S.adminPin){setRole({type:'admin'});return}
   if(S.rhPin&&code===S.rhPin){setRole({type:'rh'});return}
   const bt=S.boutiques.find(b=>b.pin&&b.pin===code);
   if(bt){setRole({type:'boutique',b:bt.id});return}
