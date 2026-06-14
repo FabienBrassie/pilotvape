@@ -1219,7 +1219,7 @@ function openMineDay(iso){
   const cals=myCals();
   const ex=(S.calEntries||[]).filter(x=>x.owner===ROLE.empId&&x.allday&&x.date===iso);
   let h='<h2>🗓️ Journée entière — '+DAYJ[wdOf(iso)]+' '+fmtFR(iso)+'</h2>';
-  if(ex.length){h+='<table style="margin-bottom:8px">'+ex.map(x=>'<tr><td><span class="bdot" style="background:'+calColor(x.calId)+'"></span> '+esc(x.title)+'</td><td class="small">'+esc(calName(x.calId))+'</td><td><button class="mini" onclick="delCalEntry('+x.id+')">🗑</button></td></tr>').join('')+'</table>';}
+  if(ex.length){h+='<table style="margin-bottom:8px">'+ex.map(x=>'<tr><td><span class="bdot" style="background:'+calColor(x.calId)+'"></span> '+esc(x.title)+'</td><td class="small">'+esc(calName(x.calId))+'</td><td><button class="mini" onclick="openCalEntryEdit('+x.id+')">✎</button> <button class="mini" onclick="delCalEntry('+x.id+');openMineDay(\''+iso+'\')">🗑</button></td></tr>').join('')+'</table>';}
   h+='<div class="row"><select id="md-cal">'+cals.map(c=>'<option value="'+c.id+'">'+esc(c.name)+'</option>').join('')+'</select>'+
    '<input id="md-title" placeholder="Titre (ex : Salon pro, journée perso)" style="width:200px">'+
    '<button class="act green" onclick="addAllDay(\''+iso+'\')">Ajouter</button>'+
@@ -1231,6 +1231,26 @@ function addAllDay(iso){
   if(!cal||!title){alert('Choisis un calendrier et un titre.');return;}
   S.calEntries.push({id:Date.now(),calId:+cal,owner:ROLE.empId,date:iso,allday:true,title,_ts:NOW()});
   save();openMineDay(iso);render();
+}
+// Éditeur d'une entrée (clic sur un bloc) : calendrier, titre, date, horaire + supprimer
+function openCalEntryEdit(id){
+  if(!isAdmin())return;
+  const x=(S.calEntries||[]).find(e=>e.id===id);if(!x)return;
+  const cals=myCals();
+  let h='<h2>🗓️ Modifier l\'entrée</h2>';
+  h+='<div class="row"><select id="ee-cal">'+cals.map(c=>'<option value="'+c.id+'"'+(c.id===x.calId?' selected':'')+'>'+esc(c.name)+'</option>').join('')+'</select>'+
+   '<input id="ee-title" value="'+esc(x.title)+'" style="width:220px"></div>';
+  h+='<div class="row">le <input type="date" id="ee-date" value="'+x.date+'">'+(x.allday?' <span class="small">(journée entière)</span>':' de <input type="time" id="ee-du" value="'+x.du+'"> à <input type="time" id="ee-au" value="'+x.au+'">')+'</div>';
+  h+='<div class="row"><button class="act green" onclick="saveCalEntry('+id+')">Enregistrer</button> <button class="act red" onclick="delCalEntry('+id+');$(\'evpanel\').style.display=\'none\'">🗑 Supprimer</button> <button class="act grey" onclick="$(\'evpanel\').style.display=\'none\'">Fermer</button></div>';
+  $('evpanel').innerHTML=h;$('evpanel').style.display='block';
+}
+function saveCalEntry(id){
+  const x=(S.calEntries||[]).find(e=>e.id===id);if(!x)return;
+  if($('ee-cal'))x.calId=+$('ee-cal').value;
+  if($('ee-title')&&$('ee-title').value.trim())x.title=$('ee-title').value.trim();
+  if($('ee-date')&&$('ee-date').value)x.date=$('ee-date').value;
+  if(!x.allday&&$('ee-du')&&$('ee-au')){const du=$('ee-du').value,au=$('ee-au').value;if(du&&au&&au>du){x.du=du;x.au=au;}}
+  x._ts=NOW();save();$('evpanel').style.display='none';render();
 }
 function togCal(id){if(calHidden.has(id))calHidden.delete(id);else calHidden.add(id);try{localStorage.setItem('gestionrh-calhidden',JSON.stringify([...calHidden]))}catch(e){}render();}
 function addCal(){if(!isAdmin())return;const n=prompt('Nom du calendrier (ex : RDV pro, Orga perso…)');if(!n||!n.trim())return;const color=CALPAL[(myCals().length)%CALPAL.length];S.calendars.push({id:Date.now(),name:n.trim(),color,owner:ROLE.empId,_ts:NOW()});save();renderCalPanel();render();}
@@ -1314,7 +1334,7 @@ function renderMineWeek(){
     for(const x of ents){
       const s=t2m(x.du),f=t2m(x.au);if(isNaN(s)||isNaN(f))continue;
       const top=(s-CAL_START)*PX,hpx=(f-s)*PX;
-      bb+='<div class="blk" title="'+esc(calName(x.calId))+' — '+esc(x.title)+'" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:58%;width:40%;background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:30"><b>'+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
+      bb+='<div class="blk" data-ce="'+x.id+'" title="'+esc(calName(x.calId))+' — '+esc(x.title)+' (glisse pour déplacer, étire le bas/haut pour la durée)" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:58%;width:40%;background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:30;cursor:grab"><b>'+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
     }
     bb+='</div>';
   }
@@ -2301,12 +2321,21 @@ document.addEventListener('mousedown',ev=>{
   if(!isAdmin())return; // salarié = lecture seule
   const col=ev.target.closest('.daycol');
   if(!col||ev.target.closest('.panel'))return;
-  // Vue "Mon planning" : glisser crée une ENTRÉE PERSO minutée (pas un créneau boutique)
+  // Vue "Mon planning" : glisser crée/déplace une ENTRÉE PERSO minutée (pas un créneau boutique)
   if(calView==='mine'){
-    if(ev.target.closest('.blk'))return; // on ne déplace pas un bloc existant (v1)
-    if(!col.dataset.iso)return;
     const r2=col.getBoundingClientRect();
     const mn=clampM(snap15((ev.clientY-r2.top)/PX+CAL_START),CAL_START,CAL_END);
+    const blk=ev.target.closest('.blk');
+    if(blk){
+      const ceId=blk.dataset.ce;
+      if(!ceId)return; // bloc d'un collègue = lecture seule
+      const x=(S.calEntries||[]).find(e=>e.id===+ceId);if(!x||x.allday)return;
+      const br=blk.getBoundingClientRect();
+      const isRz=ev.clientY>br.bottom-9,isRzt=ev.clientY<br.top+9;
+      drag={mode:isRzt?'rzt':(isRz?'rz':'mv'),cal:x.id,iso:x.date,curIso:x.date,du:t2m(x.du),au:t2m(x.au),grab:mn-t2m(x.du),el:blk,moved:false,sx:ev.clientX,sy:ev.clientY};
+      ev.preventDefault();return;
+    }
+    if(!col.dataset.iso)return;
     drag={mode:'newcal',iso:col.dataset.iso,curIso:col.dataset.iso,du:mn,au:mn+30,el:null,moved:false,sx:ev.clientX,sy:ev.clientY};
     ev.preventDefault();return;
   }
@@ -2365,6 +2394,13 @@ document.addEventListener('mouseup',()=>{
   if(!drag)return;
   const d=drag;drag=null;
   const g=$('ghost');if(g)g.remove();
+  if(d.cal){ // entrée perso : déplacée/étirée → enregistre ; clic simple → ouvre l'éditeur
+    const x=(S.calEntries||[]).find(e=>e.id===d.cal);
+    if(x&&d.moved){x.date=d.curIso;x.du=m2t(d.du);x.au=m2t(d.au);x._ts=NOW();save();render();}
+    else if(x){openCalEntryEdit(d.cal);}
+    else render();
+    return;
+  }
   if(d.mode==='newcal'){
     if(!d.moved)d.au=Math.min(d.du+60,CAL_END); // clic simple = 1h
     openNewCalEntry(d.curIso,m2t(d.du),m2t(d.au));return;
