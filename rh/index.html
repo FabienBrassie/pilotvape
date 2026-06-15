@@ -132,7 +132,7 @@ body.dark .aline.or{background:#3a2a08;color:#fcd34d}
 .pchip .dot{width:10px;height:10px;border-radius:50%}
 .pchip.off{opacity:.4}
 .pchip.off span.n{text-decoration:line-through}
-#hours{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#hours,#minehours{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
 .hcard{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 13px;display:flex;align-items:center;gap:7px;font-size:13px}
 .hcard .dot{width:11px;height:11px;border-radius:50%;display:inline-block}
 .hcard .big{font-weight:700;font-size:15px}
@@ -3342,7 +3342,7 @@ function renderMine(){
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const wk=sumNormHS(e,days);const mo=sumNormHS(e,monthDays(curMonday));
   h+='<div class="mhead">Mes heures</div>';
-  h+='<div id="hours" style="margin:0 0 10px"><div class="hcard"><span class="dot" style="background:'+colOf(e)+'"></span><b>Cette semaine</b><span class="big">'+fmtDur(wk.norm)+'</span><span class="small">normales</span>'+(wk.hs?'<span class="hsbadge">+ '+fmtDur(wk.hs)+' HS</span>':'')+'</div>'+
+  h+='<div id="minehours" style="margin:0 0 10px"><div class="hcard"><span class="dot" style="background:'+colOf(e)+'"></span><b>Cette semaine</b><span class="big">'+fmtDur(wk.norm)+'</span><span class="small">normales</span>'+(wk.hs?'<span class="hsbadge">+ '+fmtDur(wk.hs)+' HS</span>':'')+'</div>'+
     '<div class="hcard"><b>Ce mois ('+MOISN[+curMonday.slice(5,7)]+')</b><span class="big">'+fmtDur(mo.norm)+'</span><span class="small">normales</span>'+(mo.hs?'<span class="hsbadge">+ '+fmtDur(mo.hs)+' HS</span>':'')+(mo.fer?'<span class="small">· '+mo.fer+' fériés</span>':'')+(mo.dim?'<span class="small">· '+mo.dim+' dim.</span>':'')+'</div></div>';
   h+='<div class="small" style="margin-top:10px">Une demande de congé part en validation chez ton responsable. Un arrêt maladie est enregistré directement (pense à transmettre ton justificatif). Le planning reste en consultation : seules les modifications de l\'employeur s\'y appliquent.</div>';
   $('minepanel').innerHTML=h;
