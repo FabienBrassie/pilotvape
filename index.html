@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-15 21:03</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 14:16</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -17244,59 +17244,33 @@ function renderDashboard() {
     });
   });
 
-  // 2) Trier : campagnes éclatées d'abord (pour réserver leurs blocs de lanes), puis le reste
-  const _sortKey = (e) => (e._campGroup ? '0_' + e._campGroup : '1') + '_' + (e.dateDebut || '') + '_' + String(99999 - _daysBetween(e.dateDebut, e.dateFin)).padStart(5, '0');
-  _ganttEntries.sort((a, b) => _sortKey(a).localeCompare(_sortKey(b)));
-
-  // 3) Assigner les lanes
-  //    - Campagnes éclatées (NATIONALE) : bloc exclusif de N lanes réservées.
-  //      N = nbInternalLanes (calculé par bin-packing interne ci-dessus).
-  //      Chaque OP utilise entry._internalLane pour sa position dans le bloc.
-  //      Les lanes du bloc sont « réservées » : aucune autre OP ne peut s'y placer.
-  //    - Autres : bin-packing glouton classique, en évitant les lanes réservées.
-  const _lanes = []; // chaque lane = dateFin du dernier élément placé
-  const _campLaneAssigned = new Map(); // campId → { startLane, nbLanes, endDate }
-
-  // D'abord, réserver les blocs pour chaque campagne éclatée
-  // Les lanes sont bloquées jusqu'à la date de fin de la campagne (pas indéfiniment)
-  _campLaneGroups.forEach(cg => {
-    const startLane = _lanes.length;
-    const nb = cg.nbInternalLanes || 1;
-    // Date de fin de la campagne = max(dateFin de toutes les OPs du groupe)
-    const campEnd = cg.entries.reduce((m, e) => {
-      const f = e.dateFin || e.dateDebut;
-      return (!m || f > m) ? f : m;
-    }, null) || '';
-    for (let i = 0; i < nb; i++) {
-      _lanes.push(campEnd); // bloquée jusqu'à la fin de la campagne, libre après
-    }
-    _campLaneAssigned.set(cg.campId, { startLane: startLane, nbLanes: nb, endDate: campEnd });
+  // 2+3) Assignation des lanes : REGROUPEMENT PAR TYPE (demande Fabien 2026-06-16).
+  //   - Chaque type d'OP forme un bloc de lanes contiguës : tous les Prix rouge ensemble,
+  //     tous les one-shot ensemble, etc. Fini l'entrelacement par dates (PR / one-shot /
+  //     nationale / PR ...).
+  //   - Ordre des blocs : OP nationale tout en haut, puis le reste.
+  //   - Dans un bloc : 1 lane par OP, la plus RÉCENTE (date de début la + tardive) en haut.
+  const _groupOrder = ['NATIONALE', 'PRIX_ROUGE', 'NOUVEAUTE', 'EXCLU', 'LIQUIDE_DU_MOMENT', 'COUP'];
+  const _groupRank = (t) => { const i = _groupOrder.indexOf(t); return i < 0 ? _groupOrder.length : i; };
+  _ganttEntries.sort((a, b) => {
+    const ra = _groupRank(a.type), rb = _groupRank(b.type);
+    if (ra !== rb) return ra - rb;                        // bloc de type d'abord
+    const da = a.dateDebut || '', db = b.dateDebut || '';
+    if (da !== db) return db.localeCompare(da);           // plus récent en haut
+    return (a.label || '').localeCompare(b.label || '');  // stable
   });
+  // 1 lane par entrée, dans l'ordre trié (empilées les unes sous les autres)
+  _ganttEntries.forEach((entry, i) => { entry.lane = i; });
+  const _lanes = _ganttEntries.map(e => e.dateFin);       // _lanes.length = nb de lanes
 
-  // Puis placer toutes les entries
-  _ganttEntries.forEach(entry => {
-    if (entry._campGroup) {
-      // Campagne éclatée : utiliser le bloc réservé + _internalLane
-      const cInfo = _campLaneAssigned.get(entry._campGroup);
-      entry.lane = cInfo.startLane + (entry._internalLane || 0);
-      return;
-    }
-    // OPs normales : bin-packing classique
-    // Les lanes de campagne sont occupées jusqu'à campEnd, mais libres après
-    let assigned = false;
-    for (let li = 0; li < _lanes.length; li++) {
-      const lastEnd = _lanes[li];
-      if (entry.dateDebut > lastEnd) {
-        _lanes[li] = entry.dateFin;
-        entry.lane = li;
-        assigned = true;
-        break;
-      }
-    }
-    if (!assigned) {
-      entry.lane = _lanes.length;
-      _lanes.push(entry.dateFin);
-    }
+  // Recalcule l'emprise en lanes de chaque campagne éclatée (pour les bandeaux de fond)
+  const _campLaneAssigned = new Map(); // campId → { startLane, nbLanes }
+  _campLaneGroups.forEach(cg => {
+    const lns = cg.entries.map(e => e.lane).filter(l => l != null);
+    if (!lns.length) return;
+    const startLane = Math.min.apply(null, lns);
+    const endLane = Math.max.apply(null, lns);
+    _campLaneAssigned.set(cg.campId, { startLane: startLane, nbLanes: endLane - startLane + 1 });
   });
 
   const _nbLanes = Math.max(1, _lanes.length);
