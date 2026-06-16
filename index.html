@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 18:27</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 18:49</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -7979,8 +7979,36 @@ async function loadData() {
         const a = actions.find(x => x.type === 'SORTIR' && x.motifSortie === 'REPRISE'
           && x.produitId === pid
           && (parfumId ? x.produitParfumId === parfumId : !x.produitParfumId));
-        if (a && (a.annulee || a.dateCloture || a._archived)) {
-          _reveillerObjet(a); // chantier D3 : réveil complet + passeport _reviveTs propagable
+        if (a) {
+          if (a.annulee || a.dateCloture || a._archived) {
+            _reveillerObjet(a); // chantier D3 : réveil complet + passeport _reviveTs propagable
+            _healed++;
+          }
+          return;
+        }
+        // Pas d'action reprise, mais une SORTIR CLASSIQUE traîne sur un produit/parfum en REPRISE
+        // → c'est la cause directe du "à reprendre" vu en "à sortir" (fix 2026-06-16).
+        // On la convertit en action reprise (réutilisation), avec les 5 étapes du workflow reprise.
+        const classic = actions.find(x => x.type === 'SORTIR' && x.motifSortie !== 'REPRISE'
+          && x.produitId === pid
+          && (parfumId ? x.produitParfumId === parfumId : !x.produitParfumId));
+        if (classic) {
+          _reveillerObjet(classic);
+          classic.motifSortie = 'REPRISE';
+          classic.campagneReprise = classic.campagneReprise || 'Reprise (à nommer)';
+          classic.prixRouge = 0; classic.prixAvantRouge = '';
+          if (classic.decisionChoice === 'rouge') classic.decisionChoice = '';
+          classic.etiquetteRouge = false; classic.fanfareOpType = '';
+          (typeof SHOPS !== 'undefined' ? SHOPS : []).forEach(sh => {
+            if (!classic.etats) classic.etats = {};
+            if (!classic.etats[sh]) classic.etats[sh] = { done:false, dateFait:null, responsable:'', commentaire:'', steps:{}, _stepTs:{} };
+            classic.etats[sh].steps = makeStepMap(classic);
+            classic.etats[sh].done = false;
+            classic.etats[sh].dateFait = null;
+            classic.etats[sh].comptageQte = null;
+            if (!classic.etats[sh]._stepTs) classic.etats[sh]._stepTs = {};
+          });
+          classic._ts = new Date().toISOString();
           _healed++;
         }
       };
@@ -12894,6 +12922,14 @@ async function updateLiqField(id, field, val) {
   console.log('[updateLiqField]', id, field, val);
   const g = baseLiq.find(l => l.id === id);
   if (!g) { console.warn('[updateLiqField] Gamme introuvable:', id); return; }
+  // ── REPRISE : on passe par le workflow canonique (lancerReprise) au lieu de poser le statut
+  // à la main. Sinon le statut devient REPRISE mais l'action SORTIR classique reste active →
+  // le produit s'affiche à tort dans "à sortir" au dashboard au lieu de "à reprendre".
+  // (incohérence signalée par Fabien 2026-06-16). lancerReprise réutilise/convertit la SORTIR.
+  if (field === 'statutVie' && val === 'REPRISE' && g.statutVie !== 'REPRISE') {
+    await lancerReprise('liq', g.id, null);
+    return;
+  }
   g._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   const _oldStatutLiq = g.statutVie; // snapshot avant modification
   if (['pa','pv','marge'].includes(field)) {
@@ -12975,6 +13011,9 @@ async function updateLiqField(id, field, val) {
   // Sync statutVie → proposition liquide decision
   if (field === 'statutVie') {
     syncLiqToPropLiq(g);
+    // Re-synchro des actions auto (créer/clôturer la SORTIR/RENTRER selon le nouveau statut).
+    // Manquait pour les liquides → le dashboard restait désynchronisé tant qu'on ne rechargeait pas.
+    if (typeof syncAutoActions === 'function') syncAutoActions();
     // Si passage à A_SORTIR → proposer un remplacement
     if ((val === 'A_SORTIR' || val === 'FIN_DE_VIE') && _oldStatutLiq !== val) {
       setTimeout(() => promptRemplacement('liq', id, g.marque + ' — ' + g.gamme, null, null), 50);
@@ -12992,6 +13031,12 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
   const p = g.parfums[pIdx];
   // Assurer un ID stable
   if (!p.id) p.id = g.id + '_p' + String(pIdx).padStart(3, '0');
+  // ── REPRISE parfum : workflow canonique (idem gamme, cf. updateLiqField) ──
+  // Évite le statut REPRISE posé à la main avec une SORTIR classique qui traîne → "à sortir" fantôme.
+  if (field === 's' && val === 'REPRISE' && p.s !== 'REPRISE') {
+    await lancerReprise('liq', g.id, p.id);
+    return;
+  }
   p._ts = _now; // timestamp parfum pour merge par ID
   if (['pa','pv'].includes(field)) {
     const _pvAvant = p.pv;
@@ -13024,7 +13069,11 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
   // Recalcule le statut gamme depuis les parfums (priorité au plus actif).
   // Ex : un parfum revient DANS_OFFRE alors que les autres sont REPRISE → la gamme passe DANS_OFFRE
   // (les autres parfums restent en REPRISE individuellement, visibles sur le dashboard).
-  if (field === 's') _recomputeGammeStatutFromParfums(g);
+  if (field === 's') {
+    _recomputeGammeStatutFromParfums(g);
+    // Re-synchro actions (cf. updateLiqField) : sans ça, le dashboard restait désynchronisé.
+    if (typeof syncAutoActions === 'function') syncAutoActions();
+  }
   saveData(); renderLiqAll();
 }
 
