@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 14:16</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 16:55</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -919,7 +919,7 @@ function applyRoleUI() {
     // Masquer tous les boutons RETENU / REFUSÉ sur les propositions
     document.querySelectorAll('button[onclick*="updatePropDecision"], button[onclick*="decidePropPd"], button[onclick*="updatePropLiqDecision"]').forEach(b => b.style.display = 'none');
     // Désactiver TOUS les champs de modification des propositions (rôle, caseTech/tirage, prix, décision, etc.)
-    document.querySelectorAll('select[onchange*="updatePropField"], select[onchange*="updatePropDecision"], select[onchange*="updatePropLiqDecision"], select[onchange*="updatePropLiqField"], input[onblur*="updatePropField"], input[onblur*="updatePropLiqField"], input[onchange*="updatePropLiqField"]').forEach(el => { el.setAttribute('disabled','true'); el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; });
+    document.querySelectorAll('select[onchange*="updatePropField"], select[onchange*="updatePropDecision"], select[onchange*="updatePropLiqDecision"], select[onchange*="updatePropLiqField"], select[onchange*="updatePropPdDecision"], select[onchange*="updatePropPdField"], input[onblur*="updatePropField"], input[onblur*="updatePropLiqField"], input[onchange*="updatePropLiqField"], input[onblur*="updatePropPdField"], input[onchange*="updatePropPdField"], textarea[onblur*="updatePropPdField"]').forEach(el => { el.setAttribute('disabled','true'); el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; });
     // Masquer les formulaires d'ajout de propositions
     document.querySelectorAll('[onclick*="showAddPropForm"], [onclick*="showPropLiqForm"], [onclick*="showPropPdForm"], [onclick*="deletePropLiq"], [onclick*="deletePropPdNew"], [onclick*="deletePropPd"]').forEach(b => b.style.display = 'none');
     // Masquer les boutons supprimer / annuler / clôturer / rouvrir / dupliquer / éditer sur les OPs
@@ -24872,6 +24872,9 @@ function togglePropPdForm() {
   const form = document.getElementById('propPdForm');
   const show = form.style.display === 'none';
   form.style.display = show ? 'block' : 'none';
+  // À l'ouverture, peupler le select "Case technique" selon la catégorie par défaut
+  // (sinon le champ reste vide tant qu'on ne change pas la catégorie — bug signalé Fabien 2026-06-16)
+  if (show) propPdFormCatChanged();
 }
 
 function propPdFormCatChanged() {
@@ -24990,57 +24993,196 @@ function renderPropositionsPD() {
   document.getElementById('countPdRefuseSt').textContent = refuse;
   document.getElementById('countPdRetenuSt').textContent = retenu;
 
-  let html = '';
-
+  // Rendu calqué sur les propositions Liquides : groupé par catégorie (Box / Ato),
+  // colonnes triables, ligne dépliable avec champs éditables. (uniformisation Fabien 2026-06-16)
   if (list.length === 0) {
-    html = `<div style="text-align:center; padding:20px; color:#64748b;">Aucune proposition ${currentPropPdView === 'refuse' ? 'refusée' : 'en attente'}.</div>`;
-  } else {
-    // Afficher comme grille (similaire aux propositions kits)
-    html += `<div class="prop-grid-header">
-      <span>Date</span>
-      <span>Auteur</span>
-      <span>Marque</span>
-      <span>Modèle</span>
-      <span>PA</span>
-      <span>PV</span>
-      <span>Marge</span>
-      <span>%</span>
-      <span>Case</span>
-      <span>Rôle</span>
-      <span>Actions</span>
-    </div>`;
-
-    list.forEach(prop => {
-      const doublon = basePD.find(pd => pd.marque.toLowerCase() === prop.marque.toLowerCase() && pd.modele.toLowerCase() === prop.modele.toLowerCase());
-      const roleAutoColor = ROLE_COLORS[prop.rolePossible] || '#64748b';
-      const decColor = prop.decision === 'RETENU' ? '#22c55e' : prop.decision === 'REFUSE' ? '#ef4444' : '#475569';
-
-      html += `<div class="prop-grid" style="border-left:3px solid ${decColor}; padding:8px 10px; background:rgba(30,41,59,0.5); border-radius:4px; margin-bottom:4px;">
-        <span style="color:#94a3b8; font-size:10px;">${prop.date ? fmtFR(prop.date) : '—'}</span>
-        <span style="font-size:11px;">${prop.auteur || '?'}</span>
-        <span style="font-weight:600;">🔩 ${prop.marque}</span>
-        <span>${prop.modele}</span>
-        <span style="text-align:right;">${prop.pa.toFixed(2)}€</span>
-        <span style="text-align:right;">${prop.pv.toFixed(2)}€</span>
-        <span style="text-align:right;">${prop.marge.toFixed(2)}€</span>
-        <span style="text-align:right; color:#94a3b8; font-size:10px;">${(prop.margePct*100).toFixed(1)}%</span>
-        <span class="badge" style="font-size:10px; background:#334155;">${PD_CASE_LABELS[prop.caseTech] || prop.caseTech}</span>
-        <span class="badge" style="background:${roleAutoColor}; color:#0f172a; font-size:10px;">${ROLE_LABELS[prop.rolePossible] || '—'}</span>
-        <div style="display:flex; gap:4px; font-size:11px;">
-          ${!prop.decision ? `
-            <button onclick="decidePropPdNew('${prop.id}','RETENU')" style="background:#22c55e; color:#0f172a; padding:2px 6px; border:none; border-radius:3px; cursor:pointer; font-weight:600; font-size:10px;">✓</button>
-            <button onclick="decidePropPdNew('${prop.id}','REFUSE')" style="background:#ef4444; color:white; padding:2px 6px; border:none; border-radius:3px; cursor:pointer; font-weight:600; font-size:10px;">✕</button>
-          ` : `
-            <button onclick="decidePropPdNew('${prop.id}','')" style="padding:2px 6px; background:#334155; color:#94a3b8; border:none; border-radius:3px; cursor:pointer; font-size:10px;">↩</button>
-          `}
-          <button onclick="deletePropPdNew('${prop.id}')" style="padding:2px 6px; background:#334155; color:#94a3b8; border:none; border-radius:3px; cursor:pointer; font-size:10px;">🗑</button>
-          ${doublon ? '<span style="color:#f59e0b; font-size:9px; margin-left:4px;">⚠ Doublon</span>' : ''}
-        </div>
-      </div>`;
-    });
+    c.innerHTML = `<div style="text-align:center; padding:24px; color:#64748b; font-style:italic;">Aucune proposition pièce détachée ${currentPropPdView === 'refuse' ? 'refusée' : 'en attente'}.</div>`;
+    return;
   }
 
+  // Tri interne au groupe
+  const dir = propPdSortDir, sortBy = propPdSortCol;
+  const caseOrderMap = {}; PD_ALL_CASES.forEach((ct, i) => { caseOrderMap[ct] = i; });
+  const caseRank = (ct) => (caseOrderMap[ct] === undefined ? 99 : caseOrderMap[ct]);
+  const pdSortFns = {
+    nom: (a, b) => (((a.marque||'') + (a.modele||'')).localeCompare((b.marque||'') + (b.modele||''))) * dir,
+    fournisseur: (a, b) => ((a.fournisseur||'').localeCompare(b.fournisseur||'')) * dir,
+    pa: (a, b) => ((a.pa||0) - (b.pa||0)) * dir,
+    pv: (a, b) => ((a.pv||0) - (b.pv||0)) * dir,
+    marge: (a, b) => ((a.marge||0) - (b.marge||0)) * dir,
+    case: (a, b) => (caseRank(a.caseTech) - caseRank(b.caseTech)) * dir,
+    role: (a, b) => ((a.rolePossible||'').localeCompare(b.rolePossible||'')) * dir
+  };
+  const innerSort = pdSortFns[sortBy] || pdSortFns.case;
+
+  // Grouper par catégorie (Box puis Ato)
+  const groups = {};
+  list.forEach(p => { const cat = p.categorie || '?'; (groups[cat] = groups[cat] || []).push(p); });
+  Object.values(groups).forEach(g => g.sort(innerSort));
+  const orderedCats = PD_CATEGORIES.filter(cat => groups[cat] && groups[cat].length);
+  Object.keys(groups).forEach(cat => { if (!orderedCats.includes(cat)) orderedCats.push(cat); });
+
+  const arrow = (col) => sortBy === col ? (dir > 0 ? ' ▲' : ' ▼') : '';
+  const ac = (col) => sortBy === col ? 'color:#e2e8f0;' : '';
+  const hClick = (col, extra) => `onclick="setPropPdSort('${col}')" style="cursor:pointer;${ac(col)}${extra||''}"`;
+  const gridCols = '3px 34px 1fr 80px 55px 55px 70px 90px 70px 84px';
+  const inS = 'width:100%; padding:2px 4px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:3px; font-size:11px;';
+  const esc = (s) => (s||'').replace(/"/g, '&quot;');
+
+  let html = `<div style="display:grid; grid-template-columns:${gridCols}; gap:0 6px; font-size:9px; color:#64748b; font-weight:600; text-transform:uppercase; letter-spacing:0.3px; padding:2px 8px; align-items:center;">
+    <span></span><span></span><span ${hClick('nom')}>Marque · Modèle${arrow('nom')}</span><span ${hClick('fournisseur')}>Fourn.${arrow('fournisseur')}</span><span ${hClick('pa','text-align:right;')}>PA${arrow('pa')}</span><span ${hClick('pv','text-align:right;')}>PV${arrow('pv')}</span><span ${hClick('marge','text-align:right;')}>Marge${arrow('marge')}</span><span ${hClick('case')}>Case${arrow('case')}</span><span ${hClick('role')}>Rôle${arrow('role')}</span><span>Décision</span>
+  </div>`;
+
+  orderedCats.forEach(cat => {
+    const catColor = PD_CAT_COLORS[cat] || '#94a3b8';
+    const catIcon = PD_CAT_ICONS[cat] || '🔩';
+    const catLabel = PD_CAT_LABELS[cat] || cat;
+    html += `<div style="display:flex; align-items:center; gap:8px; padding:8px 8px 4px; margin-top:6px;">
+      <span style="font-size:12px; font-weight:700; color:${catColor};">${catIcon} ${catLabel}</span>
+      <span style="font-size:10px; color:#64748b;">(${groups[cat].length})</span>
+      <div style="flex:1; height:1px; background:${catColor}30;"></div>
+    </div>`;
+
+    groups[cat].forEach(prop => {
+      const sc = prop.decision === 'RETENU' ? '#22c55e' : prop.decision === 'REFUSE' ? '#ef4444' : '#f59e0b';
+      const roleColor = ROLE_COLORS[prop.rolePossible] || '#64748b';
+      const roleLbl = ROLE_LABELS[prop.rolePossible] || '—';
+      const margeColor = (prop.marge||0) >= 0 ? '#22c55e' : '#ef4444';
+      const fournCentral = prop.fournisseur && prop.fournisseur.toLowerCase().includes('central');
+      const doublon = basePD.find(pd => (pd.marque||'').toLowerCase() === (prop.marque||'').toLowerCase() && (pd.modele||'').toLowerCase() === (prop.modele||'').toLowerCase());
+      const nomDisplay = `<span style="color:#94a3b8;">${prop.marque||''}</span> — <b>${prop.modele||''}</b>${doublon ? ' <span style="color:#f59e0b; font-size:9px;">⚠ doublon</span>' : ''}`;
+
+      html += `<div style="display:grid; grid-template-columns:${gridCols}; gap:0 6px; font-size:11px; padding:5px 8px; align-items:center; background:#1e293b; border-radius:4px; margin-bottom:2px; cursor:pointer;" onclick="togglePropPdDetail('${prop.id}')">
+        <div style="background:${sc}; border-radius:2px; width:3px; height:100%;"></div>
+        <div style="font-size:13px; text-align:center;" title="${catLabel}">${catIcon}</div>
+        <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${nomDisplay}</div>
+        <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:${fournCentral?'#4ade80':'#fb923c'}; font-size:10px; font-weight:600;">${prop.fournisseur||'—'}</div>
+        <div style="color:#94a3b8; text-align:right;">€${(prop.pa||0).toFixed(2)}</div>
+        <div style="color:#e2e8f0; text-align:right; font-weight:500;">€${(prop.pv||0).toFixed(2)}</div>
+        <div style="color:${margeColor}; text-align:right;">${(prop.marge||0)>=0?'+':''}€${(prop.marge||0).toFixed(2)}</div>
+        <div><span class="badge" style="font-size:9px; background:#334155;">${PD_CASE_LABELS[prop.caseTech] || prop.caseTech || '—'}</span></div>
+        <div style="color:${roleColor}; font-weight:500; font-size:10px;">${roleLbl}</div>
+        <div>
+          <select onclick="event.stopPropagation();" onchange="updatePropPdDecision('${prop.id}',this.value)" style="padding:2px 4px; font-size:10px; background:#0f172a; border:1px solid #475569; color:${sc}; border-radius:3px; width:100%;">
+            <option value="" ${!prop.decision?'selected':''}>⏳ Attente</option>
+            <option value="RETENU" ${prop.decision==='RETENU'?'selected':''}>✅ Retenu</option>
+            <option value="REFUSE" ${prop.decision==='REFUSE'?'selected':''}>❌ Refusé</option>
+          </select>
+        </div>
+      </div>`;
+
+      // Panneau détail (caché par défaut) — édition inline
+      const isBox = prop.categorie === 'BOX';
+      const casesForCat = isBox ? PD_BOX_TYPES : PD_ATO_TYPES;
+      html += `<div id="prop-pd-detail-${prop.id}" style="display:none; padding:8px 12px; background:#0f172a80; border:1px solid #33415540; border-radius:0 0 4px 4px; margin:0 0 4px;">`;
+      html += `<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:6px; font-size:11px;">`;
+      html += `<div><label style="font-size:9px; color:#64748b;">Auteur</label><input value="${esc(prop.auteur)}" onblur="updatePropPdField('${prop.id}','auteur',this.value)" style="${inS}"></div>`;
+      html += `<div><label style="font-size:9px; color:#64748b;">Catégorie</label><select onchange="updatePropPdField('${prop.id}','categorie',this.value)" style="${inS}">${PD_CATEGORIES.map(ct => `<option value="${ct}" ${prop.categorie===ct?'selected':''}>${PD_CAT_ICONS[ct]} ${PD_CAT_LABELS[ct]}</option>`).join('')}</select></div>`;
+      html += `<div><label style="font-size:9px; color:#64748b;">Marque</label><input value="${esc(prop.marque)}" onblur="updatePropPdField('${prop.id}','marque',this.value)" style="${inS}"></div>`;
+      html += `<div><label style="font-size:9px; color:#64748b;">Modèle</label><input value="${esc(prop.modele)}" onblur="updatePropPdField('${prop.id}','modele',this.value)" style="${inS}"></div>`;
+      html += `<div><label style="font-size:9px; color:#64748b;">Case technique</label><select onchange="updatePropPdField('${prop.id}','caseTech',this.value)" style="${inS}">${casesForCat.map(ct => `<option value="${ct}" ${prop.caseTech===ct?'selected':''}>${PD_CASE_LABELS[ct]}</option>`).join('')}</select></div>`;
+      html += `<div><label style="font-size:9px; color:#64748b;">Fournisseur</label><input value="${esc(prop.fournisseur)}" onblur="updatePropPdField('${prop.id}','fournisseur',this.value)" style="${inS}"></div>`;
+      html += `<div><label style="font-size:9px; color:#64748b;">PA HT</label><input type="number" step="0.01" value="${prop.pa||0}" onchange="updatePropPdField('${prop.id}','pa',this.value)" style="${inS} text-align:right;"></div>`;
+      html += `<div><label style="font-size:9px; color:#64748b;">PV TTC</label><input type="number" step="0.01" value="${prop.pv||0}" onchange="updatePropPdField('${prop.id}','pv',this.value)" style="${inS} text-align:right;"></div>`;
+      if (isBox) {
+        html += `<div><label style="font-size:9px; color:#64748b;">Watts</label><input type="number" value="${prop.w||0}" onchange="updatePropPdField('${prop.id}','w',this.value)" style="${inS} text-align:right;"></div>`;
+        html += `<div><label style="font-size:9px; color:#64748b;">mAh</label><input type="number" value="${prop.mah||0}" onchange="updatePropPdField('${prop.id}','mah',this.value)" style="${inS} text-align:right;"></div>`;
+      } else {
+        html += `<div><label style="font-size:9px; color:#64748b;">Contenance (mL)</label><input type="number" step="0.1" value="${prop.contenance||0}" onchange="updatePropPdField('${prop.id}','contenance',this.value)" style="${inS} text-align:right;"></div>`;
+        html += `<div><label style="font-size:9px; color:#64748b;">Résistance (Ω)</label><input value="${esc(prop.resistance)}" onblur="updatePropPdField('${prop.id}','resistance',this.value)" style="${inS}"></div>`;
+      }
+      html += `<div><label style="font-size:9px; color:#64748b;">Rôle possible</label><div style="padding:3px 4px; color:${roleColor}; font-weight:600;">${roleLbl}</div></div>`;
+      html += `<div style="grid-column:span 2;"><label style="font-size:9px; color:#64748b;">Commentaire</label><textarea onblur="updatePropPdField('${prop.id}','commentaire',this.value)" style="${inS} min-height:36px; resize:vertical;">${(prop.commentaire||'').replace(/</g,'&lt;')}</textarea></div>`;
+      html += `</div>`;
+      html += `<div style="margin-top:6px; text-align:right;"><button onclick="event.stopPropagation(); deletePropPdNew('${prop.id}')" style="padding:3px 10px; font-size:10px; background:none; border:1px solid #ef444460; color:#ef4444; border-radius:3px; cursor:pointer;">🗑 Supprimer</button></div>`;
+      html += `</div>`;
+    });
+  });
+
   c.innerHTML = html;
+}
+
+let propPdSortCol = 'case';
+let propPdSortDir = 1;
+function setPropPdSort(col) {
+  if (propPdSortCol === col) { propPdSortDir *= -1; } else { propPdSortCol = col; propPdSortDir = 1; }
+  renderPropositionsPD();
+}
+
+function togglePropPdDetail(id) {
+  const el = document.getElementById('prop-pd-detail-' + id);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function updatePropPdField(id, field, val) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const prop = propositionsPD.find(p => p.id === id);
+  if (!prop) return;
+  prop._ts = new Date().toISOString(); // timestamp pour propagation merge multi-poste
+  if (['pa','pv'].includes(field)) {
+    prop[field] = parseFloat(val) || 0;
+    const _m = computeMarge(prop.pa, prop.pv);
+    prop.marge = _m.marge; prop.margePct = _m.margePct;
+    prop.rolePossible = calcPdRole(prop.caseTech, prop.pa, prop.pv);
+  } else if (['w','mah'].includes(field)) {
+    prop[field] = parseInt(val) || 0;
+  } else if (field === 'contenance') {
+    prop[field] = parseFloat(val) || 0;
+  } else if (field === 'categorie') {
+    prop.categorie = val;
+    const cases = val === 'BOX' ? PD_BOX_TYPES : PD_ATO_TYPES;
+    if (!cases.includes(prop.caseTech)) prop.caseTech = cases[0];
+    prop.rolePossible = calcPdRole(prop.caseTech, prop.pa, prop.pv);
+  } else if (field === 'caseTech') {
+    prop.caseTech = val;
+    prop.rolePossible = calcPdRole(prop.caseTech, prop.pa, prop.pv);
+  } else {
+    prop[field] = val;
+  }
+  if (prop.decision === 'RETENU') syncPropPdToBasePD(prop);
+  saveData();
+  renderPropositionsPD();
+}
+
+function syncPropPdToBasePD(prop) {
+  if (prop.decision !== 'RETENU') return;
+  let pd = basePD.find(x => (x.marque||'').toLowerCase() === (prop.marque||'').toLowerCase() && (x.modele||'').toLowerCase() === (prop.modele||'').toLowerCase());
+  if (!pd) {
+    pd = {
+      id: 'PD-' + String(Math.max(0, ...basePD.map(p => parseInt((p.id||'').replace('PD-',''))||0)) + 1).padStart(3, '0'),
+      categorie: prop.categorie, caseTech: prop.caseTech, marque: prop.marque, modele: prop.modele,
+      pa: prop.pa, pv: prop.pv, fournisseur: prop.fournisseur, roleChoisi: '',
+      statutVie: 'A_RENTRER', commentaire: prop.commentaire
+    };
+    if (prop.categorie === 'BOX') { pd.w = prop.w || 0; pd.mah = prop.mah || 0; }
+    else { pd.contenance = prop.contenance || 0; pd.resistance = prop.resistance || ''; }
+    ensurePdModel(pd);
+    basePD.push(pd);
+    syncAutoActions();
+  } else {
+    pd.categorie = prop.categorie; pd.caseTech = prop.caseTech; pd.pa = prop.pa; pd.pv = prop.pv;
+    pd.fournisseur = prop.fournisseur; pd.commentaire = prop.commentaire;
+    if (prop.categorie === 'BOX') { pd.w = prop.w || 0; pd.mah = prop.mah || 0; }
+    else { pd.contenance = prop.contenance || 0; pd.resistance = prop.resistance || ''; }
+  }
+}
+
+function updatePropPdDecision(id, decision) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const prop = propositionsPD.find(p => p.id === id);
+  if (!prop) return;
+  prop._ts = new Date().toISOString();
+  // Si on retire RETENU → enlever de basePD l'entrée correspondante
+  if (prop.decision === 'RETENU' && decision !== 'RETENU') {
+    const idx = basePD.findIndex(pd => (pd.marque||'').toLowerCase() === (prop.marque||'').toLowerCase() && (pd.modele||'').toLowerCase() === (prop.modele||'').toLowerCase());
+    if (idx !== -1) { _deletedIds.add(basePD[idx].id); basePD.splice(idx, 1); }
+  }
+  prop.decision = decision;
+  if (decision === 'RETENU') syncPropPdToBasePD(prop);
+  saveData();
+  renderPropositionsPD();
+  try { renderBasePD(); } catch(e) {}
+  try { renderDashboard(); } catch(e) {}
 }
 
 function decidePropPdNew(propId, decision) {
