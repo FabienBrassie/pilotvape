@@ -16,6 +16,8 @@ header h1{font-size:16px;font-weight:700;margin-right:6px}
 .wnav{display:flex;align-items:center;gap:6px;margin-left:auto}
 button.nav{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:8px;padding:5px 11px;cursor:pointer;font-size:13px}
 button.nav:hover{background:var(--bg)}
+button.nav.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.weekrel{font-size:11px;color:var(--mut);font-weight:600;white-space:nowrap;padding:2px 8px;border:1px solid var(--line);border-radius:999px}
 #weeklabel{font-weight:600;font-size:13.5px;min-width:150px;text-align:center}
 input,select{border:1px solid #cbd5e1;border-radius:6px;padding:5px 7px;font-size:13px;background:var(--card);color:var(--txt)}
 main{padding:12px 16px;max-width:1400px;margin:0 auto}
@@ -252,9 +254,10 @@ body.dark .dayhead.today b{background:#3b82f6}
     <span id="savestate"></span>
     <div class="seg" style="--segc:var(--blue)"><button id="vw-mine" class="meonly" onclick="setView('mine')">📍 Mon planning</button><button id="vw-week" onclick="setView('week')">Semaine</button><button id="vw-synth" class="adminonly" onclick="setView('synth')">3 boutiques</button><button id="vw-month" onclick="setView('month')">Mois</button></div>
     <button class="nav" id="navprev" onclick="navCal(-1)">◀</button>
-    <button class="nav" onclick="curMonday=monday(todayISO());render()">Aujourd'hui</button>
+    <button class="nav" id="todaybtn" onclick="curMonday=monday(todayISO());render()">Aujourd'hui</button>
     <button class="nav" onclick="navCal(1)">▶</button>
     <span id="weeklabel"></span>
+    <span id="weekrel" class="weekrel"></span>
     <input type="date" id="goto" style="width:130px" onchange="if(this.value){curMonday=monday(this.value);render()}">
     <button id="setbtn" class="adminonly" onclick="togAbs()" title="Absences : congés, maladies">🏖</button>
     <button id="setbtn" class="adminonly" onclick="togFeries()" title="Fériés & dimanches ouverts">🎌</button>
@@ -1181,7 +1184,7 @@ function teamCell(bId,d){
 function renderSynth(){
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const today=todayISO();
-  $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
+  $('weeklabel').textContent=weekRange(curMonday);
   let h='<div class="sgrid"><div class="scorner"></div>';
   for(const d of days)h+='<div class="swd'+(d===today?' today':'')+'">'+DAYJ[wdOf(d)]+' '+(+d.slice(8,10))+'</div>';
   for(const b of S.boutiques){
@@ -1348,7 +1351,7 @@ function renderMineWeek(){
   const me=emp(ROLE&&ROLE.empId);
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const today=todayISO();
-  $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
+  $('weeklabel').textContent=weekRange(curMonday);
   if(!me){$('calhead').innerHTML='<div></div>';$('calbody').innerHTML='<div class="small" style="padding:16px">Indisponible.</div>';return;}
   const myBof=d=>{const p=presence(me,d);return (p.st==='present'&&p.blocks)?[...new Set(p.blocks.map(bl=>bl[2]))]:[];};
   // EN-TÊTES : jour + boutique(s) où aller (couleur de la boutique)
@@ -1477,6 +1480,7 @@ function render(){
   const vw=document.getElementById('vw-week'),vm=document.getElementById('vw-month'),vs=document.getElementById('vw-synth'),vmi=document.getElementById('vw-mine');
   if(vw)vw.classList.toggle('on',calView==='week');if(vm)vm.classList.toggle('on',calView==='month');if(vs)vs.classList.toggle('on',calView==='synth');if(vmi)vmi.classList.toggle('on',calView==='mine');
   const month=calView==='month',synth=calView==='synth',mine=calView==='mine',grid=month||synth;
+  navOrient();
   $('calwrap').style.display=grid?'none':'';          // le calendrier sert pour Semaine ET Mon planning
   $('monthwrap').style.display=grid?'':'none';
   $('hours').style.display=grid?'none':'';            // récap d'heures visible aussi en Mon planning (= mes heures)
@@ -1486,14 +1490,14 @@ function render(){
   if(synth){renderSynth();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
   if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);saveUI();return;}
-  $('weeklabel').textContent=fmtFR(curMonday)+' → '+fmtFR(addD(curMonday,6));
+  $('weeklabel').textContent=weekRange(curMonday);
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const today=todayISO();
   // entêtes de jours
   let hh='<div></div>';
   for(const d of days){const f=ferieOf(d);const hrs=shopHours(curB,d);
     const fShow=f&&(f.type==='ferie'||!/normal/i.test(f.b[curB]||'Fermé')); // spécial : seulement si concerne cette boutique
-    hh+='<div class="dayhead'+(d===today?' today':'')+(isLive(d)?'':' pre')+'"><b>'+DAYJ[wdOf(d)]+' '+(+d.slice(8,10))+'</b>'+
+    hh+='<div class="dayhead'+(d===today?' today':'')+(isLive(d)?'':' pre')+'"><b>'+DAYJ[wdOf(d)]+' '+(+d.slice(8,10))+' '+MOIS3[+d.slice(5,7)]+'</b>'+
       (fShow?'<span class="fer">'+esc(f.nom)+' · '+(hrs?fmtH(hrs.open)+'-'+fmtH(hrs.close):'fermé')+'</span>':
         (hrs?'':'<span class="fer">fermé</span>'))+'</div>';}
   $('calhead').innerHTML=hh;
@@ -3282,6 +3286,35 @@ function applyAssist(bi,si){
 
 // ============ MON ESPACE (salarié) ============
 const MOISN=['','janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
+const MOIS3=['','janv','févr','mars','avr','mai','juin','juil','août','sept','oct','nov','déc'];
+// Libellé d'une semaine avec le NOM du mois (gère les semaines à cheval sur 2 mois / 2 années)
+function weekRange(mon){const end=addD(mon,6);
+  const d1=+mon.slice(8,10),d2=+end.slice(8,10),m1=+mon.slice(5,7),m2=+end.slice(5,7),y1=mon.slice(0,4),y2=end.slice(0,4);
+  if(m1===m2)return d1+' → '+d2+' '+MOISN[m2]+' '+y2;
+  if(y1===y2)return d1+' '+MOISN[m1]+' → '+d2+' '+MOISN[m2]+' '+y2;
+  return d1+' '+MOISN[m1]+' '+y1+' → '+d2+' '+MOISN[m2]+' '+y2;}
+// Repères de navigation : surligne « Aujourd'hui » sur la période courante + chip relatif (cette semaine, dans 2 semaines, dans 1 mois…)
+function navOrient(){
+  const tb=document.getElementById('todaybtn'),rel=document.getElementById('weekrel');
+  let isNow=false,txt='';
+  if(calView==='month'){
+    const a=addD(curMonday,3),t=todayISO();
+    const dm=(+a.slice(0,4)-+t.slice(0,4))*12+(+a.slice(5,7)-+t.slice(5,7));
+    isNow=dm===0;
+    txt=dm===0?'ce mois-ci':Math.abs(dm)===1?(dm>0?'le mois prochain':'le mois dernier'):(dm>0?'dans '+dm+' mois':'il y a '+(-dm)+' mois');
+  }else{
+    const tw=monday(todayISO());
+    const d=Math.round((new Date(curMonday)-new Date(tw))/(7*864e5));
+    isNow=d===0;
+    if(d===0)txt='cette semaine';
+    else{const fut=d>0,n=Math.abs(d);
+      if(n===1)txt=fut?'la semaine prochaine':'la semaine dernière';
+      else if(n<5)txt=fut?('dans '+n+' semaines'):('il y a '+n+' semaines');
+      else{const mo=Math.round(n/4.345);txt=(fut?'dans ~':'il y a ~')+mo+' mois';}}
+  }
+  if(tb)tb.classList.toggle('on',isNow);
+  if(rel)rel.textContent=txt;
+}
 function monthDays(anchor){const y=+anchor.slice(0,4),m=+anchor.slice(5,7);const out=[];
   let d=y+'-'+String(m).padStart(2,'0')+'-01';while(+d.slice(5,7)===m){out.push(d);d=addD(d,1)}return out;}
 function sumNormHS(e,days){let norm=0,hs=0,fer=0,dim=0;
