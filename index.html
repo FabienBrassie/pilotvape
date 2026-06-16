@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 16:55</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 18:27</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -918,8 +918,10 @@ function applyRoleUI() {
     if (opForm) opForm.style.display = 'none';
     // Masquer tous les boutons RETENU / REFUSÉ sur les propositions
     document.querySelectorAll('button[onclick*="updatePropDecision"], button[onclick*="decidePropPd"], button[onclick*="updatePropLiqDecision"]').forEach(b => b.style.display = 'none');
-    // Désactiver TOUS les champs de modification des propositions (rôle, caseTech/tirage, prix, décision, etc.)
-    document.querySelectorAll('select[onchange*="updatePropField"], select[onchange*="updatePropDecision"], select[onchange*="updatePropLiqDecision"], select[onchange*="updatePropLiqField"], select[onchange*="updatePropPdDecision"], select[onchange*="updatePropPdField"], input[onblur*="updatePropField"], input[onblur*="updatePropLiqField"], input[onchange*="updatePropLiqField"], input[onblur*="updatePropPdField"], input[onchange*="updatePropPdField"], textarea[onblur*="updatePropPdField"]').forEach(el => { el.setAttribute('disabled','true'); el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; });
+    // Désactiver UNIQUEMENT la décision retenu/refusé (réservée à l'admin).
+    // L'édition des champs d'une proposition (prix, marque, case, etc.) reste ouverte à tous
+    // pour corriger une erreur de saisie (demande Fabien 2026-06-16).
+    document.querySelectorAll('select[onchange*="updatePropDecision"], select[onchange*="updatePropLiqDecision"], select[onchange*="updatePropPdDecision"]').forEach(el => { el.setAttribute('disabled','true'); el.style.opacity = '0.5'; el.style.pointerEvents = 'none'; });
     // Masquer les formulaires d'ajout de propositions
     document.querySelectorAll('[onclick*="showAddPropForm"], [onclick*="showPropLiqForm"], [onclick*="showPropPdForm"], [onclick*="deletePropLiq"], [onclick*="deletePropPdNew"], [onclick*="deletePropPd"]').forEach(b => b.style.display = 'none');
     // Masquer les boutons supprimer / annuler / clôturer / rouvrir / dupliquer / éditer sur les OPs
@@ -25048,6 +25050,7 @@ function renderPropositionsPD() {
       const roleColor = ROLE_COLORS[prop.rolePossible] || '#64748b';
       const roleLbl = ROLE_LABELS[prop.rolePossible] || '—';
       const margeColor = (prop.marge||0) >= 0 ? '#22c55e' : '#ef4444';
+      const mPct = (prop.margePct != null ? prop.margePct : computeMarge(prop.pa, prop.pv).margePct);
       const fournCentral = prop.fournisseur && prop.fournisseur.toLowerCase().includes('central');
       const doublon = basePD.find(pd => (pd.marque||'').toLowerCase() === (prop.marque||'').toLowerCase() && (pd.modele||'').toLowerCase() === (prop.modele||'').toLowerCase());
       const nomDisplay = `<span style="color:#94a3b8;">${prop.marque||''}</span> — <b>${prop.modele||''}</b>${doublon ? ' <span style="color:#f59e0b; font-size:9px;">⚠ doublon</span>' : ''}`;
@@ -25059,7 +25062,7 @@ function renderPropositionsPD() {
         <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:${fournCentral?'#4ade80':'#fb923c'}; font-size:10px; font-weight:600;">${prop.fournisseur||'—'}</div>
         <div style="color:#94a3b8; text-align:right;">€${(prop.pa||0).toFixed(2)}</div>
         <div style="color:#e2e8f0; text-align:right; font-weight:500;">€${(prop.pv||0).toFixed(2)}</div>
-        <div style="color:${margeColor}; text-align:right;">${(prop.marge||0)>=0?'+':''}€${(prop.marge||0).toFixed(2)}</div>
+        <div style="color:${margeColor}; text-align:right;">${(prop.marge||0)>=0?'+':''}€${(prop.marge||0).toFixed(2)} <span style="font-size:8px; color:#64748b;">${(mPct*100).toFixed(0)}%</span></div>
         <div><span class="badge" style="font-size:9px; background:#334155;">${PD_CASE_LABELS[prop.caseTech] || prop.caseTech || '—'}</span></div>
         <div style="color:${roleColor}; font-weight:500; font-size:10px;">${roleLbl}</div>
         <div>
@@ -25115,7 +25118,7 @@ function togglePropPdDetail(id) {
 }
 
 function updatePropPdField(id, field, val) {
-  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  // Édition ouverte à tous (correction d'erreur) — la décision retenu/refusé reste admin
   const prop = propositionsPD.find(p => p.id === id);
   if (!prop) return;
   prop._ts = new Date().toISOString(); // timestamp pour propagation merge multi-poste
@@ -25845,7 +25848,7 @@ function submitNewPropositionLiq() {
 }
 
 function updatePropLiqField(id, field, val) {
-  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  // Édition ouverte à tous (correction d'erreur) — la décision retenu/refusé reste admin
   const p = propositionsLiq.find(x => x.id === id);
   if (!p) return;
   p._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
@@ -26068,6 +26071,7 @@ function renderPropositionsLiq() {
     const roleColor = LIQ_ROLE_COLORS[p.roleChoisi] || '#64748b';
     const roleLbl = LIQ_ROLE_SHORT[p.roleChoisi] || '—';
     const margeColor = p.marge >= 0 ? '#22c55e' : '#ef4444';
+    const mPct = (p.margePct != null ? p.margePct : computeMarge(p.pa, p.pv).margePct);
     const typeLbl = p.type === 'parfum' ? '🧴' : '📦';
     const typeTitle = p.type === 'parfum' ? 'Parfum individuel' : 'Gamme entière';
     const nomDisplay = p.nom ? `<span style="color:#94a3b8;">${p.marque}</span> — <b>${p.gamme}</b> · <span style="color:${ctColor}">${p.nom}</span>` :
@@ -26080,7 +26084,7 @@ function renderPropositionsLiq() {
       <div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:${p.fournisseur && p.fournisseur.toLowerCase().includes('central') ? '#4ade80' : '#fb923c'}; font-size:10px; font-weight:600;">${p.fournisseur||'—'}</div>
       <div style="color:#94a3b8; text-align:right;">€${p.pa.toFixed(2)}</div>
       <div style="color:#e2e8f0; text-align:right; font-weight:500;">€${p.pv.toFixed(2)}</div>
-      <div style="color:${margeColor}; text-align:right;">+€${p.marge.toFixed(2)}</div>
+      <div style="color:${margeColor}; text-align:right;">+€${p.marge.toFixed(2)} <span style="font-size:8px; color:#64748b;">${(mPct*100).toFixed(0)}%</span></div>
       <div style="color:#94a3b8; text-align:center;">${p.nbRefs||'—'}</div>
       <div style="color:${roleColor}; font-weight:500;">${roleLbl}</div>
       <div>
