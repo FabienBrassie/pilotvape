@@ -1079,9 +1079,15 @@ function commitDay(e,iso,blocks,scope,extra){
         e.pats.push(pe);
         e.pats.sort((a,b)=>a.from<b.from?-1:1);
       }
-      if(blocks.length)pe.pat[wd]={b:bId,blocks:blocks.map(bl=>[bl[0],bl[1],bl[2]])}; // un planning type récurrent n'est jamais en HS
-      else delete pe.pat[wd];
-      pe._ts=NOW();e._ts=NOW();
+      // écrit CE jour de la semaine dans un planning type (jamais en HS)
+      const _setWd=p=>{if(blocks.length)p.pat[wd]={b:bId,blocks:blocks.map(bl=>[bl[0],bl[1],bl[2]])};else delete p.pat[wd];p._ts=NOW();};
+      _setWd(pe);
+      // « à partir de ce jour » : écrase CE jour de la semaine dans TOUS les plannings type
+      // postérieurs (créés par un « futur » ultérieur), sinon ils masqueraient ce changement
+      // dès leur propre date de départ. Les exceptions « ce jour seulement » (pointillées) ne
+      // sont pas touchées.
+      if(scope==='futur')e.pats.forEach(p2=>{if(p2.from>iso)_setWd(p2);});
+      e._ts=NOW();
     }
     if(S.exceptions.some(x=>x.empId===e.id&&x.date===iso))S.tomb['ex|'+e.id+'|'+iso]=NOW();
     S.exceptions=S.exceptions.filter(x=>!(x.empId===e.id&&x.date===iso));
