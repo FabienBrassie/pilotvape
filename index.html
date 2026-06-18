@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 11:07</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 11:57</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -19605,6 +19605,25 @@ function opToggleProduitMode(mode) {
   }
 }
 
+// Affiche les lignes campagne (info existante / nouvelle) SANS prompt — utilisé par la
+// restauration du formulaire après re-render (fix 2026-06-18) et par opOnCampagneSelectChange.
+function _opShowCampagneRows(v) {
+  const infoRow = document.getElementById('opCampagneInfoRow');
+  const newRow  = document.getElementById('opCampagneNewRow');
+  if (!infoRow || !newRow) return;
+  if (v === '__new__') { infoRow.style.display = 'none'; newRow.style.display = 'block'; return; }
+  if (v) {
+    const c = getCampagne(v);
+    if (!c) { infoRow.style.display = 'none'; newRow.style.display = 'none'; return; }
+    const _sv = (id, val) => { const e = document.getElementById(id); if (e) e.value = val; };
+    _sv('opCampagneExistNom', c.nom);
+    _sv('opCampagneExistDebut', c.dateDebut || '');
+    _sv('opCampagneExistFin', c.dateFin || '');
+    _sv('opCampagneExistComment', c.commentaire || '');
+    infoRow.style.display = 'block'; newRow.style.display = 'none';
+  } else { infoRow.style.display = 'none'; newRow.style.display = 'none'; }
+}
+
 // Réagit au changement du select "Campagne" dans le form d'OP.
 // Cas : "" (sans campagne) / "__new__" (création) / un id de campagne existante.
 async function opOnCampagneSelectChange() {
@@ -20482,10 +20501,26 @@ function duplicateOp(id) {
   });
 }
 
+// Champs du formulaire "Nouvelle OP manuelle" à préserver à travers les re-renders.
+const _OP_FORM_FIELDS = ['opType','opKit','opLibreFamille','opLibreLibelle','opDateDebut','opDateFin','opMecaType','opMecaDescription','opPartenaire','opPaCommande','opComment','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment'];
+
 function renderOps() {
   const container = document.getElementById('opsContent');
   if (!container) return;
   // syncAutoActions retiré du render pour performance — appelé uniquement quand les données changent
+
+  // ── Préservation de la saisie en cours du formulaire "Nouvelle OP" (fix 2026-06-18) ──
+  // Un auto-sync en arrière-plan (poll 60 s / focus) re-render renderOps et reconstruit tout
+  // le HTML : sans ça, un formulaire à moitié rempli (Type, Produit, dates, campagne) était vidé.
+  // On capture les valeurs avant reconstruction, on les restaure après.
+  let _opFormSnap = null;
+  if (document.getElementById('opType')) {
+    _opFormSnap = {};
+    _OP_FORM_FIELDS.forEach(id => { const el = document.getElementById(id); if (el) _opFormSnap[id] = el.value; });
+    const _m = document.querySelector('input[name="opProduitMode"]:checked'); _opFormSnap._mode = _m ? _m.value : null;
+    const _ca = document.getElementById('opCommandeAdmin'); _opFormSnap._commandeAdmin = _ca ? _ca.checked : false;
+    const _cs = document.getElementById('opCampagneSelect'); _opFormSnap._campagne = _cs ? _cs.value : '';
+  }
 
   const today = ymd(new Date());
   const kits = baseKits.filter(k => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(k.statutVie))
@@ -21051,6 +21086,20 @@ function renderOps() {
     <span style="margin-left:auto; font-size:10px; color:#64748b; font-style:italic;">Tu peux aussi rattacher une OP isolée via 📣 Campagne ? sur sa carte.</span>
   </div>`;
   container.innerHTML = form + toolbar + campagneBar + overviewBlock + opsHtml;
+
+  // ── Restauration de la saisie en cours du formulaire "Nouvelle OP" (fix 2026-06-18) ──
+  if (_opFormSnap) {
+    try {
+      _OP_FORM_FIELDS.forEach(id => { const el = document.getElementById(id); if (el && _opFormSnap[id] !== undefined) el.value = _opFormSnap[id]; });
+      if (_opFormSnap._mode) { const r = document.querySelector('input[name="opProduitMode"][value="' + _opFormSnap._mode + '"]'); if (r) { r.checked = true; opToggleProduitMode(_opFormSnap._mode); } }
+      const _ca2 = document.getElementById('opCommandeAdmin'); if (_ca2) _ca2.checked = !!_opFormSnap._commandeAdmin;
+      // Campagne : restaurer SANS re-prompt (sauf si une pré-sélection post-création est en attente).
+      if (!opPreselectCampagneId && _opFormSnap._campagne) {
+        const _cs2 = document.getElementById('opCampagneSelect');
+        if (_cs2) { _cs2.value = _opFormSnap._campagne; _opShowCampagneRows(_opFormSnap._campagne); }
+      }
+    } catch (e) { console.warn('[renderOps] restauration form échouée:', e); }
+  }
 
   // Pré-sélection de campagne (après création d'une vague, pour enchaîner).
   if (opPreselectCampagneId) {
