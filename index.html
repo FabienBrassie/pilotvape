@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 19:10</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 19:24</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -6170,7 +6170,13 @@ function _applyActionShopChange(a, shop) {
           prod._ts = _nowTs;
           prod.statutVie = 'DANS_OFFRE';
           if (kit) syncKitToProp(kit);
-          if (liq) syncLiqToPropLiq(liq);
+          if (liq) {
+            // Rentrée de la GAMME ENTIÈRE validée → les parfums encore "à rentrer" passent dans
+            // l'offre. Sans ça, ils restaient "à rentrer" en base et regénéraient des lignes
+            // fantômes alors que la rentrée était bouclée (incohérence signalée Fabien 2026-06-18).
+            (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = 'DANS_OFFRE'; p._ts = _nowTs; } });
+            syncLiqToPropLiq(liq);
+          }
           // PD : statutVie mis à jour directement via prod.statutVie
         }
       }
@@ -17535,7 +17541,7 @@ function renderDashboard() {
   //     nationale / PR ...).
   //   - Ordre des blocs : OP nationale tout en haut, puis le reste.
   //   - Dans un bloc : 1 lane par OP, la plus RÉCENTE (date de début la + tardive) en haut.
-  const _groupOrder = ['NATIONALE', 'PRIX_ROUGE', 'NOUVEAUTE', 'EXCLU', 'LIQUIDE_DU_MOMENT', 'COUP'];
+  const _groupOrder = ['NATIONALE', 'PRIX_ROUGE', 'EXCLU', 'LIQUIDE_DU_MOMENT', 'NOUVEAUTE', 'COUP'];
   const _groupRank = (t) => { const i = _groupOrder.indexOf(t); return i < 0 ? _groupOrder.length : i; };
   const _entryDone = (e) => e.ops && e.ops.length > 0 && e.ops.every(o => opTimeStatus(o) === 'TERMINEE');
   // Affinage 2026-06-18 : les OP TERMINÉES ne monopolisent plus une ligne chacune.
