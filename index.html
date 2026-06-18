@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 21:34</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 22:12</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -434,7 +434,7 @@
       </select>
       <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Par marque</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
+        <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Par marque</option><option value="gamme">Tri: Par gamme (tous formats)</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
       </select>
     </div>
     <div id="liqStats" style="margin-bottom:8px;"></div>
@@ -14225,6 +14225,53 @@ function renderLiqAll() {
             items.sort((a,b) => a.gamme.localeCompare(b.gamme)).forEach(g => { html += renderLiqGammeCard(g, true); });
             html += `</div>`;
           }
+          html += `</div>`;
+        });
+      }
+
+      html += `</div>`;
+    });
+  }
+  // ═══ MODE PAR GAMME (marque → gamme → tous formats réunis, demande Fabien 2026-06-18) ═══
+  else if (viewMode === 'gamme') {
+    const marques = [...new Set(actifs.map(g => g.marque || '—'))].sort((a, b) => a.localeCompare(b));
+    if (marques.length === 0) html += `<div style="padding:16px; text-align:center; color:#64748b; font-style:italic;">Aucune gamme.</div>`;
+    marques.forEach(marque => {
+      const mItems = actifs.filter(g => (g.marque || '—') === marque);
+      if (!mItems.length) return;
+      let hash = 0; for (let i = 0; i < marque.length; i++) hash = ((hash << 5) - hash + marque.charCodeAt(i)) | 0;
+      const color = `hsl(${Math.abs(hash) % 360}, 45%, 60%)`;
+      const mKey = 'liq-g-marque-' + marque.replace(/[^a-z0-9]/gi, '_');
+      const mExpanded = isLiqExpanded(mKey);
+      const mChev = mExpanded ? '▾' : '▸';
+      const gammeNames = [...new Set(mItems.map(g => g.gamme || '—'))].sort((a, b) => a.localeCompare(b));
+      const _nbParf = mItems.reduce((s, g) => s + (g.parfums || []).filter(p => p.s !== 'SORTI').length, 0);
+
+      html += `<div style="margin-top:6px; background:${color}06; border:1px solid ${color}35; border-radius:5px; overflow:hidden;">`;
+      html += `<div onclick="toggleLiqSection('${mKey}')" style="padding:5px 12px; background:${color}20; display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;" onmouseover="this.style.background='${color}30'" onmouseout="this.style.background='${color}20'">
+        <span style="color:${color}; font-size:11px; width:12px; font-weight:700;">${mChev}</span>
+        <span style="font-size:13px; font-weight:700; color:${color}; letter-spacing:0.5px;">${marque}</span>
+        <span style="font-size:10px; color:#94a3b8;">${gammeNames.length} gamme${gammeNames.length > 1 ? 's' : ''} · ${_nbParf} parfums</span>
+      </div>`;
+
+      if (mExpanded) {
+        gammeNames.forEach(gn => {
+          const gEntries = mItems.filter(g => (g.gamme || '—') === gn)
+            .sort((a, b) => (LIQ_FORMATS.indexOf(a.format) - LIQ_FORMATS.indexOf(b.format)));
+          if (!gEntries.length) return;
+          const fmtLbls = gEntries.map(g => LIQ_FORMAT_LABELS[g.format] || g.format).join(' · ');
+          html += `<div style="margin:3px 6px; border:1px solid #33415560; border-radius:4px; overflow:hidden;">`;
+          html += `<div style="padding:4px 10px; background:#1e293b; display:flex; align-items:center; gap:8px;">
+            <span style="font-size:12px; font-weight:700; color:#e2e8f0;">${gn}</span>
+            <span style="font-size:9px; color:#94a3b8;">${gEntries.length} format${gEntries.length > 1 ? 's' : ''} · ${fmtLbls}</span>
+          </div>`;
+          gEntries.forEach(g => {
+            const fc = LIQ_FORMAT_COLORS[g.format] || '#94a3b8';
+            html += `<div style="padding:3px 10px 0;">
+              <span style="font-size:9px; font-weight:700; color:${fc}; background:${fc}18; border:1px solid ${fc}50; border-radius:3px; padding:0 6px;">${LIQ_FORMAT_LABELS[g.format] || g.format}</span>
+            </div>`;
+            html += renderLiqGammeCard(g, true);
+          });
           html += `</div>`;
         });
       }
