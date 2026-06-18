@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 17:58</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 18:35</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3844,6 +3844,10 @@ function ensureActionForParfum(gamme, parfumId, type) {
 }
 
 function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
+  // One-shot parfum actif (feature 2026-06-18) : protège ses actions RENTRER/SORTIR même quand
+  // le parfum est DANS_OFFRE/OK (occupation temporaire), comme pour les kits/gammes one-shot.
+  const _pf = (gamme.parfums || []).find(p => p.id === parfumId);
+  const isOneShotActif = _pf && _pf.oneShot === true && ['DANS_OFFRE','A_RENTRER','OK'].includes(parfumStatus);
   actions.forEach(a => {
     if (a._archived) return;
     if (a.produitId !== gamme.id) return;
@@ -3859,8 +3863,8 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
       return;
     }
     const stillValid =
-      (a.type === 'SORTIR' && parfumStatus === 'A_SORTIR') ||
-      (a.type === 'RENTRER' && parfumStatus === 'A_RENTRER');
+      (a.type === 'SORTIR' && (parfumStatus === 'A_SORTIR' || isOneShotActif)) ||
+      (a.type === 'RENTRER' && (parfumStatus === 'A_RENTRER' || isOneShotActif));
     if (!stillValid) _cancelAction(a);
   });
 }
@@ -4123,6 +4127,12 @@ function syncAutoActions() {
           if (pStatus === 'A_SORTIR') ensureActionForParfum(g, p.id, 'SORTIR');
           if (pStatus === 'A_RENTRER') ensureActionForParfum(g, p.id, 'RENTRER');
         }
+        // One-shot au niveau parfum (feature 2026-06-18)
+        if (p.oneShot === true && ['DANS_OFFRE','A_RENTRER','OK'].includes(pStatus)) {
+          _ensureOneShotOpParfum(g, p);
+        } else if (p.oneShotOpId) {
+          _closeOneShotOpParfum(g, p);
+        }
         cleanupActionsForParfum(g, p.id, pStatus);
       });
     }
@@ -4342,6 +4352,83 @@ function ensureOneShotOpLiq(gamme) {
 }
 function closeOneShotOpLiq(gamme) { _closeOneShotOpGeneric(gamme); }
 
+// ── One-shot au niveau PARFUM (feature 2026-06-18) ──
+// Permet un one-shot sur un parfum précis d'une gamme (ex : 2 parfums Japura en bon plan),
+// sans embarquer toute la gamme. Crée une OP COUP ciblée (produitParfumId) reliée aux actions
+// RENTRER/SORTIR du parfum. Flag : parfum.oneShot ; lien : parfum.oneShotOpId. Pour mettre
+// plusieurs parfums en one-shot, on en active simplement plusieurs (1 OP COUP chacun, groupables
+// en campagne).
+function _ensureOneShotOpParfum(gamme, parfum) {
+  if (!gamme || !parfum || !parfum.id) return null;
+  const aRentrer = ensureActionForParfum(gamme, parfum.id, 'RENTRER');
+  const aSortir  = ensureActionForParfum(gamme, parfum.id, 'SORTIR');
+  let op = parfum.oneShotOpId ? ops.find(o => o.id === parfum.oneShotOpId) : null;
+  if (op && _deletedIds.has(op.id)) { parfum.oneShotOpId = ''; op = null; }
+  if (!op) {
+    op = ops.find(o => o.type === 'COUP' && !o.dateFin && !o._archived && !_deletedIds.has(o.id)
+      && o.produitParfumId === parfum.id
+      && ((aRentrer && o.rentrerActionId === aRentrer.id) || (aSortir && o.sortirActionId === aSortir.id)));
+  }
+  const today = ymd(new Date());
+  const label = 'One-shot liquide — ' + (gamme.marque || '') + ' ' + (gamme.gamme || '') + ' · ' + (parfum.n || '');
+  if (!op) {
+    op = {
+      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+      type: 'COUP',
+      produitIds: [gamme.id],
+      produitParfumId: parfum.id,
+      dateDebut: today,
+      dateFin: null,
+      commentaire: label,
+      rentrerActionId: aRentrer ? aRentrer.id : null,
+      sortirActionId:  aSortir  ? aSortir.id  : null,
+      auto: true,
+      etats: {},
+      pieces: []
+    };
+    seedOpDefaults(op);
+    ensureOpSteps(op);
+    pushOpTraced(op, '_ensureOneShotOpParfum');
+    parfum.oneShotOpId = op.id;
+    if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
+    if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
+    if (aRentrer) syncActionStepsToOp(aRentrer);
+    if (aSortir)  syncActionStepsToOp(aSortir);
+    _syncCoupPrixRouge(op, aRentrer, gamme);
+    return op;
+  }
+  const _sortirFait = aSortir && typeof actionGlobalState === 'function' && actionGlobalState(aSortir) === 'FAIT';
+  if ((op.dateFin || op._archived || op.annulee) && !_sortirFait && !op._dateFinManuelle) {
+    _reveillerObjet(op);
+    op.dateFin = null;
+    if (!op.dateDebut) op.dateDebut = today;
+  }
+  if (aRentrer && op.rentrerActionId !== aRentrer.id) op.rentrerActionId = aRentrer.id;
+  if (aSortir  && op.sortirActionId  !== aSortir.id)  op.sortirActionId  = aSortir.id;
+  if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
+  if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
+  parfum.oneShotOpId = op.id;
+  if (!op.produitIds || !op.produitIds.includes(gamme.id)) op.produitIds = [gamme.id];
+  op.produitParfumId = parfum.id;
+  ensureOpSteps(op);
+  if (aRentrer || aSortir) _syncOneShotStepsBidi(op, aRentrer, aSortir);
+  _syncCoupPrixRouge(op, aRentrer, gamme);
+  return op;
+}
+
+function _closeOneShotOpParfum(gamme, parfum) {
+  if (!parfum) return;
+  const today = ymd(new Date());
+  if (parfum.oneShotOpId) {
+    const op = ops.find(o => o.id === parfum.oneShotOpId);
+    if (op && op.type === 'COUP' && !op.dateFin) op.dateFin = today;
+  }
+  ops.filter(o => o.type === 'COUP' && !o.dateFin && o.produitParfumId === parfum.id
+    && o.produitIds && o.produitIds[0] === (gamme && gamme.id))
+     .forEach(o => { o.dateFin = today; });
+  parfum.oneShotOpId = '';
+}
+
 // PD : nouvelle prise en charge one-shot (était manquante)
 function ensureOneShotOpPd(pd) {
   const label = 'One-shot PD — ' + (pd ? (pd.marque || '') + ' ' + (pd.modele || '') : '');
@@ -4400,6 +4487,50 @@ function toggleLiqOneShot(gammeId) {
   saveData();
   renderLiqAll();
   renderDashboard();
+  if (typeof renderOps === 'function') renderOps();
+}
+
+// One-shot au niveau parfum (feature 2026-06-18) — pendant de toggleLiqOneShot pour un parfum.
+function toggleLiqParfumOneShot(gammeId, parfumId) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const g = baseLiq.find(x => x.id === gammeId);
+  if (!g) return;
+  const p = (g.parfums || []).find(x => x.id === parfumId);
+  if (!p) return;
+  const _now = new Date().toISOString();
+  g._ts = _now; p._ts = _now;
+  p.oneShot = !p.oneShot;
+  syncAutoActions();
+  if (p.oneShot && ['A_RENTRER','DANS_OFFRE','OK'].includes(p.s || 'OK')) {
+    promptOneShotPrixRougeParfum(g, p);
+  }
+  saveData();
+  renderLiqAll();
+  renderDashboard();
+  if (typeof renderOps === 'function') renderOps();
+}
+
+// Prix rouge du one-shot parfum : pendant de promptOneShotPrixRouge ciblé sur l'action du parfum.
+async function promptOneShotPrixRougeParfum(g, p) {
+  if (!g || !p) return;
+  let a = actions.find(x => x.produitId === g.id && x.produitType === 'liq' && x.produitParfumId === p.id && x.type === 'RENTRER' && !x.annulee);
+  if (!a) a = actions.find(x => x.produitId === g.id && x.produitType === 'liq' && x.produitParfumId === p.id && x.type === 'SORTIR' && !x.annulee);
+  if (!a) return;
+  if (typeof a.prixRouge === 'number') { _propagateOneShotPrixRouge(a); return; }
+  const pvRef = (typeof p.pv === 'number' && p.pv > 0) ? p.pv : (g.pv || 0);
+  const nom = (g.marque || '') + ' ' + (g.gamme || '') + ' · ' + (p.n || '');
+  const rep = await pvConfirm('One-shot activé sur ' + nom + '.\n\nMettre un prix rouge ?');
+  if (!rep) return;
+  const saisie = prompt('Prix rouge pour ' + nom + (pvRef > 0 ? '\n(PV actuel : ' + pvRef.toFixed(2) + '€)' : '') + '\n\nSaisir le prix :', pvRef > 0 ? (pvRef * 0.7).toFixed(2) : '');
+  if (!saisie) return;
+  const prix = parseFloat(saisie.replace(',', '.'));
+  if (isNaN(prix) || prix <= 0) return;
+  a.prixAvantRouge = pvRef;
+  a.prixRouge = prix;
+  _propagateOneShotPrixRouge(a);
+  saveData();
+  try { renderLiqAll(); } catch(e) {}
+  try { renderDashboard(); } catch(e) {}
   if (typeof renderOps === 'function') renderOps();
 }
 
@@ -4720,10 +4851,17 @@ function syncOpsFromVerdicts() {
       _autoClose(op, 'COUP : RENTRER+SORTIR terminées');
       // Libère le flag oneShot du kit : le coup est consommé.
       if (op.dateFin) {
-        const kit = baseKits.find(k => k.id === (op.produitIds || [])[0]);
+        const _pid = (op.produitIds || [])[0];
+        const kit = baseKits.find(k => k.id === _pid);
         if (kit) {
           kit.oneShot = false;
           kit.oneShotOpId = '';
+        }
+        // One-shot parfum (feature 2026-06-18) : libère le flag sur le parfum visé.
+        if (op.produitParfumId) {
+          const _g = baseLiq.find(l => l.id === _pid);
+          const _p = _g && (_g.parfums || []).find(x => x.id === op.produitParfumId);
+          if (_p) { _p.oneShot = false; _p.oneShotOpId = ''; }
         }
       }
     }
@@ -13594,6 +13732,7 @@ function renderLiqGammeDetail(g) {
         html += `<label onclick="event.stopPropagation();" title="Exclusif Cigusto" style="display:inline-flex; align-items:center; gap:2px; padding:1px 5px; font-size:9px; background:${p.exclu ? '#64748b30' : 'transparent'}; color:${p.exclu ? '#cbd5e1' : '#64748b'}; border:1px solid ${p.exclu ? '#64748b' : '#33415540'}; border-radius:2px; cursor:pointer; font-weight:${p.exclu ? 700 : 400}; flex-shrink:0;">
           <input type="checkbox" ${p.exclu ? 'checked' : ''} onchange="updateLiqParfumField('${g.id}',${pi},'exclu',this.checked)" style="margin:0; cursor:pointer; accent-color:#64748b; transform:scale(0.8);">Exclu</label>`;
         if (isAdmin()) {
+          html += `<button onclick="event.stopPropagation(); toggleLiqParfumOneShot('${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:${p.oneShot ? '#fcd34d22' : 'none'}; border:1px solid ${p.oneShot ? '#fcd34d70' : '#fcd34d40'}; color:#fcd34d; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:${p.oneShot ? 700 : 400};" title="${p.oneShot ? 'One-shot actif sur ce parfum — cliquer pour désactiver' : 'Mettre ce parfum en one-shot (bon plan temporaire : entrée + sortie + prix rouge)'}">⚡</button>`;
           html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #0ea5e960; color:#7dd3fc; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:600;" title="Lancer une reprise fournisseur sur ce parfum">📦</button>`;
           html += `<button onclick="event.stopPropagation(); lancerRetrocession('liq','${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #06b6d460; color:#67e8f9; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:600;" title="Rétrocession : transférer ce parfum d'une boutique à une autre">🔁</button>`;
         }
