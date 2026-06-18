@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-16 18:49</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 11:07</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3434,6 +3434,12 @@ function getActionSteps(typeOrAction) {
     const et = base.find(s => s.key === 'etiquette');
     if (et) et.label = 'Prix rouge imprimé';
   }
+  // Commande gérée par l'admin (feature 2026-06-18) : la boutique ne commande pas, elle
+  // réceptionne et saisit. On relabelle l'étape 'commande' (clé inchangée → _stepTs/done préservés).
+  if (type === 'RENTRER' && typeof typeOrAction === 'object' && typeOrAction && typeOrAction.commandeAdmin) {
+    const cmd = base.find(s => s.key === 'commande');
+    if (cmd) cmd.label = 'Commande saisie en stock Swappy';
+  }
   return base;
 }
 function makeStepMap(typeOrAction) {
@@ -4126,6 +4132,25 @@ function syncAutoActions() {
       closeOneShotOpPd(pd);
     }
     cleanupActionsForPd(pd);
+  });
+  // ── Propagation OP → action RENTRER (feature 2026-06-18) ──
+  // L'action RENTRER est la source de vérité pour l'affichage et les étapes ; l'OP porte le
+  // choix fait à la création ("commande gérée par l'admin" + "prix de saisie temporaire") et
+  // le pousse sur l'action liée. Les éditions sur la ligne mettent à jour les DEUX (action+OP)
+  // → propagation idempotente, pas de conflit. Champs purement additifs (merge non impacté).
+  ops.forEach(op => {
+    if (!op.rentrerActionId) return;
+    if (op.commandeAdmin === undefined && op.paCommande === undefined) return;
+    const ra = actions.find(a => a.id === op.rentrerActionId && a.type === 'RENTRER' && !a.annulee);
+    if (!ra) return;
+    if (op.commandeAdmin !== undefined && ra.commandeAdmin !== !!op.commandeAdmin) {
+      ra.commandeAdmin = !!op.commandeAdmin; ra._ts = new Date().toISOString();
+    }
+    if (op.paCommande !== undefined) {
+      const _v = (typeof op.paCommande === 'number' && op.paCommande > 0) ? op.paCommande : null;
+      if (_v === null) { if (ra.paCommande !== undefined) { delete ra.paCommande; ra._ts = new Date().toISOString(); } }
+      else if (ra.paCommande !== _v) { ra.paCommande = _v; ra._ts = new Date().toISOString(); }
+    }
   });
   // Auto-lien remplaceId : un kit A_RENTRER sans remplaceId qui partage exactement
   // la même case technique (profil + caseTech + rôle) qu'un kit à sortir → lien automatique.
@@ -6561,6 +6586,39 @@ async function setDispatchHub(actionId, hub) {
   saveData();
   try { renderDashboard(); } catch(e) {}
   pvAlert('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' activée.\nLes transferts vers les autres boutiques sont créés (section 🔁 Rétrocessions).');
+}
+
+// ── "Qui commande ?" sur un À RENTRER (feature 2026-06-18, dictionnaire §b-bis) ──
+// commandeAdmin=true → la commande est passée par Fabien en direct fournisseur ; la boutique
+// n'a qu'à réceptionner et saisir la commande en stock Swappy (l'étape 'commande' est relabelée).
+// On miroite sur l'OP liée pour que la propagation OP→action (syncAutoActions) ne l'écrase pas.
+function setRentrerCommandeAdmin(actionId, val) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'RENTRER') return;
+  const isAdminCmd = (val === 'admin' || val === true);
+  a.commandeAdmin = isAdminCmd;
+  a._ts = new Date().toISOString();
+  const op = ops.find(o => o.rentrerActionId === a.id);
+  if (op) { op.commandeAdmin = isAdminCmd; op._ts = new Date().toISOString(); }
+  logAction('Qui commande', _logActionLabel(actionId) + ' → ' + (isAdminCmd ? 'admin (Fabien)' : 'boutique'));
+  saveData(); try { renderDashboard(); } catch(e) {}
+}
+
+// ── Prix de saisie temporaire pour CETTE commande (feature 2026-06-18, dictionnaire §e) ──
+// Le PA de la fiche base est INCHANGÉ (il sert à la marge). On ne fait qu'indiquer aux équipes
+// le prix à saisir pour cette commande précise (ex : prix de lancement). Vide = pas d'instruction.
+function setRentrerPaCommande(actionId, val) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'RENTRER') return;
+  const n = parseFloat(String(val).replace(',', '.'));
+  const v = (isFinite(n) && n > 0) ? n : null;
+  if (v === null) delete a.paCommande; else a.paCommande = v;
+  a._ts = new Date().toISOString();
+  const op = ops.find(o => o.rentrerActionId === a.id);
+  if (op) { op.paCommande = (v === null ? null : v); op._ts = new Date().toISOString(); }
+  saveData(); try { renderDashboard(); } catch(e) {}
 }
 
 // ── RÉCEPTION CENTRALISÉE sur une OP, SÉPARÉE produit / PLV (refonte 2026-06-13, demande
@@ -15965,6 +16023,37 @@ function renderDashboard() {
           <span style="font-size:10px; color:#64748b;">Prix rouge ?</span>
           <span onclick="event.stopPropagation(); initRentrerPrixRouge('${a.id}')" style="cursor:pointer; padding:2px 8px; font-size:10.5px; font-weight:700; border-radius:3px; background:transparent; color:#ef4444; border:1px solid #ef444480;">🔴 Prix rouge</span>
         </div>` : '';
+        // ── 📦 Commande gérée par l'admin (feature 2026-06-18, "qui commande") ──
+        // Bannière visible par tous quand c'est Fabien qui commande ; sélecteur réservé admin.
+        let commandeAdminBlock = '';
+        const _ca = a.commandeAdmin === true;
+        if (_ca) {
+          commandeAdminBlock += `<div style="margin-bottom:6px; padding:4px 8px; background:#7c3aed15; border:1px solid #a78bfa40; border-radius:3px; font-size:10px; color:#c4b5fd;">📦 Commande passée par Fabien — la boutique n'a qu'à <b>réceptionner</b> puis <b>saisir la commande en stock Swappy</b>.</div>`;
+        }
+        if (typeof isAdmin === 'function' && isAdmin()) {
+          commandeAdminBlock += `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+            <span style="font-size:10px; color:#64748b;">Qui commande ?</span>
+            <select onclick="event.stopPropagation()" onchange="setRentrerCommandeAdmin('${a.id}', this.value)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${_ca ? '#a78bfa60' : '#475569'}; color:${_ca ? '#c4b5fd' : '#cbd5e1'}; border-radius:3px;">
+              <option value="boutique" ${!_ca ? 'selected' : ''}>La boutique commande sur Swappy</option>
+              <option value="admin" ${_ca ? 'selected' : ''}>Fabien a commandé — la boutique réceptionne & saisit</option>
+            </select>
+          </div>`;
+        }
+        // ── 💶 Prix de saisie temporaire pour CETTE commande (feature 2026-06-18) ──
+        // Le PA base reste inchangé (marge) ; on indique juste le prix à saisir cette fois.
+        const _paNormal = (prod && typeof prod.pa === 'number') ? prod.pa : (kit && typeof kit.pa === 'number' ? kit.pa : null);
+        const _pac = (typeof a.paCommande === 'number' && a.paCommande > 0) ? a.paCommande : null;
+        let paCommandeBlock = '';
+        if (_pac) {
+          paCommandeBlock += `<div style="margin-bottom:6px; padding:4px 8px; background:#14532d20; border:1px solid #22c55e40; border-radius:3px; font-size:10px; color:#86efac;">💶 Saisir cette commande à <b>${_pac.toFixed(2)}€ HT</b>${_paNormal != null ? ' — prix normal <b>' + _paNormal.toFixed(2) + '€ HT</b> (inchangé en base)' : ''}.</div>`;
+        }
+        if (typeof isAdmin === 'function' && isAdmin()) {
+          paCommandeBlock += `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+            <span style="font-size:10px; color:#64748b;">Prix de saisie (HT) pour cette commande ?</span>
+            <input type="number" step="0.01" min="0" value="${_pac != null ? _pac.toFixed(2) : ''}" placeholder="${_paNormal != null ? _paNormal.toFixed(2) : 'PA'}" onchange="setRentrerPaCommande('${a.id}', this.value)" onclick="event.stopPropagation()" style="width:80px; padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #22c55e60; color:#86efac; border-radius:3px; font-weight:600; text-align:right;">
+            <span style="font-size:10px; color:#64748b;">€ HT${_paNormal != null ? ' · normal ' + _paNormal.toFixed(2) + '€' : ''}</span>
+          </div>`;
+        }
         // ── 📦 Réception centralisée (dispatch, 2026-06-12) : la décision se prend ICI, sur
         // le À rentrer. Hub choisi → rétrocessions hub → autres boutiques créées et suivies.
         let dispatchBlock = '';
@@ -15987,7 +16076,7 @@ function renderDashboard() {
         } else if (a.dispatchHub) {
           dispatchBlock = `<div style="margin-bottom:6px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:3px; font-size:10px; color:#67e8f9;">📦 Réception centralisée à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub} — les autres boutiques reçoivent leur lot par rétrocession (transport Fabien).</div>`;
         }
-        return dispatchBlock + `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        return commandeAdminBlock + paCommandeBlock + dispatchBlock + `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
           ${remplBlock}
           <span style="font-size:10px; color:#64748b;">Entrée en fanfare ?</span>
           ${fanfareChips}
@@ -19624,6 +19713,10 @@ function submitNewOp() {
   const mecaType = (document.getElementById('opMecaType').value || '').trim();
   const mecaDescription = (document.getElementById('opMecaDescription').value || '').trim();
   const partenaire = (document.getElementById('opPartenaire').value || '').trim();
+  // Feature 2026-06-18 : commande gérée par l'admin + prix de saisie temporaire
+  const commandeAdmin = !!(document.getElementById('opCommandeAdmin') && document.getElementById('opCommandeAdmin').checked);
+  const _paCmdRaw = parseFloat(String((document.getElementById('opPaCommande') || {}).value || '').replace(',', '.'));
+  const paCommande = (isFinite(_paCmdRaw) && _paCmdRaw > 0) ? _paCmdRaw : undefined;
 
   const newOp = {
     id: 'OP-' + String(nextOpId++).padStart(4, '0'),
@@ -19636,14 +19729,17 @@ function submitNewOp() {
     mecanique: mecaType ? { type: mecaType, params: {}, description: mecaDescription } : { type: null, params: {}, description: mecaDescription },
     prixActionId: null, auto: false, etats: {}
   };
+  if (commandeAdmin) newOp.commandeAdmin = true;
+  if (paCommande !== undefined) newOp.paCommande = paCommande;
   seedOpDefaults(newOp);
   ensureOpSteps(newOp);
   pushOpTraced(newOp, 'submitNewOp');
   logAction('Nouvelle OP', (OP_TYPE_META[type] || {}).label + ' — ' + (produitLibre ? produitLibre.libelle : _logProdName(produitIds[0])));
   // Reset des champs (on garde Type et Campagne pour enchaîner les vagues d'une même campagne)
-  ['opKit','opDateFin','opComment','opLibreLibelle','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment','opMecaType','opMecaDescription','opPartenaire'].forEach(id => {
+  ['opKit','opDateFin','opComment','opLibreLibelle','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment','opMecaType','opMecaDescription','opPartenaire','opPaCommande'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
+  const _opCmdAdminEl = document.getElementById('opCommandeAdmin'); if (_opCmdAdminEl) _opCmdAdminEl.checked = false;
   // Si on vient de créer une nouvelle campagne, on la sélectionne dans le dropdown
   // pour que la 2ème vague soit proposée d'emblée sous elle.
   if (campagneSel === '__new__' && campagneId) {
@@ -19652,6 +19748,8 @@ function submitNewOp() {
   } else {
     opPreselectCampagneId = campagneSel || '';
   }
+  // Re-synchro pour propager commandeAdmin/paCommande vers l'action RENTRER liée si elle existe déjà.
+  try { syncAutoActions(); } catch(e) {}
   saveData();
   renderOps();
   renderDashboard();
@@ -20501,6 +20599,16 @@ function renderOps() {
       </select>
       <input type="text" id="opMecaDescription" placeholder="Description mécanique (ex: -50% le 2ème, 2 achetés 1 offert, -3€ promo…)" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:4px; font-size:11px;">
       <input type="text" id="opPartenaire" placeholder="Partenaire (ex: A&L, Cigusto HQ…)" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:4px; font-size:11px;">
+    </div>
+
+    <!-- Ligne 4-bis : commande gérée par l'admin + prix de saisie (pour les OP générant un "à rentrer") -->
+    <div style="display:flex; gap:14px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#cbd5e1; cursor:pointer;">
+        <input type="checkbox" id="opCommandeAdmin" style="cursor:pointer; accent-color:#a78bfa;">
+        📦 Commande gérée par moi <span style="color:#64748b;">(l'équipe réceptionne &amp; saisit en stock)</span>
+      </label>
+      <span style="font-size:11px; color:#64748b;">Prix de saisie HT pour cette commande :</span>
+      <input type="number" step="0.01" min="0" id="opPaCommande" placeholder="ex : 1.94 (si ≠ prix normal)" title="Prix d'achat à saisir pour CETTE commande. Le prix normal de la fiche reste inchangé." style="width:170px; padding:6px 8px; background:#0f172a; color:#86efac; border:1px solid #334155; border-radius:4px; font-size:11px; text-align:right;">
     </div>
 
     <!-- Ligne 5 : commentaire + bouton -->
