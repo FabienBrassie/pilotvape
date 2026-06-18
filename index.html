@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 18:47</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 18:56</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -21043,18 +21043,18 @@ function renderOps() {
           const cnb = opsInC.length;
           const cnbAct = opsInC.filter(o => opTimeStatus(o) !== 'TERMINEE').length;
           const datesL = (c.dateDebut || c.dateFin)
-            ? `<span style="font-size:9.5px; color:#fbbf24; padding:1px 6px; background:#f59e0b15; border:1px solid #f59e0b40; border-radius:3px;">${fmtFR(c.dateDebut) || '?'} → ${fmtFR(c.dateFin) || '?'}</span>`
+            ? `<span style="font-size:9.5px; color:#c4b5fd; padding:1px 6px; background:#8b5cf615; border:1px solid #8b5cf640; border-radius:3px;">${fmtFR(c.dateDebut) || '?'} → ${fmtFR(c.dateFin) || '?'}</span>`
             : '';
           const campDots = renderAveragedShopDots(opsInC, opShopFilter);
-          secInner += `<div style="margin:4px 8px; background:#020617; border:1px solid #f59e0b40; border-left:3px solid #f59e0b; border-radius:5px; overflow:hidden;">
-            <div onclick="toggleCampagneCollapse('${cid}')" style="padding:5px 10px; cursor:pointer; display:flex; align-items:center; gap:8px; background:#f59e0b08;">
-              <span style="color:#f59e0b; font-size:11px; font-weight:700;">${isCampCol ? '▸' : '▾'}</span>
-              <span style="font-size:11px; color:#fbbf24; font-weight:700; letter-spacing:0.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;">📣 ${c.nom}</span>
+          secInner += `<div style="margin:4px 8px; background:${isCampCol ? '#020617' : '#17122e'}; border:1px solid ${isCampCol ? '#8b5cf640' : '#8b5cf666'}; border-left:3px solid #8b5cf6; border-radius:5px; overflow:hidden;">
+            <div onclick="toggleCampagneCollapse('${cid}')" style="padding:5px 10px; cursor:pointer; display:flex; align-items:center; gap:8px; background:#8b5cf61a;">
+              <span style="color:#a78bfa; font-size:11px; font-weight:700;">${isCampCol ? '▸' : '▾'}</span>
+              <span style="font-size:11px; color:#c4b5fd; font-weight:700; letter-spacing:0.3px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:1;">📣 ${c.nom}</span>
               ${datesL || ''}
               <span style="font-size:9.5px; color:#94a3b8; white-space:nowrap;">${cnb} OP${cnb > 1 ? 's' : ''}${cnbAct > 0 ? ` · <span style="color:#a78bfa; font-weight:700;">${cnbAct} active${cnbAct > 1 ? 's' : ''}</span>` : ''}</span>
               <span style="display:inline-flex; gap:3px;">${campDots}</span>
             </div>
-            ${isCampCol ? '' : `<div style="padding:4px 0;">${opsInC.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('')}</div>`}
+            ${isCampCol ? '' : `<div style="padding:4px 0; background:#8b5cf610;">${opsInC.map(op => renderOpCardHtml(op, { shopFilter: opShopFilter, compact: true })).join('')}</div>`}
           </div>`;
         });
         // OPs sans campagne — affichées à plat
@@ -21118,7 +21118,7 @@ function renderOps() {
         const _cnbTerm = _cnb - _cnbAct;
         const _nbHorsFenetre = opsInC.filter(o => isOpOutsideCampagne(o).outside).length;
         const _datesLbl = (c.dateDebut || c.dateFin)
-          ? `<span style="font-size:9.5px; color:#fbbf24; padding:1px 6px; background:#f59e0b15; border:1px solid #f59e0b40; border-radius:3px;">${fmtFR(c.dateDebut) || '?'} → ${fmtFR(c.dateFin) || '?'}</span>`
+          ? `<span style="font-size:9.5px; color:#c4b5fd; padding:1px 6px; background:#8b5cf615; border:1px solid #8b5cf640; border-radius:3px;">${fmtFR(c.dateDebut) || '?'} → ${fmtFR(c.dateFin) || '?'}</span>`
           : '<span></span>';
         const _commentLbl = c.commentaire
           ? ` <span style="font-size:9.5px; color:#94a3b8; font-style:italic;">— ${c.commentaire}</span>`
@@ -21152,10 +21152,10 @@ function renderOps() {
           });
         }
 
-        _campagnesInner += `<div style="margin: 0 6px 6px; background: #020617; border: 1px solid #f59e0b40; border-left: 3px solid #f59e0b; border-radius: 5px; overflow: hidden;">
-          <div onclick="toggleCampagneCollapse('${cid}')" style="padding: 6px 10px; cursor: pointer; display: grid; grid-template-columns: 14px minmax(0,1.6fr) 170px 130px 66px minmax(220px, max-content); align-items: center; gap: 8px; background: #f59e0b10;">
-            <span style="color: #f59e0b; font-size: 11px; font-weight: 700;">${_isCampCol ? '▸' : '▾'}</span>
-            <span style="font-size: 11px; color: #fbbf24; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📣 ${c.nom}${_termLbl}${_commentLbl}${_warnLbl}</span>
+        _campagnesInner += `<div style="margin: 0 6px 6px; background: ${_isCampCol ? '#020617' : '#17122e'}; border: 1px solid ${_isCampCol ? '#8b5cf640' : '#8b5cf666'}; border-left: 3px solid #8b5cf6; border-radius: 5px; overflow: hidden;">
+          <div onclick="toggleCampagneCollapse('${cid}')" style="padding: 6px 10px; cursor: pointer; display: grid; grid-template-columns: 14px minmax(0,1.6fr) 170px 130px 66px minmax(220px, max-content); align-items: center; gap: 8px; background: #8b5cf61a;">
+            <span style="color: #a78bfa; font-size: 11px; font-weight: 700;">${_isCampCol ? '▸' : '▾'}</span>
+            <span style="font-size: 11px; color: #c4b5fd; font-weight: 700; letter-spacing: 0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📣 ${c.nom}${_termLbl}${_commentLbl}${_warnLbl}</span>
             ${_datesLbl}
             <span style="font-size: 9.5px; color: #94a3b8; white-space: nowrap;">${_cnb} OP${_cnb > 1 ? 's' : ''}${_cnbAct > 0 ? ` · <span style="color:#a78bfa; font-weight:700;">${_cnbAct} active${_cnbAct > 1 ? 's' : ''}</span>` : ''}${_cnbTerm > 0 ? ` · <span style="color:#64748b;">${_cnbTerm} term.</span>` : ''}</span>
             <span style="display: inline-flex; gap: 3px; justify-content: center;">${_campDots}</span>
@@ -21163,11 +21163,11 @@ function renderOps() {
               <span onclick="event.stopPropagation(); openCampagneEtiquettesDialog('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Générer étiquettes pour tous les produits">🏷️</span>
               ${_hasPR ? `<span onclick="event.stopPropagation(); generateAffichePrixRouge('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Affiche PDF Prix Rouge">📄</span>` : ''}
               <span onclick="event.stopPropagation(); openCampagneFormulaire('${cid}', [])" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Ajouter ou retirer des OPs de cette campagne">📋 Gérer</span>
-              <span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Modifier le nom et les dates">✎</span>
+              <span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#8b5cf61a; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Modifier le nom et les dates">✎</span>
               <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
             </span>
           </div>
-          ${_isCampCol ? '' : `<div style="padding: 4px 0 8px 0;">${_campContent}</div>`}
+          ${_isCampCol ? '' : `<div style="padding: 4px 0 8px 0; background: #8b5cf610;">${_campContent}</div>`}
         </div>`;
       });
 
@@ -21177,10 +21177,10 @@ function renderOps() {
       const _totalCampActifs = filtered.filter(o => o.campagneId && opTimeStatus(o) !== 'TERMINEE').length;
       const _totalCampTerm = _totalCampOps - _totalCampActifs;
       const _campagnesBlocDots = renderAveragedShopDots(filtered.filter(o => o.campagneId), opShopFilter);
-      opsHtml += `<div style="margin-bottom: 10px; background: #0f172a; border: 1px solid #f59e0b40; border-left: 3px solid #f59e0b; border-radius: 6px; overflow: hidden;">
-        <div onclick="toggleOpTypeCollapse('_CAMPAGNES_')" style="padding: 6px 10px; cursor: pointer; display: grid; grid-template-columns: 14px minmax(0,1.6fr) 170px 130px 66px minmax(220px, max-content); align-items: center; gap: 8px; background: #f59e0b15;">
-          <span style="color: #f59e0b; font-size: 12px; font-weight: 700;">${_isBlocCampagnesColl ? '▸' : '▾'}</span>
-          <span style="font-size: 11px; color: #fbbf24; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;">📣 Campagnes</span>
+      opsHtml += `<div style="margin-bottom: 10px; background: ${_isBlocCampagnesColl ? '#0f172a' : '#140f28'}; border: 1px solid #8b5cf640; border-left: 3px solid #8b5cf6; border-radius: 6px; overflow: hidden;">
+        <div onclick="toggleOpTypeCollapse('_CAMPAGNES_')" style="padding: 6px 10px; cursor: pointer; display: grid; grid-template-columns: 14px minmax(0,1.6fr) 170px 130px 66px minmax(220px, max-content); align-items: center; gap: 8px; background: #8b5cf61f;">
+          <span style="color: #a78bfa; font-size: 12px; font-weight: 700;">${_isBlocCampagnesColl ? '▸' : '▾'}</span>
+          <span style="font-size: 11px; color: #c4b5fd; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;">📣 Campagnes</span>
           <span></span>
           <span style="font-size: 10px; color: #94a3b8; white-space: nowrap;">${_campIdsAll.length} camp. · ${_totalCampOps} OP${_totalCampOps > 1 ? 's' : ''}${_totalCampActifs > 0 ? ` · <span style="color:#a78bfa; font-weight:700;">${_totalCampActifs} act.</span>` : ''}${_totalCampTerm > 0 ? ` · <span style="color:#64748b;">${_totalCampTerm} term.</span>` : ''}</span>
           <span style="display: inline-flex; gap: 3px; justify-content: center;">${_campagnesBlocDots}</span>
