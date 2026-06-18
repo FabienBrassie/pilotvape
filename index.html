@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 18:35</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 18:47</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -17953,6 +17953,12 @@ function renderDashboard() {
         _prodLabel = a.produitId || '?';
       }
       const _opLabel = op ? (' · 📣 ' + ((OP_TYPE_META[op.type] || {}).label || op.type) + (op.dateDebut ? ' le ' + fmtFR(op.dateDebut) : '')) : '';
+      // Commande gérée par l'admin (feature 2026-06-18) : message explicite pour que les
+      // boutiques NE recommandent PAS (sinon doublon). On le garde visible dans "À anticiper"
+      // mais avec ce repère clair plutôt que de le masquer.
+      const _cmdAdminBadge = (a.type === 'RENTRER' && a.commandeAdmin === true)
+        ? ` <span style="font-size:9px; padding:0 5px; background:#7c3aed22; color:#c4b5fd; border:1px solid #a78bfa70; border-radius:3px; font-weight:700; white-space:nowrap;" title="Fabien passe la commande — réception + saisie seulement, ne pas recommander">📦 Commande gérée par Fabien</span>`
+        : '';
       let _delaiTxt;
       if (score < 0) _delaiTxt = 'OP démarrée il y a ' + (-score) + ' j';
       else if (score === 0) _delaiTxt = 'démarre aujourd\'hui';
@@ -17978,7 +17984,7 @@ function renderDashboard() {
         return '<span title="' + (SHOP_LABELS[sh] || sh) + ' — ' + nbDone + '/' + total + ' étape' + (total > 1 ? 's' : '') + '" style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; font-size:8px; font-weight:700; background:' + bg + '; color:' + txt + '; border:1.5px solid ' + col + '; border-radius:50%; margin-right:2px;">' + init + '</span>';
       }).join('');
       return `<div data-urgence-row="1" data-urgence-action="${a.id}" style="display:grid; grid-template-columns: minmax(0,1fr) 80px 110px ${_shopsToShow.length * 18 + 6}px 100px; gap:8px; align-items:center; padding:6px 10px 6px 12px; background:${meta.bg}; border-left:3px solid ${meta.color}; border-radius:3px; margin:0 6px 3px; cursor:pointer; transition:background 0.12s; font-size:11px;" onmouseover="this.style.background='${meta.color}25'" onmouseout="this.style.background='${meta.bg}'">
-        <span style="color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:none;">${_prodLabel}<span style="color:#94a3b8; font-weight:400; font-size:9.5px;">${_opLabel}</span></span>
+        <span style="color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; pointer-events:none;">${_prodLabel}<span style="color:#94a3b8; font-weight:400; font-size:9.5px;">${_opLabel}</span>${_cmdAdminBadge}</span>
         <span style="pointer-events:none;">${_typeBadge}</span>
         <span style="color:${meta.color}; font-size:10px; font-weight:700; text-align:right; white-space:nowrap; pointer-events:none;">${_delaiTxt}</span>
         <span style="text-align:center; pointer-events:none;">${_dots}</span>
