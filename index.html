@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 21:18</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 21:34</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -15185,7 +15185,19 @@ function renderDashboard() {
 
   // SORTIR motif=REPRISE sont sortis du flux "à sortir" classique et atterrissent dans une section dédiée
   // "À reprendre" (workflow reprise fournisseur — désactivation Swappy, comptage, mise de côté).
-  const sortir = actions.filter(a => (a.type === 'SORTIR' || a.type === 'SWAP_COMPOSANT') && a.motifSortie !== 'REPRISE' && isVisible(a));
+  // One-shot (réglage Fabien 2026-06-18) : la sortie (destockage final) d'un one-shot ne s'affiche
+  // PAS tant que la rentrée n'est pas validée (produit pas encore reçu) — sinon "à sortir" un produit
+  // pas encore rentré est déroutant. On masque donc la SORTIR d'une OP COUP dont le RENTRER lié
+  // n'est pas FAIT.
+  const _oneShotSortirAvantReception = (a) => {
+    if (a.type !== 'SORTIR') return false;
+    const coupOp = ops.find(o => o.type === 'COUP' && o.sortirActionId === a.id && !o._archived);
+    if (!coupOp || !coupOp.rentrerActionId) return false;
+    const aR = actions.find(x => x.id === coupOp.rentrerActionId);
+    if (!aR || aR.annulee) return false; // pas de rentrée à attendre → comportement normal
+    return actionGlobalState(aR) !== 'FAIT'; // rentrée pas encore validée → masquer la sortie
+  };
+  const sortir = actions.filter(a => (a.type === 'SORTIR' || a.type === 'SWAP_COMPOSANT') && a.motifSortie !== 'REPRISE' && isVisible(a) && !_oneShotSortirAvantReception(a));
   // Filtre spécifique pour les reprises : on garde même les actions 100% cochées (FAIT) pour que
   // Fabien voie le bilan et puisse clôturer manuellement la campagne (sinon tout disparaîtrait
   // avant qu'il n'envoie le bilan au fournisseur). Annulées et archivées restent exclues.
@@ -15464,7 +15476,10 @@ function renderDashboard() {
     // C'est ici que ça se joue : si cette boutique garde la réf pour ses clients, un
     // bouton court-circuite ses coches. Bandeau si c'est déjà fait.
     let ccZone = '';
-    if (a.type === 'SORTIR' && a.motifSortie !== 'REPRISE') {
+    // Inclut désormais les REPRISES (demande Fabien 2026-06-18) : une boutique peut garder une réf
+    // en tiroir pour un client plutôt que de la renvoyer au fournisseur. Court-circuite ses coches
+    // de reprise (elle ne renvoie pas), la reprise continue ailleurs. garderEnTiroir est générique.
+    if (a.type === 'SORTIR') {
       const _ccProd = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
         : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
         : baseKits.find(k => k.id === a.produitId);
