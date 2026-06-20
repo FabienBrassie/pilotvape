@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-18 22:12</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-20 14:17</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3271,6 +3271,9 @@ async function ouvrirCommandeClient(produitType, produitId, parfumId) {
         cible.commandeClient = un ? cc : null;
         cible._ts = new Date().toISOString();
         prod._ts = new Date().toISOString(); // propage aussi la gamme (merge parfums par _ts)
+        // Court-circuiter la sortie active pour les boutiques qui gardent en tiroir (même effet
+        // que le bouton "garder en tiroir" du dashboard) — sinon l'action SORTIR reste "en cours".
+        try { _courtCircuiterTiroirSortir(); } catch (e) { console.error('[CC-tiroir]', e); }
         if (typeof logAction === 'function') logAction('Commande client', nom + ' → ' + (un ? Object.keys(cc).join(', ') : 'aucune boutique'));
         saveData();
         if (typeof renderKits === 'function') renderKits();
@@ -3356,6 +3359,43 @@ async function garderEnTiroir(actionId, shop) {
   try { if (typeof renderLiqAll === 'function') renderLiqAll(); } catch (e) {}
   try { if (typeof renderWalls === 'function') renderWalls(); } catch (e) {}
   try { if (typeof renderOps === 'function') renderOps(); } catch (e) {}
+}
+
+// ── Court-circuit "tiroir" unifié (fix 2026-06-18) ──────────────────────────────
+// Une boutique qui garde une réf en tiroir (commande client) ne fait pas la sortie : ses coches
+// de la SORTIR doivent être court-circuitées (faites) pour que l'action puisse se terminer et
+// disparaître. Le bouton dashboard "garder en tiroir" le faisait déjà ; la FENÊTRE commande
+// client (ouvrirCommandeClient) posait le flag SANS court-circuiter → l'action restait "en cours".
+// Cette fonction applique le court-circuit pour toute boutique en tiroir sur une SORTIR active.
+// Appelée à l'enregistrement de la commande client ET dans syncAutoActions (répare l'existant).
+function _courtCircuiterTiroirSortir() {
+  actions.forEach(a => {
+    if (a.type !== 'SORTIR' || a.annulee || a._archived) return;
+    if (a.motifSortie === 'REPRISE') return; // une reprise en tiroir : géré séparément, pas de cascade SORTI
+    if (typeof actionGlobalState === 'function' && actionGlobalState(a) === 'FAIT') return;
+    const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
+      : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
+      : baseKits.find(k => k.id === a.produitId);
+    if (!prod) return;
+    let cible = prod;
+    if (a.produitType === 'liq' && a.produitParfumId && Array.isArray(prod.parfums)) {
+      cible = prod.parfums.find(p => p.id === a.produitParfumId) || prod;
+    }
+    const cc = cible.commandeClient;
+    if (!cc) return;
+    SHOPS.forEach(sh => {
+      if (!cc[sh]) return;
+      const st = a.etats && a.etats[sh];
+      if (!st || st.done) return; // déjà fait / court-circuité
+      if (!st.steps) st.steps = makeStepMap(a);
+      if (!st._stepTs) st._stepTs = {};
+      const _ts = new Date().toISOString();
+      getActionSteps(a).forEach(s => { if (st.steps[s.key] !== true) { st.steps[s.key] = true; st._stepTs[s.key] = _ts; } });
+      a._ts = _ts;
+      _applyActionShopChange(a, sh);
+      try { syncActionStepsToOp(a); } catch (e) {}
+    });
+  });
 }
 
 // ── Helpers natures d'étapes (chantier intelligence métier — 2026-06-11) ─────────
@@ -4240,6 +4280,9 @@ function syncAutoActions() {
   syncMiseEnPlaceActions();
   syncPriceActions();
   syncOpsFromVerdicts();
+  // Répare les sorties où une boutique garde en tiroir mais ses coches n'ont pas été
+  // court-circuitées (flag posé via la fenêtre commande client) → l'action peut se terminer.
+  try { _courtCircuiterTiroirSortir(); } catch (e) { console.error('[CC-tiroir sync]', e); }
   // Après toutes les créations auto, demander confirmation des dates (non-bloquant)
   if (_opsPendingDateConfirm.length > 0) {
     setTimeout(() => _flushPendingDateConfirm(), 200);
