@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-06-22 13:47 — couche mobile salarié (agenda type Google Agenda + bouton +), desktop inchangé -->
+<meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
 *{box-sizing:border-box;margin:0;padding:0}
@@ -241,6 +243,65 @@ body.dark .dayhead.today b{background:#3b82f6}
 .yrrow.done{opacity:.5}
 .ybadge{background:#7c3aed;color:#fff;border-radius:6px;padding:1px 7px;font-weight:800;font-size:12px;min-width:42px;text-align:center}
 .ydone{color:var(--green);font-weight:700;font-size:12px;margin-left:8px}
+
+/* ============ MOBILE (téléphone) — ajouté 2026-06-22, ne touche pas au desktop ============ */
+/* --- Agenda salarié type Google Agenda (masqué par défaut, affiché en JS sur mobile) --- */
+#magenda{display:none}
+.magh{display:flex;align-items:center;gap:10px;padding:6px 2px 12px}
+.magnav{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:50%;width:38px;height:38px;font-size:15px;cursor:pointer;flex:none}
+.magtitle{flex:1;text-align:center;line-height:1.2}
+.magtitle b{font-size:15px}
+.magtitle span{display:block;font-size:11px;color:var(--mut)}
+.magstrip{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;margin-bottom:14px}
+.magday{display:flex;flex-direction:column;align-items:center;gap:2px;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:7px 0 6px;cursor:pointer;min-height:58px;position:relative}
+.magday .magwd{font-size:10.5px;color:var(--mut);font-weight:700;text-transform:uppercase}
+.magday .magnum{font-size:16px;font-weight:700;line-height:1}
+.magday.today .magnum{color:var(--blue)}
+.magday.sel{background:var(--blue);border-color:var(--blue)}
+.magday.sel .magwd,.magday.sel .magnum{color:#fff}
+.magdot{width:6px;height:6px;border-radius:50%;margin-top:1px}
+.magday.sel .magdot{box-shadow:0 0 0 1.5px #fff}
+.magdetail{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px 14px 16px}
+.magdate{font-size:13px;font-weight:700;color:var(--mut);margin-bottom:12px;text-transform:capitalize}
+.magcard{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-left:4px solid var(--mut);border-radius:12px;padding:11px 12px;margin-bottom:9px}
+.magtime{font-size:15px;font-weight:700;white-space:nowrap}
+.magmeta{flex:1;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.magshop{font-size:12.5px;color:var(--mut);font-weight:600}
+.maghs{background:#0891b2;color:#fff;font-size:10px;font-weight:800;padding:1px 6px;border-radius:6px}
+.magdur{font-size:12.5px;color:var(--mut);font-weight:700;white-space:nowrap}
+.magtot{font-size:13px;text-align:right;margin-top:4px;color:var(--txt)}
+.magnote{font-size:12.5px;color:var(--mut);margin-top:10px;background:var(--bg);border-radius:10px;padding:8px 10px}
+.magempty{font-size:14px;font-weight:600;color:var(--mut);padding:14px 4px;text-align:center}
+.magempty.conge{color:#caa204}.magempty.mal{color:var(--red)}.magempty.ecole{color:#ea7317}.magempty.rest{color:var(--mut)}
+/* --- Bouton flottant « + » (demande) --- */
+#mfab{display:none;position:fixed;right:18px;bottom:20px;width:58px;height:58px;border-radius:50%;border:none;background:var(--green);color:#fff;font-size:32px;line-height:1;font-weight:300;box-shadow:0 8px 22px rgba(22,163,74,.45);cursor:pointer;z-index:60;align-items:center;justify-content:center;padding:0}
+body.mobsal #mfab{display:flex}
+body.mobsal main{padding-bottom:90px}
+
+@media (max-width:680px){
+  /* En-tête compact mais fonctionnel */
+  header{padding:8px 10px;gap:6px}
+  header h1{font-size:15px;margin-right:2px}
+  .bchip{padding:6px 12px;font-size:13px}
+  #weekrel,#goto,#savestate{display:none}
+  #weeklabel{min-width:0;font-size:13px}
+  .wnav{gap:5px}
+  button.nav{padding:8px 11px;font-size:14px}
+  .seg button{padding:7px 11px;font-size:13px}
+  header input,header select{padding:7px 8px;font-size:14px}
+  /* Panneaux (modales) en plein écran sur téléphone */
+  .panel{position:fixed;top:0;left:0;transform:none;width:100vw!important;max-width:100vw!important;max-height:100vh;height:100vh;border-radius:0;padding:16px 14px calc(env(safe-area-inset-bottom) + 24px);border:none}
+  #login .box{width:min(360px,94vw);padding:24px 22px}
+  #login input{padding:11px;font-size:16px}
+  #login .bchip{padding:10px 16px;font-size:14px}
+  /* Grilles desktop (mois / 3 boutiques / semaine) : défilables horizontalement au lieu d'être écrasées */
+  #calwrap,#monthwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #calhead,#calbody,#evband{min-width:620px}
+  .mgrid,.sgrid{min-width:620px}
+  .addrow{flex-direction:column;align-items:stretch}
+  .addrow select,.addrow input,.addrow button{width:100%}
+  button.act{padding:10px 14px;font-size:14px}
+}
 </style>
 </head>
 <body>
@@ -295,10 +356,12 @@ body.dark .dayhead.today b{background:#3b82f6}
   <div id="minetools" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px"></div>
   <div id="calwrap"><div id="calhead"></div><div id="evband"></div><div id="calbody"></div></div>
   <div id="monthwrap" style="display:none"></div>
+  <div id="magenda"></div>
   <div id="hours"></div>
   <div id="alerts"></div>
   <div class="small adminonly" style="margin-top:8px">Glisse un bloc pour le déplacer, ⌥ Option + glisse pour le dupliquer, étire-le par le bas pour changer la durée, clique dessus pour les détails, clique-glisse sur une zone vide pour créer. Chaque modification te demande : ce jour uniquement, ou toutes les semaines.</div>
 </main>
+<button id="mfab" onclick="togMine()" title="Faire une demande (congé, absence)" aria-label="Faire une demande">+</button>
 <div id="edpanel" class="panel"></div>
 <div id="hdetail" class="panel"></div>
 <div id="evpanel" class="panel"></div>
@@ -1461,6 +1524,62 @@ function renderMonth(){
   h+='</div>';
   $('monthwrap').innerHTML=h;
 }
+// ============ MOBILE — agenda salarié type Google Agenda ============
+let mAgDay=null;
+function isMobile(){return window.matchMedia('(max-width:680px)').matches}
+let _mqMob=window.matchMedia('(max-width:680px)');
+(_mqMob.addEventListener?_mqMob.addEventListener('change',()=>{try{render()}catch(e){}}):_mqMob.addListener(()=>{try{render()}catch(e){}}));
+function selMAg(d){mAgDay=d;renderMobileAgenda();}
+function bcol(id){const v=getComputedStyle(document.body).getPropertyValue('--'+id).trim();return v||'#64748b'}
+function _mStateLabel(p){
+  if(p.st==='repos')return{emo:'😴',txt:'Repos',cls:'rest'};
+  if(p.st==='conge')return{emo:'🏖',txt:p.pend?'Congé (en attente)':'Congé',cls:'conge'};
+  if(p.st==='maladie')return{emo:'🤒',txt:'Arrêt maladie',cls:'mal'};
+  if(p.st==='ecole')return{emo:'🎓',txt:'École',cls:'ecole'};
+  return null;
+}
+function renderMobileAgenda(){
+  const e=emp(ROLE&&ROLE.empId);if(!e){$('magenda').innerHTML='';return}
+  const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
+  const today=todayISO();
+  if(!mAgDay||!days.includes(mAgDay))mAgDay=days.includes(today)?today:days[0];
+  let h='<div class="magh">'+
+    '<button class="magnav" onclick="navCal(-1)" aria-label="Semaine précédente">◀</button>'+
+    '<div class="magtitle"><b>'+esc(weekRange(curMonday))+'</b><span>'+esc(e.nom)+'</span></div>'+
+    '<button class="magnav" onclick="navCal(1)" aria-label="Semaine suivante">▶</button></div>';
+  // bande des 7 jours
+  h+='<div class="magstrip">';
+  for(const d of days){
+    const p=presence(e,d),isT=d===today,sel=d===mAgDay;
+    let mk='';
+    if(p.st==='present'&&p.blocks&&p.blocks.length)mk='<span class="magdot" style="background:'+bcol(p.blocks[0][2]||p.b)+'"></span>';
+    else if(p.st==='conge'||p.st==='maladie'||p.st==='ecole')mk='<span class="magdot" style="background:#cbd5e1"></span>';
+    h+='<button class="magday'+(sel?' sel':'')+(isT?' today':'')+'" onclick="selMAg(\''+d+'\')">'+
+       '<span class="magwd">'+DAYJ[wdOf(d)]+'</span><span class="magnum">'+(+d.slice(8,10))+'</span>'+mk+'</button>';
+  }
+  h+='</div>';
+  // détail du jour sélectionné
+  const p=presence(e,mAgDay);
+  h+='<div class="magdetail"><div class="magdate">'+DAYJ[wdOf(mAgDay)]+' '+(+mAgDay.slice(8,10))+' '+MOIS3[+mAgDay.slice(5,7)]+(mAgDay===today?' · aujourd’hui':'')+'</div>';
+  if(p.st==='present'&&p.blocks&&p.blocks.length){
+    const bl=p.blocks.slice().sort((a,b)=>t2m(a[0])-t2m(b[0]));let tot=0;
+    for(const b of bl){
+      const dur=durMin(b[0],b[1]);tot+=dur;const bo=bout(b[2])||bout(p.b);
+      h+='<div class="magcard" style="border-left-color:'+bcol(b[2]||p.b)+'">'+
+        '<div class="magtime">'+fmtH(b[0])+' – '+fmtH(b[1])+'</div>'+
+        '<div class="magmeta"><span class="magshop">'+esc(bo?bo.nom:'')+'</span>'+(b[3]?'<span class="maghs">HS</span>':'')+'</div>'+
+        '<div class="magdur">'+fmtDur(dur)+'</div></div>';
+    }
+    h+='<div class="magtot">Total : <b>'+fmtDur(tot)+'</b>'+(p.pend?' · <span style="color:#d97706">congé en attente</span>':'')+'</div>';
+    if(p.note)h+='<div class="magnote">📝 '+esc(p.note)+'</div>';
+  }else{
+    const st=_mStateLabel(p);
+    h+='<div class="magempty'+(st?' '+st.cls:'')+'">'+(st?st.emo+' '+st.txt:'— pas de planning ce jour —')+'</div>';
+    if(p.note)h+='<div class="magnote">📝 '+esc(p.note)+'</div>';
+  }
+  h+='</div>';
+  $('magenda').innerHTML=h;
+}
 function navMin(){return (ROLE&&(ROLE.type==='boutique'||ROLE.type==='salarie'||ROLE.type==='rh'))?monday(S.goLive):null;}
 function clampMonday(){const mn=navMin();if(mn&&curMonday<mn)curMonday=mn;}
 function render(){
@@ -1487,6 +1606,17 @@ function render(){
   $('alerts').style.display=(grid||mine||!isAdmin())?'none':'';
   $('people').style.display=(grid||mine)?'none':'';   // pas de chips de masquage en Mon planning
   if($('minetools'))$('minetools').style.display=mine?'flex':'none'; // barre des calendriers perso (Mon planning)
+  // ---- MOBILE salarié : agenda type Google Agenda (ne s'active que sur petit écran + rôle salarié) ----
+  const mobSal=(ROLE&&ROLE.type==='salarie'&&isMobile());
+  document.body.classList.toggle('mobsal',mobSal);
+  if(mobSal){
+    $('calwrap').style.display='none';$('monthwrap').style.display='none';$('hours').style.display='none';$('alerts').style.display='none';$('people').style.display='none';
+    if($('minetools'))$('minetools').style.display='none';
+    if(month){$('magenda').style.display='none';renderMonth();$('monthwrap').style.display='';}
+    else{renderMobileAgenda();$('magenda').style.display='block';}
+    saveUI();return;
+  }
+  if($('magenda'))$('magenda').style.display='none';
   if(synth){renderSynth();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
   if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);saveUI();return;}
