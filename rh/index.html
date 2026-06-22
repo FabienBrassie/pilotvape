@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 14:34 — mobile salarié : grille qui tient (minmax) + retour depuis le mode complet, desktop inchangé -->
+<!-- v 2026-06-22 14:52 — mobile salarié : swipe = semaine +/- <!-- v 2026-06-22 14:47 — mobile admin : édition au doigt (pont tactile) + en-tête réorganisé + panneaux plein écran, desktop inchangé --> pastilles collègues masquer/afficher sous le planning -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -250,6 +250,14 @@ body.dark .dayhead.today b{background:#3b82f6}
 /* Barre mobile minimaliste (remplace l'en-tête pour le salarié) */
 #mtop{display:none}
 #mreq{display:none}
+/* Pastilles collègues sous le planning (vue perso mobile) */
+#mcoll{display:none}
+body.mobplan #mcoll{display:block;margin-top:12px}
+.mcoll-t{font-size:11.5px;color:var(--mut);font-weight:600;margin-bottom:7px;padding:0 2px}
+.mcoll-chips{display:flex;flex-wrap:wrap;gap:7px}
+.mcoll-chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:999px;padding:7px 12px;font-size:12.5px;font-weight:600;cursor:pointer}
+.mcoll-chip .cd{width:9px;height:9px;border-radius:50%;flex:none}
+.mcoll-chip.off{opacity:.42;text-decoration:line-through;background:var(--bg)}
 /* --- MODE PLANNING PERSO MOBILE : on ne montre QUE la grille « Mon planning » --- */
 body.mobplan header{display:none!important}
 body.mobplan #hours,body.mobplan #minetools,body.mobplan #alerts,body.mobplan #people,body.mobplan #testbanner{display:none!important}
@@ -277,25 +285,37 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
 .mreq-box .mrq-msg{display:none;margin-top:12px;font-size:13px;font-weight:600;text-align:center}
 
 @media (max-width:680px){
-  /* --- En-tête compact mais fonctionnel --- */
-  header{padding:8px 10px;gap:6px}
+  /* --- En-tête admin réorganisé en lignes nettes (au lieu d'un fouillis qui déborde) --- */
+  header{padding:8px 10px;gap:6px 8px;flex-wrap:wrap}
   header h1{font-size:15px;margin-right:2px}
-  .bchip{padding:6px 12px;font-size:13px}
+  .bchip{padding:7px 13px;font-size:13px}
   #weekrel,#goto,#savestate{display:none}
-  #weeklabel{min-width:0;font-size:13px}
-  .wnav{gap:5px}
-  button.nav{padding:8px 10px;font-size:14px}
-  .seg button{padding:7px 10px;font-size:13px}
-  header input,header select{padding:7px 8px;font-size:14px}
+  #weeklabel{min-width:0;font-size:13px;flex:1;text-align:center}
+  .wnav{margin-left:0;width:100%;gap:6px;flex-wrap:wrap;justify-content:center}
+  .seg{width:100%;order:-1}
+  .seg button{flex:1;padding:9px 6px;font-size:12.5px}
+  button.nav{padding:9px 12px;font-size:15px}
+  header button[id="setbtn"],#testbtn,#themebtn,#minebtn,#reqbtn{width:44px;height:42px;font-size:18px;display:inline-flex;align-items:center;justify-content:center;padding:0}
+  #syncdot{order:9;font-size:10px}
+  .whoami{font-size:11px;order:8}
+  header input,header select{padding:8px;font-size:16px}
   main{padding:10px 8px 90px}
-  /* --- Panneaux (modales) en plein écran sur téléphone --- */
-  .panel{position:fixed;top:0;left:0;transform:none;width:100vw!important;max-width:100vw!important;max-height:100vh;height:100vh;border-radius:0;padding:16px 14px calc(env(safe-area-inset-bottom) + 24px);border:none}
+  /* --- Panneaux (modales) en plein écran, bouton Fermer toujours accessible --- */
+  .panel{position:fixed;top:0;left:0;transform:none;width:100vw!important;max-width:100vw!important;max-height:100vh;height:100vh;border-radius:0;padding:14px 12px calc(env(safe-area-inset-bottom) + 24px);border:none}
+  .panel .phead{position:sticky;top:0;background:var(--card);z-index:3;margin:-14px -12px 8px;padding:12px;border-bottom:1px solid var(--line)}
+  .panel input,.panel select,.panel textarea{font-size:16px}
+  .panel .seg button{padding:8px 9px;font-size:13px}
+  .panel .ecard,.panel .row,.panel .brow{row-gap:8px}
+  .paiecol{overflow-x:auto}
   #login .box{width:min(360px,94vw);padding:24px 22px}
   #login input{padding:11px;font-size:16px}
   #login .bchip{padding:10px 16px;font-size:14px}
   .addrow{flex-direction:column;align-items:stretch}
   .addrow select,.addrow input,.addrow button{width:100%}
-  button.act{padding:10px 14px;font-size:14px}
+  button.act{padding:11px 14px;font-size:14px}
+  /* Modale de portée (ce jour / toutes les semaines) bien tappable */
+  #scopemodal .box{width:min(340px,92vw)}
+  #scopemodal button{padding:13px;font-size:15px}
 
   /* --- GRILLE HORAIRE type Google Agenda : faire tenir 7 colonnes sur le téléphone --- */
   /* minmax(0,1fr) : empêche le contenu d'élargir une colonne (sinon la grille déborde et se décale) */
@@ -380,6 +400,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   <div id="minetools" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px"></div>
   <div id="calwrap"><div id="calhead"></div><div id="evband"></div><div id="calbody"></div></div>
   <div id="monthwrap" style="display:none"></div>
+  <div id="mcoll"></div>
   <div id="hours"></div>
   <div id="alerts"></div>
   <div class="small adminonly" style="margin-top:8px">Glisse un bloc pour le déplacer, ⌥ Option + glisse pour le dupliquer, étire-le par le bas pour changer la durée, clique dessus pour les détails, clique-glisse sur une zone vide pour créer. Chaque modification te demande : ce jour uniquement, ou toutes les semaines.</div>
@@ -1477,6 +1498,7 @@ function renderMineWeek(){
     if(mb.size){
       const evs=[];
       for(const e of S.employees.filter(x=>x.actif)){
+        if(e.id!==me.id&&hidden.has(e.id))continue; // collègue masqué (jamais soi-même)
         const p=presence(e,d);if(p.st!=='present'||!p.blocks)continue;
         p.blocks.forEach(bl=>{if(!mb.has(bl[2]))return;evs.push({e,bl,me:e.id===me.id,s:t2m(bl[0]),f:t2m(bl[1]),hs:!!bl[3]});});
       }
@@ -1566,6 +1588,40 @@ function renderMonth(){
 function isMobile(){return window.matchMedia('(max-width:680px)').matches}
 let _mqMob=window.matchMedia('(max-width:680px)');
 (_mqMob.addEventListener?_mqMob.addEventListener('change',()=>{try{render()}catch(e){}}):_mqMob.addListener(()=>{try{render()}catch(e){}}));
+// Swipe horizontal sur le planning = semaine précédente / suivante (vue salarié, lecture seule — pas de conflit avec l'édition admin)
+let _sw=null;
+document.addEventListener('touchstart',ev=>{
+  if(isAdmin())return;const t=ev.touches[0];if(!t||!ev.target.closest('#calwrap'))return;
+  _sw={x:t.clientX,y:t.clientY};
+},{passive:true});
+document.addEventListener('touchend',ev=>{
+  if(!_sw||isAdmin()){_sw=null;return}
+  const s=_sw;_sw=null;const t=ev.changedTouches&&ev.changedTouches[0];if(!t)return;
+  const dx=t.clientX-s.x,dy=t.clientY-s.y;
+  if(Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.6)navCal(dx<0?1:-1);
+},{passive:true});
+// Pastilles « collègues cette semaine » sous le planning (masquer / afficher), pour la vue planning perso mobile
+function renderMColl(){
+  const wrap=$('mcoll');if(!wrap)return;
+  const me=emp(ROLE&&ROLE.empId);if(!me){wrap.innerHTML='';return}
+  const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
+  const set=new Map();
+  for(const d of days){
+    const mb=new Set((presence(me,d).blocks||[]).map(b=>b[2]));
+    if(!mb.size)continue;
+    for(const e of S.employees.filter(x=>x.actif&&x.id!==me.id)){
+      const p=presence(e,d);if(p.st!=='present'||!p.blocks)continue;
+      if(p.blocks.some(b=>mb.has(b[2])))set.set(e.id,e);
+    }
+  }
+  const list=[...set.values()].sort((a,b)=>(a.nom||'').localeCompare(b.nom||''));
+  if(!list.length){wrap.innerHTML='';return}
+  let h='<div class="mcoll-t">Collègues cette semaine — appuie pour masquer / afficher</div><div class="mcoll-chips">';
+  for(const e of list){const off=hidden.has(e.id);
+    h+='<button class="mcoll-chip'+(off?' off':'')+'" onclick="togHide(\''+e.id+'\')"><span class="cd" style="background:'+colOf(e)+'"></span>'+esc(e.nom)+(off?' 🚫':'')+'</button>';
+  }
+  h+='</div>';wrap.innerHTML=h;
+}
 // Popup compacte « Faire une demande » (congé / arrêt maladie) pour le salarié
 function mrqTypeChg(){const t=$('mrq-type').value;$('mrq-note').placeholder=t==='maladie'?'Motif / précision (optionnel)':'Message à ton responsable (optionnel)';}
 function openMReq(){const m=$('mreq');if(!m)return;const msg=$('mrq-msg');msg.style.display='none';$('mrq-du').value='';$('mrq-au').value='';$('mrq-note').value='';$('mrq-type').value='conge';mrqTypeChg();m.classList.add('mreq-on');}
@@ -1618,7 +1674,7 @@ function render(){
   if($('minetools'))$('minetools').style.display=mine?'flex':'none'; // barre des calendriers perso (Mon planning)
   if(synth){renderSynth();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
-  if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);saveUI();return;}
+  if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);if(document.body.classList.contains('mobplan'))renderMColl();saveUI();return;}
   $('weeklabel').textContent=weekRange(curMonday);
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const today=todayISO();
@@ -2622,6 +2678,26 @@ document.addEventListener('mouseup',()=>{
   $('scopetitle').textContent=(d.dup?'Dupliquer':'Modifier')+' le bloc de '+emp(d.empId).nom+' ('+fmtH(m2t(d.du))+' – '+fmtH(m2t(d.au))+(pending.tgtIso!==pending.srcIso?', '+(d.dup?'copié':'déplacé')+' au '+DAYJ[wdOf(pending.tgtIso)]+' '+fmtCourt(pending.tgtIso):'')+') :';
   $('scopemodal').style.display='flex';
 });
+// ---- Pont TACTILE → souris : permet l'édition du planning au doigt (admin) sans toucher à la logique souris ----
+let _tDrag=false;
+function _tDispatch(type,x,y,el){(el||document.body).dispatchEvent(new MouseEvent(type,{bubbles:true,cancelable:true,clientX:x,clientY:y,button:0}));}
+document.addEventListener('touchstart',ev=>{
+  if(!isAdmin()||!drag&&ev.touches.length!==1)return;
+  const t=ev.touches[0];if(!t)return;
+  const el=document.elementFromPoint(t.clientX,t.clientY);
+  if(!el||!el.closest('.daycol')||el.closest('.panel'))return; // seulement sur la grille
+  _tDrag=true;ev.preventDefault(); // bloque le scroll + l'émulation souris pendant l'édition
+  _tDispatch('mousedown',t.clientX,t.clientY,el);
+},{passive:false});
+document.addEventListener('touchmove',ev=>{
+  if(!_tDrag)return;const t=ev.touches[0];if(!t)return;
+  ev.preventDefault();_tDispatch('mousemove',t.clientX,t.clientY,document.body);
+},{passive:false});
+document.addEventListener('touchend',ev=>{
+  if(!_tDrag)return;_tDrag=false;
+  const t=ev.changedTouches&&ev.changedTouches[0];
+  _tDispatch('mouseup',t?t.clientX:0,t?t.clientY:0,document.body);
+},{passive:false});
 function applyScope(scope){
   if(pendingCal){ // déplacement d'une entrée perso récurrente
     const p=pendingCal;pendingCal=null;$('scopemodal').style.display='none';
