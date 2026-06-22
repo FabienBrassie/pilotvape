@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 14:52 — mobile salarié : swipe = semaine +/- <!-- v 2026-06-22 14:47 — mobile admin : édition au doigt (pont tactile) + en-tête réorganisé + panneaux plein écran, desktop inchangé --> pastilles collègues masquer/afficher sous le planning -->
+<!-- v 2026-06-22 15:10 — fix : trait rouge de l'heure actuelle ajouté dans Mon planning (manquait) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1522,6 +1522,8 @@ function renderMineWeek(){
       const w=baseW/peN,l=baseL+o.col*w;
       bb+='<div class="blk" data-ce="'+x.id+'" title="'+esc(calName(x.calId))+' — '+esc(x.title)+' (glisse pour déplacer, étire le bas/haut pour la durée)" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 1px);width:calc('+w+'% - 3px);background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:30;cursor:grab"><b>'+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
     }
+    if(d===today){const now=new Date();const m=now.getHours()*60+now.getMinutes();
+      if(m>CAL_START&&m<CAL_END)bb+='<div class="nowline" style="top:'+((m-CAL_START)*PX)+'px"></div>';}
     bb+='</div>';
   }
   $('calbody').innerHTML=bb;
