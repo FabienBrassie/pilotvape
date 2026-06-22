@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-20 17:40</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-22 16:00</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -749,6 +749,7 @@ let _journalSearch = '';
 function isAdmin() { return currentRole === 'admin'; }
 
 function showLoginScreen() {
+  fetchAccessList(); // amorce la liste des codes partagés (sans bloquer l'affichage)
   // Si déjà loggé, ne rien faire
   if (currentRole === 'admin') { applyRoleUI(); return; }
   if (currentRole === 'boutique' && currentShop) { applyRoleUI(); return; }
@@ -770,18 +771,13 @@ function showLoginScreen() {
       <p style="color:#64748b; font-size:12px; margin-bottom:24px;">Pilotage commercial</p>
       <div style="display:flex; flex-direction:column; gap:12px;">
         <div style="display:flex; gap:8px; align-items:center;">
-          <input id="boutiquePinInput" type="password" placeholder="PIN Boutique" maxlength="10"
+          <input id="pvCodeInput" type="password" inputmode="text" placeholder="Ton code" maxlength="12" autocomplete="off"
             style="flex:1; padding:12px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:8px; font-size:14px; text-align:center;"
-            onkeydown="if(event.key==='Enter') loginAsBoutique()">
-          <button onclick="loginAsBoutique()" style="padding:12px 20px; background:#3b82f6; color:#fff; border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;">Boutique</button>
+            onkeydown="if(event.key==='Enter') pvLogin()">
+          <button onclick="pvLogin()" style="padding:12px 20px; background:#22c55e; color:#0f172a; border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;">Entrer</button>
         </div>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input id="adminPinInput" type="password" placeholder="PIN Admin" maxlength="10"
-            style="flex:1; padding:12px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:8px; font-size:14px; text-align:center;"
-            onkeydown="if(event.key==='Enter') loginAsAdmin()">
-          <button onclick="loginAsAdmin()" style="padding:12px 20px; background:#22c55e; color:#0f172a; border:none; border-radius:8px; font-size:14px; font-weight:700; cursor:pointer;">Admin</button>
-        </div>
-        <p id="loginError" style="color:#ef4444; font-size:11px; margin:0; display:none;">PIN incorrect</p>
+        <p id="loginError" style="color:#ef4444; font-size:11px; margin:0; display:none;">Code incorrect</p>
+        <p style="color:#475569; font-size:10.5px; margin:4px 0 0; line-height:1.4;">Ton code perso, ou le code de ta boutique.<br>Codes gérés dans le RH (chacun le sien).</p>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -834,6 +830,65 @@ function loginAsAdmin() {
   applyRoleUI();
 }
 
+// ── ACCÈS UNIFIÉ — codes partagés avec le RH (source unique de vérité) ──────────
+// Même serveur + même clé API que le RH. Chaque boutique a SON code, chaque personne
+// le sien (gérés dans le RH ⚙️). PilotVape les lit ici au login. Filets de sécurité :
+// le master admin en dur reste TOUJOURS valable (jamais verrouillé), et l'ancien code
+// boutique ne marche QUE si le serveur est injoignable.
+const RH_SHOP_MAP = { P:'pessac', M:'merignac', L:'langon' };
+let _pvAccess = null;
+async function fetchAccessList() {
+  try {
+    const r = await fetch(SYNC_WORKER_URL + '/rh/data', { method:'GET', cache:'no-store', headers:{ 'X-API-Key': SYNC_API_KEY } });
+    if (!r.ok) throw new Error('http');
+    const j = await r.json();
+    const S = j && j.data;
+    if (!S || !S.boutiques) throw new Error('vide');
+    _pvAccess = {
+      boutiques: (S.boutiques||[]).filter(function(b){return b.pin;}).map(function(b){ return { shop: RH_SHOP_MAP[b.id]||null, code: String(b.pin).trim() }; }),
+      people: (S.employees||[]).filter(function(e){return e.actif && e.pin;}).map(function(e){ return { nom:e.nom, code:String(e.pin).trim(), admin:!!e.admin, shop:RH_SHOP_MAP[e.b]||null }; })
+    };
+    try { localStorage.setItem('pv_access_cache', JSON.stringify(_pvAccess)); } catch(e) {}
+    return _pvAccess;
+  } catch(e) {
+    if (!_pvAccess) { try { _pvAccess = JSON.parse(localStorage.getItem('pv_access_cache')||'null'); } catch(_) {} }
+    return null; // échec réseau (un cache éventuel est dans _pvAccess)
+  }
+}
+// Résout un code en rôle : {role:'admin',who} | {role:'boutique',shop,who} | null
+function resolveCode(code, listAvailable) {
+  code = String(code||'').trim(); if (!code) return null;
+  const A = _pvAccess;
+  if (A) {
+    const pa = (A.people||[]).find(function(p){ return p.admin && p.code===code; });
+    if (pa) return { role:'admin', who:pa.nom };
+    const bt = (A.boutiques||[]).find(function(b){ return b.code===code && b.shop; });
+    if (bt) return { role:'boutique', shop:bt.shop };
+    const pe = (A.people||[]).find(function(p){ return p.code===code && p.shop; });
+    if (pe) return { role:'boutique', shop:pe.shop, who:pe.nom };
+  }
+  // Master admin TOUJOURS valable (secours anti-verrouillage)
+  if (hashPin(code) === ADMIN_PIN_HASH) return { role:'admin', who:'admin (secours)' };
+  // Ancien code boutique commun : uniquement si la liste partagée est indisponible
+  if (!listAvailable && hashPin(code) === BOUTIQUE_PIN_HASH) return { role:'boutique', shop:null };
+  return null;
+}
+async function pvLogin() {
+  const inp = document.getElementById('pvCodeInput'); if (!inp) return;
+  const code = inp.value;
+  const errEl = document.getElementById('loginError');
+  const list = await fetchAccessList(); // tente la liste à jour (sinon cache/null)
+  const res = resolveCode(code, !!list);
+  if (!res) { if (errEl) { errEl.style.display='block'; errEl.textContent='Code incorrect'; } inp.value=''; return; }
+  const ov = document.getElementById('loginOverlay');
+  if (res.role === 'admin') {
+    currentRole = 'admin'; localStorage.setItem('pv_role','admin');
+    logAction('Connexion', 'admin' + (res.who ? ' ('+res.who+')' : ''));
+    if (ov) ov.remove(); applyRoleUI(); return;
+  }
+  if (res.shop) { _selectShop(res.shop); }
+  else { currentRole = 'boutique'; localStorage.setItem('pv_role','boutique'); _showShopPicker(); }
+}
 function logout() {
   currentRole = '';
   currentShop = '';

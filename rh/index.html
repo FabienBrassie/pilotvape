@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 15:10 — fix : trait rouge de l'heure actuelle ajouté dans Mon planning (manquait) -->
+<!-- v 2026-06-22 15:52 — accès boutique RH = code uniquement (mobile ET PC) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -247,6 +247,9 @@ body.dark .dayhead.today b{background:#3b82f6}
 /* ============ MOBILE (téléphone) — ajouté 2026-06-22, ne touche pas au desktop ============ */
 /* Bouton flottant « + » (demande congé/absence) */
 #mfab{display:none;position:fixed;right:18px;bottom:calc(env(safe-area-inset-bottom,0px) + 24px);width:60px;height:60px;border-radius:50%;border:none;background:var(--green);color:#fff;font-size:34px;line-height:1;font-weight:300;box-shadow:0 8px 22px rgba(22,163,74,.45);cursor:pointer;z-index:60;align-items:center;justify-content:center;padding:0}
+/* Accès boutique = par CODE uniquement (mobile ET PC) : on retire l'entrée libre sans code */
+#loginshops{display:none}
+#loginperso{border-top:none!important;padding-top:0!important}
 /* Barre mobile minimaliste (remplace l'en-tête pour le salarié) */
 #mtop{display:none}
 #mreq{display:none}
@@ -380,9 +383,11 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
 <div id="login">
   <div class="box">
     <h2>🗂️ Gestion RH</h2>
+    <div id="loginshops">
     <p style="margin-bottom:8px">Consulter le planning d'une boutique</p>
     <div id="loginbq" style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap;margin-bottom:14px"></div>
-    <div style="border-top:1px solid var(--line);padding-top:12px"><p>Accès personnel ou responsable</p>
+    </div>
+    <div id="loginperso" style="border-top:1px solid var(--line);padding-top:12px"><p>Entre ton code (personnel, boutique ou admin)</p>
     <input type="password" id="pinin" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="code" onkeydown="if(event.key==='Enter')tryLogin()">
     <div class="err" id="loginerr"></div>
     <button class="act" style="margin-top:10px;width:100%" onclick="tryLogin()">Entrer</button></div>
@@ -3641,7 +3646,7 @@ function isResp(){return !!(ROLE&&ROLE.type==='salarie'&&emp(ROLE.empId)&&emp(RO
 function respTeam(){if(!isResp())return [];const b=emp(ROLE.empId).b;return S.employees.filter(e=>e.actif&&e.b===b);}
 function renderLoginBq(){const el=document.getElementById('loginbq');if(!el||!S)return;
   el.innerHTML=S.boutiques.map(b=>'<button class="bchip '+b.id+' on" style="padding:7px 16px" onclick="openBoutique(\''+b.id+'\')">'+esc(b.nom)+'</button>').join('');}
-function openBoutique(bId){if(!bout(bId))return;setRole({type:'boutique',b:bId});}
+function openBoutique(bId){if(isMobile())return;if(!bout(bId))return;setRole({type:'boutique',b:bId});} // mobile : accès boutique uniquement via code
 function tryLogin(){
   const code=$('pinin').value.trim();
   if(!code){$('loginerr').textContent='Entre ton code';return}
