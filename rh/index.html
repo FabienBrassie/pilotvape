@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 15:52 — accès boutique RH = code uniquement (mobile ET PC) -->
+<!-- v 2026-06-22 17:07 — popup Absences en onglets (À valider / Heures sup / Historique) + trace des refusés (auto-refus congé tracé, maladie refusée conservée) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1126,7 +1126,7 @@ function presence(e,iso){
     return{st:'present',b:xb,blocks:(ex.blocks||[]).map(bl=>[bl[0],bl[1],bl[2]||xb,bl[3]?1:0,bl[4]||0]),ex:true,note:ex.note};
   }
   if(!day)return{st:'repos',b:e.b};
-  if(S.maladies.some(m=>m.empId===e.id&&iso>=m.du&&iso<=m.au&&m.statut!=='attente'))return{st:'maladie',b:day.b};
+  if(S.maladies.some(m=>m.empId===e.id&&iso>=m.du&&iso<=m.au&&m.statut!=='attente'&&m.statut!=='refuse'))return{st:'maladie',b:day.b};
   if((S.ecoles||[]).some(x=>x.empId===e.id&&iso>=x.du&&iso<=x.au))return{st:'ecole',b:day.b};
   if(S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='accepte'))return{st:'conge',b:day.b};
   const pend=S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='attente');
@@ -2185,11 +2185,12 @@ function checkAbsence(empId,du,au,kind){
 }
 
 // ============ ONGLET ABSENCES (congés + maladies) ============
-let absSel=new Set(['P','M','L']),absType='ALL';
-try{const v=JSON.parse(localStorage.getItem('gestionrh-abs-filtre')||'null');if(v&&v.b&&v.b.length)absSel=new Set(v.b);if(v&&v.t)absType=v.t}catch(e){}
-function absSaveF(){try{localStorage.setItem('gestionrh-abs-filtre',JSON.stringify({b:[...absSel],t:absType}))}catch(e){}}
+let absSel=new Set(['P','M','L']),absType='ALL',absTab='valider';
+try{const v=JSON.parse(localStorage.getItem('gestionrh-abs-filtre')||'null');if(v&&v.b&&v.b.length)absSel=new Set(v.b);if(v&&v.t)absType=v.t;if(v&&v.tab)absTab=v.tab}catch(e){}
+function absSaveF(){try{localStorage.setItem('gestionrh-abs-filtre',JSON.stringify({b:[...absSel],t:absType,tab:absTab}))}catch(e){}}
 function togAbsB(bid){if(absSel.has(bid)){if(absSel.size>1)absSel.delete(bid)}else absSel.add(bid);absSaveF();renderAbs()}
 function setAbsT(t){absType=t;absSaveF();renderAbs()}
+function setAbsTab(t){absTab=t;absSaveF();renderAbs()}
 function cgEditor(c){
   return '<div class="brow" id="cgedit-'+c.id+'" style="margin-top:6px;background:var(--card);border:1.5px solid var(--blue);border-radius:10px;padding:8px">'+
     '✎ Modifier la période : du <input type="date" id="cge-du-'+c.id+'" value="'+c.du+'"> au <input type="date" id="cge-au-'+c.id+'" value="'+c.au+'">'+
@@ -2300,18 +2301,21 @@ function delCg(id){if(!confirm('Supprimer ce congé ?'))return;S.tomb['cg|'+id]=
 function delMl(id){if(!confirm('Supprimer cette absence maladie ?'))return;S.tomb['ml|'+id]=NOW();S.maladies=S.maladies.filter(m=>m.id!==id);save();renderAbs();render()}
 // Validation d'une maladie déclarée par un responsable
 function acceptMl(id){const m=(S.maladies||[]).find(x=>x.id===id);if(!m)return;delete m.statut;m._ts=NOW();save();render();if($('abspanel').style.display==='block')renderAbs();}
-function refuseMl(id){const m=(S.maladies||[]).find(x=>x.id===id);if(!m)return;S.tomb['ml|'+id]=NOW();S.maladies=S.maladies.filter(x=>x.id!==id);save();render();if($('abspanel').style.display==='block')renderAbs();}
+function refuseMl(id){const m=(S.maladies||[]).find(x=>x.id===id);if(!m)return;m.statut='refuse';m._ts=NOW();save();render();if($('abspanel').style.display==='block')renderAbs();}
 function delEc(id){if(!confirm('Supprimer cette période d\'école ?'))return;S.tomb['ec|'+id]=NOW();S.ecoles=S.ecoles.filter(x=>x.id!==id);save();renderAbs();render()}
 function delEnt(id){if(!confirm('Supprimer cette période entreprise ? (retour au rythme de base sur la période)'))return;S.tomb['en|'+id]=NOW();S.entreprises=S.entreprises.filter(x=>x.id!==id);save();renderAbs();render()}
 function renderAbs(){
   const an=String(new Date().getFullYear());
+  const _nAtt=(typeof pendingCount==='function')?pendingCount():0;
   let h='<div class="phead"><h2>🏖 Absences</h2>'+
    S.boutiques.map(b=>'<button class="bchip '+b.id+(absSel.has(b.id)?' on':'')+'" onclick="togAbsB(\''+b.id+'\')">'+b.nom+'</button>').join('')+
-   '<div class="seg">'+[['ALL','Tout'],['conge','🏖 Congés'],['maladie','🤒 Maladies'],['ecole','🎓 École'],['ent','🏭 Entreprise']].map(x=>'<button class="'+(absType===x[0]?'on':'')+'" onclick="setAbsT(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>'+
+   '<div class="seg">'+[['valider','⏳ À valider'+(_nAtt?' ('+_nAtt+')':'')],['hsup','⏱ Heures sup'],['histo','🗂 Historique']].map(x=>'<button class="'+(absTab===x[0]?'on':'')+'" onclick="setAbsTab(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>'+
    '<button class="act grey" style="margin-left:auto" onclick="$(\'abspanel\').style.display=\'none\'">Fermer</button></div>';
+  // ═══ ONGLET « À VALIDER » ═══
+  if(absTab==='valider'){
   // ---- incohérences détectées sur les absences existantes ----
   const probs=[];
-  const scan=(arr,kind,label)=>{for(const r of arr){const e=emp(r.empId);if(!e||!absSel.has(e.b))continue;
+  const scan=(arr,kind,label)=>{for(const r of arr){const e=emp(r.empId);if(!e||!absSel.has(e.b))continue;if(r.statut==='refuse')continue;
     for(const it of checkAbsence(r.empId,r.du,r.au,kind))if(it.sev==='block')
       probs.push({e,r,kind,label,txt:it.txt});}};
   scan(S.conges,'conge','🏖 Congé');scan(S.maladies,'maladie','🤒 Maladie');scan(S.ecoles||[],'ecole','🎓 École');
@@ -2375,6 +2379,31 @@ function renderAbs(){
       h+='<div class="datecard" style="border-left:4px solid var(--orange)"><div class="dbadge"><b>'+(+m.du.slice(8,10))+'</b><span>'+DAYJ[wdOf(m.du)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(m.du)+' → '+fmtFR(m.au)+' · <b>'+nbJours(m.du,m.au)+' j</b></span>'+(m.parResp&&emp(m.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(m.parResp).nom)+'</span>':'')+(m.note?'<span class="small">« '+esc(m.note)+' »</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptMl('+m.id+')">✓ Accepter</button> <button class="act red" onclick="refuseMl('+m.id+')">✗ Refuser</button></span></div></div></div>';
     }
   }
+  if(!probs.length&&!att.length&&!hsatt.length&&!mlatt.length)h+='<div class="small" style="padding:10px 4px">✓ Rien à valider pour le moment.</div>';
+  } // ── fin onglet À VALIDER ──
+
+  // ═══ ONGLET « HEURES SUP » — historique complet (en attente / acceptées / refusées) ═══
+  if(absTab==='hsup'){
+    const hsList=(S.hsdemandes||[]).filter(x=>emp(x.empId)&&absSel.has(emp(x.empId).b));
+    h+='<div class="mhead">⏱ Heures sup — toutes (en attente · acceptées · refusées)</div>';
+    if(!hsList.length)h+='<div class="small" style="padding:6px 4px">Aucune heure sup enregistrée.</div>';
+    for(const e of S.employees.filter(x=>x.actif&&absSel.has(x.b))){
+      const mine=hsList.filter(x=>x.empId===e.id).sort((a,b)=>a.date<b.date?1:-1);
+      if(!mine.length)continue;
+      h+='<div class="ecard" style="flex-direction:column;align-items:stretch">';
+      h+='<div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+');font-weight:700">'+bout(e.b).nom+'</span><span class="small" style="margin-left:auto">'+mine.length+' demande'+(mine.length>1?'s':'')+'</span></div>';
+      for(const x of mine){
+        const st=x.statut||'attente';
+        const stBadge=st==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':st==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé ✗</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>';
+        h+='<div class="brow" style="padding-left:18px"><span>'+DAYJ[wdOf(x.date)]+' '+fmtFR(x.date)+'</span><span class="small" style="color:#0891b2;font-weight:800">'+hsLabel(x)+'</span>'+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+(x.parResp&&emp(x.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ '+esc(emp(x.parResp).nom)+'</span>':'')+stBadge+'<span style="margin-left:auto;white-space:nowrap">'+(st!=='accepte'?'<button class="mini" onclick="acceptHS('+x.id+')" title="Accepter">✓</button> ':'')+(st!=='refuse'?'<button class="mini" onclick="refuseHS('+x.id+')" title="Refuser">✗</button> ':'')+'<button class="mini ghost" onclick="delHS('+x.id+')">🗑</button></span></div>';
+      }
+      h+='</div>';
+    }
+  } // ── fin onglet HEURES SUP ──
+
+  // ═══ ONGLET « HISTORIQUE » — congés/maladies/école/entreprise par salarié + ajout ═══
+  if(absTab==='histo'){
+  h+='<div class="phead" style="padding-top:4px;border:none"><div class="seg">'+[['ALL','Tout'],['conge','🏖 Congés'],['maladie','🤒 Maladies'],['ecole','🎓 École'],['ent','🏭 Entreprise']].map(x=>'<button class="'+(absType===x[0]?'on':'')+'" onclick="setAbsT(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div></div>';
   h+='<div class="mhead">Par salarié</div>';
   for(const e of S.employees.filter(x=>x.actif&&absSel.has(x.b))){
     const cgs=S.conges.filter(c=>c.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
@@ -2399,7 +2428,8 @@ function renderAbs(){
       h+='<div class="brow absrow" id="absrow-'+x.t+'-'+r.id+'" style="padding-left:18px;border-radius:8px'+(past?';opacity:.5':'')+'">'+
         '<span>'+(x.t==='conge'?'🏖':x.t==='ecole'?'🎓':x.t==='ent'?'🏭':'🤒')+'</span>'+
         '<span>'+fmtFR(r.du)+' → '+fmtFR(r.au)+'</span><span class="small"><b>'+nbJours(r.du,r.au)+' j</b></span>';
-      if(x.t==='conge')h+=(r.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':r.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>');
+      if(x.t==='conge')h+=(r.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':r.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé'+(r.auto?' auto':'')+'</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>')+(r.auto&&r.motifAuto?'<span class="small" style="color:var(--red)" title="Refus automatique — l\'admin peut accepter manuellement avec ✓">🚫 '+esc(r.motifAuto)+'</span>':'');
+      if(x.t==='maladie'&&r.statut==='refuse')h+='<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé</span>';
       if(x.t==='conge'&&r.modifie)h+='<span class="modif" title="Demande initiale : '+fmtFR(r.demande.du)+' → '+fmtFR(r.demande.au)+'">✏️ modifié</span>';
       if(r.note)h+='<span class="small">'+esc(r.note)+'</span>';
       h+='<span style="margin-left:auto;white-space:nowrap">';
@@ -2420,6 +2450,7 @@ function renderAbs(){
    '<select id="ab-st"><option value="attente">en attente</option><option value="accepte">accepté</option></select>'+
    '<input id="ab-note" placeholder="Note (optionnel)" style="width:150px">'+
    '<button class="act" onclick="addAbs()">Ajouter</button></div>';
+  } // ── fin onglet HISTORIQUE ──
   $('abspanel').innerHTML=h;
 }
 function addAbs(){
@@ -2809,6 +2840,16 @@ async function renderSettings(){
   h+='<div class="mhead">🚀 Mise en service</div><div class="row"><span class="small">Date de démarrage de l\'outil (avant, les plannings sont de l\'historique grisé, non contrôlé) :</span><input type="date" value="'+esc(S.goLive||'')+'" onchange="S.goLive=this.value||\'2026-06-01\';S.goLiveTs=NOW();save();render()"></div>';
   h+='<div class="mhead">🔐 Codes d\'accès</div><div class="row"><span class="small">L\'accès admin se règle sur les fiches ci-dessus : coche 👑 + un code 🔑 personnel. La personne se connecte alors en admin avec SON code (plus de code maître).</span> &nbsp; <span class="small">🔎 Code RH (lecture seule : calendrier + récap paie) :</span><input value="'+esc(S.rhPin||'')+'" inputmode="numeric" maxlength="6" style="width:80px" onchange="S.rhPin=this.value.trim();S.rhPinTs=NOW();save()"></div>';
   h+='<div class="row"><span class="small">🏬 Codes boutique (vue planning + demandes de la boutique, lecture seule) :</span>'+S.boutiques.map((b,i)=>'<span style="white-space:nowrap"><span class="small" style="color:var(--'+b.id+')">'+b.nom+'</span> <input value="'+esc(b.pin||'')+'" inputmode="numeric" maxlength="6" style="width:70px" onchange="S.boutiques['+i+'].pin=this.value.trim();S.boutiques['+i+']._ts=NOW();save()"></span>').join(' ')+'</div>';
+  // Récap lisible de tous les accès (vaut pour PilotVape ET le RH)
+  h+='<div class="mhead">🔐 Récap des accès — vaut pour PilotVape ET le RH</div>';
+  h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:5px">';
+  h+='<div class="small" style="font-weight:700">🏬 Boutiques</div>';
+  S.boutiques.forEach(b=>{h+='<div class="brow" style="padding:2px 0 2px 12px"><span class="bdot" style="background:var(--'+b.id+')"></span><b>'+esc(b.nom)+'</b><span style="margin-left:auto">'+(b.pin?'code <b>'+esc(b.pin)+'</b>':'<span style="color:var(--red);font-weight:700">⚠ aucun code</span>')+'</span></div>';});
+  h+='<div class="small" style="font-weight:700;margin-top:6px">👥 Personnes actives</div>';
+  S.employees.filter(e=>e.actif&&!(e.dateOut&&e.dateOut<todayISO())).forEach(e=>{h+='<div class="brow" style="padding:2px 0 2px 12px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small">'+esc((bout(e.b)||{}).nom||'')+'</span>'+(e.admin?'<span class="modif" style="background:#caa204">👑 admin</span>':'')+(e.resp?'<span class="modif" style="background:#0891b2">🛡️ resp</span>':'')+'<span style="margin-left:auto">'+(e.pin?'code <b>'+esc(e.pin)+'</b>':'<span style="color:var(--mut)">— aucun code</span>')+'</span></div>';});
+  if(S.rhPin)h+='<div class="brow" style="padding:2px 0 2px 12px"><span>🔎</span><b>Accès RH (lecture seule)</b><span style="margin-left:auto">code <b>'+esc(S.rhPin)+'</b></span></div>';
+  h+='<div class="small" style="margin-top:8px;color:var(--mut)">🔑 PilotVape : code maître <b>2803</b> (caché, toujours valable — seul secours admin anti-verrouillage). L\'ancien code boutique commun <b>1990</b> a été supprimé : plus aucun accès boutique sans code RH.</div>';
+  h+='</div>';
   h+='<div class="mhead">Horaires des boutiques</div><div class="row">';
   S.boutiques.forEach((b,i)=>{
     h+='<div class="ecard" style="margin-bottom:0;--segc:var(--'+b.id+')"><span class="bdot" style="background:var(--'+b.id+')"></span><b style="font-size:13px">'+b.nom+'</b>'+
@@ -3616,7 +3657,20 @@ function submitRequest(){
   // validation de cohérence : une demande illogique OU qui casse la couverture est refusée
   const checks=checkAbsence(e.id,du,au,t);
   const dur=checks.filter(c=>c.sev==='block'||(t==='conge'&&c.cov));
-  if(dur.length){rqMsg('Demande impossible :<br>• '+dur.map(x=>esc(x.txt)).join('<br>• '),'red');return}
+  if(dur.length){
+    const motif=dur.map(x=>x.txt).join(' · ');
+    // Trace du refus automatique : on enregistre le congé en "refusé auto" (motif gardé) pour que
+    // l'admin le voie dans le popup Absences et puisse l'accepter manuellement s'il le souhaite.
+    // (demande Fabien 2026-06-20 — avant, la demande était jetée sans aucune trace.)
+    if(t==='conge'){
+      S.conges.push({id:Date.now(),empId:e.id,du,au,statut:'refuse',auto:true,motifAuto:motif,note:$('rq-note').value,parSalarie:!resp,parResp:resp?ROLE.empId:undefined,_ts:NOW()});
+      save();
+      mineMsg='⛔ Demande de congé refusée automatiquement ('+fmtFR(du)+' → '+fmtFR(au)+') : '+esc(motif)+'. Ton responsable en est informé et peut revenir dessus.';
+      renderMine();render();
+      return;
+    }
+    rqMsg('Demande impossible :<br>• '+dur.map(x=>esc(x.txt)).join('<br>• '),'red');return;
+  }
   const pourQui=targetId===ROLE.empId?'':' pour '+esc(e.nom);
   if(t==='conge'){
     S.conges.push({id:Date.now(),empId:e.id,du,au,statut:'attente',note:$('rq-note').value,parSalarie:!resp,parResp:resp?ROLE.empId:undefined,_ts:NOW()});
