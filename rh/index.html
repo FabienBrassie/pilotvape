@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 14:20 — mobile salarié : QUE « Mon planning » (grille), sans en-tête ni récap + popup demande, desktop inchangé -->
+<!-- v 2026-06-22 14:34 — mobile salarié : grille qui tient (minmax) + retour depuis le mode complet, desktop inchangé -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -264,6 +264,8 @@ body.mobplan #mtop{display:flex;align-items:center;gap:8px;position:sticky;top:0
 /* échappatoire admin : ⋮ → réaffiche l'appli complète (la classe mobplan est retirée par render) */
 body.mobfull header{display:flex!important}
 body.mobfull #mtop,body.mobfull #mfab{display:none!important}
+#mbackplan{display:none}
+@media (max-width:680px){body.mobfull #mbackplan{display:inline-flex;align-items:center;gap:4px;order:-1;background:var(--blue);color:#fff;border:none;border-radius:9px;padding:7px 11px;font-size:13px;font-weight:700;cursor:pointer}}
 /* --- Popup « Faire une demande » qui tient sur l'écran --- */
 #mreq.mreq-on{display:flex;position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.45);align-items:center;justify-content:center;padding:16px}
 .mreq-box{background:var(--card);border-radius:18px;width:min(420px,94vw);max-height:88vh;overflow:auto;padding:18px 18px calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 20px 60px rgba(0,0,0,.4)}
@@ -296,20 +298,23 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   button.act{padding:10px 14px;font-size:14px}
 
   /* --- GRILLE HORAIRE type Google Agenda : faire tenir 7 colonnes sur le téléphone --- */
-  #calhead,#evband,#calbody{grid-template-columns:34px repeat(7,1fr)}
-  .hlabel{font-size:9px;right:4px}
-  .dayhead{padding:6px 1px 5px;font-size:11px}
-  .dayhead b{display:block}
-  .dayhead.today b{padding:2px 7px}
-  .dayhead .fer,.dayhead .chipb{font-size:8.5px}
+  /* minmax(0,1fr) : empêche le contenu d'élargir une colonne (sinon la grille déborde et se décale) */
+  #calhead,#evband,#calbody{grid-template-columns:30px repeat(7,minmax(0,1fr))}
+  .hlabel{font-size:9px;right:3px}
+  .dayhead{padding:6px 1px 5px;font-size:10.5px;overflow:hidden;min-width:0}
+  .dayhead b{display:block;white-space:normal;word-break:break-word;line-height:1.1}
+  .dayhead.today b{padding:1px 5px}
+  .dayhead .fer,.dayhead .chipb{font-size:8px;white-space:normal;word-break:break-word;overflow:hidden}
   .dayhead .chipb{display:inline}
+  .daycol,.hourcol{min-width:0}
   /* Blocs : lisibles façon Google (nom visible, heures masquées pour ne pas surcharger) */
   .blk{font-size:9.5px;padding:2px 3px;border-radius:6px;border-width:1px}
   .blk b{font-size:9.5px;white-space:normal;line-height:1.05}
   .blk span{display:none}
   /* Bandeau événements (fériés/OP) plus compact */
   #evband .evlabel{font-size:8px;padding:2px}
-  .evc{font-size:8.5px;padding:1px 4px}
+  #evband .evcell{min-width:0;overflow:hidden}
+  .evc{font-size:8.5px;padding:1px 4px;max-width:100%}
   /* Vue Mois / 3 boutiques : défilables si trop larges */
   #monthwrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
   .sgrid{min-width:560px}
@@ -321,9 +326,10 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   <button class="mtnav" onclick="navCal(-1)" aria-label="Semaine précédente">◀</button>
   <div class="mtlabel" onclick="curMonday=monday(todayISO());render()"><span id="mtoplabel"></span><small>appuie pour revenir à aujourd’hui</small></div>
   <button class="mtnav" onclick="navCal(1)" aria-label="Semaine suivante">▶</button>
-  <button class="mtmenu" onclick="document.body.classList.add('mobfull')" title="Tout afficher">⋮</button>
+  <button class="mtmenu" onclick="document.body.classList.add('mobfull');render()" title="Tout afficher">⋮</button>
 </div>
 <header>
+  <button id="mbackplan" onclick="document.body.classList.remove('mobfull');render()" title="Revenir à mon planning">📅 Mon planning</button>
   <h1>📅 Planning</h1>
   <button class="bchip P" data-b="P" onclick="curB='P';render()">Pessac</button>
   <button class="bchip M" data-b="M" onclick="curB='M';render()">Mérignac</button>
