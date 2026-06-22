@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 17:07 — popup Absences en onglets (À valider / Heures sup / Historique) + trace des refusés (auto-refus congé tracé, maladie refusée conservée) -->
+<!-- v 2026-06-22 18:02 — popup Absences en onglets + trace des refusés · bouton "Masquer les collègues" dans Mon planning (focus moi seul) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1233,6 +1233,10 @@ function commitDay(e,iso,blocks,scope,extra){
 let calView='week';
 try{const v=localStorage.getItem('gestionrh-calview');if(v)calView=v}catch(e){}
 function setView(v){calView=v;try{localStorage.setItem('gestionrh-calview',v)}catch(e){}render();}
+// Focus "Mon planning" : masquer les collègues pour se concentrer sur son propre planning (pro+perso)
+let mineFocus=false;
+try{mineFocus=localStorage.getItem('gestionrh-minefocus')==='1'}catch(e){}
+function toggleMineFocus(){mineFocus=!mineFocus;try{localStorage.setItem('gestionrh-minefocus',mineFocus?'1':'0')}catch(e){}render();}
 function navCal(n){curMonday=addD(curMonday, calView==='month'? 0 : 7*n);
   if(calView==='month'){const a=monday(curMonday);const mid=addD(a,15);const y=+mid.slice(0,4),m=+mid.slice(5,7);let ny=y,nm=m+n;if(nm<1){nm=12;ny--}if(nm>12){nm=1;ny++}curMonday=monday(ny+'-'+String(nm).padStart(2,'0')+'-15');}
   render();}
@@ -1503,6 +1507,7 @@ function renderMineWeek(){
     if(mb.size){
       const evs=[];
       for(const e of S.employees.filter(x=>x.actif)){
+        if(mineFocus&&e.id!==me.id)continue; // focus "moi seul" : tous les collègues masqués
         if(e.id!==me.id&&hidden.has(e.id))continue; // collègue masqué (jamais soi-même)
         const p=presence(e,d);if(p.st!=='present'||!p.blocks)continue;
         p.blocks.forEach(bl=>{if(!mb.has(bl[2]))return;evs.push({e,bl,me:e.id===me.id,s:t2m(bl[0]),f:t2m(bl[1]),hs:!!bl[3]});});
@@ -1535,7 +1540,8 @@ function renderMineWeek(){
   // Barre des calendriers perso (afficher/masquer + gérer) — patron uniquement
   if(isAdmin()){
     const cals=myCals();
-    let t='<span class="small" style="color:var(--mut)">🗓️ Mes calendriers :</span>';
+    let t='<button class="mini" onclick="toggleMineFocus()" title="Masquer les collègues pour te concentrer sur TON planning (pro + perso)" style="'+(mineFocus?'background:var(--blue);color:#fff;border-color:var(--blue);font-weight:700':'')+'">'+(mineFocus?'👤 Moi seul ✓':'👥 Masquer les collègues')+'</button>';
+    t+='<span class="small" style="color:var(--mut);margin-left:8px">🗓️ Mes calendriers :</span>';
     t+=cals.map(c=>'<button class="bchip" style="background:'+c.color+';opacity:'+(calHidden.has(c.id)?'.4':'1')+'" onclick="togCal('+c.id+')" title="Afficher / masquer">'+esc(c.name)+'</button>').join('');
     if(!cals.length)t+='<span class="small">aucun pour l\'instant</span>';
     t+=' <button class="mini" onclick="togCalPanel()">＋ Gérer</button>';
