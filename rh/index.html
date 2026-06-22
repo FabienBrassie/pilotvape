@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 14:10 — mobile : vraie grille horaire (Google Agenda) rendue responsive + bouton +, desktop inchangé -->
+<!-- v 2026-06-22 14:20 — mobile salarié : QUE « Mon planning » (grille), sans en-tête ni récap + popup demande, desktop inchangé -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -245,9 +245,34 @@ body.dark .dayhead.today b{background:#3b82f6}
 .ydone{color:var(--green);font-weight:700;font-size:12px;margin-left:8px}
 
 /* ============ MOBILE (téléphone) — ajouté 2026-06-22, ne touche pas au desktop ============ */
-/* Bouton flottant « + » (demande congé/absence) pour le salarié sur mobile */
-#mfab{display:none;position:fixed;right:18px;bottom:20px;width:58px;height:58px;border-radius:50%;border:none;background:var(--green);color:#fff;font-size:32px;line-height:1;font-weight:300;box-shadow:0 8px 22px rgba(22,163,74,.45);cursor:pointer;z-index:60;align-items:center;justify-content:center;padding:0}
-body.mobsal #mfab{display:flex}
+/* Bouton flottant « + » (demande congé/absence) */
+#mfab{display:none;position:fixed;right:18px;bottom:calc(env(safe-area-inset-bottom,0px) + 24px);width:60px;height:60px;border-radius:50%;border:none;background:var(--green);color:#fff;font-size:34px;line-height:1;font-weight:300;box-shadow:0 8px 22px rgba(22,163,74,.45);cursor:pointer;z-index:60;align-items:center;justify-content:center;padding:0}
+/* Barre mobile minimaliste (remplace l'en-tête pour le salarié) */
+#mtop{display:none}
+#mreq{display:none}
+/* --- MODE PLANNING PERSO MOBILE : on ne montre QUE la grille « Mon planning » --- */
+body.mobplan header{display:none!important}
+body.mobplan #hours,body.mobplan #minetools,body.mobplan #alerts,body.mobplan #people,body.mobplan #testbanner{display:none!important}
+body.mobplan main .small.adminonly,body.mobplan main>.small{display:none!important}
+body.mobplan main{padding:0 6px calc(env(safe-area-inset-bottom,0px) + 80px)}
+body.mobplan #mfab{display:flex}
+body.mobplan #mtop{display:flex;align-items:center;gap:8px;position:sticky;top:0;z-index:40;background:var(--card);border-bottom:1px solid var(--line);padding:8px 10px calc(8px + env(safe-area-inset-top,0px));padding-top:max(8px,env(safe-area-inset-top,0px))}
+#mtop .mtnav{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:50%;width:38px;height:38px;font-size:15px;cursor:pointer;flex:none}
+#mtop .mtlabel{flex:1;text-align:center;font-weight:700;font-size:15px;cursor:pointer}
+#mtop .mtlabel small{display:block;font-weight:500;font-size:10.5px;color:var(--mut)}
+#mtop .mtmenu{border:1px solid var(--line);background:var(--card);color:var(--mut);border-radius:9px;width:38px;height:38px;font-size:16px;cursor:pointer;flex:none}
+/* échappatoire admin : ⋮ → réaffiche l'appli complète (la classe mobplan est retirée par render) */
+body.mobfull header{display:flex!important}
+body.mobfull #mtop,body.mobfull #mfab{display:none!important}
+/* --- Popup « Faire une demande » qui tient sur l'écran --- */
+#mreq.mreq-on{display:flex;position:fixed;inset:0;z-index:90;background:rgba(0,0,0,.45);align-items:center;justify-content:center;padding:16px}
+.mreq-box{background:var(--card);border-radius:18px;width:min(420px,94vw);max-height:88vh;overflow:auto;padding:18px 18px calc(18px + env(safe-area-inset-bottom,0px));box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.mreq-box h3{font-size:16px;display:flex;align-items:center;margin-bottom:14px}
+.mreq-box .mclose{margin-left:auto;border:none;background:var(--bg);color:var(--txt);border-radius:8px;width:32px;height:32px;font-size:16px;cursor:pointer}
+.mreq-box label{display:block;font-size:12.5px;font-weight:600;color:var(--mut);margin:10px 0 4px}
+.mreq-box select,.mreq-box input{width:100%;padding:11px;font-size:16px;border:1px solid #cbd5e1;border-radius:10px;background:var(--card);color:var(--txt)}
+.mreq-box .mrq-send{width:100%;margin-top:16px;padding:13px;font-size:15px;font-weight:700;border:none;border-radius:12px;background:var(--green);color:#fff;cursor:pointer}
+.mreq-box .mrq-msg{display:none;margin-top:12px;font-size:13px;font-weight:600;text-align:center}
 
 @media (max-width:680px){
   /* --- En-tête compact mais fonctionnel --- */
@@ -292,6 +317,12 @@ body.mobsal #mfab{display:flex}
 </style>
 </head>
 <body>
+<div id="mtop">
+  <button class="mtnav" onclick="navCal(-1)" aria-label="Semaine précédente">◀</button>
+  <div class="mtlabel" onclick="curMonday=monday(todayISO());render()"><span id="mtoplabel"></span><small>appuie pour revenir à aujourd’hui</small></div>
+  <button class="mtnav" onclick="navCal(1)" aria-label="Semaine suivante">▶</button>
+  <button class="mtmenu" onclick="document.body.classList.add('mobfull')" title="Tout afficher">⋮</button>
+</div>
 <header>
   <h1>📅 Planning</h1>
   <button class="bchip P" data-b="P" onclick="curB='P';render()">Pessac</button>
@@ -347,7 +378,22 @@ body.mobsal #mfab{display:flex}
   <div id="alerts"></div>
   <div class="small adminonly" style="margin-top:8px">Glisse un bloc pour le déplacer, ⌥ Option + glisse pour le dupliquer, étire-le par le bas pour changer la durée, clique dessus pour les détails, clique-glisse sur une zone vide pour créer. Chaque modification te demande : ce jour uniquement, ou toutes les semaines.</div>
 </main>
-<button id="mfab" onclick="togMine()" title="Faire une demande (congé, absence)" aria-label="Faire une demande">+</button>
+<button id="mfab" onclick="openMReq()" title="Faire une demande (congé, absence)" aria-label="Faire une demande">+</button>
+<div id="mreq">
+  <div class="mreq-box">
+    <h3>✍️ Faire une demande<button class="mclose" onclick="closeMReq()" aria-label="Fermer">✕</button></h3>
+    <label for="mrq-type">Type</label>
+    <select id="mrq-type" onchange="mrqTypeChg()"><option value="conge">🏖 Demande de congé</option><option value="maladie">🤒 Arrêt maladie</option></select>
+    <label for="mrq-du">Du</label>
+    <input type="date" id="mrq-du">
+    <label for="mrq-au">Au</label>
+    <input type="date" id="mrq-au">
+    <label for="mrq-note">Message (optionnel)</label>
+    <input id="mrq-note" placeholder="Message à ton responsable (optionnel)">
+    <div class="mrq-msg" id="mrq-msg"></div>
+    <button class="mrq-send" onclick="submitMReq()">Envoyer</button>
+  </div>
+</div>
 <div id="edpanel" class="panel"></div>
 <div id="hdetail" class="panel"></div>
 <div id="evpanel" class="panel"></div>
@@ -1514,10 +1560,34 @@ function renderMonth(){
 function isMobile(){return window.matchMedia('(max-width:680px)').matches}
 let _mqMob=window.matchMedia('(max-width:680px)');
 (_mqMob.addEventListener?_mqMob.addEventListener('change',()=>{try{render()}catch(e){}}):_mqMob.addListener(()=>{try{render()}catch(e){}}));
+// Popup compacte « Faire une demande » (congé / arrêt maladie) pour le salarié
+function mrqTypeChg(){const t=$('mrq-type').value;$('mrq-note').placeholder=t==='maladie'?'Motif / précision (optionnel)':'Message à ton responsable (optionnel)';}
+function openMReq(){const m=$('mreq');if(!m)return;const msg=$('mrq-msg');msg.style.display='none';$('mrq-du').value='';$('mrq-au').value='';$('mrq-note').value='';$('mrq-type').value='conge';mrqTypeChg();m.classList.add('mreq-on');}
+function closeMReq(){const m=$('mreq');if(m)m.classList.remove('mreq-on');}
+function submitMReq(){
+  if(!ROLE||!ROLE.empId){return;}
+  const e=emp(ROLE.empId);if(!e)return;
+  const t=$('mrq-type').value,du=$('mrq-du').value,au=$('mrq-au').value||du;
+  const msg=(txt,ok)=>{const el=$('mrq-msg');el.style.display='block';el.style.color=ok?'var(--green)':'var(--red)';el.innerHTML=txt;};
+  if(!du||au<du){msg('Choisis des dates valides.',false);return;}
+  const checks=checkAbsence(e.id,du,au,t);
+  const dur=checks.filter(c=>c.sev==='block'||(t==='conge'&&c.cov));
+  if(dur.length){msg('Demande impossible : '+dur.map(x=>esc(x.txt)).join(' ; '),false);return;}
+  if(t==='conge')S.conges.push({id:Date.now(),empId:e.id,du,au,statut:'attente',note:$('mrq-note').value,parSalarie:true,_ts:NOW()});
+  else S.maladies.push({id:Date.now(),empId:e.id,du,au,note:$('mrq-note').value,parSalarie:true,_ts:NOW()});
+  save();render();
+  msg('✓ Demande envoyée ('+fmtFR(du)+' → '+fmtFR(au)+').',true);
+  setTimeout(closeMReq,1500);
+}
 function navMin(){return (ROLE&&(ROLE.type==='boutique'||ROLE.type==='salarie'||ROLE.type==='rh'))?monday(S.goLive):null;}
 function clampMonday(){const mn=navMin();if(mn&&curMonday<mn)curMonday=mn;}
 function render(){
   clampMonday();
+  // MODE PLANNING PERSO MOBILE : téléphone + salarié (ou admin-salarié) = on n'affiche QUE « Mon planning »
+  const mobPlan=!!(ROLE&&ROLE.empId&&isMobile()&&!document.body.classList.contains('mobfull'));
+  document.body.classList.toggle('mobplan',mobPlan);
+  if(mobPlan)calView='mine';
+  {const lab=document.getElementById('mtoplabel');if(lab&&mobPlan)lab.textContent=weekRange(curMonday);}
   {const mn=navMin();const pv=document.getElementById('navprev');if(pv){const atMin=mn&&curMonday<=mn;pv.style.opacity=atMin?'.35':'';pv.style.pointerEvents=atMin?'none':'';}
    const gt=document.getElementById('goto');if(gt)gt.min=mn||'';}
   // Console Boutique : toujours verrouillée sur SA boutique (restoreUI a pu réécrire curB avec une autre boutique mémorisée)
@@ -1540,8 +1610,6 @@ function render(){
   $('alerts').style.display=(grid||mine||!isAdmin())?'none':'';
   $('people').style.display=(grid||mine)?'none':'';   // pas de chips de masquage en Mon planning
   if($('minetools'))$('minetools').style.display=mine?'flex':'none'; // barre des calendriers perso (Mon planning)
-  // Mobile salarié : on garde la VRAIE grille horaire (type Google Agenda) ; on n'ajoute que le bouton « + » via la classe
-  document.body.classList.toggle('mobsal',!!(ROLE&&ROLE.type==='salarie'&&isMobile()));
   if(synth){renderSynth();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
   if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);saveUI();return;}
