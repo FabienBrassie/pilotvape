@@ -2583,7 +2583,8 @@ document.addEventListener('mousedown',ev=>{
       const x=(S.calEntries||[]).find(e=>e.id===+ceId);if(!x||x.allday)return;
       const br=blk.getBoundingClientRect();
       const isRz=ev.clientY>br.bottom-9,isRzt=ev.clientY<br.top+9;
-      drag={mode:isRzt?'rzt':(isRz?'rz':'mv'),cal:x.id,dup:(!isRz&&!isRzt&&ev.altKey),iso:x.date,curIso:x.date,du:t2m(x.du),au:t2m(x.au),grab:mn-t2m(x.du),el:blk,moved:false,sx:ev.clientX,sy:ev.clientY};
+      const occIso=x.date||col.dataset.iso; // entrée récurrente : pas de x.date → jour réel de la colonne (sinon "ce jour" supprime le mauvais jour)
+      drag={mode:isRzt?'rzt':(isRz?'rz':'mv'),cal:x.id,dup:(!isRz&&!isRzt&&ev.altKey),iso:occIso,curIso:occIso,du:t2m(x.du),au:t2m(x.au),grab:mn-t2m(x.du),el:blk,moved:false,sx:ev.clientX,sy:ev.clientY};
       ev.preventDefault();return;
     }
     if(!col.dataset.iso)return;
