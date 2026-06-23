@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-23 17:34 — OP PilotVape dans le bandeau événements : repère vert "début" / rouge "fin" ; 1 seul repère par campagne (pas par OP) -->
+<!-- v 2026-06-23 17:45 — OP PilotVape dans le bandeau événements : libellés clairs (« Campagne X », « Nouveauté Y » dédup) ; campagne introuvable = OP isolée (plus de « Campagne » fantôme) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -62,7 +62,7 @@ main{padding:12px 16px;max-width:1400px;margin:0 auto}
 #calhead{display:grid;grid-template-columns:52px repeat(7,1fr)}
 #evband{display:grid;grid-template-columns:52px repeat(7,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 #evband .evlabel{font-size:9.5px;color:var(--mut);padding:3px 4px;text-align:right}
-#evband .evcell{border-left:1px solid var(--line);padding:2px 3px;min-height:24px;cursor:pointer}
+#evband .evcell{border-left:1px solid var(--line);padding:2px 3px;min-height:24px;cursor:pointer;min-width:0;overflow:hidden}
 #evband .evcell:hover{background:var(--bg)}
 .evc{display:inline-block;font-size:10px;font-weight:600;border-radius:5px;padding:1px 6px;margin:1px 2px 1px 0;color:#fff;vertical-align:middle;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .evc.ferie{background:#dc2626;color:#fff}
@@ -758,33 +758,34 @@ async function fetchPvOps(){
     const prod={};['baseKits','baseLiq','basePD'].forEach(k=>(D[k]||[]).forEach(p=>{if(p&&p.id!=null)prod[p.id]=p}));
     const out=[];
     const seenCamp=new Set();
+    // dédoublonne les mots répétés d'un nom produit (ex. marque "JNR" + gamme "JNR" → "JNR")
+    const _dedupName=(parts)=>{const a=[];for(const p of parts){const t=(p||'').trim();if(!t)continue;if(a.length&&a[a.length-1].toLowerCase()===t.toLowerCase())continue;a.push(t);}return a.join(' ');};
     for(const op of D.ops){
       if(!op||op._archived||op.annulee)continue;
-      // ── Campagne : UNE seule entrée par campagne (pas un repère par OP de la campagne) ──
-      if(op.campagneId!=null){
+      const c=(op.campagneId!=null)?camp[op.campagneId]:null;
+      // ── Campagne NOMMÉE existante : UNE seule entrée par campagne, préfixe "Campagne " ──
+      if(c&&c.nom){
         if(seenCamp.has(op.campagneId))continue;
         seenCamp.add(op.campagneId);
-        const c=camp[op.campagneId];
         const sibs=D.ops.filter(o=>o&&!o._archived&&!o.annulee&&o.campagneId===op.campagneId);
-        const du=(c&&c.dateDebut)||sibs.map(o=>o.dateDebut).filter(Boolean).sort()[0]||null;
+        const du=c.dateDebut||sibs.map(o=>o.dateDebut).filter(Boolean).sort()[0]||null;
         if(!du)continue;
         const aus=sibs.map(o=>o.dateFin).filter(Boolean).sort();
-        const finReal=(c&&c.dateFin)||(aus.length?aus[aus.length-1]:null);
+        const finReal=c.dateFin||(aus.length?aus[aus.length-1]:null);
         let au=finReal||du;if(au<du)au=du;
-        const name=(c&&c.nom)||'Campagne';
-        out.push({du,au,hasFin:!!finReal,label:name,full:'Campagne — '+name+' ('+sibs.length+' OP'+(sibs.length>1?'s':'')+')'});
+        out.push({du,au,hasFin:!!finReal,label:'Campagne '+c.nom,full:'Campagne « '+c.nom+' » ('+sibs.length+' OP'+(sibs.length>1?'s':'')+')'});
         continue;
       }
-      // ── OP isolée (hors campagne) ──
-      const du=op.dateDebut||null;if(!du)continue;
-      const finReal=op.dateFin||null;
+      // ── OP isolée (ou campagne introuvable/sans nom → traitée individuellement) : "type + produit" ──
+      const du=op.dateDebut||(c&&c.dateDebut)||null;if(!du)continue;
+      const finReal=op.dateFin||(c&&c.dateFin)||null;
       let au=finReal||du;if(au<du)au=du;
-      let name='';
-      if(op.produitLibre&&op.produitLibre.libelle)name=op.produitLibre.libelle;
-      else if(op.produitIds&&op.produitIds[0]&&prod[op.produitIds[0]]){const p=prod[op.produitIds[0]];name=((p.marque||'')+' '+(p.modele||p.gamme||p.designation||'')).trim();}
-      else name=(op.commentaire||'').slice(0,40);
       const tl=_PV_OP_TL[op.type]||op.type||'OP';
-      out.push({du,au,hasFin:!!finReal,label:name||tl,full:tl+(name?' — '+name:'')});
+      let pname='';
+      if(op.produitLibre&&op.produitLibre.libelle)pname=op.produitLibre.libelle;
+      else if(op.produitIds&&op.produitIds[0]&&prod[op.produitIds[0]]){const p=prod[op.produitIds[0]];pname=_dedupName([p.marque,p.modele||p.gamme||p.designation]);}
+      const label=pname?(tl+' '+pname):tl;
+      out.push({du,au,hasFin:!!finReal,label,full:label});
     }
     _pvOps=out;try{localStorage.setItem('rh-pvops',JSON.stringify(out))}catch(e){}
     try{render()}catch(e){}
