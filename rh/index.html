@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-22 18:02 — popup Absences en onglets + trace des refusés · bouton "Masquer les collègues" dans Mon planning (focus moi seul) -->
+<!-- v 2026-06-23 17:29 — OP PilotVape dans le bandeau événements : repère vert "début" / rouge "fin" (lecture seule, même Worker) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -735,6 +735,46 @@ function _startSync(){
   setInterval(()=>{if(document.visibilityState==='visible')pullFromServer(true)},60000);
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')pullFromServer(true)});
   window.addEventListener('focus',()=>pullFromServer(true));
+  // OP PilotVape → repères début/fin dans le planning (greffe 2026-06-22)
+  fetchPvOps();
+  setInterval(()=>{if(document.visibilityState==='visible')fetchPvOps()},60000);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')fetchPvOps()});
+}
+
+// ── OP PilotVape dans le planning RH (greffe 2026-06-22, lecture seule) ──
+// Le RH lit les OP de PilotVape sur le MÊME Worker (endpoint /data, même clé) et n'en garde
+// que les dates de début/fin + un libellé. Aucune écriture : pur repère d'affichage. On NE
+// remplit PAS le planning sur toute la durée (trop chargé) : on pose juste un repère VERT
+// "début …" au démarrage de l'OP et un repère ROUGE "fin …" à sa fin (idée Fabien).
+let _pvOps=null;
+try{_pvOps=JSON.parse(localStorage.getItem('rh-pvops')||'null')}catch(e){}
+const _PV_OP_TL={PRIX_ROUGE:'Prix rouge',NATIONALE:'OP nationale',NOUVEAUTE:'Nouveauté',EXCLU:'Exclu',LIQUIDE_DU_MOMENT:'Liquide du moment',COUP:'One-shot'};
+async function fetchPvOps(){
+  try{
+    const r=await _fetchTimeout(SYNC_WORKER_URL+'/data',{method:'GET',cache:'no-store',headers:_syncHeaders()},15000);
+    if(!r.ok)return;
+    const j=await r.json();const D=j&&j.data;if(!D||!Array.isArray(D.ops))return;
+    const camp={};(D.campagnes||[]).forEach(c=>{if(c&&c.id!=null)camp[c.id]=c});
+    const prod={};['baseKits','baseLiq','basePD'].forEach(k=>(D[k]||[]).forEach(p=>{if(p&&p.id!=null)prod[p.id]=p}));
+    const out=[];
+    for(const op of D.ops){
+      if(!op||op._archived||op.annulee)continue;
+      const c=(op.campagneId!=null)?camp[op.campagneId]:null;
+      const du=op.dateDebut||(c&&c.dateDebut)||null;
+      if(!du)continue;
+      const finReal=op.dateFin||(c&&c.dateFin)||null;
+      let au=finReal||du;if(au<du)au=du;
+      let name='';
+      if(c&&c.nom)name=c.nom;
+      else if(op.produitLibre&&op.produitLibre.libelle)name=op.produitLibre.libelle;
+      else if(op.produitIds&&op.produitIds[0]&&prod[op.produitIds[0]]){const p=prod[op.produitIds[0]];name=((p.marque||'')+' '+(p.modele||p.gamme||p.designation||'')).trim();}
+      else name=(op.commentaire||'').slice(0,40);
+      const tl=_PV_OP_TL[op.type]||op.type||'OP';
+      out.push({du,au,hasFin:!!finReal,label:name||tl,full:tl+(name?' — '+name:'')});
+    }
+    _pvOps=out;try{localStorage.setItem('rh-pvops',JSON.stringify(out))}catch(e){}
+    try{render()}catch(e){}
+  }catch(e){/* hors-ligne : on garde le cache */}
 }
 
 
@@ -1810,6 +1850,11 @@ function dayEvents(d,b){
     if(d<ev.du||d>ev.au)continue;
     if(ev.b&&ev.b!=='ALL'&&ev.b!==b)continue;
     out.push({cls:ev.type==='OP'?'op':'autre',txt:(ev.type==='OP'?'📣 ':'📌 ')+ev.label,detail:(ev.type==='OP'?'OP : ':'Événement : ')+esc(ev.label)+' '+periodeTxt(ev.du,ev.au)+(ev.b&&ev.b!=='ALL'?' · '+bout(ev.b).nom:' · toutes boutiques')});
+  }
+  // OP PilotVape : repère VERT au début, ROUGE à la fin (rien entre les deux pour ne pas charger)
+  for(const op of (_pvOps||[])){
+    if(d===op.du)out.push({cls:'pvop',st:'style="background:#16a34a;color:#fff;border:1px solid #4ade80"',txt:'▶ '+op.label,detail:'OP PilotVape — DÉBUT : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
+    if(op.hasFin&&d===op.au&&op.au!==op.du)out.push({cls:'pvop',st:'style="background:#dc2626;color:#fff;border:1px solid #f87171"',txt:'◀ '+op.label,detail:'OP PilotVape — FIN : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
   }
   return out;
 }
