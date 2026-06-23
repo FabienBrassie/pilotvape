@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-23 17:54 — OP PilotVape : campagne datée STRICTEMENT par sa fenêtre (c.dateDebut/dateFin), plus de repli sur la date des OP "en retard" (fix repère trop tôt) -->
+<!-- v 2026-06-23 23:05 — Vues 3 boutiques & Mois : calendrier "Événements & perso" sous le planning (événements pro + planning perso admin, sans salariés) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1367,6 +1367,22 @@ function teamCell(bId,d){
   workItems.sort((a,b)=>a.st-b.st||a.en-b.en);
   return workItems.map(x=>x.line).join('')+(off?'<div class="moff">'+off+'</div>':'');
 }
+// Chips "événements seuls" d'un jour : événements pro (férié, OP/événement, OP PilotVape) +
+// éléments du planning PERSO de l'admin (calendriers perso, journée + minuté). PAS les salariés
+// (ni shifts, ni congés/maladies). Utilisé sous les vues "3 boutiques" et "Mois". (Fabien 2026-06-23)
+function _evtOnlyChips(d){
+  const out=[];
+  const f=ferieOf(d);
+  if(f){const sp=f.type==='special';out.push('<span class="evc '+(sp?'ouvexc':'ferie')+'" title="'+(sp?'Ouverture exceptionnelle':'Jour férié')+'">'+(sp?'⭐ Spécial':'🎌 Férié')+'</span>');}
+  for(const ev of (S.events||[])){if(d<ev.du||d>ev.au)continue;out.push('<span class="evc '+(ev.type==='OP'?'op':'autre')+'" title="'+esc(ev.label)+'">'+(ev.type==='OP'?'📣 ':'📌 ')+esc(ev.label)+'</span>');}
+  for(const op of (_pvOps||[])){
+    if(op.startReal!==false&&d===op.du)out.push('<span class="evc" style="background:#16a34a;color:#fff" title="'+esc(op.full)+'">▶ '+esc(op.label)+'</span>');
+    if(op.hasFin&&d===op.au&&op.au!==op.du)out.push('<span class="evc" style="background:#dc2626;color:#fff" title="'+esc(op.full)+'">◀ '+esc(op.label)+'</span>');
+  }
+  for(const c of myAllDayChips(d))out.push('<span class="evc '+(c.cls||'')+'" '+(c.st||'')+' title="'+esc(c.detail||c.txt)+'">'+esc(c.txt)+'</span>');
+  for(const x of myEntriesOn(d))out.push('<span class="evc" style="background:'+calColor(x.calId)+';color:#fff" title="'+esc(calName(x.calId))+' — '+esc(x.title)+'">'+x.du+' '+esc(x.title)+'</span>');
+  return out;
+}
 function renderSynth(){
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const today=todayISO();
@@ -1385,6 +1401,9 @@ function renderSynth(){
         teamCell(b.id,d)+'</div>';
     }
   }
+  // Ligne "Événements & perso" (pas de salariés) — sous les boutiques, même style
+  h+='<div class="sbname" style="color:var(--mut);border-left:4px solid var(--mut)">📌 Événements &amp; perso</div>';
+  for(const d of days){const ch=_evtOnlyChips(d);h+='<div class="scell'+(d===today?' today':'')+'" onclick="openEvEd(\''+d+'\')" style="cursor:pointer;align-items:flex-start">'+(ch.length?ch.join(' '):'')+'</div>';}
   h+='</div>';
   $('monthwrap').innerHTML=h;
 }
@@ -1647,6 +1666,19 @@ function renderMonth(){
       h+=cell;
     }
     // stop si la semaine suivante est entièrement hors mois
+    if(+addD(start,(w+1)*7).slice(5,7)!==m && addD(start,(w+1)*7)>first){break;}
+  }
+  h+='</div>';
+  // ── Calendrier "Événements & perso" du mois (sans salariés), sous le calendrier principal ──
+  h+='<div style="padding:10px 10px 2px;font-size:12px;font-weight:700;color:var(--mut)">📌 Événements &amp; perso</div>';
+  h+='<div class="mgrid">'+['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'].map(x=>'<div class="mwd">'+x+'</div>').join('');
+  for(let w=0;w<6;w++){
+    const wkStart=addD(start,w*7);
+    for(let i=0;i<7;i++){
+      const d=addD(wkStart,i);const inM=(+d.slice(5,7)===m);
+      const ch=_evtOnlyChips(d);
+      h+='<div class="mcell'+(inM?'':' out')+(d===today?' today':'')+'" onclick="openEvEd(\''+d+'\')" style="cursor:pointer"><span class="dn">'+(+d.slice(8,10))+'</span><div class="moff">'+(ch.length?ch.join(' '):'')+'</div></div>';
+    }
     if(+addD(start,(w+1)*7).slice(5,7)!==m && addD(start,(w+1)*7)>first){break;}
   }
   h+='</div>';
