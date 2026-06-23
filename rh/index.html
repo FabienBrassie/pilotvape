@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-23 17:45 — OP PilotVape dans le bandeau événements : libellés clairs (« Campagne X », « Nouveauté Y » dédup) ; campagne introuvable = OP isolée (plus de « Campagne » fantôme) -->
+<!-- v 2026-06-23 17:54 — OP PilotVape : campagne datée STRICTEMENT par sa fenêtre (c.dateDebut/dateFin), plus de repli sur la date des OP "en retard" (fix repère trop tôt) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -764,16 +764,16 @@ async function fetchPvOps(){
       if(!op||op._archived||op.annulee)continue;
       const c=(op.campagneId!=null)?camp[op.campagneId]:null;
       // ── Campagne NOMMÉE existante : UNE seule entrée par campagne, préfixe "Campagne " ──
+      // IMPORTANT : on utilise STRICTEMENT les dates de la campagne (c.dateDebut/c.dateFin), JAMAIS
+      // celles des OP. Une campagne de nouveautés "en retard" contient des OP dont la date de ligne
+      // est ancienne (ex. 22/06) — s'en servir ferait apparaître le repère trop tôt (bug Fabien).
       if(c&&c.nom){
         if(seenCamp.has(op.campagneId))continue;
         seenCamp.add(op.campagneId);
+        const du=c.dateDebut||null, fin=c.dateFin||null;
+        if(!du&&!fin)continue; // campagne sans aucune date → rien à placer
         const sibs=D.ops.filter(o=>o&&!o._archived&&!o.annulee&&o.campagneId===op.campagneId);
-        const du=c.dateDebut||sibs.map(o=>o.dateDebut).filter(Boolean).sort()[0]||null;
-        if(!du)continue;
-        const aus=sibs.map(o=>o.dateFin).filter(Boolean).sort();
-        const finReal=c.dateFin||(aus.length?aus[aus.length-1]:null);
-        let au=finReal||du;if(au<du)au=du;
-        out.push({du,au,hasFin:!!finReal,label:'Campagne '+c.nom,full:'Campagne « '+c.nom+' » ('+sibs.length+' OP'+(sibs.length>1?'s':'')+')'});
+        out.push({du:du||fin,au:fin||du,startReal:!!du,hasFin:!!fin,label:'Campagne '+c.nom,full:'Campagne « '+c.nom+' » ('+sibs.length+' OP'+(sibs.length>1?'s':'')+')'});
         continue;
       }
       // ── OP isolée (ou campagne introuvable/sans nom → traitée individuellement) : "type + produit" ──
@@ -1868,7 +1868,7 @@ function dayEvents(d,b){
   }
   // OP PilotVape : repère VERT au début, ROUGE à la fin (rien entre les deux pour ne pas charger)
   for(const op of (_pvOps||[])){
-    if(d===op.du)out.push({cls:'pvop',st:'style="background:#16a34a;color:#fff;border:1px solid #4ade80"',txt:'▶ '+op.label,detail:'OP PilotVape — DÉBUT : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
+    if(op.startReal!==false&&d===op.du)out.push({cls:'pvop',st:'style="background:#16a34a;color:#fff;border:1px solid #4ade80"',txt:'▶ '+op.label,detail:'OP PilotVape — DÉBUT : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
     if(op.hasFin&&d===op.au&&op.au!==op.du)out.push({cls:'pvop',st:'style="background:#dc2626;color:#fff;border:1px solid #f87171"',txt:'◀ '+op.label,detail:'OP PilotVape — FIN : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
   }
   return out;
