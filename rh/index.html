@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-23 17:29 — OP PilotVape dans le bandeau événements : repère vert "début" / rouge "fin" (lecture seule, même Worker) -->
+<!-- v 2026-06-23 17:34 — OP PilotVape dans le bandeau événements : repère vert "début" / rouge "fin" ; 1 seul repère par campagne (pas par OP) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -757,16 +757,30 @@ async function fetchPvOps(){
     const camp={};(D.campagnes||[]).forEach(c=>{if(c&&c.id!=null)camp[c.id]=c});
     const prod={};['baseKits','baseLiq','basePD'].forEach(k=>(D[k]||[]).forEach(p=>{if(p&&p.id!=null)prod[p.id]=p}));
     const out=[];
+    const seenCamp=new Set();
     for(const op of D.ops){
       if(!op||op._archived||op.annulee)continue;
-      const c=(op.campagneId!=null)?camp[op.campagneId]:null;
-      const du=op.dateDebut||(c&&c.dateDebut)||null;
-      if(!du)continue;
-      const finReal=op.dateFin||(c&&c.dateFin)||null;
+      // ── Campagne : UNE seule entrée par campagne (pas un repère par OP de la campagne) ──
+      if(op.campagneId!=null){
+        if(seenCamp.has(op.campagneId))continue;
+        seenCamp.add(op.campagneId);
+        const c=camp[op.campagneId];
+        const sibs=D.ops.filter(o=>o&&!o._archived&&!o.annulee&&o.campagneId===op.campagneId);
+        const du=(c&&c.dateDebut)||sibs.map(o=>o.dateDebut).filter(Boolean).sort()[0]||null;
+        if(!du)continue;
+        const aus=sibs.map(o=>o.dateFin).filter(Boolean).sort();
+        const finReal=(c&&c.dateFin)||(aus.length?aus[aus.length-1]:null);
+        let au=finReal||du;if(au<du)au=du;
+        const name=(c&&c.nom)||'Campagne';
+        out.push({du,au,hasFin:!!finReal,label:name,full:'Campagne — '+name+' ('+sibs.length+' OP'+(sibs.length>1?'s':'')+')'});
+        continue;
+      }
+      // ── OP isolée (hors campagne) ──
+      const du=op.dateDebut||null;if(!du)continue;
+      const finReal=op.dateFin||null;
       let au=finReal||du;if(au<du)au=du;
       let name='';
-      if(c&&c.nom)name=c.nom;
-      else if(op.produitLibre&&op.produitLibre.libelle)name=op.produitLibre.libelle;
+      if(op.produitLibre&&op.produitLibre.libelle)name=op.produitLibre.libelle;
       else if(op.produitIds&&op.produitIds[0]&&prod[op.produitIds[0]]){const p=prod[op.produitIds[0]];name=((p.marque||'')+' '+(p.modele||p.gamme||p.designation||'')).trim();}
       else name=(op.commentaire||'').slice(0,40);
       const tl=_PV_OP_TL[op.type]||op.type||'OP';
