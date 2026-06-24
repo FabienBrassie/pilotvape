@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-24 22:55 — Ajustements horaires : badge coloré distinct (heures sup cyan + ; retard rouge − ; parti plus tôt orange −) au lieu d'un "−2h" cyan trompeur -->
+<!-- v 2026-06-25 00:21 — Semaines futures : voile rouge sur tout le calendrier (au lieu du liseré bleu) + pastille rouge ; passé grisé inchangé -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -88,8 +88,10 @@ main{padding:12px 16px;max-width:1400px;margin:0 auto}
 .scell.pre,.mcell.pre{opacity:.42}
 .dayhead.pre{opacity:.45}
 /* Différenciation semaine en cours / passée / future (lisibilité navigation — Fabien 2026-06-24) */
-#calwrap,#monthwrap{transition:opacity .15s,filter .15s,box-shadow .15s}
-body.viewfuture #calwrap,body.viewfuture #monthwrap{opacity:.9;filter:saturate(.85);box-shadow:inset 4px 0 0 #2563eb}
+#calwrap,#monthwrap{transition:opacity .15s,filter .15s;position:relative}
+/* FUTUR : voile rouge bien visible sur tout le calendrier (clics traversent) */
+body.viewfuture #calwrap::after,body.viewfuture #monthwrap::after{content:'';position:absolute;inset:0;background:rgba(239,68,68,.14);pointer-events:none;z-index:60;border-radius:inherit}
+/* PASSÉ : grisé + estompé */
 body.viewpast #calwrap,body.viewpast #monthwrap{opacity:.64;filter:grayscale(.55) saturate(.7);box-shadow:inset 4px 0 0 #78716c}
 .hline{position:absolute;left:0;right:0;height:1px;background:var(--gridline)}
 .blk{position:absolute;border-radius:7px;padding:3px 6px;color:#fff;font-size:11px;line-height:1.25;overflow:hidden;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,.22);border:1.5px solid var(--card);z-index:5}
@@ -3680,7 +3682,7 @@ function navOrient(){
   document.body.classList.toggle('viewfuture',!isNow&&future);
   document.body.classList.toggle('viewpast',!isNow&&!future);
   if(rel){rel.textContent=txt;
-    const _c=isNow?{bg:'rgba(22,163,74,.16)',bd:'rgba(22,163,74,.5)',fg:'#16a34a'}:future?{bg:'rgba(37,99,235,.16)',bd:'rgba(37,99,235,.5)',fg:'#3b82f6'}:{bg:'rgba(120,113,108,.18)',bd:'rgba(120,113,108,.5)',fg:'#a8a29e'};
+    const _c=isNow?{bg:'rgba(22,163,74,.16)',bd:'rgba(22,163,74,.5)',fg:'#16a34a'}:future?{bg:'rgba(239,68,68,.18)',bd:'rgba(239,68,68,.55)',fg:'#f87171'}:{bg:'rgba(120,113,108,.18)',bd:'rgba(120,113,108,.5)',fg:'#a8a29e'};
     rel.style.background=_c.bg;rel.style.borderColor=_c.bd;rel.style.color=_c.fg;}
 }
 function monthDays(anchor){const y=+anchor.slice(0,4),m=+anchor.slice(5,7);const out=[];
