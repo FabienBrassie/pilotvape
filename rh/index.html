@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-23 23:05 — Vues 3 boutiques & Mois : calendrier "Événements & perso" sous le planning (événements pro + planning perso admin, sans salariés) -->
+<!-- v 2026-06-24 22:55 — Ajustements horaires : badge coloré distinct (heures sup cyan + ; retard rouge − ; parti plus tôt orange −) au lieu d'un "−2h" cyan trompeur -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -87,6 +87,10 @@ main{padding:12px 16px;max-width:1400px;margin:0 auto}
 .daycol.pre{opacity:.42}
 .scell.pre,.mcell.pre{opacity:.42}
 .dayhead.pre{opacity:.45}
+/* Différenciation semaine en cours / passée / future (lisibilité navigation — Fabien 2026-06-24) */
+#calwrap,#monthwrap{transition:opacity .15s,filter .15s,box-shadow .15s}
+body.viewfuture #calwrap,body.viewfuture #monthwrap{opacity:.9;filter:saturate(.85);box-shadow:inset 4px 0 0 #2563eb}
+body.viewpast #calwrap,body.viewpast #monthwrap{opacity:.64;filter:grayscale(.55) saturate(.7);box-shadow:inset 4px 0 0 #78716c}
 .hline{position:absolute;left:0;right:0;height:1px;background:var(--gridline)}
 .blk{position:absolute;border-radius:7px;padding:3px 6px;color:#fff;font-size:11px;line-height:1.25;overflow:hidden;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,.22);border:1.5px solid var(--card);z-index:5}
 .blk b{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1845,12 +1849,12 @@ function render(){
     for(const rq of (S.hsdemandes||[]).filter(x=>x.statut==='attente'&&x.date===d)){
       const e=emp(rq.empId);if(!e||e.b!==curB)continue;
       const pp=presence(e,d);const mine=(pp.st==='present'?(pp.blocks||[]):[]).filter(bl=>bl[2]===curB);
-      const sens=rq.sens||'sup';let a,b2,cut=false,lab;
-      if(sens==='sup'){const last=mine.length?t2m(mine[mine.length-1][1]):t2m(bout(curB).close)-rq.min;a=last;b2=last+rq.min;lab='+'+fmtMin(rq.min)+' ?';}
-      else if(sens==='fin'){if(!mine.length)continue;const le=t2m(mine[mine.length-1][1]);a=le-rq.min;b2=le;cut=true;lab='−'+fmtMin(rq.min)+' ?';}
-      else {if(!mine.length)continue;const fsx=t2m(mine[0][0]);a=fsx;b2=fsx+rq.min;cut=true;lab='−'+fmtMin(rq.min)+' ?';}
+      const sens=rq.sens||'sup';let a,b2,cut=false,lab,desc;
+      if(sens==='sup'){const last=mine.length?t2m(mine[mine.length-1][1]):t2m(bout(curB).close)-rq.min;a=last;b2=last+rq.min;lab='+'+fmtMin(rq.min)+' HS ?';desc='heures sup +'+fmtMin(rq.min);}
+      else if(sens==='fin'){if(!mine.length)continue;const le=t2m(mine[mine.length-1][1]);a=le-rq.min;b2=le;cut=true;lab='↩ parti −'+fmtMin(rq.min)+' ?';desc='parti plus tôt −'+fmtMin(rq.min);}
+      else {if(!mine.length)continue;const fsx=t2m(mine[0][0]);a=fsx;b2=fsx+rq.min;cut=true;lab='🕒 retard '+fmtMin(rq.min)+' ?';desc='retard — arrivé '+fmtMin(rq.min)+' plus tard';}
       a=Math.max(CAL_START,a);b2=Math.min(CAL_END,b2);if(b2<=a)continue;
-      bb+='<div class="reqghost'+(cut?' cut':'')+'" style="top:'+((a-CAL_START)*PX)+'px;height:'+Math.max((b2-a)*PX,12)+'px;left:2px;right:2px;'+(cut?'':'background:'+colOf(e))+'" title="Demande en attente — '+esc(e.nom)+'">'+esc(e.nom.split(' ')[0])+' '+lab+'</div>';
+      bb+='<div class="reqghost'+(cut?' cut':'')+'" style="top:'+((a-CAL_START)*PX)+'px;height:'+Math.max((b2-a)*PX,12)+'px;left:2px;right:2px;'+(cut?'':'background:'+colOf(e))+'" title="Demande en attente — '+esc(e.nom)+' : '+esc(desc)+(rq.note?' · « '+esc(rq.note)+' »':'')+' — à valider dans 🏖 Absences ▸ Heures sup">'+esc(e.nom.split(' ')[0])+' '+lab+'</div>';
     }
     if(d===today){const now=new Date();const m=now.getHours()*60+now.getMinutes();
       if(m>CAL_START&&m<CAL_END)bb+='<div class="nowline" style="top:'+((m-CAL_START)*PX)+'px"></div>';}
@@ -2465,8 +2469,8 @@ function renderAbs(){
   const hsatt=(S.hsdemandes||[]).filter(x=>x.statut==='attente'&&emp(x.empId)&&absSel.has(emp(x.empId).b)).sort((a,b)=>a.date<b.date?-1:1);
   if(hsatt.length){
     h+='<div class="mhead">⏱ Heures sup à valider ('+hsatt.length+')</div>';
-    for(const x of hsatt){const e=emp(x.empId);
-      h+='<div class="datecard" style="border-left:4px solid #0891b2"><div class="dbadge"><b>'+(+x.date.slice(8,10))+'</b><span>'+DAYJ[wdOf(x.date)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(x.date)+'</span><span style="color:#0891b2;font-weight:800">'+hsLabel(x)+'</span>'+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+(x.parResp&&emp(x.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(x.parResp).nom)+'</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptHS('+x.id+')">✓ Accepter</button> <button class="act red" onclick="refuseHS('+x.id+')">✗ Refuser</button></span></div></div></div>';
+    for(const x of hsatt){const e=emp(x.empId);const _hk=hsKind(x);
+      h+='<div class="datecard" style="border-left:4px solid '+_hk.accent+'"><div class="dbadge"><b>'+(+x.date.slice(8,10))+'</b><span>'+DAYJ[wdOf(x.date)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(x.date)+'</span>'+hsBadge(x)+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+(x.parResp&&emp(x.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(x.parResp).nom)+'</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptHS('+x.id+')">✓ Accepter</button> <button class="act red" onclick="refuseHS('+x.id+')">✗ Refuser</button></span></div></div></div>';
     }
   }
   // maladies déclarées par un responsable, en attente de validation
@@ -2483,7 +2487,7 @@ function renderAbs(){
   // ═══ ONGLET « HEURES SUP » — historique complet (en attente / acceptées / refusées) ═══
   if(absTab==='hsup'){
     const hsList=(S.hsdemandes||[]).filter(x=>emp(x.empId)&&absSel.has(emp(x.empId).b));
-    h+='<div class="mhead">⏱ Heures sup — toutes (en attente · acceptées · refusées)</div>';
+    h+='<div class="mhead">⏱ Ajustements horaires — heures sup · <span style="color:#f87171">retards</span> · <span style="color:#fb923c">départs anticipés</span> (en attente · acceptées · refusées)</div>';
     if(!hsList.length)h+='<div class="small" style="padding:6px 4px">Aucune heure sup enregistrée.</div>';
     for(const e of S.employees.filter(x=>x.actif&&absSel.has(x.b))){
       const mine=hsList.filter(x=>x.empId===e.id).sort((a,b)=>a.date<b.date?1:-1);
@@ -2493,7 +2497,7 @@ function renderAbs(){
       for(const x of mine){
         const st=x.statut||'attente';
         const stBadge=st==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':st==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé ✗</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>';
-        h+='<div class="brow" style="padding-left:18px"><span>'+DAYJ[wdOf(x.date)]+' '+fmtFR(x.date)+'</span><span class="small" style="color:#0891b2;font-weight:800">'+hsLabel(x)+'</span>'+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+(x.parResp&&emp(x.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ '+esc(emp(x.parResp).nom)+'</span>':'')+stBadge+'<span style="margin-left:auto;white-space:nowrap">'+(st!=='accepte'?'<button class="mini" onclick="acceptHS('+x.id+')" title="Accepter">✓</button> ':'')+(st!=='refuse'?'<button class="mini" onclick="refuseHS('+x.id+')" title="Refuser">✗</button> ':'')+'<button class="mini ghost" onclick="delHS('+x.id+')">🗑</button></span></div>';
+        h+='<div class="brow" style="padding-left:18px"><span>'+DAYJ[wdOf(x.date)]+' '+fmtFR(x.date)+'</span>'+hsBadge(x)+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+(x.parResp&&emp(x.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ '+esc(emp(x.parResp).nom)+'</span>':'')+stBadge+'<span style="margin-left:auto;white-space:nowrap">'+(st!=='accepte'?'<button class="mini" onclick="acceptHS('+x.id+')" title="Accepter">✓</button> ':'')+(st!=='refuse'?'<button class="mini" onclick="refuseHS('+x.id+')" title="Refuser">✗</button> ':'')+'<button class="mini ghost" onclick="delHS('+x.id+')">🗑</button></span></div>';
       }
       h+='</div>';
     }
@@ -3304,6 +3308,13 @@ function submitHS(min){
 }
 function fmtMin(m){const h=Math.floor(m/60),mm=m%60;return (h?h+'h':'')+(mm?(h?String(mm).padStart(2,'0'):mm+'min'):(h?'':'0'));}
 function hsLabel(x){const sn=x.sens||'sup';const ic=sn==='fin'?'🌙 −':sn==='debut'?'🌅 −':'⏱ +';return ic+fmtMin(x.min);}
+// Distingue visuellement les AJUSTEMENTS : heures sup (positif, cyan) vs retard / parti plus tôt
+// (problèmes, rouge/orange) — pour ne pas faire croire qu'un retard est une heure sup (Fabien 2026-06-24).
+function hsKind(x){const sn=x.sens||'sup';
+  if(sn==='debut')return{ic:'🌅',sign:'−',txt:'retard',fg:'#f87171',bg:'rgba(220,38,38,.14)',bd:'#dc262666',accent:'#ef4444',prob:true};
+  if(sn==='fin')return{ic:'🌙',sign:'−',txt:'parti plus tôt',fg:'#fb923c',bg:'rgba(234,88,12,.14)',bd:'#ea580c66',accent:'#f97316',prob:true};
+  return{ic:'⏱',sign:'+',txt:'heures sup',fg:'#22d3ee',bg:'rgba(8,145,178,.16)',bd:'#0891b255',accent:'#0891b2',prob:false};}
+function hsBadge(x){const k=hsKind(x);return '<span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+k.bg+';color:'+k.fg+';border:1px solid '+k.bd+';white-space:nowrap">'+k.ic+' '+k.sign+fmtMin(x.min)+' · '+k.txt+'</span>';}
 // Admin : accepter une HS -> ajoute un bloc HS en fin de journée
 function acceptHS(id){
   const r=S.hsdemandes.find(x=>x.id===id);if(!r)return;const e=emp(r.empId);if(!e)return;
@@ -3648,16 +3659,16 @@ function weekRange(mon){const end=addD(mon,6);
 // Repères de navigation : surligne « Aujourd'hui » sur la période courante + chip relatif (cette semaine, dans 2 semaines, dans 1 mois…)
 function navOrient(){
   const tb=document.getElementById('todaybtn'),rel=document.getElementById('weekrel');
-  let isNow=false,txt='';
+  let isNow=false,txt='',future=false;
   if(calView==='month'){
     const a=addD(curMonday,3),t=todayISO();
     const dm=(+a.slice(0,4)-+t.slice(0,4))*12+(+a.slice(5,7)-+t.slice(5,7));
-    isNow=dm===0;
+    isNow=dm===0;future=dm>0;
     txt=dm===0?'ce mois-ci':Math.abs(dm)===1?(dm>0?'le mois prochain':'le mois dernier'):(dm>0?'dans '+dm+' mois':'il y a '+(-dm)+' mois');
   }else{
     const tw=monday(todayISO());
     const d=Math.round((new Date(curMonday)-new Date(tw))/(7*864e5));
-    isNow=d===0;
+    isNow=d===0;future=d>0;
     if(d===0)txt='cette semaine';
     else{const fut=d>0,n=Math.abs(d);
       if(n===1)txt=fut?'la semaine prochaine':'la semaine dernière';
@@ -3665,7 +3676,12 @@ function navOrient(){
       else{const mo=Math.round(n/4.345);txt=(fut?'dans ~':'il y a ~')+mo+' mois';}}
   }
   if(tb)tb.classList.toggle('on',isNow);
-  if(rel)rel.textContent=txt;
+  // Différenciation visuelle de la période affichée (en cours / future / passée)
+  document.body.classList.toggle('viewfuture',!isNow&&future);
+  document.body.classList.toggle('viewpast',!isNow&&!future);
+  if(rel){rel.textContent=txt;
+    const _c=isNow?{bg:'rgba(22,163,74,.16)',bd:'rgba(22,163,74,.5)',fg:'#16a34a'}:future?{bg:'rgba(37,99,235,.16)',bd:'rgba(37,99,235,.5)',fg:'#3b82f6'}:{bg:'rgba(120,113,108,.18)',bd:'rgba(120,113,108,.5)',fg:'#a8a29e'};
+    rel.style.background=_c.bg;rel.style.borderColor=_c.bd;rel.style.color=_c.fg;}
 }
 function monthDays(anchor){const y=+anchor.slice(0,4),m=+anchor.slice(5,7);const out=[];
   let d=y+'-'+String(m).padStart(2,'0')+'-01';while(+d.slice(5,7)===m){out.push(d);d=addD(d,1)}return out;}
