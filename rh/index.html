@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 17:20 — Plafond contrat : on n'étire plus un bloc NORMAL au-delà du temps de travail hebdo (e.h) ; un nouveau bloc créé une fois le contrat atteint passe automatiquement en heures sup. Blocs HS non plafonnés. -->
+<!-- v 2026-06-25 18:02 — Vue « Mon planning » : les blocs retard/parti tôt s'affichent en ROUGE avec libellé (comme la vue Semaine), au lieu d'un bloc vert normal -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1628,14 +1628,15 @@ function renderMineWeek(){
         if(mineFocus&&e.id!==me.id)continue; // focus "moi seul" : tous les collègues masqués
         if(e.id!==me.id&&hidden.has(e.id))continue; // collègue masqué (jamais soi-même)
         const p=presence(e,d);if(p.st!=='present'||!p.blocks)continue;
-        p.blocks.forEach(bl=>{if(!mb.has(bl[2]))return;evs.push({e,bl,me:e.id===me.id,s:t2m(bl[0]),f:t2m(bl[1]),hs:!!bl[3]});});
+        p.blocks.forEach(bl=>{if(!mb.has(bl[2]))return;evs.push({e,bl,me:e.id===me.id,s:t2m(bl[0]),f:t2m(bl[1]),hs:!!bl[3],lbl:(typeof bl[4]==='string'&&bl[4])?bl[4]:''});});
       }
       evs.sort((a,b)=>a.s-b.s||b.f-a.f);
       const colsEnd=[];for(const ev of evs){let c=0;while(c<colsEnd.length&&colsEnd[c]>ev.s)c++;ev.col=c;colsEnd[c]=ev.f;}
       for(const ev of evs){
         const top=(ev.s-CAL_START)*PX,hpx=(ev.f-ev.s)*PX,l=Math.min(ev.col*24,64);
-        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'">'+
-          '<b>'+(ev.me?'★ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
+        const _isRet=(ev.lbl==='retard'||ev.lbl==='parti tôt');
+        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e)))+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':'')+'>'+
+          '<b>'+(ev.me?'★ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
       }
     }
     // calendriers personnels (RDV, orga…) : pleine largeur s'il n'y a pas d'équipe ce jour,
@@ -3144,6 +3145,15 @@ function fmtHfrac(min){const h=Math.floor(min/60),m=min%60;const F={15:'1/4',30:
   if(h===0)return F?F+" d'h":m+'min';
   if(m===0)return h+'h';
   return F?h+'h'+F:h+'h'+String(m).padStart(2,'0');}
+// Retards/départs validés par semaine ISO : {min, label} — label correct (retard / départ anticipé / les deux).
+function lossWeekInfo(e,days){const w={};const ds=new Set(days);
+  for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;
+    const k=isoWeek(r.date);const o=(w[k]=w[k]||{min:0,deb:0,fin:0});o.min+=r.min;o[sn==='debut'?'deb':'fin']+=r.min;}
+  Object.keys(w).forEach(k=>{const o=w[k];o.label=(o.deb&&o.fin)?'retard/départ':(o.fin?'départ anticipé':'retard');});
+  return w;}
+function lossMonthLabel(e,days){let deb=0,fin=0;const ds=new Set(days);
+  for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;if(sn==='debut')deb+=r.min;else fin+=r.min;}
+  return (deb&&fin)?'retard/départ':(fin?'départ anticipé':'retard');}
 function feriesOfMonth(days){return days.filter(d=>{const f=ferieOf(d);return f&&f.type==='ferie';}).sort();}
 function daysAbs(arr,eid,days){let n=0;for(const d of days)if(arr.some(x=>x.empId===eid&&d>=x.du&&d<=x.au))n++;return n;}
 function paieRow(e,days){
@@ -3151,7 +3161,7 @@ function paieRow(e,days){
   return {
     nom:e.nom, b:e.b,
     norm:w.norm, hs:w.hs, fer:w.fer, dim:w.dim,
-    retard:lossMin(e,days),
+    retard:lossMin(e,days), retardLabel:lossMonthLabel(e,days),
     ferchome:feriesOfMonth(days).filter(d=>inEmploi(e,d)&&dayWorkedMin(e,d)===0).length,
     conge:daysAbs(S.conges.filter(c=>c.statut==='accepte'),e.id,days),
     maladie:daysAbs(S.maladies.filter(m=>m.statut!=='attente'),e.id,days),
@@ -3281,7 +3291,7 @@ function renderPaie(){
       const r=paieRow(e,days);
       h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:4px">';
       h+='<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
-        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (retard / départ anticipé non rattrapé) — déjà retirées des heures normales ci-contre, à NE PAS payer">'+fmtHfrac(r.retard)+' retard</span>':'')+'</span></div>';
+        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (non rattrapé) — déjà retirées des heures normales ci-contre, non rémunérées">'+fmtHfrac(r.retard)+' '+r.retardLabel+' (non rémunéré)</span>':'')+'</span></div>';
       for(const ev of paieEvents(e,days)){
         h+='<div class="brow" style="padding-left:14px;font-size:12px"><span style="width:104px;color:var(--mut)">'+ev.label+'</span><span>'+ev.txt+'</span></div>';
       }
@@ -3304,8 +3314,8 @@ function paieEvents(e,days){
     evs.push({d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
   const hw=hsByWeek(e,days);
   Object.keys(hw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏱ Semaine '+k,txt:'<span style="color:#0891b2;font-weight:700">'+fmtHdec(hw[k])+' sup</span>'});});
-  const lw=lossByWeek(e,days);
-  Object.keys(lw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ S'+k,txt:'<span style="color:#dc2626;font-weight:700" title="Retard/départ anticipé non rattrapé — déjà déduit des heures, à ne pas payer">'+fmtHfrac(lw[k])+' retard</span>'});});
+  const lwi=lossWeekInfo(e,days);
+  Object.keys(lwi).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ S'+k,txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
   if(e.dateIn&&e.dateIn>=days[0]&&e.dateIn<=days[days.length-1])evs.push({d:e.dateIn,label:'📄 Début de contrat',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
   if(e.dateOut&&e.dateOut>=days[0]&&e.dateOut<=days[days.length-1])evs.push({d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
   evs.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
@@ -3347,9 +3357,9 @@ function paieTextStr(){
       // heures sup par semaine ISO
       const hw=hsByWeek(e,days);
       Object.keys(hw).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHdec(hw[k])+' sup\n';});
-      // heures manquées (retard/départ non rattrapé) — déjà déduites des heures travaillées, à ne pas payer
-      const lw=lossByWeek(e,days);
-      Object.keys(lw).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : -'+fmtHdec(lw[k])+' (retard/départ non rattrapé, déjà déduit des heures)\n';});
+      // heures manquées (retard/départ non rattrapé) — déjà déduites des heures travaillées, non rémunérées
+      const lwi=lossWeekInfo(e,days);
+      Object.keys(lwi).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' (non rémunéré)\n';});
       // congés acceptés du mois
       for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
         out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du)+'.':'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)+'.')+'\n';
