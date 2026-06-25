@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 16:16 — Récap paie : ligne retard raccourcie « ⏰ SX : 3/4 d'h retard » (fractions françaises via fmtHfrac), idem badge carte salarié -->
+<!-- v 2026-06-25 16:22 — Indicateur de synchro « en ligne / hors ligne » épinglé en haut à droite (position:fixed, hors flux) → son changement ne décale plus la barre ; repli en flux normal sur mobile -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -16,6 +16,8 @@ header h1{font-size:16px;font-weight:700;margin-right:6px}
 .bchip.on{opacity:1;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .bchip.P{background:var(--P)}.bchip.M{background:var(--M)}.bchip.L{background:var(--L)}
 .wnav{display:flex;align-items:center;gap:6px;margin-left:auto}
+/* Indicateur de synchro épinglé en haut à droite (hors flux) : son changement en/hors ligne ne décale plus rien */
+#syncdot{position:fixed;top:13px;right:14px;z-index:40;pointer-events:none}
 button.nav{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:8px;padding:5px 11px;cursor:pointer;font-size:13px}
 button.nav:hover{background:var(--bg)}
 button.nav.on{background:var(--blue);color:#fff;border-color:var(--blue)}
@@ -306,7 +308,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   .seg button{flex:1;padding:9px 6px;font-size:12.5px}
   button.nav{padding:9px 12px;font-size:15px}
   header button[id="setbtn"],#testbtn,#themebtn,#minebtn,#reqbtn{width:44px;height:42px;font-size:18px;display:inline-flex;align-items:center;justify-content:center;padding:0}
-  #syncdot{order:9;font-size:10px}
+  #syncdot{position:static;top:auto;right:auto;order:9;font-size:10px}
   .whoami{font-size:11px;order:8}
   header input,header select{padding:8px;font-size:16px}
   main{padding:10px 8px 90px}
