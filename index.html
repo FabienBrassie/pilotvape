@@ -171,7 +171,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-23 17:26</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-06-25 18:42</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -15707,6 +15707,18 @@ function renderDashboard() {
     return `<span style="font-size:10px; color:#64748b;">${promptLabel}</span>${chips}${opLink}`;
   }
 
+  // ── Badges canoniques (règle 8) : « commande gérée par Fabien » et « réception centralisée (hub) ».
+  // Une seule source d'étiquette, branchée sur TOUTES les lignes pliées À rentrer : carte action
+  // (Kits/PD), ligne Liquides « gamme entière » et groupes de parfums. (Demande Fabien 2026-06-25.)
+  function _badgeCommandeAdmin() {
+    return `<span title="C'est Fabien qui passe la commande — la boutique n'a qu'à réceptionner puis saisir en stock, ne pas recommander" style="font-size:9px; font-weight:700; padding:1px 6px; background:#7c3aed22; color:#c4b5fd; border:1px solid #a78bfa60; border-radius:3px; white-space:nowrap;">📦 Commande gérée par Fabien</span>`;
+  }
+  function _badgeHub(hub) {
+    if (!hub) return '';
+    const _lbl = SHOP_LABELS[hub] || hub;
+    return `<span title="Réception centralisée : tout le stock arrive à ${_lbl}, puis dispatch par rétrocession vers les autres boutiques" style="font-size:9px; font-weight:700; padding:1px 6px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; white-space:nowrap;">📦 hub ${_lbl}</span>`;
+  }
+
   // Blindage (chantier A — 2026-06-10) : une carte action illisible ne tue plus le dashboard.
   function renderActionCard(a, _opts) {
     try {
@@ -15943,7 +15955,7 @@ function renderDashboard() {
       }
       // Commande gérée par l'admin (Fabien) → repère sur la ligne PLIÉE (demande Fabien 2026-06-20)
       if (a.commandeAdmin === true) {
-        badgeTag += `<span title="C'est Fabien qui passe la commande — la boutique n'a qu'à réceptionner puis saisir en stock" style="font-size:9px; font-weight:700; padding:1px 6px; background:#7c3aed22; color:#c4b5fd; border:1px solid #a78bfa60; border-radius:3px; white-space:nowrap;">📦 Commande Fabien</span>`;
+        badgeTag += _badgeCommandeAdmin();
       }
       // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
       if (a.prixRouge) {
@@ -16079,7 +16091,7 @@ function renderDashboard() {
 
     // ── 📦 RÉCEPTION CENTRALISÉE : badge hub sur la ligne À rentrer ──
     if (a.type === 'RENTRER' && a.dispatchHub) {
-      badgeTag += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; white-space:nowrap;" title="Réception centralisée : tout le stock arrive à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub}, puis dispatch par rétrocession vers les autres boutiques">📦 hub ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub}</span>`;
+      badgeTag += _badgeHub(a.dispatchHub);
     }
 
     // ── 🔁 RÉTROCESSION : tout sur une LIGNE PLEINE LARGEUR (subtitleRow2) pour ne pas
@@ -16785,10 +16797,17 @@ function renderDashboard() {
         background:${bg}; color:${txt}; border:1px solid ${col}; border-radius:50%; user-select:none;">${init}</span>`;
     }).join('');
 
+    // Repères À rentrer sur la ligne pliée « groupe de parfums » (demande Fabien 2026-06-25) :
+    // seulement si tout le groupe partage l'info (même OP/réception → cohérent).
+    const _grpRentrer = grp.length > 0 && grp.every(a => a.type === 'RENTRER');
+    const _grpExtraBadges =
+      (_grpRentrer && grp.every(a => a.commandeAdmin === true) ? _badgeCommandeAdmin() : '')
+      + ((_grpRentrer && grp[0].dispatchHub && grp.every(a => a.dispatchHub === grp[0].dispatchHub)) ? _badgeHub(grp[0].dispatchHub) : '');
+
     return _ligneLiquide({
       groupKey,
       nom: g.gamme,
-      badgesHtml: `<span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${grp.length} parfum${grp.length>1?'s':''}</span>${progressLabel}`,
+      badgesHtml: `<span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${grp.length} parfum${grp.length>1?'s':''}</span>${progressLabel}${_grpExtraBadges}`,
       profShort, profColor,
       formatBadge: _liqFormatBadge(g.format), formatLabel,
       btnHtml: prixRougeBtn,
@@ -16884,6 +16903,9 @@ function renderDashboard() {
     if (g.statutVie === 'FIN_DE_VIE') {
       _glBadges += `<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#78350f40; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">☠️ Fin de vie</span>`;
     }
+    // Repères À rentrer sur la ligne pliée « gamme entière » (demande Fabien 2026-06-25)
+    if (a.type === 'RENTRER' && a.commandeAdmin === true) _glBadges += _badgeCommandeAdmin();
+    if (a.type === 'RENTRER' && a.dispatchHub) _glBadges += _badgeHub(a.dispatchHub);
     _glBadges += doneLabel;
 
     return _ligneLiquide({
