@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 09:57 — Vigilance retards/départs anticipés acceptés : pastille « ⚠ −Xh retard » sur la carte d'heures + repère persistant dans le bandeau événements -->
+<!-- v 2026-06-25 10:40 — Journal RH « Problèmes » : panneau 📒 (admin + responsables) saisie incidents (erreur/téléphone/inventaire/pb client/comportement/sanction…) + reprise auto des retards/départs (ponctualité), filtré par boutique -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -375,6 +375,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
     <span id="weekrel" class="weekrel"></span>
     <input type="date" id="goto" style="width:130px" onchange="if(this.value){curMonday=monday(this.value);render()}">
     <button id="setbtn" class="adminonly" onclick="togAbs()" title="Absences : congés, maladies">🏖</button>
+    <button id="setbtn" class="respok" onclick="togJournal()" title="Journal RH — problèmes : erreurs, retards, comportement, sanctions…">📒</button>
     <button id="setbtn" class="adminonly" onclick="togFeries()" title="Fériés & dimanches ouverts">🎌</button>
     <button id="setbtn" class="adminonly" onclick="togAssist()" title="Assistant d'optimisation">🪄</button>
     <button id="testbtn" class="adminonly nav" onclick="toggleTest()" title="Mode test (s'entraîner sur d'anciennes dates)">🧪</button>
@@ -404,6 +405,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
 <div id="paiepanel" class="panel" style="width:min(1240px,98vw)"></div>
 <div id="assistpanel" class="panel" style="width:min(960px,97vw)"></div>
 <div id="reqpanel" class="panel" style="width:min(820px,96vw)"></div>
+<div id="journalpanel" class="panel" style="width:min(1120px,98vw)"></div>
 <div id="hspanel" class="panel" style="width:min(440px,94vw)"></div>
 <div id="calpanel" class="panel" style="width:min(560px,96vw)"></div>
 <main>
@@ -990,10 +992,12 @@ function mergeData(L,R){
     else if(ts(rf)>ts(lf)){const i=L.feries.indexOf(lf);L.feries[i]=rf}
   }
   L.feries=L.feries.filter(f=>{const tk=L.tomb['fer|'+f.date];return !(tk&&tk>ts(f))});
-  // journal RH : on additionne sans doublon
+  // journal RH : on additionne sans doublon, en respectant les suppressions (tombstones)
   const sig=r=>r.d+'|'+r.q+'|'+r.t+'|'+(r.c||'');
-  const have=new Set((L.rh||[]).map(sig));
-  for(const r of R.rh||[])if(!have.has(sig(r))){L.rh.push(r);have.add(sig(r))}
+  L.rh=L.rh||[];
+  const have=new Set(L.rh.map(sig));
+  for(const r of R.rh||[]){const s=sig(r);if(have.has(s))continue;if(L.tomb&&L.tomb['rh|'+s])continue;L.rh.push(r);have.add(s);}
+  L.rh=L.rh.filter(r=>!(L.tomb&&L.tomb['rh|'+sig(r)]));
   // primes / solidarité (par clé)
   L.primes=L.primes||{};L.solidarite=L.solidarite||{};
   for(const k in (R.primes||{}))if(!L.primes[k]||ts(R.primes[k])>ts(L.primes[k]))L.primes[k]=R.primes[k];
@@ -3849,9 +3853,72 @@ function setRole(r){
   applyRole();render();
 }
 function logout(){ROLE=null;try{localStorage.removeItem('gestionrh-role')}catch(e){}
-  edit=null;['settings','feriepanel','abspanel','minepanel','evpanel','hdetail','paiepanel','reqpanel','hspanel'].forEach(id=>{if($(id))$(id).style.display='none'});
+  edit=null;['settings','feriepanel','abspanel','minepanel','evpanel','hdetail','paiepanel','reqpanel','hspanel','journalpanel'].forEach(id=>{if($(id))$(id).style.display='none'});
   renderLoginBq();$('login').style.display='flex';setTimeout(()=>$('pinin').focus(),50);}
 function canPaie(){return ROLE&&(ROLE.type==='admin'||ROLE.type==='rh');}
+// ===== JOURNAL RH (onglet « Problèmes ») : incidents saisis + ponctualité (retards/départs) =====
+const JTYPES=[
+  {t:'Erreur',c:'#475569'},
+  {t:'Retard',c:'#ef4444'},
+  {t:"Retard à l'ouverture",c:'#b91c1c'},
+  {t:'Parti plus tôt',c:'#f97316'},
+  {t:'Téléphone',c:'#7c3aed'},
+  {t:'Comportement',c:'#d97706'},
+  {t:'Inventaire',c:'#1d4ed8'},
+  {t:'Problème client',c:'#0891b2'},
+  {t:'Sanction / Avertissement',c:'#111827'},
+  {t:'Autre',c:'#64748b'}
+];
+function jtypeColor(t){const x=JTYPES.find(j=>j.t===t);return x?x.c:'#64748b';}
+function canJournal(){return isAdmin()||isResp()||!!(ROLE&&ROLE.type==='boutique');}
+function journalMyB(){if(isAdmin())return null;if(isResp())return emp(ROLE.empId)&&emp(ROLE.empId).b;if(ROLE&&ROLE.type==='boutique')return ROLE.b;return null;}
+let journalFilterB=null;
+function _journalSig(r){return r.d+'|'+r.q+'|'+r.t+'|'+(r.c||'');}
+function togJournal(){if(!canJournal())return;const el=$('journalpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderJournal();}
+function setJournalB(b){journalFilterB=b;renderJournal();}
+function addJournalEntry(b){
+  if(!canJournal())return;
+  const d=$('jr-d').value,q=$('jr-q').value,t=$('jr-t').value,c=($('jr-c').value||'').trim();
+  if(!d||!q){alert('Date et salarié requis.');return;}
+  S.rh=S.rh||[];const r={d,q,b,t,c,id:Date.now(),_ts:NOW()};
+  S.rh.push(r);if(S.tomb)delete S.tomb['rh|'+_journalSig(r)];
+  save();renderJournal();
+}
+function delJournalEntry(sig){
+  if(!confirm('Supprimer cette entrée du journal ?'))return;
+  S.tomb=S.tomb||{};S.tomb['rh|'+sig]=NOW();
+  S.rh=(S.rh||[]).filter(r=>_journalSig(r)!==sig);
+  save();renderJournal();
+}
+function renderJournal(){
+  if(!canJournal())return;
+  const isA=isAdmin();const myB=journalMyB();
+  const shops=isA?S.boutiques.map(b=>b.id):(myB?[myB]:[]);
+  if(journalFilterB&&!shops.includes(journalFilterB))journalFilterB=null;
+  const selB=journalFilterB||myB||shops[0];
+  let h='<div class="phead"><h2>📒 Journal RH — Problèmes</h2>';
+  if(isA)h+=S.boutiques.map(b=>'<button class="bchip '+b.id+(selB===b.id?' on':'')+'" onclick="setJournalB(\''+b.id+'\')">'+b.nom+'</button>').join('');
+  else if(selB)h+='<span class="chipb" style="color:var(--'+selB+')">'+bout(selB).nom+'</span>';
+  h+='<button class="act grey" style="margin-left:auto" onclick="$(\'journalpanel\').style.display=\'none\'">Fermer</button></div>';
+  h+='<div class="small" style="margin-bottom:6px;color:var(--mut)">Comportement · attitude · fiabilité · ponctualité. Les retards / départs anticipés déclarés (ajustements horaires) sont repris ici automatiquement (🕒 auto).</div>';
+  const emps=S.employees.filter(e=>e.actif&&e.b===selB);
+  h+='<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
+    '<select id="jr-q">'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
+    '<select id="jr-t">'+JTYPES.map(j=>'<option>'+j.t+'</option>').join('')+'</select>'+
+    '<input id="jr-c" placeholder="Commentaire (optionnel)" style="flex:1;min-width:160px">'+
+    '<button class="act green" onclick="addJournalEntry(\''+selB+'\')">Ajouter</button></div>';
+  const list=[];
+  for(const r of (S.rh||[]))if(r.b===selB)list.push({d:r.d,q:r.q,t:r.t,c:r.c||'',sig:_journalSig(r)});
+  for(const rq of (S.hsdemandes||[])){const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(rq.statut==='refuse')continue;const e=emp(rq.empId);if(!e||e.b!==selB)continue;
+    list.push({d:rq.date,q:e.nom,t:sn==='debut'?'Retard':'Parti plus tôt',c:fmtMin(rq.min)+(rq.note?' — '+rq.note:'')+(rq.statut!=='accepte'?' (à valider)':''),auto:true});}
+  list.sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0);
+  h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
+  if(!list.length)h+='<div class="small">Aucune entrée pour cette boutique.</div>';
+  for(const r of list){const col=jtypeColor(r.t);
+    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+'</span>'+(r.auto?'<span class="small" style="color:var(--mut);white-space:nowrap" title="Issu d\'une déclaration d\'ajustement horaire">🕒 auto</span>':((isA||selB===myB)?'<button class="mini ghost" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
+  }
+  $('journalpanel').innerHTML=h;
+}
 function applyRole(){
   const admin=isAdmin();
   if(!admin&&calView==='synth')calView='week';
@@ -3860,6 +3927,7 @@ function applyRole(){
   document.querySelectorAll('.meonly').forEach(el=>el.classList.toggle('hide',!me)); // vue "Mon planning multisite"
   document.querySelectorAll('.adminonly').forEach(el=>el.classList.toggle('hide',!admin));
   document.querySelectorAll('.paieok').forEach(el=>el.classList.toggle('hide',!canPaie()));
+  document.querySelectorAll('.respok').forEach(el=>el.classList.toggle('hide',!(admin||isResp()||(ROLE&&ROLE.type==='boutique'))));
   updateBadge();
   document.querySelectorAll('.salonly').forEach(el=>el.classList.toggle('hide',!(ROLE&&ROLE.type==='salarie')));
   if(ROLE&&ROLE.type==='salarie'){const e=emp(ROLE.empId);
