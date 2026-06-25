@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 15:25 — Journal RH ↔ Heures sup unifiés : un retard/départ saisi au Journal (durée) crée un ajustement (même donnée, validable des 2 côtés) qui modifie le planning ; type « Retard à l'ouverture » préservé -->
+<!-- v 2026-06-25 15:42 — Retard matérialisé sur le planning (bloc rouge « retard »/« parti tôt », heures déduites & exclues du calcul) ; saisie Journal auto-validée (s'applique direct au planning, même pour le passé) ; édition des notes du Journal (✎) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1042,7 +1042,8 @@ function t2m(t){const a=(t||'0:0').split(':');return(+a[0])*60+(+a[1])}
 function m2t(m){return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')}
 function fmtH(t){if(!t)return'';const a=t.split(':');return a[1]==='00'?a[0].replace(/^0/,'')+'h':a[0].replace(/^0/,'')+'h'+a[1]}
 function durMin(du,au){return t2m(au)-t2m(du)}
-function blocksMin(bl){return (bl||[]).reduce((s,b)=>s+durMin(b[0],b[1]),0)}
+function isRetardBlock(b){return b&&(b[4]==='retard'||b[4]==='parti tôt');}
+function blocksMin(bl){return (bl||[]).reduce((s,b)=>s+(isRetardBlock(b)?0:durMin(b[0],b[1])),0)}
 function durH(du,au){return durMin(du,au)/60}
 function blocksDur(bl){return blocksMin(bl)/60}
 function fmtDur(min){min=Math.round(min);const h=Math.floor(Math.abs(min)/60),m=Math.abs(min)%60;return (min<0?'-':'')+h+'h'+(m?String(m).padStart(2,'0'):'')}
@@ -1825,7 +1826,7 @@ function render(){
       const top=(ev.s-CAL_START)*PX, hpx=(ev.f-ev.s)*PX;
       const l=Math.min(ev.col*24,64); // cascade façon Google Agenda
       bb+='<div class="blk'+(ev.ex?' ex':'')+(ev.confl?' selfov':'')+(ev.lbl?' rep':'')+'" data-emp="'+ev.e.id+'" data-iso="'+d+'" data-bi="'+ev.bi+'"'+
-        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))+'"'+
+        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+((ev.lbl==='retard'||ev.lbl==='parti tôt')?'#dc2626':(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e)))+'"'+
         (ev.lbl?' title="'+esc(ev.lbl)+'"':(ev.note?' title="'+esc(ev.note)+'"':''))+'>'+
         '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span><i class="rz"></i></div>';
     }
@@ -3349,8 +3350,20 @@ function acceptHS(id){
   if(sens==='sup'){const bb=bout(e.b);let start;
     if(blocks.length)start=t2m(blocks[blocks.length-1][1]); else start=Math.max(0,t2m(bb.close)-r.min);
     blocks.push([m2t(start),m2t(Math.min(1440,start+r.min)),(blocks.length?blocks[blocks.length-1][2]:e.b),1]);
-  } else if(sens==='fin'){let rem=r.min;while(rem>0&&blocks.length){const L=blocks[blocks.length-1];const dur=t2m(L[1])-t2m(L[0]);if(dur<=rem){rem-=dur;blocks.pop();}else{L[1]=m2t(t2m(L[1])-rem);rem=0;}}
-  } else if(sens==='debut'){let rem=r.min;while(rem>0&&blocks.length){const F=blocks[0];const dur=t2m(F[1])-t2m(F[0]);if(dur<=rem){rem-=dur;blocks.shift();}else{F[0]=m2t(t2m(F[0])+rem);rem=0;}}}
+  } else if(sens==='fin'){ // parti plus tôt → bloc rouge "parti tôt" en fin de créneau (non compté)
+    let rem=r.min;const nb=[];
+    for(let i=blocks.length-1;i>=0;i--){const B=blocks[i],bs=t2m(B[0]),be=t2m(B[1]),dur=be-bs;
+      if(rem<=0){nb.unshift(B);continue;}
+      if(rem>=dur){nb.unshift([B[0],B[1],B[2],0,'parti tôt']);rem-=dur;}
+      else{nb.unshift([m2t(be-rem),B[1],B[2],0,'parti tôt']);nb.unshift([B[0],m2t(be-rem),B[2],B[3]||0,(typeof B[4]==='string'&&B[4]&&!isRetardBlock(B))?B[4]:0]);rem=0;}}
+    blocks=nb;
+  } else if(sens==='debut'){ // retard → bloc rouge "retard" en début de créneau (non compté)
+    let rem=r.min;const nb=[];
+    for(const B of blocks){const bs=t2m(B[0]),be=t2m(B[1]),dur=be-bs;
+      if(rem<=0){nb.push(B);continue;}
+      if(rem>=dur){nb.push([B[0],B[1],B[2],0,'retard']);rem-=dur;}
+      else{nb.push([m2t(bs),m2t(bs+rem),B[2],0,'retard']);nb.push([m2t(bs+rem),B[1],B[2],B[3]||0,(typeof B[4]==='string'&&B[4]&&!isRetardBlock(B))?B[4]:0]);rem=0;}}
+    blocks=nb;}
   commitDay(e,r.date,blocks,'jour');
   r.statut='accepte';r._ts=NOW();save();render();if($('abspanel').style.display==='block')renderAbs();
 }
@@ -3904,12 +3917,26 @@ function addJournalEntry(b){
     if(!isAdmin()&&isResp())dem.parResp=ROLE.empId;
     S.hsdemandes.push(dem);
     if($('jr-c'))$('jr-c').value='';if($('jr-min'))$('jr-min').value='';
-    save();renderJournal();try{render()}catch(e2){}
+    // Auto-validé (comportement « comme validé ») → applique au planning : bloc rouge "retard" + heures déduites
+    try{acceptHS(dem.id);}catch(e2){save();}
+    renderJournal();
     return;
   }
   S.rh=S.rh||[];const r={d,q,b,t,c,id:Date.now(),_ts:NOW()};
   S.rh.push(r);if(S.tomb)delete S.tomb['rh|'+_journalSig(r)];
   if($('jr-c'))$('jr-c').value='';
+  save();renderJournal();
+}
+// Édition d'une entrée saisie (note) du Journal : on tombstone l'ancienne signature et on recrée.
+function editJournalEntry(sig){
+  if(!canJournal())return;
+  const r=(S.rh||[]).find(x=>_journalSig(x)===sig);if(!r)return;
+  const nt=prompt('Type :\n'+JTYPES.map(j=>j.t).join(' · '),r.t);if(nt===null)return;
+  const nc=prompt('Commentaire :',r.c||'');if(nc===null)return;
+  S.tomb=S.tomb||{};S.tomb['rh|'+sig]=NOW();
+  S.rh=(S.rh||[]).filter(x=>_journalSig(x)!==sig);
+  const nr={d:r.d,q:r.q,b:r.b,t:(nt||'').trim()||r.t,c:(nc||'').trim(),id:Date.now(),_ts:NOW()};
+  S.rh.push(nr);if(S.tomb)delete S.tomb['rh|'+_journalSig(nr)];
   save();renderJournal();
 }
 function delJournalEntry(sig){
@@ -3953,7 +3980,7 @@ function renderJournal(){
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
   if(!list.length)h+='<div class="small">Aucune entrée pour cette boutique.</div>';
   for(const r of list){const col=jtypeColor(r.t);const _qe=S.employees.find(x=>x.nom===r.q&&x.b===selB)||S.employees.find(x=>x.nom===r.q);const qcol=_qe?colOf(_qe):'';
-    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.auto?(r.pending&&isA?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> <button class="mini ghost" title="Refuser" onclick="refuseHS('+r.id+');renderJournal()">✗</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini ghost" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
+    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.auto?(r.pending&&isA?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> <button class="mini ghost" title="Refuser" onclick="refuseHS('+r.id+');renderJournal()">✗</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
   }
   $('journalpanel').innerHTML=h;
 }
