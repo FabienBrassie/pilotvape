@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 15:51 — Retard sur planning (bloc rouge, heures déduites) ; Journal auto-validé ; édition notes (✎) ; détection auto « Retard à l'ouverture » quand le salarié ouvre la boutique ce jour-là (s'applique aussi aux saisies antérieures à l'affichage) -->
+<!-- v 2026-06-25 15:54 — Retard sur planning + Journal auto-validé + édition notes ; « Retard à l'ouverture » auto ; vigilance & détection ouverture basées sur la boutique RÉELLEMENT travaillée ce jour-là (renfort/ouverture d'une autre boutique désormais visibles) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1927,7 +1927,8 @@ function dayEvents(d,b){
   for(const rq of (S.hsdemandes||[])){
     if(rq.date!==d||rq.statut!=='accepte')continue;
     const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue; // seules les "pertes" font vigilance
-    const e2=emp(rq.empId);if(!e2||e2.b!==b)continue;
+    const e2=emp(rq.empId);if(!e2)continue;
+    const wb=(presence(e2,d)||{}).b||e2.b;if(wb!==b)continue; // boutique réellement travaillée ce jour-là (renfort inclus)
     const k=hsKind(rq);
     out.push({cls:'sim',st:'style="background:'+k.accent+';color:#fff"',txt:k.ic+' '+esc(e2.nom.split(' ')[0])+' '+k.sign+fmtMin(rq.min),detail:esc(e2.nom)+' — '+k.txt+' '+k.sign+fmtMin(rq.min)+' (validé) — '+fmtMin(rq.min)+' en moins cette semaine'});
   }
@@ -3923,7 +3924,8 @@ function addJournalEntry(b){
     S.hsdemandes=S.hsdemandes||[];
     // Détection auto « à l'ouverture » : un retard d'un salarié qui ouvre la boutique ce jour-là.
     let kind=t;
-    if(sens==='debut'&&kind==='Retard'&&isOpenerAtB(e,d,e.b))kind="Retard à l'ouverture";
+    const _wb=(presence(e,d)||{}).b||e.b;
+    if(sens==='debut'&&kind==='Retard'&&isOpenerAtB(e,d,_wb))kind="Retard à l'ouverture";
     const dem={id:Date.now(),empId:e.id,date:d,min,sens,kind,note:c,statut:'attente',_ts:NOW()};
     if(!isAdmin()&&isResp())dem.parResp=ROLE.empId;
     S.hsdemandes.push(dem);
@@ -3987,7 +3989,7 @@ function renderJournal(){
   for(const rq of (S.hsdemandes||[])){const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(rq.statut==='refuse')continue;const e=emp(rq.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;if(!_journalInPeriod(rq.date))continue;
     let tt=rq.kind||(sn==='debut'?'Retard':'Parti plus tôt');
     // Affiche « à l'ouverture » si le salarié ouvre la boutique ce jour-là (vaut aussi pour les saisies antérieures).
-    if(sn==='debut'&&tt==='Retard'&&isOpenerAtB(e,rq.date,e.b))tt="Retard à l'ouverture";
+    if(sn==='debut'&&tt==='Retard'&&isOpenerAtB(e,rq.date,(presence(e,rq.date)||{}).b||e.b))tt="Retard à l'ouverture";
     list.push({d:rq.date,q:e.nom,t:tt,c:fmtMin(rq.min)+(rq.note?' — '+rq.note:''),auto:true,id:rq.id,pending:rq.statut!=='accepte'});}
   list.sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0);
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
