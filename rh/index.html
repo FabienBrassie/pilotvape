@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 16:51 — Calendrier « Événements & perso » (bas des vues Mois & 3 boutiques) : chips ponctualité retard/départ validés, toutes boutiques (admin) → coup d'œil global du mois -->
+<!-- v 2026-06-25 17:07 — CORRECTIF régression : le glisser/étirer/déplacer des blocs remarche (le clic synthétique après un drag réinitialisait pending/edit et fermait le modal de portée → garde temporelle _noCloseTs 400ms) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1212,6 +1212,7 @@ let curB='P';
 let edit=null;     // {empId, iso, bi|null, du, au}
 let pending=null;  // drag en attente de portée
 let pendingCal=null;  // déplacement d'une entrée perso récurrente en attente de portée
+let _noCloseTs=0;  // un drag/relâché vient d'ouvrir une fenêtre → le clic synthétique qui suit ne doit PAS la refermer
 let drag=null;
 let hidden=new Set();
 try{hidden=new Set(JSON.parse(localStorage.getItem('gestionrh-masques')||'[]'))}catch(e){}
@@ -2838,6 +2839,7 @@ function ghostRender(cols){
 document.addEventListener('mouseup',()=>{
   if(!drag)return;
   const d=drag;drag=null;
+  _noCloseTs=Date.now(); // ce drag va ouvrir un éditeur / modal de portée : protéger du clic synthétique qui suit
   const g=$('ghost');if(g)g.remove();
   if(d.cal){ // entrée perso : copie (⌥+glisser) / déplacement-étirement / clic = éditeur
     const x=(S.calEntries||[]).find(e=>e.id===d.cal);
@@ -2957,6 +2959,7 @@ document.addEventListener('click',ev=>{
 // AVANT le onclick d'un éventuel bouton d'ouverture — donc on ferme les panneaux ouverts, puis le
 // bouton ouvre le sien proprement (pas d'auto-fermeture du panneau qu'on vient d'ouvrir).
 document.addEventListener('click',ev=>{
+  if(Date.now()-_noCloseTs<400)return; // clic synthétique qui suit un drag (drop → éditeur/modal) : ne pas refermer
   // On NE ferme pas si le clic est dans un panneau, le header, ou la boîte d'un modal (login / portée).
   if(ev.target.closest('.panel')||ev.target.closest('header')||ev.target.closest('#login')||ev.target.closest('.box'))return;
   let closed=false;
