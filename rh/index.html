@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 16:28 — Indicateurs synchro ET « enregistré » épinglés en haut à droite (hors flux) → plus aucun décalage de la barre quand ils apparaissent/changent ; repli en flux normal sur mobile -->
+<!-- v 2026-06-25 16:43 — Uniformisation : marqueur retard/départ ajouté aux vues 3 boutiques & Mois (lossTagFor) ; fermeture au clic extérieur fiabilisée (réinit. de l'état éditeur/portée → ne réapparaît plus au poll, modal de portée fermable sur le fond) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1374,6 +1374,13 @@ function dayHealth(bId,d){
   }
   return{level:bad?'bad':warn?'warn':'ok',issues};
 }
+// Marqueur ROUGE retard / départ anticipé VALIDÉ d'un salarié un jour donné (pour les vues 3 boutiques & Mois).
+function lossTagFor(eid,d){
+  const ls=(S.hsdemandes||[]).filter(x=>x.statut==='accepte'&&x.empId===eid&&x.date===d&&(x.sens==='debut'||x.sens==='fin'));
+  if(!ls.length)return '';
+  const tot=ls.reduce((s,x)=>s+x.min,0);const isRet=ls.some(x=>x.sens==='debut');
+  return ' <span class="mtag" style="background:#dc2626;color:#fff" title="'+(isRet?'Retard':'Départ anticipé')+' validé — '+fmtMin(tot)+' en moins (déjà déduit des heures)">'+(isRet?'⏰':'🌙')+' −'+fmtMin(tot)+'</span>';
+}
 function teamCell(bId,d){
   const emps=S.employees.filter(e=>e.actif);
   const workItems=[];let off='';
@@ -1381,7 +1388,7 @@ function teamCell(bId,d){
     if(e.b!==bId && !((presence(e,d).blocks||[]).some(bl=>bl[2]===bId)))continue;
     const tg=dayTag(e,d,bId);if(!tg)continue;
     const pend=(S.hsdemandes||[]).some(x=>x.statut==='attente'&&x.empId===e.id&&x.date===d);
-    const line='<div class="mline"><span class="md" style="background:'+colOf(e)+'"></span>'+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+'</div>';
+    const line='<div class="mline"><span class="md" style="background:'+colOf(e)+'"></span>'+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
     if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
       const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===bId);
       workItems.push({st:mine.length?t2m(mine[0][0]):9999,en:mine.length?t2m(mine[mine.length-1][1]):0,line});
@@ -1675,7 +1682,7 @@ function renderMonth(){
       for(const e of emps){
         if(e.b!==curB && !((presence(e,d).blocks||[]).some(bl=>bl[2]===curB)))continue;
         const tg=dayTag(e,d);if(!tg)continue;
-        const line='<div class="mline"><span class="md" style="background:'+colOf(e)+'"></span>'+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span></div>';
+        const line='<div class="mline"><span class="md" style="background:'+colOf(e)+'"></span>'+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
         if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
           const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===curB);
           const st=mine.length?t2m(mine[0][0]):9999;const en=mine.length?t2m(mine[mine.length-1][1]):0;
@@ -2942,8 +2949,15 @@ document.addEventListener('click',ev=>{
 // AVANT le onclick d'un éventuel bouton d'ouverture — donc on ferme les panneaux ouverts, puis le
 // bouton ouvre le sien proprement (pas d'auto-fermeture du panneau qu'on vient d'ouvrir).
 document.addEventListener('click',ev=>{
-  if(ev.target.closest('.panel')||ev.target.closest('header')||ev.target.closest('#login')||ev.target.closest('#scopemodal'))return;
-  document.querySelectorAll('.panel').forEach(p=>{if(p.style.display==='block')p.style.display='none';});
+  // On NE ferme pas si le clic est dans un panneau, le header, ou la boîte d'un modal (login / portée).
+  if(ev.target.closest('.panel')||ev.target.closest('header')||ev.target.closest('#login')||ev.target.closest('.box'))return;
+  let closed=false;
+  document.querySelectorAll('.panel').forEach(p=>{if(p.style.display==='block'){p.style.display='none';closed=true;}});
+  // États qui RECRÉENT une fenêtre au prochain rendu (éditeur de bloc via `edit`, modal de portée via `pending`) :
+  // il faut les réinitialiser, sinon le panneau réapparaît au prochain render() (ex : poll de synchro).
+  if(edit||pending||pendingCal){edit=null;pending=null;pendingCal=null;closed=true;}
+  const sm=$('scopemodal');if(sm&&sm.style.display&&sm.style.display!=='none'){sm.style.display='none';closed=true;}
+  if(closed)render();
 },true);
 document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';if($('journalpanel'))$('journalpanel').style.display='none';render()}});
 
