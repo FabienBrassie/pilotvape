@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 16:43 — Uniformisation : marqueur retard/départ ajouté aux vues 3 boutiques & Mois (lossTagFor) ; fermeture au clic extérieur fiabilisée (réinit. de l'état éditeur/portée → ne réapparaît plus au poll, modal de portée fermable sur le fond) -->
+<!-- v 2026-06-25 16:51 — Calendrier « Événements & perso » (bas des vues Mois & 3 boutiques) : chips ponctualité retard/départ validés, toutes boutiques (admin) → coup d'œil global du mois -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1411,6 +1411,14 @@ function _evtOnlyChips(d){
   }
   for(const c of myAllDayChips(d))out.push('<span class="evc '+(c.cls||'')+'" '+(c.st||'')+' title="'+esc(c.detail||c.txt)+'">'+esc(c.txt)+'</span>');
   for(const x of myEntriesOn(d))out.push('<span class="evc" style="background:'+calColor(x.calId)+';color:#fff" title="'+esc(calName(x.calId))+' — '+esc(x.title)+'">'+x.du+' '+esc(x.title)+'</span>');
+  // Ponctualité (admin) : retards / départs anticipés VALIDÉS, toutes boutiques — coup d'œil global du mois
+  if(isAdmin()){
+    for(const rq of (S.hsdemandes||[])){
+      if(rq.statut!=='accepte'||rq.date!==d)continue;const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;
+      const e=emp(rq.empId);if(!e)continue;const wb=(presence(e,d)||{}).b||e.b;
+      out.push('<span class="evc" style="background:#dc2626;color:#fff" title="'+(sn==='debut'?'Retard':'Départ anticipé')+' validé — '+esc(e.nom)+' ('+bout(wb).nom+'), '+fmtMin(rq.min)+' en moins (déjà déduit)">'+(sn==='debut'?'⏰':'🌙')+' '+esc(e.nom.split(' ')[0])+' −'+fmtMin(rq.min)+' · '+esc(bout(wb).nom)+'</span>');
+    }
+  }
   return out;
 }
 function renderSynth(){
