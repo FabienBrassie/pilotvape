@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 09:46 — Semaines futures : voile orange + blocs légèrement désaturés (saturate .78) ; passé grisé -->
+<!-- v 2026-06-25 09:57 — Vigilance retards/départs anticipés acceptés : pastille « ⚠ −Xh retard » sur la carte d'heures + repère persistant dans le bandeau événements -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1910,6 +1910,14 @@ function dayEvents(d,b){
     if(op.startReal!==false&&d===op.du)out.push({cls:'pvop',st:'style="background:#16a34a;color:#fff;border:1px solid #4ade80"',txt:'▶ '+op.label,detail:'OP PilotVape — DÉBUT : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
     if(op.hasFin&&d===op.au&&op.au!==op.du)out.push({cls:'pvop',st:'style="background:#dc2626;color:#fff;border:1px solid #f87171"',txt:'◀ '+op.label,detail:'OP PilotVape — FIN : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
   }
+  // Vigilance : retards / départs anticipés ACCEPTÉS (trace persistante, même après application au planning)
+  for(const rq of (S.hsdemandes||[])){
+    if(rq.date!==d||rq.statut!=='accepte')continue;
+    const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue; // seules les "pertes" font vigilance
+    const e2=emp(rq.empId);if(!e2||e2.b!==b)continue;
+    const k=hsKind(rq);
+    out.push({cls:'sim',st:'style="background:'+k.accent+';color:#fff"',txt:k.ic+' '+esc(e2.nom.split(' ')[0])+' '+k.sign+fmtMin(rq.min),detail:esc(e2.nom)+' — '+k.txt+' '+k.sign+fmtMin(rq.min)+' (validé) — '+fmtMin(rq.min)+' en moins cette semaine'});
+  }
   return out;
 }
 function renderEvBand(days,bOf,opts){
@@ -2594,6 +2602,8 @@ function recapEmps(days){
   const b=(ROLE&&ROLE.type==='boutique'&&bout(ROLE.b))?ROLE.b:curB;
   return S.employees.filter(e=>empVisibleWeek(e,curMonday)&&(e.b===b||days.some(d=>{const p=presence(e,d);return p.st==='present'&&(p.blocks||[]).some(bl=>bl[2]===b)})));
 }
+// Somme des retards (arrivé plus tard) + départs anticipés ACCEPTÉS sur la semaine → vigilance.
+function weekAdjLoss(e,mon){let retard=0,depart=0;for(let i=0;i<7;i++){const d=addD(mon,i);for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.date!==d||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn==='debut')retard+=r.min;else if(sn==='fin')depart+=r.min;}}return{retard,depart,total:retard+depart};}
 function renderHoursBar(days){
   let h='';
   const emps=recapEmps(days);
@@ -2610,6 +2620,7 @@ function renderHoursBar(days){
       '<span class="big">'+fmtDur(norm)+'</span><span class="small">/ '+fmtDur(cm)+'</span>'+(credit>0?'<span class="small" title="absences payées créditées (congé/maladie/école)">+ '+fmtDur(credit)+' '+(cicon||'payé')+'</span>':'')+
       (ec>0?'<span class="ko">+'+fmtDur(ec)+'</span>':ec<0?'<span class="warn">−'+fmtDur(-ec)+'</span>':'<span class="ok">✓</span>')+
       (hs>0?'<span class="hsbadge">+ '+fmtDur(hs)+' en HS</span>':'')+
+      (function(){const a=weekAdjLoss(e,curMonday);if(!a.total)return '';const lbl=a.retard&&!a.depart?'retard':a.depart&&!a.retard?'parti tôt':'retard/départ';return '<span class="hsbadge" style="background:rgba(239,68,68,.16);color:#f87171" title="'+(a.retard?fmtDur(a.retard)+' de retard':'')+(a.retard&&a.depart?' · ':'')+(a.depart?fmtDur(a.depart)+' parti plus tôt':'')+' — déjà déduit des heures">⚠ −'+fmtDur(a.total)+' '+lbl+'</span>';})()+
       (here!==tot?'<span class="small">dont '+fmtDur(here)+' ici</span>':'')+'</div>';
   }
   $('hours').innerHTML=h||'<span class="small">Personne de planifié cette semaine dans cette boutique.</span>';
