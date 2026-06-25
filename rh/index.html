@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 11:30 — Journal RH « Problèmes » : filtres boutique + salarié (selon boutique) + période (ce mois / mois dernier / année / tout) -->
+<!-- v 2026-06-25 11:59 — Journal RH : filtre « 90 derniers jours » ; fermeture des panneaux au clic extérieur (capture) + Échap -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -2921,7 +2921,14 @@ document.addEventListener('click',ev=>{
   const col=ev.target.closest('.daycol');
   if(col&&col.dataset.iso)declareHS(col.dataset.iso);
 });
-document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';render()}});
+// Fermer les panneaux en cliquant en dehors (cohérent pour tous). Phase de CAPTURE : on s'exécute
+// AVANT le onclick d'un éventuel bouton d'ouverture — donc on ferme les panneaux ouverts, puis le
+// bouton ouvre le sien proprement (pas d'auto-fermeture du panneau qu'on vient d'ouvrir).
+document.addEventListener('click',ev=>{
+  if(ev.target.closest('.panel')||ev.target.closest('header')||ev.target.closest('#login')||ev.target.closest('#scopemodal'))return;
+  document.querySelectorAll('.panel').forEach(p=>{if(p.style.display==='block')p.style.display='none';});
+},true);
+document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';if($('journalpanel'))$('journalpanel').style.display='none';render()}});
 
 // ============ PARAMÈTRES (équipe & données) ============
 function togSettings(){if(!isAdmin())return;const el=$('settings');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderSettings();saveUI()}
@@ -3874,7 +3881,7 @@ function canJournal(){return isAdmin()||isResp()||!!(ROLE&&ROLE.type==='boutique
 function journalMyB(){if(isAdmin())return null;if(isResp())return emp(ROLE.empId)&&emp(ROLE.empId).b;if(ROLE&&ROLE.type==='boutique')return ROLE.b;return null;}
 let journalFilterB=null,journalFilterEmp='',journalFilterPeriod='mois';
 function _journalSig(r){return r.d+'|'+r.q+'|'+r.t+'|'+(r.c||'');}
-function _journalInPeriod(d){const p=journalFilterPeriod,t=todayISO();d=d||'';if(p==='tout')return true;if(p==='annee')return d.slice(0,4)===t.slice(0,4);if(p==='mois')return d.slice(0,7)===t.slice(0,7);if(p==='mois-1'){let y=+t.slice(0,4),m=+t.slice(5,7)-1;if(m<1){m=12;y--;}return d.slice(0,7)===y+'-'+String(m).padStart(2,'0');}return true;}
+function _journalInPeriod(d){const p=journalFilterPeriod,t=todayISO();d=d||'';if(p==='tout')return true;if(p==='j90')return d>=addD(t,-90)&&d<=t;if(p==='annee')return d.slice(0,4)===t.slice(0,4);if(p==='mois')return d.slice(0,7)===t.slice(0,7);if(p==='mois-1'){let y=+t.slice(0,4),m=+t.slice(5,7)-1;if(m<1){m=12;y--;}return d.slice(0,7)===y+'-'+String(m).padStart(2,'0');}return true;}
 function togJournal(){if(!canJournal())return;const el=$('journalpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderJournal();}
 function setJournalB(b){journalFilterB=b;journalFilterEmp='';renderJournal();}
 function setJournalEmp(v){journalFilterEmp=v;renderJournal();}
@@ -3911,7 +3918,7 @@ function renderJournal(){
   h+='<div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">'+
     '<span class="small" style="color:var(--mut)">Filtrer :</span>'+
     '<select onchange="setJournalEmp(this.value)"><option value="">👤 Tous les salariés</option>'+emps.map(e=>'<option value="'+esc(e.nom)+'"'+(journalFilterEmp===e.nom?' selected':'')+'>'+esc(e.nom)+'</option>').join('')+'</select>'+
-    '<select onchange="setJournalPeriod(this.value)">'+[['mois','📅 Ce mois-ci'],['mois-1','Mois dernier'],['annee','Cette année'],['tout','Tout']].map(o=>'<option value="'+o[0]+'"'+(journalFilterPeriod===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>'+
+    '<select onchange="setJournalPeriod(this.value)">'+[['mois','📅 Ce mois-ci'],['mois-1','Mois dernier'],['j90','90 derniers jours'],['annee','Cette année'],['tout','Tout']].map(o=>'<option value="'+o[0]+'"'+(journalFilterPeriod===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>'+
     '</div>';
   h+='<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
     '<select id="jr-q">'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
