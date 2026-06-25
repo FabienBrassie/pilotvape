@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 16:22 — Indicateur de synchro « en ligne / hors ligne » épinglé en haut à droite (position:fixed, hors flux) → son changement ne décale plus la barre ; repli en flux normal sur mobile -->
+<!-- v 2026-06-25 16:28 — Indicateurs synchro ET « enregistré » épinglés en haut à droite (hors flux) → plus aucun décalage de la barre quand ils apparaissent/changent ; repli en flux normal sur mobile -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -16,8 +16,9 @@ header h1{font-size:16px;font-weight:700;margin-right:6px}
 .bchip.on{opacity:1;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .bchip.P{background:var(--P)}.bchip.M{background:var(--M)}.bchip.L{background:var(--L)}
 .wnav{display:flex;align-items:center;gap:6px;margin-left:auto}
-/* Indicateur de synchro épinglé en haut à droite (hors flux) : son changement en/hors ligne ne décale plus rien */
+/* Indicateurs synchro + sauvegarde épinglés en haut à droite (hors flux) : leur apparition/changement ne décale plus rien */
 #syncdot{position:fixed;top:13px;right:14px;z-index:40;pointer-events:none}
+#savestate{position:fixed;top:31px;right:14px;z-index:40;pointer-events:none;text-align:right}
 button.nav{border:1px solid var(--line);background:var(--card);color:var(--txt);border-radius:8px;padding:5px 11px;cursor:pointer;font-size:13px}
 button.nav:hover{background:var(--bg)}
 button.nav.on{background:var(--blue);color:#fff;border-color:var(--blue)}
