@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 16:01 — « Mon planning » (vue patron) : la vigilance retard/départ s'affiche pour TOUTES les boutiques (comme les congés), avec le nom de la boutique ; en vue boutique, reste filtré sur la boutique du jour -->
+<!-- v 2026-06-25 16:16 — Récap paie : ligne retard raccourcie « ⏰ SX : 3/4 d'h retard » (fractions françaises via fmtHfrac), idem badge carte salarié -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1925,7 +1925,7 @@ function dayEvents(d,b){
   }
   // Vigilance : retards / départs anticipés ACCEPTÉS (trace persistante, même après application au planning)
   // En "Mon planning" (vue patron) on montre TOUTES les boutiques, comme les congés ; en vue boutique on filtre.
-  const _allB=(typeof calView!=='undefined'&&calView==='mine');
+  const _allB=(typeof calView!=='undefined'&&calView==='mine'&&isAdmin());
   for(const rq of (S.hsdemandes||[])){
     if(rq.date!==d||rq.statut!=='accepte')continue;
     const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue; // seules les "pertes" font vigilance
@@ -3088,6 +3088,11 @@ function lossByWeek(e,days){const w={};const ds=new Set(days);
   for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;const k=isoWeek(r.date);w[k]=(w[k]||0)+r.min;}
   return w;}
 function lossMin(e,days){const w=lossByWeek(e,days);return Object.keys(w).reduce((t,k)=>t+w[k],0);}
+// Durée courte en fractions françaises : 45→"3/4 d'h", 30→"1/2 d'h", 15→"1/4 d'h", 75→"1h1/4".
+function fmtHfrac(min){const h=Math.floor(min/60),m=min%60;const F={15:'1/4',30:'1/2',45:'3/4'}[m];
+  if(h===0)return F?F+" d'h":m+'min';
+  if(m===0)return h+'h';
+  return F?h+'h'+F:h+'h'+String(m).padStart(2,'0');}
 function feriesOfMonth(days){return days.filter(d=>{const f=ferieOf(d);return f&&f.type==='ferie';}).sort();}
 function daysAbs(arr,eid,days){let n=0;for(const d of days)if(arr.some(x=>x.empId===eid&&d>=x.du&&d<=x.au))n++;return n;}
 function paieRow(e,days){
@@ -3225,7 +3230,7 @@ function renderPaie(){
       const r=paieRow(e,days);
       h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:4px">';
       h+='<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
-        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (retard / départ anticipé non rattrapé) — déjà retirées des heures normales ci-contre, à NE PAS payer">−'+fmtDur(r.retard)+' retard</span>':'')+'</span></div>';
+        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (retard / départ anticipé non rattrapé) — déjà retirées des heures normales ci-contre, à NE PAS payer">'+fmtHfrac(r.retard)+' retard</span>':'')+'</span></div>';
       for(const ev of paieEvents(e,days)){
         h+='<div class="brow" style="padding-left:14px;font-size:12px"><span style="width:104px;color:var(--mut)">'+ev.label+'</span><span>'+ev.txt+'</span></div>';
       }
@@ -3249,7 +3254,7 @@ function paieEvents(e,days){
   const hw=hsByWeek(e,days);
   Object.keys(hw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏱ Semaine '+k,txt:'<span style="color:#0891b2;font-weight:700">'+fmtHdec(hw[k])+' sup</span>'});});
   const lw=lossByWeek(e,days);
-  Object.keys(lw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ Semaine '+k,txt:'<span style="color:#dc2626;font-weight:700">−'+fmtHdec(lw[k])+' retard/départ</span> <span class="small">non rattrapé — déjà déduit des heures, à ne pas payer</span>'});});
+  Object.keys(lw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ S'+k,txt:'<span style="color:#dc2626;font-weight:700" title="Retard/départ anticipé non rattrapé — déjà déduit des heures, à ne pas payer">'+fmtHfrac(lw[k])+' retard</span>'});});
   if(e.dateIn&&e.dateIn>=days[0]&&e.dateIn<=days[days.length-1])evs.push({d:e.dateIn,label:'📄 Début de contrat',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
   if(e.dateOut&&e.dateOut>=days[0]&&e.dateOut<=days[days.length-1])evs.push({d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
   evs.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
