@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 17:07 — CORRECTIF régression : le glisser/étirer/déplacer des blocs remarche (le clic synthétique après un drag réinitialisait pending/edit et fermait le modal de portée → garde temporelle _noCloseTs 400ms) -->
+<!-- v 2026-06-25 17:20 — Plafond contrat : on n'étire plus un bloc NORMAL au-delà du temps de travail hebdo (e.h) ; un nouveau bloc créé une fois le contrat atteint passe automatiquement en heures sup. Blocs HS non plafonnés. -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1254,6 +1254,11 @@ function snap15(m){return Math.round(m/15)*15}
 function clampM(m,a,b){return Math.max(a,Math.min(b,m))}
 function sortBlocks(bl){bl.sort((a,b)=>t2m(a[0])-t2m(b[0]))}
 function dayBlocksOf(e,iso){const p=presence(e,iso);return p.st==='present'?p.blocks.map(b=>b.slice()):[]}
+// Minutes NORMALES (hors HS, hors blocs retard) d'une semaine, en option en excluant un bloc précis (iso+index) — base du plafond contrat.
+function weekNormalMinExcl(e,mon,exIso,exBi){let t=0;
+  for(let i=0;i<7;i++){const iso=addD(mon,i);const p=presence(e,iso);if(p.st!=='present')continue;
+    (p.blocks||[]).forEach((bl,bi)=>{if(bl[3]||isRetardBlock(bl))return;if(exIso!=null&&iso===exIso&&bi===exBi)return;t+=durMin(bl[0],bl[1]);});}
+  return t;}
 // Heure de 1re arrivée d'un salarié à une boutique donnée ce jour-là (min depuis minuit), null si absent.
 function _firstStartAtB(emp,iso,bid){const bl=dayBlocksOf(emp,iso);let m=Infinity;
   bl.forEach(x=>{if(!isRetardBlock(x)&&String(x[2])===String(bid))m=Math.min(m,t2m(x[0]));});
@@ -2727,11 +2732,19 @@ function edApply(){
   const ctx={iso:edit.iso,bi:edit.bi,sameEmp:eid===edit.empId};
   const blocks=dayBlocksOf(e,ctx.iso);
   if(ctx.bi!=null&&ctx.sameEmp)blocks.splice(ctx.bi,1);
-  blocks.push([du,au,$('ed-b').value,$('ed-hs').checked?1:0]);
-  const extra={note:$('ed-note').value};
   const scope=edScope();
+  // AUTO-HEURES SUP : un bloc qui pousse les heures NORMALES de la semaine au-delà du contrat devient HS
+  // (le flag HS ne persiste que sur une exception « ce jour » — pas dans le planning type).
+  let hsFlag=$('ed-hs').checked?1:0,autoHS=false;
+  if(!hsFlag&&e.h&&scope==='jour'){
+    const other=weekNormalMinExcl(e,monday(ctx.iso),ctx.sameEmp?ctx.iso:null,ctx.sameEmp?ctx.bi:null);
+    if(other+(t2m(au)-t2m(du))>e.h*60){hsFlag=1;autoHS=true;}
+  }
+  blocks.push([du,au,$('ed-b').value,hsFlag]);
+  const extra={note:$('ed-note').value};
   edit=null;
   commitDay(e,ctx.iso,blocks,scope,extra);
+  if(autoHS)setTimeout(()=>{try{setSave('➕ bloc compté en heures sup — '+(e.h)+'h hebdo atteintes')}catch(_){}} ,30);
 }
 function edDelBlock(){
   const e=emp(edit.empId);const p=presence(e,edit.iso);
@@ -2790,7 +2803,7 @@ document.addEventListener('mousedown',ev=>{
     const br=blk.getBoundingClientRect();
     const isRz=ev.clientY>br.bottom-9;
     const isRzt=ev.clientY<br.top+9;
-    drag={mode:isRzt?'rzt':(isRz?'rz':'mv'),dup:ev.altKey&&!isRz&&!isRzt,empId,iso,bi,bb:bl[2]||curB,hsf:bl[3]?1:0,du:t2m(bl[0]),au:t2m(bl[1]),grab:minute-t2m(bl[0]),el:blk,moved:false,curIso:iso,sx:ev.clientX,sy:ev.clientY};
+    drag={mode:isRzt?'rzt':(isRz?'rz':'mv'),dup:ev.altKey&&!isRz&&!isRzt,empId,iso,bi,bb:bl[2]||curB,hsf:bl[3]?1:0,du:t2m(bl[0]),au:t2m(bl[1]),origDur:t2m(bl[1])-t2m(bl[0]),grab:minute-t2m(bl[0]),el:blk,moved:false,curIso:iso,sx:ev.clientX,sy:ev.clientY};
   }else{
     drag={mode:'new',iso:col.dataset.iso,curIso:col.dataset.iso,du:minute,au:minute+30,el:null,moved:false,sx:ev.clientX,sy:ev.clientY};
   }
@@ -2812,6 +2825,16 @@ document.addEventListener('mousemove',ev=>{
   }else if(drag.mode==='rz'){drag.au=Math.max(drag.du+15,minute)}
   else if(drag.mode==='rzt'){drag.du=Math.min(drag.au-15,minute)}
   else if(drag.mode==='new'||drag.mode==='newcal'){drag.au=Math.max(drag.du+15,minute);if(over)drag.curIso=over.dataset.iso}
+  // PLAFOND CONTRAT : on n'étire pas un bloc NORMAL au-delà du temps de travail hebdo (les blocs HS ne sont pas plafonnés).
+  if((drag.mode==='rz'||drag.mode==='rzt')&&drag.empId!=null&&!drag.cal&&drag.hsf!==1){
+    const e=emp(drag.empId);
+    if(e&&e.h){
+      const other=weekNormalMinExcl(e,monday(drag.iso),drag.iso,drag.bi);
+      const cap=Math.max(drag.origDur||15,e.h*60-other); // jamais rétrécir sous la durée d'origine
+      if(drag.mode==='rz')drag.au=Math.min(drag.au,drag.du+cap);
+      else drag.du=Math.max(drag.du,drag.au-cap);
+    }
+  }
   ghostRender(cols);
 });
 function ghostRender(cols){
