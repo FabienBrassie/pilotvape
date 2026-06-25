@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 15:05 — Journal RH : prénoms colorés à la couleur du salarié (planning) -->
+<!-- v 2026-06-25 15:25 — Journal RH ↔ Heures sup unifiés : un retard/départ saisi au Journal (durée) crée un ajustement (même donnée, validable des 2 côtés) qui modifie le planning ; type « Retard à l'ouverture » préservé -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -3336,7 +3336,7 @@ function hsLabel(x){const sn=x.sens||'sup';const ic=sn==='fin'?'🌙 −':sn==='
 // Distingue visuellement les AJUSTEMENTS : heures sup (positif, cyan) vs retard / parti plus tôt
 // (problèmes, rouge/orange) — pour ne pas faire croire qu'un retard est une heure sup (Fabien 2026-06-24).
 function hsKind(x){const sn=x.sens||'sup';
-  if(sn==='debut')return{ic:'🌅',sign:'−',txt:'retard',fg:'#f87171',bg:'rgba(220,38,38,.14)',bd:'#dc262666',accent:'#ef4444',prob:true};
+  if(sn==='debut')return{ic:'🌅',sign:'−',txt:(x.kind==="Retard à l'ouverture"?'retard ouverture':'retard'),fg:'#f87171',bg:'rgba(220,38,38,.14)',bd:'#dc262666',accent:'#ef4444',prob:true};
   if(sn==='fin')return{ic:'🌙',sign:'−',txt:'parti plus tôt',fg:'#fb923c',bg:'rgba(234,88,12,.14)',bd:'#ea580c66',accent:'#f97316',prob:true};
   return{ic:'⏱',sign:'+',txt:'heures sup',fg:'#22d3ee',bg:'rgba(8,145,178,.16)',bd:'#0891b255',accent:'#0891b2',prob:false};}
 function hsBadge(x){const k=hsKind(x);return '<span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+k.bg+';color:'+k.fg+';border:1px solid '+k.bd+';white-space:nowrap">'+k.ic+' '+k.sign+fmtMin(x.min)+' · '+k.txt+'</span>';}
@@ -3886,12 +3886,30 @@ function togJournal(){if(!canJournal())return;const el=$('journalpanel');const s
 function setJournalB(b){journalFilterB=b;journalFilterEmp='';renderJournal();}
 function setJournalEmp(v){journalFilterEmp=v;renderJournal();}
 function setJournalPeriod(v){journalFilterPeriod=v;renderJournal();}
+const _PUNCT_SENS={'Retard':'debut',"Retard à l'ouverture":'debut','Parti plus tôt':'fin'};
 function addJournalEntry(b){
   if(!canJournal())return;
   const d=$('jr-d').value,q=$('jr-q').value,t=$('jr-t').value,c=($('jr-c').value||'').trim();
   if(!d||!q){alert('Date et salarié requis.');return;}
+  const sens=_PUNCT_SENS[t];
+  if(sens){
+    // Retard / départ anticipé → on crée un AJUSTEMENT (même donnée que l'onglet Heures sup),
+    // qui s'affiche sur le planning et, une fois validé, raccourcit le créneau + déduit les heures.
+    const min=parseInt(($('jr-min')||{}).value)||0;
+    if(min<5){alert('Pour un retard / départ anticipé, indique une durée en minutes (≥ 5).');return;}
+    const e=S.employees.find(x=>x.nom===q&&x.b===b)||S.employees.find(x=>x.nom===q);
+    if(!e){alert('Salarié introuvable.');return;}
+    S.hsdemandes=S.hsdemandes||[];
+    const dem={id:Date.now(),empId:e.id,date:d,min,sens,kind:t,note:c,statut:'attente',_ts:NOW()};
+    if(!isAdmin()&&isResp())dem.parResp=ROLE.empId;
+    S.hsdemandes.push(dem);
+    if($('jr-c'))$('jr-c').value='';if($('jr-min'))$('jr-min').value='';
+    save();renderJournal();try{render()}catch(e2){}
+    return;
+  }
   S.rh=S.rh||[];const r={d,q,b,t,c,id:Date.now(),_ts:NOW()};
   S.rh.push(r);if(S.tomb)delete S.tomb['rh|'+_journalSig(r)];
+  if($('jr-c'))$('jr-c').value='';
   save();renderJournal();
 }
 function delJournalEntry(sig){
@@ -3923,17 +3941,19 @@ function renderJournal(){
   h+='<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
     '<select id="jr-q">'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
     '<select id="jr-t">'+JTYPES.map(j=>'<option>'+j.t+'</option>').join('')+'</select>'+
-    '<input id="jr-c" placeholder="Commentaire (optionnel)" style="flex:1;min-width:160px">'+
+    '<input id="jr-min" type="number" min="5" step="5" placeholder="min (retard/départ)" title="Durée en minutes — requise pour Retard / Retard à l\'ouverture / Parti plus tôt : crée un ajustement à valider qui modifie le planning" style="width:135px">'+
+    '<input id="jr-c" placeholder="Commentaire (optionnel)" style="flex:1;min-width:140px">'+
     '<button class="act green" onclick="addJournalEntry(\''+selB+'\')">Ajouter</button></div>';
   const list=[];
   for(const r of (S.rh||[]))if(r.b===selB&&(!journalFilterEmp||r.q===journalFilterEmp)&&_journalInPeriod(r.d))list.push({d:r.d,q:r.q,t:r.t,c:r.c||'',sig:_journalSig(r)});
   for(const rq of (S.hsdemandes||[])){const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(rq.statut==='refuse')continue;const e=emp(rq.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;if(!_journalInPeriod(rq.date))continue;
-    list.push({d:rq.date,q:e.nom,t:sn==='debut'?'Retard':'Parti plus tôt',c:fmtMin(rq.min)+(rq.note?' — '+rq.note:'')+(rq.statut!=='accepte'?' (à valider)':''),auto:true});}
+    const tt=rq.kind||(sn==='debut'?'Retard':'Parti plus tôt');
+    list.push({d:rq.date,q:e.nom,t:tt,c:fmtMin(rq.min)+(rq.note?' — '+rq.note:''),auto:true,id:rq.id,pending:rq.statut!=='accepte'});}
   list.sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0);
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
   if(!list.length)h+='<div class="small">Aucune entrée pour cette boutique.</div>';
   for(const r of list){const col=jtypeColor(r.t);const _qe=S.employees.find(x=>x.nom===r.q&&x.b===selB)||S.employees.find(x=>x.nom===r.q);const qcol=_qe?colOf(_qe):'';
-    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+'</span>'+(r.auto?'<span class="small" style="color:var(--mut);white-space:nowrap" title="Issu d\'une déclaration d\'ajustement horaire">🕒 auto</span>':((isA||selB===myB)?'<button class="mini ghost" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
+    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.auto?(r.pending&&isA?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> <button class="mini ghost" title="Refuser" onclick="refuseHS('+r.id+');renderJournal()">✗</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini ghost" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
   }
   $('journalpanel').innerHTML=h;
 }
