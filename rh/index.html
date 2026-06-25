@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 15:59 — Récap paie : ligne ROUGE « heures manquées » (retard/départ non rattrapé) symétrique aux HS, dans la carte + événements + CSV + texte comptable (déjà déduites des heures normales, à ne pas payer) -->
+<!-- v 2026-06-25 16:01 — « Mon planning » (vue patron) : la vigilance retard/départ s'affiche pour TOUTES les boutiques (comme les congés), avec le nom de la boutique ; en vue boutique, reste filtré sur la boutique du jour -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1924,13 +1924,17 @@ function dayEvents(d,b){
     if(op.hasFin&&d===op.au&&op.au!==op.du)out.push({cls:'pvop',st:'style="background:#dc2626;color:#fff;border:1px solid #f87171"',txt:'◀ '+op.label,detail:'OP PilotVape — FIN : '+esc(op.full)+' ('+periodeTxt(op.du,op.au)+')'});
   }
   // Vigilance : retards / départs anticipés ACCEPTÉS (trace persistante, même après application au planning)
+  // En "Mon planning" (vue patron) on montre TOUTES les boutiques, comme les congés ; en vue boutique on filtre.
+  const _allB=(typeof calView!=='undefined'&&calView==='mine');
   for(const rq of (S.hsdemandes||[])){
     if(rq.date!==d||rq.statut!=='accepte')continue;
     const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue; // seules les "pertes" font vigilance
     const e2=emp(rq.empId);if(!e2)continue;
-    const wb=(presence(e2,d)||{}).b||e2.b;if(wb!==b)continue; // boutique réellement travaillée ce jour-là (renfort inclus)
+    const wb=(presence(e2,d)||{}).b||e2.b; // boutique réellement travaillée ce jour-là (renfort inclus)
+    if(!_allB&&wb!==b)continue;
     const k=hsKind(rq);
-    out.push({cls:'sim',st:'style="background:'+k.accent+';color:#fff"',txt:k.ic+' '+esc(e2.nom.split(' ')[0])+' '+k.sign+fmtMin(rq.min),detail:esc(e2.nom)+' — '+k.txt+' '+k.sign+fmtMin(rq.min)+' (validé) — '+fmtMin(rq.min)+' en moins cette semaine'});
+    const bn=(wb!==b)?' · '+bout(wb).nom:'';
+    out.push({cls:'sim',st:'style="background:'+k.accent+';color:#fff"',txt:k.ic+' '+esc(e2.nom.split(' ')[0])+' '+k.sign+fmtMin(rq.min)+(bn?' '+esc(bout(wb).nom):''),detail:esc(e2.nom)+bn+' — '+k.txt+' '+k.sign+fmtMin(rq.min)+' (validé) — '+fmtMin(rq.min)+' en moins cette semaine'});
   }
   return out;
 }
