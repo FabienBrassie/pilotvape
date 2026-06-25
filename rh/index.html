@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 15:42 — Retard matérialisé sur le planning (bloc rouge « retard »/« parti tôt », heures déduites & exclues du calcul) ; saisie Journal auto-validée (s'applique direct au planning, même pour le passé) ; édition des notes du Journal (✎) -->
+<!-- v 2026-06-25 15:51 — Retard sur planning (bloc rouge, heures déduites) ; Journal auto-validé ; édition notes (✎) ; détection auto « Retard à l'ouverture » quand le salarié ouvre la boutique ce jour-là (s'applique aussi aux saisies antérieures à l'affichage) -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -1250,6 +1250,14 @@ function snap15(m){return Math.round(m/15)*15}
 function clampM(m,a,b){return Math.max(a,Math.min(b,m))}
 function sortBlocks(bl){bl.sort((a,b)=>t2m(a[0])-t2m(b[0]))}
 function dayBlocksOf(e,iso){const p=presence(e,iso);return p.st==='present'?p.blocks.map(b=>b.slice()):[]}
+// Heure de 1re arrivée d'un salarié à une boutique donnée ce jour-là (min depuis minuit), null si absent.
+function _firstStartAtB(emp,iso,bid){const bl=dayBlocksOf(emp,iso);let m=Infinity;
+  bl.forEach(x=>{if(!isRetardBlock(x)&&String(x[2])===String(bid))m=Math.min(m,t2m(x[0]));});
+  return isFinite(m)?m:null;}
+// Vrai si e est l'ouvreur de la boutique bid ce jour-là (personne n'arrive strictement avant lui).
+function isOpenerAtB(e,iso,bid){const mine=_firstStartAtB(e,iso,bid);if(mine==null)return false;
+  for(const o of (S.employees||[])){if(o.id===e.id)continue;const s=_firstStartAtB(o,iso,bid);if(s!=null&&s<mine)return false;}
+  return true;}
 function activePat(e,iso){let cur=e.pats[0];for(const pe of e.pats){if(pe.from<=iso&&(!cur||pe.from>=cur.from))cur=pe}return cur}
 
 // Écrit la journée complète d'un salarié (scope 'jour' = exception, 'sem' = planning type)
@@ -3913,7 +3921,10 @@ function addJournalEntry(b){
     const e=S.employees.find(x=>x.nom===q&&x.b===b)||S.employees.find(x=>x.nom===q);
     if(!e){alert('Salarié introuvable.');return;}
     S.hsdemandes=S.hsdemandes||[];
-    const dem={id:Date.now(),empId:e.id,date:d,min,sens,kind:t,note:c,statut:'attente',_ts:NOW()};
+    // Détection auto « à l'ouverture » : un retard d'un salarié qui ouvre la boutique ce jour-là.
+    let kind=t;
+    if(sens==='debut'&&kind==='Retard'&&isOpenerAtB(e,d,e.b))kind="Retard à l'ouverture";
+    const dem={id:Date.now(),empId:e.id,date:d,min,sens,kind,note:c,statut:'attente',_ts:NOW()};
     if(!isAdmin()&&isResp())dem.parResp=ROLE.empId;
     S.hsdemandes.push(dem);
     if($('jr-c'))$('jr-c').value='';if($('jr-min'))$('jr-min').value='';
@@ -3974,7 +3985,9 @@ function renderJournal(){
   const list=[];
   for(const r of (S.rh||[]))if(r.b===selB&&(!journalFilterEmp||r.q===journalFilterEmp)&&_journalInPeriod(r.d))list.push({d:r.d,q:r.q,t:r.t,c:r.c||'',sig:_journalSig(r)});
   for(const rq of (S.hsdemandes||[])){const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(rq.statut==='refuse')continue;const e=emp(rq.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;if(!_journalInPeriod(rq.date))continue;
-    const tt=rq.kind||(sn==='debut'?'Retard':'Parti plus tôt');
+    let tt=rq.kind||(sn==='debut'?'Retard':'Parti plus tôt');
+    // Affiche « à l'ouverture » si le salarié ouvre la boutique ce jour-là (vaut aussi pour les saisies antérieures).
+    if(sn==='debut'&&tt==='Retard'&&isOpenerAtB(e,rq.date,e.b))tt="Retard à l'ouverture";
     list.push({d:rq.date,q:e.nom,t:tt,c:fmtMin(rq.min)+(rq.note?' — '+rq.note:''),auto:true,id:rq.id,pending:rq.statut!=='accepte'});}
   list.sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0);
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
