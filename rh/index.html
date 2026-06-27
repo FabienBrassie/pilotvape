@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-25 18:02 — Vue « Mon planning » : les blocs retard/parti tôt s'affichent en ROUGE avec libellé (comme la vue Semaine), au lieu d'un bloc vert normal -->
+<!-- v 2026-06-27 17:42 — Journal : un retard/départ anticipé validé peut être modifié (durée) ou annulé a posteriori (heures rétablies). + Fix : clic sur l'espace vide du header ferme les panneaux (fenêtre Journal qui ne se fermait pas). -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -2984,8 +2984,13 @@ document.addEventListener('click',ev=>{
 // bouton ouvre le sien proprement (pas d'auto-fermeture du panneau qu'on vient d'ouvrir).
 document.addEventListener('click',ev=>{
   if(Date.now()-_noCloseTs<400)return; // clic synthétique qui suit un drag (drop → éditeur/modal) : ne pas refermer
-  // On NE ferme pas si le clic est dans un panneau, le header, ou la boîte d'un modal (login / portée).
-  if(ev.target.closest('.panel')||ev.target.closest('header')||ev.target.closest('#login')||ev.target.closest('.box'))return;
+  // On NE ferme pas si le clic est dans un panneau ou la boîte d'un modal (login / portée).
+  if(ev.target.closest('.panel')||ev.target.closest('#login')||ev.target.closest('.box'))return;
+  // Header : un clic sur un BOUTON/contrôle ne ferme pas (sinon le bouton d'ouverture rouvrirait
+  // aussitôt le panneau). Mais un clic sur l'espace VIDE du header doit fermer les panneaux ouverts
+  // (correctif Fabien 2026-06-27 : la fenêtre Journal est très large → le seul "à côté" facile
+  // d'accès est le header, et elle ne se fermait jamais).
+  if(ev.target.closest('header')&&ev.target.closest('button,select,input,a'))return;
   let closed=false;
   document.querySelectorAll('.panel').forEach(p=>{if(p.style.display==='block'){p.style.display='none';closed=true;}});
   // États qui RECRÉENT une fenêtre au prochain rendu (éditeur de bloc via `edit`, modal de portée via `pending`) :
@@ -3459,6 +3464,67 @@ function acceptHS(id){
 }
 function refuseHS(id){const r=S.hsdemandes.find(x=>x.id===id);if(r){r.statut='refuse';r._ts=NOW();save();render();if($('abspanel').style.display==='block')renderAbs();}}
 function delHS(id){if(!confirm('Supprimer cette demande d\'heure sup ?'))return;S.tomb['hs|'+id]=NOW();S.hsdemandes=S.hsdemandes.filter(x=>x.id!==id);save();render();if($('abspanel').style.display==='block')renderAbs();if($('minepanel')&&$('minepanel').style.display==='block')renderMine();}
+
+// ── Retard / départ anticipé VALIDÉ : le modifier ou l'annuler a posteriori (Fabien 2026-06-27) ──
+// Un retard validé vit comme une exception planning (bloc rouge non compté, heures déjà déduites)
+// + sa demande dans S.hsdemandes. Pour rester fiable et merge-safe, on repart TOUJOURS du jour
+// « nettoyé » de tout marqueur retard/parti-tôt, puis on ré-applique les retards encore acceptés
+// via commitDay (l'écriture canonique). On ne touche jamais aux blocs heures sup (B[3]===1).
+function _mergeAdjBlocks(bl){
+  bl=bl.slice().sort((a,b)=>t2m(a[0])-t2m(b[0]));
+  const out=[];
+  for(const b of bl){const last=out[out.length-1];
+    if(last&&last[2]===b[2]&&(last[3]||0)===(b[3]||0)&&(last[4]||0)===(b[4]||0)&&t2m(last[1])===t2m(b[0]))last[1]=b[1];
+    else out.push(b.slice());}
+  return out;
+}
+function rebuildDayRetards(e,iso){
+  const p=presence(e,iso);
+  if(p.st!=='present'||!p.blocks){save();return;}
+  // 1) Nettoyer : tout marqueur retard/parti-tôt repasse en temps travaillé, puis fusion des blocs.
+  let blocks=p.blocks.map(b=>[b[0],b[1],b[2],b[3]||0,(isRetardBlock(b)?0:(b[4]||0))]);
+  blocks=_mergeAdjBlocks(blocks);
+  // 2) Ré-appliquer chaque retard / parti-tôt ENCORE accepté ce jour-là (mêmes règles que acceptHS).
+  const dems=(S.hsdemandes||[]).filter(r=>r.empId===e.id&&r.date===iso&&r.statut==='accepte'&&(r.sens==='debut'||r.sens==='fin'));
+  for(const r of dems){
+    if(r.sens==='fin'){let rem=r.min;const nb=[];
+      for(let i=blocks.length-1;i>=0;i--){const B=blocks[i],bs=t2m(B[0]),be=t2m(B[1]),dur=be-bs;
+        if(rem<=0||B[3]){nb.unshift(B);continue;}
+        if(rem>=dur){nb.unshift([B[0],B[1],B[2],0,'parti tôt']);rem-=dur;}
+        else{nb.unshift([m2t(be-rem),B[1],B[2],0,'parti tôt']);nb.unshift([B[0],m2t(be-rem),B[2],B[3]||0,(typeof B[4]==='string'&&B[4]&&!isRetardBlock(B))?B[4]:0]);rem=0;}}
+      blocks=nb;
+    }else{let rem=r.min;const nb=[];
+      for(const B of blocks){const bs=t2m(B[0]),be=t2m(B[1]),dur=be-bs;
+        if(rem<=0||B[3]){nb.push(B);continue;}
+        if(rem>=dur){nb.push([B[0],B[1],B[2],0,'retard']);rem-=dur;}
+        else{nb.push([m2t(bs),m2t(bs+rem),B[2],0,'retard']);nb.push([m2t(bs+rem),B[1],B[2],B[3]||0,(typeof B[4]==='string'&&B[4]&&!isRetardBlock(B))?B[4]:0]);rem=0;}}
+      blocks=nb;}
+  }
+  commitDay(e,iso,blocks,'jour');
+}
+function editRetard(id){
+  if(!isAdmin())return;
+  const r=(S.hsdemandes||[]).find(x=>x.id===id);if(!r)return;
+  const lbl=(r.sens==='fin')?'départ anticipé':'retard';
+  const v=prompt('Durée du '+lbl+' en minutes :',r.min);
+  if(v===null)return;
+  const m=parseInt(v);if(isNaN(m)||m<5){alert('Durée invalide (au moins 5 min).');return;}
+  if(m===r.min)return;
+  r.min=m;r._ts=NOW();
+  const e=emp(r.empId);
+  if(e&&r.statut==='accepte')rebuildDayRetards(e,r.date);else save();
+  render();if($('journalpanel').style.display==='block')renderJournal();if($('abspanel').style.display==='block')renderAbs();
+}
+function delRetard(id){
+  if(!isAdmin())return;
+  const r=(S.hsdemandes||[]).find(x=>x.id===id);if(!r)return;
+  const lbl=(r.sens==='fin')?'départ anticipé':'retard';
+  if(!confirm('Annuler ce '+lbl+' ? Les heures du jour sont rétablies.'))return;
+  const e=emp(r.empId);const wasAcc=r.statut==='accepte';const d=r.date;
+  S.tomb['hs|'+id]=NOW();S.hsdemandes=S.hsdemandes.filter(x=>x.id!==id);
+  if(e&&wasAcc)rebuildDayRetards(e,d);else save();
+  render();if($('journalpanel').style.display==='block')renderJournal();if($('abspanel').style.display==='block')renderAbs();
+}
 
 // Vue "Demandes en cours" — boutique (toute la boutique) ou salarié (les siennes), lecture seule
 function togReq(){const el=$('reqpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderReq();}
@@ -4076,7 +4142,7 @@ function renderJournal(){
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
   if(!list.length)h+='<div class="small">Aucune entrée pour cette boutique.</div>';
   for(const r of list){const col=jtypeColor(r.t);const _qe=S.employees.find(x=>x.nom===r.q&&x.b===selB)||S.employees.find(x=>x.nom===r.q);const qcol=_qe?colOf(_qe):'';
-    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.auto?(r.pending&&isA?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> <button class="mini ghost" title="Refuser" onclick="refuseHS('+r.id+');renderJournal()">✗</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
+    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.auto?(isA?((r.pending?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> ':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 validé ✓</span> ')+'<button class="mini" title="Modifier la durée" onclick="editRetard('+r.id+')">✎</button> <button class="mini ghost" title="Annuler — rétablit les heures du jour" onclick="delRetard('+r.id+')">🗑</button>'):'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
   }
   $('journalpanel').innerHTML=h;
 }
