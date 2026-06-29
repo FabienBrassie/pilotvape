@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-27 17:42 — Journal : un retard/départ anticipé validé peut être modifié (durée) ou annulé a posteriori (heures rétablies). + Fix : clic sur l'espace vide du header ferme les panneaux (fenêtre Journal qui ne se fermait pas). -->
+<!-- v 2026-06-29 13:41 — Retard/départ/heure sup : durée minimale 1 min (avant 5) — pour déclarer un retard de 1 à 4 min. -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -3408,7 +3408,7 @@ function renderHSPanel(){
   h+='<div class="row"><select id="hs-sens"><option value="sup">⏱ Heures en plus (heures sup)</option><option value="fin">🌙 Parti plus tôt (fin de journée)</option><option value="debut">🌅 Arrivé plus tard (début de journée)</option></select></div>';
   h+='<div class="small" style="margin-bottom:4px">Combien de temps ?</div>';
   h+='<div class="row">'+presets.map(x=>'<button class="act" onclick="submitHS('+x[0]+')">'+x[1]+'</button>').join('')+'</div>';
-  h+='<div class="row">ou <input type="number" id="hs-min" min="5" step="5" placeholder="minutes" style="width:90px"> min <button class="act" onclick="submitHS()">Envoyer</button></div>';
+  h+='<div class="row">ou <input type="number" id="hs-min" min="1" step="1" placeholder="minutes" style="width:90px"> min <button class="act" onclick="submitHS()">Envoyer</button></div>';
   h+='<input id="hs-note" placeholder="Précision (optionnel, ex : fermeture tardive)" style="width:100%;margin-top:6px">';
   h+='<div class="aline red" id="hs-msg" style="display:none;margin-top:8px"></div>';
   $('hspanel').innerHTML=h;$('hspanel').style.display='block';
@@ -3419,7 +3419,7 @@ function submitHS(min){
   let targetId=ROLE.empId;
   if(resp&&$('hs-emp')){const v=$('hs-emp').value;if(respTeam().some(x=>x.id===v))targetId=v;}
   const m=min||parseInt($('hs-min')&&$('hs-min').value)||0;
-  if(m<5){const el=$('hs-msg');if(el){el.style.display='block';el.textContent='Indique une durée (au moins 5 min).';}return;}
+  if(m<1){const el=$('hs-msg');if(el){el.style.display='block';el.textContent='Indique une durée (au moins 1 min).';}return;}
   const sens=($('hs-sens')&&$('hs-sens').value)||'sup';
   const dem={id:Date.now(),empId:targetId,date:hsDate,min:m,sens,note:($('hs-note')?$('hs-note').value:''),statut:'attente',_ts:NOW()};
   if(resp)dem.parResp=ROLE.empId;
@@ -3508,7 +3508,7 @@ function editRetard(id){
   const lbl=(r.sens==='fin')?'départ anticipé':'retard';
   const v=prompt('Durée du '+lbl+' en minutes :',r.min);
   if(v===null)return;
-  const m=parseInt(v);if(isNaN(m)||m<5){alert('Durée invalide (au moins 5 min).');return;}
+  const m=parseInt(v);if(isNaN(m)||m<1){alert('Durée invalide (au moins 1 min).');return;}
   if(m===r.min)return;
   r.min=m;r._ts=NOW();
   const e=emp(r.empId);
@@ -4065,7 +4065,7 @@ function addJournalEntry(b){
     // Retard / départ anticipé → on crée un AJUSTEMENT (même donnée que l'onglet Heures sup),
     // qui s'affiche sur le planning et, une fois validé, raccourcit le créneau + déduit les heures.
     const min=parseInt(($('jr-min')||{}).value)||0;
-    if(min<5){alert('Pour un retard / départ anticipé, indique une durée en minutes (≥ 5).');return;}
+    if(min<1){alert('Pour un retard / départ anticipé, indique une durée en minutes (≥ 1).');return;}
     const e=S.employees.find(x=>x.nom===q&&x.b===b)||S.employees.find(x=>x.nom===q);
     if(!e){alert('Salarié introuvable.');return;}
     S.hsdemandes=S.hsdemandes||[];
@@ -4128,7 +4128,7 @@ function renderJournal(){
   h+='<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
     '<select id="jr-q">'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
     '<select id="jr-t">'+JTYPES.map(j=>'<option>'+j.t+'</option>').join('')+'</select>'+
-    '<input id="jr-min" type="number" min="5" step="5" placeholder="min (retard/départ)" title="Durée en minutes — requise pour Retard / Retard à l\'ouverture / Parti plus tôt : crée un ajustement à valider qui modifie le planning" style="width:135px">'+
+    '<input id="jr-min" type="number" min="1" step="1" placeholder="min (retard/départ)" title="Durée en minutes — requise pour Retard / Retard à l\'ouverture / Parti plus tôt : crée un ajustement à valider qui modifie le planning" style="width:135px">'+
     '<input id="jr-c" placeholder="Commentaire (optionnel)" style="flex:1;min-width:140px">'+
     '<button class="act green" onclick="addJournalEntry(\''+selB+'\')">Ajouter</button></div>';
   const list=[];
