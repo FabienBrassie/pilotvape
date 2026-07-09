@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-06-29 13:41 — Retard/départ/heure sup : durée minimale 1 min (avant 5) — pour déclarer un retard de 1 à 4 min. -->
+<!-- v 2026-07-09 — Pointage des pauses : départ/retour horodatés au clic (salarié + responsable), le planning se recale sur la pause réelle, tout dépassement s'affiche en rouge façon retard (non compté), récap des écarts 🍽️ (admin/resp), repris automatiquement au Journal RH et dans le récap paie. -->
 <meta name="theme-color" content="#2563eb">
 <style>
 :root{--bg:#f4f6f9;--card:#fff;--txt:#1c2430;--mut:#6b7685;--line:#e3e8ef;--blue:#2563eb;--red:#dc2626;--orange:#d97706;--green:#16a34a;--P:#2563eb;--M:#dc2626;--L:#7c3aed;--gridline:#edf0f5;--closed:#eceff4}
@@ -257,6 +257,11 @@ body.dark .dayhead.today b{background:#3b82f6}
 /* ============ MOBILE (téléphone) — ajouté 2026-06-22, ne touche pas au desktop ============ */
 /* Bouton flottant « + » (demande congé/absence) */
 #mfab{display:none;position:fixed;right:18px;bottom:calc(env(safe-area-inset-bottom,0px) + 24px);width:60px;height:60px;border-radius:50%;border:none;background:var(--green);color:#fff;font-size:34px;line-height:1;font-weight:300;box-shadow:0 8px 22px rgba(22,163,74,.45);cursor:pointer;z-index:60;align-items:center;justify-content:center;padding:0}
+/* Pointage de pause (mobile, salarié) : pastille au-dessus du bouton "+" */
+#pfab{display:none;position:fixed;right:18px;bottom:calc(env(safe-area-inset-bottom,0px) + 96px);height:44px;border-radius:22px;border:none;background:var(--blue);color:#fff;font-size:15px;font-weight:700;padding:0 18px;box-shadow:0 8px 22px rgba(37,99,235,.4);cursor:pointer;z-index:60}
+#pfab.on{background:#d97706;box-shadow:0 8px 22px rgba(217,119,6,.45)}
+body.mobplan #pfab.show{display:block}
+body.mobfull #pfab{display:none!important}
 /* Accès boutique = par CODE uniquement (mobile ET PC) : on retire l'entrée libre sans code */
 #loginshops{display:none}
 #loginperso{border-top:none!important;padding-top:0!important}
@@ -384,6 +389,8 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
     <button id="testbtn" class="adminonly nav" onclick="toggleTest()" title="Mode test (s'entraîner sur d'anciennes dates)">🧪</button>
     <button id="setbtn" class="paieok" onclick="togPaie()" title="Récap paie mensuel">💶</button>
     <button id="setbtn" class="adminonly" onclick="togSettings()" title="Équipe & données">⚙️</button>
+    <button id="pauserecapbtn" onclick="togPauses()" title="Écarts de pause — prévu vs pointé" style="display:none">🍽️</button>
+    <button id="pausebtn" onclick="pfabClick()" title="Pointer ma pause" style="display:none">⏸️</button>
     <button id="minebtn" onclick="togMine()" title="Mon espace" style="display:none">🙋</button>
     <button id="reqbtn" onclick="togReq()" title="Demandes en cours" style="display:none">📋</button>
     <button id="themebtn" onclick="toggleTheme()" title="Mode sombre / clair">🌙</button>
@@ -409,6 +416,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
 <div id="assistpanel" class="panel" style="width:min(960px,97vw)"></div>
 <div id="reqpanel" class="panel" style="width:min(820px,96vw)"></div>
 <div id="journalpanel" class="panel" style="width:min(1120px,98vw)"></div>
+<div id="pausepanel" class="panel" style="width:min(920px,97vw)"></div>
 <div id="hspanel" class="panel" style="width:min(440px,94vw)"></div>
 <div id="calpanel" class="panel" style="width:min(560px,96vw)"></div>
 <main>
@@ -422,6 +430,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   <div id="alerts"></div>
   <div class="small adminonly" style="margin-top:8px">Glisse un bloc pour le déplacer, ⌥ Option + glisse pour le dupliquer, étire-le par le bas pour changer la durée, clique dessus pour les détails, clique-glisse sur une zone vide pour créer. Chaque modification te demande : ce jour uniquement, ou toutes les semaines.</div>
 </main>
+<button id="pfab" onclick="pfabClick()" aria-label="Pointer ma pause">⏸️ Pause</button>
 <button id="mfab" onclick="openMReq()" title="Faire une demande (congé, absence)" aria-label="Faire une demande">+</button>
 <div id="mreq">
   <div class="mreq-box">
@@ -975,9 +984,9 @@ function mergeData(L,R){
     if(i<0)L.hsdemandes.push(r);else if(((r&&r._ts)||'')>((L.hsdemandes[i]&&L.hsdemandes[i]._ts)||''))L.hsdemandes[i]=r;
   }
   L.hsdemandes=L.hsdemandes.filter(x=>{const tk=L.tomb['hs|'+x.id];return !(tk&&tk>((x&&x._ts)||''))});
-  // congés / maladies (par numéro, suppressions mémorisées)
-  for(const arr of ['conges','maladies','ecoles','entreprises']){
-    const pre={conges:'cg|',maladies:'ml|',ecoles:'ec|',entreprises:'en|'}[arr];
+  // congés / maladies / pauses pointées (par numéro, suppressions mémorisées)
+  for(const arr of ['conges','maladies','ecoles','entreprises','pauses']){
+    const pre={conges:'cg|',maladies:'ml|',ecoles:'ec|',entreprises:'en|',pauses:'pz|'}[arr];
     L[arr]=L[arr]||[];
     for(const r of R[arr]||[]){
       if(L.tomb[pre+r.id]&&L.tomb[pre+r.id]>ts(r))continue;
@@ -1045,7 +1054,8 @@ function t2m(t){const a=(t||'0:0').split(':');return(+a[0])*60+(+a[1])}
 function m2t(m){return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')}
 function fmtH(t){if(!t)return'';const a=t.split(':');return a[1]==='00'?a[0].replace(/^0/,'')+'h':a[0].replace(/^0/,'')+'h'+a[1]}
 function durMin(du,au){return t2m(au)-t2m(du)}
-function isRetardBlock(b){return b&&(b[4]==='retard'||b[4]==='parti tôt');}
+function isRetardLbl(l){return l==='retard'||l==='parti tôt'||l==='pause prolongée';}
+function isRetardBlock(b){return b&&isRetardLbl(b[4]);}
 function blocksMin(bl){return (bl||[]).reduce((s,b)=>s+(isRetardBlock(b)?0:durMin(b[0],b[1])),0)}
 function durH(du,au){return durMin(du,au)/60}
 function blocksDur(bl){return blocksMin(bl)/60}
@@ -1109,6 +1119,7 @@ function migrate(S){
   if(!S.goLive)S.goLive='2026-06-01';
   S.boutiques.forEach(b=>{if(b.pin===undefined)b.pin=''});
   S.employees.forEach(e=>{if(e.pin===undefined)e.pin='';if(e.admin===undefined)e.admin=false;if(e.resp===undefined)e.resp=false;if(e.ecoleMin===undefined)e.ecoleMin=420});
+  S.pauses=S.pauses||[]; // pointages de pause (départ/retour réels)
   // Code admin : plus de code maître. L'accès admin = coche 👑 + code PERSONNEL de la fiche.
   // Migration : l'ancien code maître devient le code perso de l'admin qui n'en a pas (anti-verrouillage),
   // puis on le retire — mais seulement une fois qu'un admin possède bien un code.
@@ -1382,10 +1393,15 @@ function dayHealth(bId,d){
 }
 // Marqueur ROUGE retard / départ anticipé VALIDÉ d'un salarié un jour donné (pour les vues 3 boutiques & Mois).
 function lossTagFor(eid,d){
+  let out='';
   const ls=(S.hsdemandes||[]).filter(x=>x.statut==='accepte'&&x.empId===eid&&x.date===d&&(x.sens==='debut'||x.sens==='fin'));
-  if(!ls.length)return '';
-  const tot=ls.reduce((s,x)=>s+x.min,0);const isRet=ls.some(x=>x.sens==='debut');
-  return ' <span class="mtag" style="background:#dc2626;color:#fff" title="'+(isRet?'Retard':'Départ anticipé')+' validé — '+fmtMin(tot)+' en moins (déjà déduit des heures)">'+(isRet?'⏰':'🌙')+' −'+fmtMin(tot)+'</span>';
+  if(ls.length){
+    const tot=ls.reduce((s,x)=>s+x.min,0);const isRet=ls.some(x=>x.sens==='debut');
+    out+=' <span class="mtag" style="background:#dc2626;color:#fff" title="'+(isRet?'Retard':'Départ anticipé')+' validé — '+fmtMin(tot)+' en moins (déjà déduit des heures)">'+(isRet?'⏰':'🌙')+' −'+fmtMin(tot)+'</span>';
+  }
+  const pz=pauseOf(eid,d);const pd=pz&&pz.ret?pauseDepassMin(pz):0;
+  if(pd>0)out+=' <span class="mtag" style="background:#dc2626;color:#fff" title="Pause prolongée — pointée '+fmtH(pz.dep)+'→'+fmtH(pz.ret)+', '+fmtMin(pd)+' au-delà de la pause prévue (déjà déduit des heures)">🍽 −'+fmtMin(pd)+'</span>';
+  return out;
 }
 function teamCell(bId,d){
   const emps=S.employees.filter(e=>e.actif);
@@ -1423,6 +1439,11 @@ function _evtOnlyChips(d){
       if(rq.statut!=='accepte'||rq.date!==d)continue;const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;
       const e=emp(rq.empId);if(!e)continue;const wb=(presence(e,d)||{}).b||e.b;
       out.push('<span class="evc" style="background:#dc2626;color:#fff" title="'+(sn==='debut'?'Retard':'Départ anticipé')+' validé — '+esc(e.nom)+' ('+bout(wb).nom+'), '+fmtMin(rq.min)+' en moins (déjà déduit)">'+(sn==='debut'?'⏰':'🌙')+' '+esc(e.nom.split(' ')[0])+' −'+fmtMin(rq.min)+' · '+esc(bout(wb).nom)+'</span>');
+    }
+    for(const pz of (S.pauses||[])){
+      if(pz.date!==d||!pz.ret)continue;const dep=pauseDepassMin(pz);if(dep<=0)continue;
+      const e=emp(pz.empId);if(!e)continue;const wb=(presence(e,d)||{}).b||e.b;
+      out.push('<span class="evc" style="background:#dc2626;color:#fff" title="Pause prolongée — '+esc(e.nom)+' ('+bout(wb).nom+') : pointée '+fmtH(pz.dep)+'→'+fmtH(pz.ret)+', +'+fmtMin(dep)+' au-delà du prévu (déjà déduit)">🍽 '+esc(e.nom.split(' ')[0])+' −'+fmtMin(dep)+' · '+esc(bout(wb).nom)+'</span>');
     }
   }
   return out;
@@ -1634,7 +1655,7 @@ function renderMineWeek(){
       const colsEnd=[];for(const ev of evs){let c=0;while(c<colsEnd.length&&colsEnd[c]>ev.s)c++;ev.col=c;colsEnd[c]=ev.f;}
       for(const ev of evs){
         const top=(ev.s-CAL_START)*PX,hpx=(ev.f-ev.s)*PX,l=Math.min(ev.col*24,64);
-        const _isRet=(ev.lbl==='retard'||ev.lbl==='parti tôt');
+        const _isRet=isRetardLbl(ev.lbl);
         bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e)))+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':'')+'>'+
           '<b>'+(ev.me?'★ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
       }
@@ -1859,7 +1880,7 @@ function render(){
       const top=(ev.s-CAL_START)*PX, hpx=(ev.f-ev.s)*PX;
       const l=Math.min(ev.col*24,64); // cascade façon Google Agenda
       bb+='<div class="blk'+(ev.ex?' ex':'')+(ev.confl?' selfov':'')+(ev.lbl?' rep':'')+'" data-emp="'+ev.e.id+'" data-iso="'+d+'" data-bi="'+ev.bi+'"'+
-        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+((ev.lbl==='retard'||ev.lbl==='parti tôt')?'#dc2626':(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e)))+'"'+
+        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e)))+'"'+
         (ev.lbl?' title="'+esc(ev.lbl)+'"':(ev.note?' title="'+esc(ev.note)+'"':''))+'>'+
         '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span><i class="rz"></i></div>';
     }
@@ -1908,6 +1929,7 @@ function render(){
   renderHoursBar(days);
   renderEditor();
   if(typeof updateBadge==='function')updateBadge();
+  if(typeof updatePfab==='function')updatePfab();
   saveUI();
 }
 function periodeTxt(du,au){return du===au?'le '+fmtFR(du):'du '+fmtFR(du)+' au '+fmtFR(au);}
@@ -2664,6 +2686,7 @@ function renderHoursBar(days){
       (ec>0?'<span class="ko">+'+fmtDur(ec)+'</span>':ec<0?'<span class="warn">−'+fmtDur(-ec)+'</span>':'<span class="ok">✓</span>')+
       (hs>0?'<span class="hsbadge">+ '+fmtDur(hs)+' en HS</span>':'')+
       (function(){const a=weekAdjLoss(e,curMonday);if(!a.total)return '';const lbl=a.retard&&!a.depart?'retard':a.depart&&!a.retard?'parti tôt':'retard/départ';return '<span class="hsbadge" style="background:rgba(239,68,68,.16);color:#f87171" title="'+(a.retard?fmtDur(a.retard)+' de retard':'')+(a.retard&&a.depart?' · ':'')+(a.depart?fmtDur(a.depart)+' parti plus tôt':'')+' — déjà déduit des heures">⚠ −'+fmtDur(a.total)+' '+lbl+'</span>';})()+
+      (function(){let t=0;for(let i=0;i<7;i++){const pz=pauseOf(e.id,addD(curMonday,i));if(pz&&pz.ret)t+=pauseDepassMin(pz);}if(!t)return '';return '<span class="hsbadge" style="background:rgba(217,119,6,.16);color:#d97706" title="Pauses pointées plus longues que prévu cette semaine — déjà déduit des heures">🍽 −'+fmtDur(t)+' pause</span>';})()+
       (here!==tot?'<span class="small">dont '+fmtDur(here)+' ici</span>':'')+'</div>';
   }
   $('hours').innerHTML=h||'<span class="small">Personne de planifié cette semaine dans cette boutique.</span>';
@@ -2958,7 +2981,7 @@ function applyScope(scope){
 function cancelScope(){pending=null;pendingCal=null;$('scopemodal').style.display='none';render()}
 // Clic hors d'une fenêtre : on la ferme (le clic est absorbé, le suivant interagit)
 document.addEventListener('mousedown',ev=>{
-  const ids=['settings','hdetail','evpanel','feriepanel','edpanel','abspanel','minepanel','paiepanel','reqpanel','hspanel','assistpanel'];
+  const ids=['settings','hdetail','evpanel','feriepanel','edpanel','abspanel','minepanel','paiepanel','reqpanel','hspanel','assistpanel','pausepanel'];
   const modalOpen=$('scopemodal').style.display==='flex';
   const anyOpen=edit||modalOpen||ids.some(id=>$(id)&&$(id).style.display==='block');
   if(!anyOpen)return;
@@ -2999,7 +3022,7 @@ document.addEventListener('click',ev=>{
   const sm=$('scopemodal');if(sm&&sm.style.display&&sm.style.display!=='none'){sm.style.display='none';closed=true;}
   if(closed)render();
 },true);
-document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';if($('journalpanel'))$('journalpanel').style.display='none';render()}});
+document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';if($('journalpanel'))$('journalpanel').style.display='none';if($('pausepanel'))$('pausepanel').style.display='none';render()}});
 
 // ============ PARAMÈTRES (équipe & données) ============
 function togSettings(){if(!isAdmin())return;const el=$('settings');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderSettings();saveUI()}
@@ -3167,6 +3190,7 @@ function paieRow(e,days){
     nom:e.nom, b:e.b,
     norm:w.norm, hs:w.hs, fer:w.fer, dim:w.dim,
     retard:lossMin(e,days), retardLabel:lossMonthLabel(e,days),
+    pause:pauseLossMin(e,days),
     ferchome:feriesOfMonth(days).filter(d=>inEmploi(e,d)&&dayWorkedMin(e,d)===0).length,
     conge:daysAbs(S.conges.filter(c=>c.statut==='accepte'),e.id,days),
     maladie:daysAbs(S.maladies.filter(m=>m.statut!=='attente'),e.id,days),
@@ -3296,7 +3320,7 @@ function renderPaie(){
       const r=paieRow(e,days);
       h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:4px">';
       h+='<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
-        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (non rattrapé) — déjà retirées des heures normales ci-contre, non rémunérées">'+fmtHfrac(r.retard)+' '+r.retardLabel+' (non rémunéré)</span>':'')+'</span></div>';
+        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (non rattrapé) — déjà retirées des heures normales ci-contre, non rémunérées">'+fmtHfrac(r.retard)+' '+r.retardLabel+' (non rémunéré)</span>':'')+(r.pause?' · <span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà retirées des heures normales, non rémunérées">'+fmtHfrac(r.pause)+' pause (non rémunéré)</span>':'')+'</span></div>';
       for(const ev of paieEvents(e,days)){
         h+='<div class="brow" style="padding-left:14px;font-size:12px"><span style="width:104px;color:var(--mut)">'+ev.label+'</span><span>'+ev.txt+'</span></div>';
       }
@@ -3321,6 +3345,8 @@ function paieEvents(e,days){
   Object.keys(hw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏱ Semaine '+k,txt:'<span style="color:#0891b2;font-weight:700">'+fmtHdec(hw[k])+' sup</span>'});});
   const lwi=lossWeekInfo(e,days);
   Object.keys(lwi).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ S'+k,txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
+  const pw=pauseLossByWeek(e,days);
+  Object.keys(pw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'🍽 S'+k,txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[k])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
   if(e.dateIn&&e.dateIn>=days[0]&&e.dateIn<=days[days.length-1])evs.push({d:e.dateIn,label:'📄 Début de contrat',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
   if(e.dateOut&&e.dateOut>=days[0]&&e.dateOut<=days[days.length-1])evs.push({d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
   evs.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
@@ -3330,10 +3356,10 @@ function paieEvents(e,days){
 function exportPaie(){
   const days=monthDays(paieAnchor);
   const emps=S.employees.filter(e=>!e.admin&&paieSel.has(e.b)&&(!paieEmp||e.id===paieEmp)&&days.some(d=>inEmploi(e,d)));
-  const head=['Salarié','Boutique','Heures normales','Heures sup','Retard/départ non rattrapé (déjà déduit)','Fériés travaillés','Dimanches travaillés','Congés (j)','Maladie (j)','École (j)'];
+  const head=['Salarié','Boutique','Heures normales','Heures sup','Retard/départ non rattrapé (déjà déduit)','Pauses prolongées (déjà déduit)','Fériés travaillés','Dimanches travaillés','Congés (j)','Maladie (j)','École (j)'];
   const lines=[head.join(';')];
   for(const e of emps){const r=paieRow(e,days);
-    lines.push([r.nom,bout(r.b).nom,fmtDur(r.norm),fmtDur(r.hs),r.retard?'-'+fmtDur(r.retard):'',r.fer,r.dim,r.conge,r.maladie,r.ecole].join(';'));}
+    lines.push([r.nom,bout(r.b).nom,fmtDur(r.norm),fmtDur(r.hs),r.retard?'-'+fmtDur(r.retard):'',r.pause?'-'+fmtDur(r.pause):'',r.fer,r.dim,r.conge,r.maladie,r.ecole].join(';'));}
   const blob=new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='recap-paie-'+paieAnchor.slice(0,7)+'.csv';a.click();
@@ -3365,6 +3391,9 @@ function paieTextStr(){
       // heures manquées (retard/départ non rattrapé) — déjà déduites des heures travaillées, non rémunérées
       const lwi=lossWeekInfo(e,days);
       Object.keys(lwi).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' (non rémunéré)\n';});
+      // pauses prolongées pointées — déjà déduites des heures travaillées, non rémunérées
+      const pw=pauseLossByWeek(e,days);
+      Object.keys(pw).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHfrac(pw[k])+' pause prolongée (non rémunéré)\n';});
       // congés acceptés du mois
       for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
         out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du)+'.':'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)+'.')+'\n';
@@ -3396,22 +3425,49 @@ function dlPaieText(){const blob=new Blob([$('paietxt').value],{type:'text/plain
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='elements-paye-'+paieAnchor.slice(0,7)+'.txt';a.click();}
 
 // ============ HEURES SUP (déclaration salarié) & DEMANDES ============
-let hsDate=null;
-function declareHS(iso){if(!ROLE||ROLE.type!=='salarie')return;hsDate=iso;renderHSPanel();}
+let hsDate=null,hsTarget=null;
+function declareHS(iso){if(!ROLE||ROLE.type!=='salarie')return;hsDate=iso;hsTarget=null;renderHSPanel();}
+function hsEmpChg(v){hsTarget=v;renderHSPanel();}
 function renderHSPanel(){
   const e=emp(ROLE.empId);if(!e)return;
   const resp=isResp();
+  // cible affichée (resp : suit le sélecteur « Pour qui ? », conservé au re-rendu)
+  const tid=(resp&&hsTarget&&respTeam().some(x=>x.id===hsTarget))?hsTarget:ROLE.empId;
   const presets=[[15,'¼h'],[30,'½h'],[45,'¾h'],[60,'1h'],[90,'1h30'],[120,'2h']];
   let h='<div class="phead"><h2>🕑 Déclarer un ajustement</h2><button class="act grey" style="margin-left:auto" onclick="$(\'hspanel\').style.display=\'none\'">Fermer</button></div>';
   h+='<div class="small" style="margin-bottom:8px"><b>'+DAYJ[wdOf(hsDate)]+' '+fmtFR(hsDate)+'</b> — part en validation chez l\'admin.</div>';
-  if(resp)h+='<div class="row"><span class="small">Pour qui ?</span><select id="hs-emp">'+respTeam().map(x=>'<option value="'+x.id+'"'+(x.id===ROLE.empId?' selected':'')+'>'+esc(x.nom)+(x.id===ROLE.empId?' (moi)':'')+'</option>').join('')+'</select></div>';
+  if(resp)h+='<div class="row"><span class="small">Pour qui ?</span><select id="hs-emp" onchange="hsEmpChg(this.value)">'+respTeam().map(x=>'<option value="'+x.id+'"'+(x.id===tid?' selected':'')+'>'+esc(x.nom)+(x.id===ROLE.empId?' (moi)':'')+'</option>').join('')+'</select></div>';
   h+='<div class="row"><select id="hs-sens"><option value="sup">⏱ Heures en plus (heures sup)</option><option value="fin">🌙 Parti plus tôt (fin de journée)</option><option value="debut">🌅 Arrivé plus tard (début de journée)</option></select></div>';
   h+='<div class="small" style="margin-bottom:4px">Combien de temps ?</div>';
   h+='<div class="row">'+presets.map(x=>'<button class="act" onclick="submitHS('+x[0]+')">'+x[1]+'</button>').join('')+'</div>';
   h+='<div class="row">ou <input type="number" id="hs-min" min="1" step="1" placeholder="minutes" style="width:90px"> min <button class="act" onclick="submitHS()">Envoyer</button></div>';
   h+='<input id="hs-note" placeholder="Précision (optionnel, ex : fermeture tardive)" style="width:100%;margin-top:6px">';
   h+='<div class="aline red" id="hs-msg" style="display:none;margin-top:8px"></div>';
+  // ── Pointage de pause (appliqué directement, sans validation) ──
+  h+='<div class="mhead" style="margin-top:12px">🍽️ Pointage de pause'+(tid!==ROLE.empId?' — '+esc((emp(tid)||{}).nom||''):'')+'</div>';
+  const rec=pauseOf(tid,hsDate);
+  if(rec&&rec.ret){
+    const dm=pauseDepassMin(rec);
+    h+='<div class="small">Pause pointée : <b>'+fmtH(rec.dep)+' → '+fmtH(rec.ret)+'</b> ('+fmtDur(t2m(rec.ret)-t2m(rec.dep))+')'+
+      (rec.prevDu?' — prévue '+fmtH(rec.prevDu)+'-'+fmtH(rec.prevAu):' — aucune pause prévue au planning')+
+      (dm>0?' · <b style="color:#dc2626">+'+fmtDur(dm)+' de dépassement</b>':' · dans les clous ✓')+'</div>';
+    if(canPauseEdit(rec))h+='<div class="row" style="margin-top:4px"><button class="mini" onclick="editPause('+rec.id+')">✎ Corriger</button><button class="mini ghost" onclick="delPause('+rec.id+')">🗑 Annuler</button></div>';
+  }else if(rec){
+    h+='<div class="small">🟠 En pause depuis <b>'+fmtH(rec.dep)+'</b>'+(rec.prevDu?' (prévue '+fmtH(rec.prevDu)+'-'+fmtH(rec.prevAu)+')':'')+'.</div>';
+    h+='<div class="row" style="margin-top:6px"><button class="act green" onclick="pointerRetour('+rec.id+');renderHSPanel()">▶️ Retour en poste — pointer '+fmtH(nowHM())+'</button></div>';
+  }else if(hsDate===todayISO()){
+    h+='<div class="row" style="margin-top:2px"><button class="act" onclick="hsPointerPause()">⏸️ Départ en pause — pointer '+fmtH(nowHM())+'</button></div>';
+    h+='<div class="small" style="color:var(--mut);margin-top:4px">L\'heure enregistrée est celle du clic. Au retour, re-clique sur le jour (ou sur ⏸️ en haut) puis « Retour en poste ». Le planning se recale tout seul sur la pause réelle ; un dépassement s\'affiche en rouge comme un retard.</div>';
+  }else{
+    h+='<div class="small" style="color:var(--mut)">Le pointage se fait le jour même (l\'heure est celle du clic).'+((resp||isAdmin())?' Pour une saisie a posteriori (oubli), passe par 🍽️ Écarts de pause.':'')+'</div>';
+  }
   $('hspanel').innerHTML=h;$('hspanel').style.display='block';
+}
+function hsPointerPause(){
+  let targetId=ROLE.empId;
+  if(isResp()&&$('hs-emp')){const v=$('hs-emp').value;if(respTeam().some(x=>x.id===v))targetId=v;}
+  pointerPause(targetId,hsDate);
+  renderHSPanel();
 }
 function submitHS(min){
   if(!ROLE||ROLE.type!=='salarie')return;
@@ -3500,6 +3556,9 @@ function rebuildDayRetards(e,iso){
         else{nb.push([m2t(bs),m2t(bs+rem),B[2],0,'retard']);nb.push([m2t(bs+rem),B[1],B[2],B[3]||0,(typeof B[4]==='string'&&B[4]&&!isRetardBlock(B))?B[4]:0]);rem=0;}}
       blocks=nb;}
   }
+  // 3) Ré-appliquer la pause POINTÉE du jour (recalage + dépassement rouge), même mécanique.
+  const _pz=pauseOf(e.id,iso);
+  if(_pz&&_pz.ret)blocks=_applyPauseBlocks(blocks,_pz);
   commitDay(e,iso,blocks,'jour');
 }
 function editRetard(id){
@@ -3524,6 +3583,247 @@ function delRetard(id){
   S.tomb['hs|'+id]=NOW();S.hsdemandes=S.hsdemandes.filter(x=>x.id!==id);
   if(e&&wasAcc)rebuildDayRetards(e,d);else save();
   render();if($('journalpanel').style.display==='block')renderJournal();if($('abspanel').style.display==='block')renderAbs();
+}
+
+// ===== POINTAGE DES PAUSES (Fabien 2026-07-09) =====
+// Le salarié (ou son responsable) pointe le DÉPART en pause puis le RETOUR en poste : l'heure est
+// celle du clic (pas de saisie). Appliqué DIRECTEMENT au planning (pas de validation) :
+//  • pause décalée → le trou du planning se recale sur la pause réelle (même durée prévue) ;
+//  • pause trop longue → le dépassement devient un bloc rouge « pause prolongée » NON COMPTÉ
+//    (même mécanique que les retards : heures déjà déduites) ;
+//  • pause plus courte → on garde la durée prévue, rien ne change.
+// La pause PRÉVUE (prevDu/prevAu) est figée dans le pointage au moment du départ → l'historique
+// prévu vs réel est conservé pour le récap des écarts (🍽️), le Journal RH et la paie.
+function pauseOf(empId,iso){return (S.pauses||[]).find(p=>p.empId===empId&&p.date===iso);}
+function nowHM(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
+function pauseDepassMin(rec){if(!rec||!rec.ret)return 0;
+  const planned=(rec.prevDu&&rec.prevAu)?Math.max(0,t2m(rec.prevAu)-t2m(rec.prevDu)):0;
+  return Math.max(0,(t2m(rec.ret)-t2m(rec.dep))-planned);}
+// Trou le plus proche d'une heure de référence parmi des blocs (triés ou non)
+function _gapNear(blocks,refMin){
+  const bl=blocks.slice().sort((a,b)=>t2m(a[0])-t2m(b[0]));
+  const gaps=[];for(let i=1;i<bl.length;i++){const a=t2m(bl[i-1][1]),b=t2m(bl[i][0]);if(b>a)gaps.push([a,b]);}
+  if(!gaps.length)return null;
+  const dist=g=>(refMin>=g[0]&&refMin<=g[1])?0:Math.min(Math.abs(refMin-g[0]),Math.abs(refMin-g[1]));
+  gaps.sort((g1,g2)=>dist(g1)-dist(g2));return gaps[0];
+}
+// Pause PRÉVUE d'un jour = trou du planning (marqueurs retard/pause réintégrés) le plus proche de ref
+function plannedGapOf(e,iso,refMin){
+  const p=presence(e,iso);
+  if(p.st!=='present'||!p.blocks||!p.blocks.length)return null;
+  let bl=p.blocks.map(b=>[b[0],b[1],b[2],b[3]||0,(isRetardBlock(b)?0:(b[4]||0))]);
+  bl=_mergeAdjBlocks(bl);
+  return _gapNear(bl,refMin!=null?refMin:1e9);
+}
+function _fillGap(blocks,a,b){ // comble le trou [a,b] avec la boutique du bloc précédent
+  const bl=blocks.map(x=>x.slice()).sort((x,y)=>t2m(x[0])-t2m(y[0]));
+  const prev=bl.filter(x=>t2m(x[1])<=a).pop();
+  const bId=prev?prev[2]:(bl[0]?bl[0][2]:null);if(bId==null)return blocks;
+  bl.push([m2t(a),m2t(b),bId,0,0]);
+  return _mergeAdjBlocks(bl);
+}
+function _carve(blocks,x,y){ // retire [x,y] du temps de travail (le nouveau trou de pause) — blocs HS intacts
+  const out=[];
+  for(const B of blocks){const bs=t2m(B[0]),be=t2m(B[1]);
+    if(be<=x||bs>=y||B[3]){out.push(B);continue;}
+    if(bs<x)out.push([B[0],m2t(x),B[2],B[3]||0,B[4]||0]);
+    if(be>y)out.push([m2t(y),B[1],B[2],B[3]||0,B[4]||0]);
+  }
+  return out;
+}
+function _markPause(blocks,x,y){ // transforme [x,y] en bloc(s) rouge(s) « pause prolongée » (non compté)
+  const out=[];
+  for(const B of blocks){const bs=t2m(B[0]),be=t2m(B[1]);
+    if(be<=x||bs>=y||B[3]||isRetardBlock(B)){out.push(B);continue;}
+    if(bs<x)out.push([B[0],m2t(x),B[2],B[3]||0,B[4]||0]);
+    const a=Math.max(bs,x),b=Math.min(be,y);
+    if(b>a)out.push([m2t(a),m2t(b),B[2],0,'pause prolongée']);
+    if(be>y)out.push([m2t(y),B[1],B[2],B[3]||0,B[4]||0]);
+  }
+  return out;
+}
+// Applique un pointage terminé à des blocs NETTOYÉS : comble l'ancien trou, creuse la pause réelle
+// (durée prévue), marque le dépassement en rouge. Idempotent (rejouable après merge / retard).
+function _applyPauseBlocks(blocks,rec){
+  if(!rec||!rec.ret)return blocks;
+  const dep=t2m(rec.dep),ret=t2m(rec.ret);
+  if(ret<=dep)return blocks;
+  const planned=(rec.prevDu&&rec.prevAu)?Math.max(0,t2m(rec.prevAu)-t2m(rec.prevDu)):0;
+  let bl=blocks;
+  if(planned>0){const g=_gapNear(bl,dep);if(g)bl=_fillGap(bl,g[0],g[1]);}
+  const gEnd=Math.min(dep+planned,1440);
+  if(gEnd>dep)bl=_carve(bl,dep,gEnd);
+  if(ret>gEnd)bl=_markPause(bl,gEnd,ret);
+  sortBlocks(bl);
+  return bl;
+}
+// Remet le planning du jour comme PRÉVU (avant d'annuler ou de re-saisir un pointage)
+function _restorePausePlanning(e,rec){
+  const p=presence(e,rec.date);if(p.st!=='present'||!p.blocks)return;
+  let blocks=p.blocks.map(b=>[b[0],b[1],b[2],b[3]||0,(b[4]==='pause prolongée'?0:(b[4]||0))]);
+  blocks=_mergeAdjBlocks(blocks);sortBlocks(blocks);
+  if(rec.ret&&rec.prevDu&&rec.prevAu){
+    const g=_gapNear(blocks,t2m(rec.dep));
+    if(g)blocks=_fillGap(blocks,g[0],g[1]);
+    blocks=_carve(blocks,t2m(rec.prevDu),t2m(rec.prevAu));
+    sortBlocks(blocks);
+  }
+  commitDay(e,rec.date,blocks,'jour');
+}
+// --- Pointage : départ / retour ---
+function pointerPause(targetId,iso){
+  const e=emp(targetId);if(!e)return;
+  if(pauseOf(targetId,iso)){setSave('⚠ Pause déjà pointée ce jour');return;}
+  if(presence(e,iso).st!=='present'){alert('Pas de créneau planifié ce jour-là — pointage impossible.');return;}
+  const now=nowHM();
+  const g=plannedGapOf(e,iso,t2m(now));
+  const rec={id:Date.now(),empId:targetId,date:iso,dep:now,ret:null,prevDu:g?m2t(g[0]):null,prevAu:g?m2t(g[1]):null,_ts:NOW()};
+  if(ROLE&&ROLE.empId&&targetId!==ROLE.empId)rec.parResp=ROLE.empId;
+  S.pauses=S.pauses||[];S.pauses.push(rec);
+  save();render();
+  setSave('⏸️ Départ en pause pointé à '+fmtH(now));
+}
+function pointerRetour(recId){
+  const rec=(S.pauses||[]).find(p=>p.id===recId);if(!rec||rec.ret)return;
+  const now=nowHM();
+  if(t2m(now)<=t2m(rec.dep)){alert('Le retour doit être après le départ ('+fmtH(rec.dep)+').');return;}
+  rec.ret=now;rec._ts=NOW();
+  const e=emp(rec.empId);
+  if(e)rebuildDayRetards(e,rec.date);else save();
+  render();
+  const dm=pauseDepassMin(rec);
+  setSave('▶️ Retour pointé à '+fmtH(now)+(dm>0?' — +'+fmtMin(dm)+' au-delà de la pause prévue':''));
+}
+// --- Corrections (admin, ou responsable pour sa boutique) ---
+function canPauseEdit(rec){if(isAdmin())return true;if(!isResp())return false;
+  const te=emp(rec.empId),me=emp(ROLE.empId);return !!(te&&me&&te.b===me.b);}
+function _pauseRefresh(){render();
+  if($('pausepanel')&&$('pausepanel').style.display==='block')renderPausePanel();
+  if($('journalpanel')&&$('journalpanel').style.display==='block')renderJournal();
+  if($('hspanel')&&$('hspanel').style.display==='block')renderHSPanel();
+  if($('minepanel')&&$('minepanel').style.display==='block')renderMine();}
+function editPause(id){
+  const rec=(S.pauses||[]).find(x=>x.id===id);if(!rec||!canPauseEdit(rec))return;
+  const e=emp(rec.empId);if(!e)return;
+  const dv=prompt('Heure de DÉPART en pause (HH:MM) :',rec.dep);if(dv===null)return;
+  const rv=prompt('Heure de RETOUR en poste (HH:MM) — vide si pas encore revenu :',rec.ret||'');if(rv===null)return;
+  const okT=t=>/^\d{1,2}:\d{2}$/.test(String(t).trim());
+  if(!okT(dv)||(String(rv).trim()&&!okT(rv))){alert('Format attendu : HH:MM (ex 13:05).');return;}
+  const nd=String(dv).trim().padStart(5,'0'),nr=String(rv).trim()?String(rv).trim().padStart(5,'0'):null;
+  if(nr&&t2m(nr)<=t2m(nd)){alert('Le retour doit être après le départ.');return;}
+  if(rec.ret)_restorePausePlanning(e,rec); // on remet d'abord le planning comme prévu
+  rec.dep=nd;rec.ret=nr;rec._ts=NOW();
+  rebuildDayRetards(e,rec.date); // ré-applique retards + pause avec les nouvelles heures
+  save();_pauseRefresh();
+}
+function delPause(id){
+  const rec=(S.pauses||[]).find(x=>x.id===id);if(!rec||!canPauseEdit(rec))return;
+  if(!confirm('Annuler ce pointage de pause ? Le planning du jour est remis comme prévu.'))return;
+  const e=emp(rec.empId);
+  S.tomb['pz|'+id]=NOW();S.pauses=S.pauses.filter(x=>x.id!==id);
+  if(e&&rec.ret)_restorePausePlanning(e,rec);
+  if(e)rebuildDayRetards(e,rec.date);
+  save();_pauseRefresh();
+}
+// Saisie manuelle a posteriori (oubli de pointage / litige) — admin ou responsable
+function addPauseManual(){
+  if(!(isAdmin()||isResp()))return;
+  const eid=$('pz-emp')&&$('pz-emp').value,d=$('pz-date')&&$('pz-date').value,
+        dep=$('pz-dep')&&$('pz-dep').value,ret=$('pz-ret')&&$('pz-ret').value;
+  if(!eid||!d||!dep||!ret){alert('Salarié, date, départ et retour sont requis.');return;}
+  const e=emp(eid);if(!e)return;
+  if(isResp()&&!isAdmin()&&e.b!==emp(ROLE.empId).b)return;
+  if(t2m(ret)<=t2m(dep)){alert('Le retour doit être après le départ.');return;}
+  if(pauseOf(eid,d)){alert('Une pause est déjà pointée ce jour-là — corrige-la (✎) plutôt.');return;}
+  if(presence(e,d).st!=='present'){alert('Pas de créneau planifié ce jour-là.');return;}
+  const g=plannedGapOf(e,d,t2m(dep));
+  const rec={id:Date.now(),empId:eid,date:d,dep,ret,prevDu:g?m2t(g[0]):null,prevAu:g?m2t(g[1]):null,manuel:true,_ts:NOW()};
+  if(!isAdmin()&&isResp())rec.parResp=ROLE.empId;
+  S.pauses=S.pauses||[];S.pauses.push(rec);
+  rebuildDayRetards(e,d);
+  save();_pauseRefresh();
+}
+// Dépassements de pause par semaine ISO (pour la paie) — en minutes
+function pauseLossByWeek(e,days){const w={};const ds=new Set(days);
+  for(const r of (S.pauses||[])){if(r.empId!==e.id||!r.ret||!ds.has(r.date))continue;
+    const dm=pauseDepassMin(r);if(dm<=0)continue;const k=isoWeek(r.date);w[k]=(w[k]||0)+dm;}
+  return w;}
+function pauseLossMin(e,days){const w=pauseLossByWeek(e,days);return Object.keys(w).reduce((t,k)=>t+w[k],0);}
+// --- Bouton rapide (header salarié + pastille mobile) : pointer MA pause d'aujourd'hui ---
+function pfabClick(){
+  if(!ROLE||ROLE.type!=='salarie')return;
+  const iso=todayISO();const rec=pauseOf(ROLE.empId,iso);
+  if(rec&&rec.ret){setSave('Pause déjà pointée aujourd\'hui : '+fmtH(rec.dep)+' → '+fmtH(rec.ret));return;}
+  if(rec){if(confirm('Pointer ton RETOUR en poste à '+fmtH(nowHM())+' ?'))pointerRetour(rec.id);}
+  else{if(confirm('Pointer ton DÉPART en pause à '+fmtH(nowHM())+' ?'))pointerPause(ROLE.empId,iso);}
+}
+function updatePfab(){
+  const sal=!!(ROLE&&ROLE.type==='salarie');
+  const rec=sal?pauseOf(ROLE.empId,todayISO()):null;
+  const on=!!(rec&&!rec.ret),done=!!(rec&&rec.ret);
+  const pb=document.getElementById('pausebtn');
+  if(pb){pb.style.display=sal?'':'none';pb.textContent=on?'▶️':'⏸️';
+    pb.title=on?('En pause depuis '+fmtH(rec.dep)+' — clique pour pointer ton retour'):done?('Pause pointée aujourd\'hui : '+fmtH(rec.dep)+' → '+fmtH(rec.ret)):'Pointer mon départ en pause (heure du clic)';
+    pb.style.background=on?'#d97706':'';pb.style.color=on?'#fff':'';}
+  const pf=document.getElementById('pfab');
+  if(pf){pf.classList.toggle('show',sal);pf.classList.toggle('on',on);
+    pf.textContent=on?'▶️ Retour en poste':done?'⏸️ Pause pointée ✓':'⏸️ Départ en pause';}
+}
+// --- Récap des écarts (🍽️) : prévu vs pointé, cumuls semaine / mois — admin + responsable ---
+let pauseAnchor=todayISO().slice(0,7)+'-15';
+function pauseNav(n){const y=+pauseAnchor.slice(0,4),m=+pauseAnchor.slice(5,7);let ny=y,nm=m+n;
+  if(nm<1){nm=12;ny--}if(nm>12){nm=1;ny++}pauseAnchor=ny+'-'+String(nm).padStart(2,'0')+'-15';renderPausePanel();}
+function togPauses(){if(!(isAdmin()||isResp()))return;const el=$('pausepanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderPausePanel();}
+function renderPausePanel(){
+  if(!(isAdmin()||isResp()))return;
+  const days=monthDays(pauseAnchor);
+  const mlabel=MOISN[+pauseAnchor.slice(5,7)]+' '+pauseAnchor.slice(0,4);
+  const myB=isAdmin()?null:(emp(ROLE.empId)||{}).b;
+  let h='<div class="phead"><h2>🍽️ Écarts de pause</h2>'+
+    '<button class="nav" onclick="pauseNav(-1)">◀</button><b style="min-width:120px;text-align:center">'+mlabel+'</b><button class="nav" onclick="pauseNav(1)">▶</button>'+
+    '<button class="act grey" style="margin-left:auto" onclick="$(\'pausepanel\').style.display=\'none\'">Fermer</button></div>';
+  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Pauses pointées (heure réelle au clic) comparées à la pause prévue au planning. Le planning se recale tout seul sur la pause réelle ; un <b style="color:#dc2626">dépassement</b> s\'affiche en rouge et est déjà déduit des heures. Sert à vérifier que les pauses prévues collent au terrain.</div>';
+  // saisie manuelle (oubli de pointage)
+  const addEmps=S.employees.filter(e=>e.actif&&(!myB||e.b===myB));
+  h+='<div class="addrow">➕ <select id="pz-emp">'+addEmps.map(e=>'<option value="'+e.id+'">'+esc(e.nom)+'</option>').join('')+'</select>'+
+    '<input type="date" id="pz-date" value="'+todayISO()+'"> départ <input type="time" id="pz-dep"> retour <input type="time" id="pz-ret">'+
+    '<button class="act green" onclick="addPauseManual()">Enregistrer</button><span class="small" style="color:var(--mut)">— saisie a posteriori (oubli de pointage)</span></div>';
+  const wk0=monday(todayISO());
+  let any=false;
+  for(const b of S.boutiques){
+    if(myB&&b.id!==myB)continue;
+    let rows='';
+    for(const e of S.employees.filter(x=>x.actif&&x.b===b.id)){
+      const recs=(S.pauses||[]).filter(x=>x.empId===e.id&&x.date>=days[0]&&x.date<=days[days.length-1]).sort((a,b2)=>a.date<b2.date?1:-1);
+      if(!recs.length)continue;
+      any=true;
+      const moisDep=recs.reduce((t,x)=>t+pauseDepassMin(x),0);
+      let wkDep=0;for(let i=0;i<7;i++){const pz=pauseOf(e.id,addD(wk0,i));if(pz&&pz.ret)wkDep+=pauseDepassMin(pz);}
+      const enCours=recs.find(x=>!x.ret);
+      rows+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:3px">';
+      rows+='<div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
+        (enCours?'<span class="small" style="color:#d97706;font-weight:700">🟠 en pause depuis '+fmtH(enCours.dep)+'</span>':'')+
+        '<span class="small" style="margin-left:auto">'+
+        (wkDep>0?'semaine en cours : <b style="color:#dc2626">+'+fmtDur(wkDep)+'</b> · ':'')+
+        'dépassements du mois : '+(moisDep>0?'<b style="color:#dc2626">+'+fmtDur(moisDep)+'</b>':'<b style="color:var(--green)">0 ✓</b>')+'</span></div>';
+      for(const x of recs){
+        const dm=pauseDepassMin(x);
+        rows+='<div class="brow" style="padding-left:16px;font-size:12px;flex-wrap:wrap">'+
+          '<span style="width:88px;color:var(--mut);white-space:nowrap">'+fmtFR(x.date)+'</span>'+
+          '<span class="small" style="width:130px">prévu : '+(x.prevDu?fmtH(x.prevDu)+'-'+fmtH(x.prevAu):'<i>aucune pause</i>')+'</span>'+
+          '<span class="small" style="width:150px">pointé : <b>'+fmtH(x.dep)+' → '+(x.ret?fmtH(x.ret):'…')+'</b></span>'+
+          (x.ret?'<span class="small" style="width:56px">'+fmtDur(t2m(x.ret)-t2m(x.dep))+'</span>':'<span class="small" style="color:#d97706;font-weight:700">en cours</span>')+
+          (x.ret?(dm>0?'<span style="color:#dc2626;font-weight:800;width:64px">+'+fmtDur(dm)+'</span>':'<span style="color:var(--green);font-weight:700;width:64px">✓</span>'):'')+
+          (x.parResp?'<span class="small" title="pointé / saisi par le responsable">🛡️</span>':'')+(x.manuel?'<span class="small" title="saisie manuelle a posteriori">✍️</span>':'')+
+          (canPauseEdit(x)?'<span style="margin-left:auto;white-space:nowrap"><button class="mini" title="Corriger les heures" onclick="editPause('+x.id+')">✎</button> <button class="mini ghost" title="Annuler ce pointage — remet le planning comme prévu" onclick="delPause('+x.id+')">🗑</button></span>':'')+
+          '</div>';
+      }
+      rows+='</div>';
+    }
+    if(rows)h+='<div class="mhead" style="color:var(--'+b.id+')">'+esc(b.nom)+'</div>'+rows;
+  }
+  if(!any)h+='<div class="small" style="padding:8px 0">Aucune pause pointée sur '+mlabel+'.</div>';
+  $('pausepanel').innerHTML=h;
 }
 
 // Vue "Demandes en cours" — boutique (toute la boutique) ou salarié (les siennes), lecture seule
@@ -3939,6 +4239,16 @@ function renderMine(){
       h+='<div class="brow" style="padding-left:6px'+(past&&x.statut!=='attente'?';opacity:.5':'')+'"><span>⏱</span><span>'+fmtFR(x.date)+'</span><span class="small" style="color:#0891b2;font-weight:700">'+hsLabel(x)+'</span>'+
         (x.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">acceptée ✓</span>':x.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusée</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>')+
         (x.statut==='attente'?' <button class="mini ghost" onclick="delHS('+x.id+')" title="Annuler ma demande">🗑</button>':'')+'</div>';}}
+  // 3-bis) MES PAUSES POINTÉES (transparence : le salarié voit ce qui est enregistré)
+  const myps=(S.pauses||[]).filter(x=>x.empId===e.id).sort((a,b)=>a.date<b.date?1:-1).slice(0,15);
+  if(myps.length){h+='<div class="mhead">🍽️ Mes pauses pointées</div>';
+    for(const x of myps){const dm=x.ret?pauseDepassMin(x):0;
+      h+='<div class="brow" style="padding-left:6px"><span>🍽️</span><span>'+fmtFR(x.date)+'</span>'+
+        '<span class="small">'+fmtH(x.dep)+' → '+(x.ret?fmtH(x.ret)+' ('+fmtDur(t2m(x.ret)-t2m(x.dep))+')':'<b style="color:#d97706">en cours</b>')+'</span>'+
+        '<span class="small" style="color:var(--mut)">'+(x.prevDu?'prévue '+fmtH(x.prevDu)+'-'+fmtH(x.prevAu):'aucune pause prévue')+'</span>'+
+        (x.ret?(dm>0?'<span class="small" style="color:#dc2626;font-weight:700">+'+fmtDur(dm)+' dépassement (déduit)</span>':'<span class="small" style="color:var(--green);font-weight:700">✓</span>'):'')+
+        (x.parResp?'<span class="small" title="pointé par le responsable">🛡️</span>':'')+'</div>';}
+    h+='<div class="small" style="color:var(--mut);margin:2px 0 6px">Pointage : clique sur ⏸️ en haut (aujourd\'hui) ou sur le jour dans la vue Semaine. L\'heure enregistrée est celle du clic.</div>';}
   // 4) RÉCAP D'HEURES (compact, en bas)
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const wk=sumNormHS(e,days);const mo=sumNormHS(e,monthDays(curMonday));
@@ -4029,7 +4339,7 @@ function setRole(r){
   applyRole();render();
 }
 function logout(){ROLE=null;try{localStorage.removeItem('gestionrh-role')}catch(e){}
-  edit=null;['settings','feriepanel','abspanel','minepanel','evpanel','hdetail','paiepanel','reqpanel','hspanel','journalpanel'].forEach(id=>{if($(id))$(id).style.display='none'});
+  edit=null;['settings','feriepanel','abspanel','minepanel','evpanel','hdetail','paiepanel','reqpanel','hspanel','journalpanel','pausepanel'].forEach(id=>{if($(id))$(id).style.display='none'});
   renderLoginBq();$('login').style.display='flex';setTimeout(()=>$('pinin').focus(),50);}
 function canPaie(){return ROLE&&(ROLE.type==='admin'||ROLE.type==='rh');}
 // ===== JOURNAL RH (onglet « Problèmes ») : incidents saisis + ponctualité (retards/départs) =====
@@ -4038,6 +4348,7 @@ const JTYPES=[
   {t:'Retard',c:'#ef4444'},
   {t:"Retard à l'ouverture",c:'#b91c1c'},
   {t:'Parti plus tôt',c:'#f97316'},
+  {t:'Pause prolongée',c:'#dc2626'},
   {t:'Téléphone',c:'#7c3aed'},
   {t:'Comportement',c:'#d97706'},
   {t:'Inventaire',c:'#1d4ed8'},
@@ -4138,11 +4449,15 @@ function renderJournal(){
     // Affiche « à l'ouverture » si le salarié ouvre la boutique ce jour-là (vaut aussi pour les saisies antérieures).
     if(sn==='debut'&&tt==='Retard'&&isOpenerAtB(e,rq.date,(presence(e,rq.date)||{}).b||e.b))tt="Retard à l'ouverture";
     list.push({d:rq.date,q:e.nom,t:tt,c:fmtMin(rq.min)+(rq.note?' — '+rq.note:''),auto:true,id:rq.id,pending:rq.statut!=='accepte'});}
+  // Pauses prolongées POINTÉES (dépassement > 0) : reprises automatiquement, comme les retards
+  for(const pz of (S.pauses||[])){if(!pz.ret)continue;const dep=pauseDepassMin(pz);if(dep<=0)continue;
+    const e=emp(pz.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;if(!_journalInPeriod(pz.date))continue;
+    list.push({d:pz.date,q:e.nom,t:'Pause prolongée',c:'+'+fmtMin(dep)+' — pointée '+fmtH(pz.dep)+'→'+fmtH(pz.ret)+(pz.prevDu?' (prévue '+fmtH(pz.prevDu)+'-'+fmtH(pz.prevAu)+')':' (aucune pause prévue)'),pause:true,id:pz.id});}
   list.sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0);
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
   if(!list.length)h+='<div class="small">Aucune entrée pour cette boutique.</div>';
   for(const r of list){const col=jtypeColor(r.t);const _qe=S.employees.find(x=>x.nom===r.q&&x.b===selB)||S.employees.find(x=>x.nom===r.q);const qcol=_qe?colOf(_qe):'';
-    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.auto?(isA?((r.pending?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> ':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 validé ✓</span> ')+'<button class="mini" title="Modifier la durée" onclick="editRetard('+r.id+')">✎</button> <button class="mini ghost" title="Annuler — rétablit les heures du jour" onclick="delRetard('+r.id+')">🗑</button>'):'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
+    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.pause?(((isA||isResp())&&canPauseEdit((S.pauses||[]).find(x=>x.id===r.id)||{empId:''}))?'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span> <button class="mini" title="Corriger les heures pointées" onclick="editPause('+r.id+')">✎</button> <button class="mini ghost" title="Annuler ce pointage — remet le planning comme prévu" onclick="delPause('+r.id+')">🗑</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span>'):r.auto?(isA?((r.pending?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> ':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 validé ✓</span> ')+'<button class="mini" title="Modifier la durée" onclick="editRetard('+r.id+')">✎</button> <button class="mini ghost" title="Annuler — rétablit les heures du jour" onclick="delRetard('+r.id+')">🗑</button>'):'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
   }
   $('journalpanel').innerHTML=h;
 }
@@ -4165,6 +4480,8 @@ function applyRole(){
   else if(ROLE&&ROLE.empId){const e=emp(ROLE.empId);$('whoami').textContent='🔧 '+(e?e.nom:'')+' · admin';}
   else $('whoami').textContent='🔧 Admin';
   const mb=document.getElementById('minebtn');if(mb)mb.style.display=(ROLE&&ROLE.empId)?'':'none';
+  const prb=document.getElementById('pauserecapbtn');if(prb)prb.style.display=(admin||isResp())?'':'none';
+  updatePfab();
   const bq=ROLE&&ROLE.type==='boutique';
   document.querySelectorAll('.bchip').forEach(c=>c.style.display=(bq&&c.dataset.b!==ROLE.b)?'none':'');
   const rb=document.getElementById('reqbtn');if(rb)rb.style.display=(bq||(ROLE&&(ROLE.type==='salarie')))?'':'none';
