@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 17:04</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 17:16</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -17404,7 +17404,7 @@ function renderDashboard() {
           const avant = typeof a.prixAvant === 'number' ? a.prixAvant.toFixed(2) + '€' : '—';
           const margeInfo = !_pf && typeof prod.marge === 'number' ? ` · marge ${prod.margePct.toFixed(1)}%` : '';
           const cibleLabel = _pf ? `parfum « ${_pf.n} »` : 'gamme';
-          return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+          return `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
             <span style="font-size:10.5px; color:#cbd5e1;">PV avant <strong>${avant}</strong> → nouveau PV <strong style="color:#f59e0b;">${cible}</strong>${margeInfo}</span>
             <span style="font-size:10px; color:#64748b; font-style:italic;">Mettre à jour l'étiquetage ${cibleLabel} en magasin</span>
           </div>`;
@@ -17456,7 +17456,7 @@ function renderDashboard() {
               { key: 'EXCLU',         label: 'Exclu',         color: '#a855f7' }
             ])
           : '';
-        return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        return `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${vChip}${rougeFlag}
           <span style="font-size:10.5px; color:#cbd5e1;">PV actuel <strong>${pvNow}</strong>${a.prixAvant && a.prixAvant !== _prodRef.pv ? ` (avant ${avant})` : ''} → cible <strong style="color:#f59e0b;">${cible}</strong></span>
           <span style="font-size:10px; color:#64748b;">·</span>
@@ -17557,21 +17557,21 @@ function renderDashboard() {
           ? `<span style="font-size:10px; color:#64748b;">→ OP ${linkedFanfareOp.id}</span>`
           : '';
         // Bouton étiquette pour les kits à rentrer (pas pour PD ni liquides)
-        const etiqBlock = (!isLiq && !isPd && kit) ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        const etiqBlock = (!isLiq && !isPd && kit) ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <span style="font-size:10px; color:#64748b;">Étiquette :</span>
           <button onclick="event.stopPropagation(); openKitEtiquetteDialog('${kit.id}')" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">🏷️ Générer étiquette</button>
         </div>` : '';
         // Prix rouge sur RENTRER (one-shot bradé, etc.)
         const _rentrerPvRef = isPd ? (prod.pv || 0) : isLiq ? (prod.pv || 0) : (kit ? kit.pv : 0);
         const _hasRentrerPR = ops.some(o => o.rentrerPrixActionId === a.id && o.type === 'PRIX_ROUGE' && isOpOuverte(o)) || typeof a.prixRouge === 'number';
-        const rentrerPrixRougeField = _hasRentrerPR ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        const rentrerPrixRougeField = _hasRentrerPR ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <span style="font-size:10px; color:#ef4444; font-weight:600;">🔴 Prix rouge :</span>
           ${typeof a.prixAvantRouge === 'number' ? '<span style="font-size:10px; color:#94a3b8; text-decoration:line-through;">' + a.prixAvantRouge.toFixed(2) + '€</span> <span style="font-size:10px; color:#94a3b8;">→</span>' : (_rentrerPvRef > 0 ? '<span style="font-size:10px; color:#94a3b8; text-decoration:line-through;">' + _rentrerPvRef.toFixed(2) + '€</span> <span style="font-size:10px; color:#94a3b8;">→</span>' : '')}
           <input type="number" step="0.01" min="0" value="${typeof a.prixRouge === 'number' ? a.prixRouge.toFixed(2) : ''}" placeholder="Prix rouge" onchange="updateActionPrixRouge('${a.id}', this.value)" onclick="event.stopPropagation()" style="width:80px; padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; font-weight:600; text-align:right;">
           <span style="font-size:10px; color:#64748b;">€</span>
         </div>` : '';
         // Bouton pour activer le prix rouge sur RENTRER (one-shot ou pas)
-        const _rentrerPRPicker = !_hasRentrerPR ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        const _rentrerPRPicker = !_hasRentrerPR ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <span style="font-size:10px; color:#64748b;">Prix rouge ?</span>
           <span onclick="event.stopPropagation(); initRentrerPrixRouge('${a.id}')" style="cursor:pointer; padding:2px 8px; font-size:10.5px; font-weight:700; border-radius:3px; background:transparent; color:#ef4444; border:1px solid #ef444480;">🔴 Prix rouge</span>
         </div>` : '';
@@ -17584,12 +17584,12 @@ function renderDashboard() {
           // ⛔ L'interdit est énoncé aussi visiblement que l'action (incident 2026-07-11 :
           // les boutiques ont commandé malgré la consigne écrite). La réception, elle,
           // reste évidemment cochable par la boutique.
-          commandeAdminBlock += `<div class="pv-cmd-admin-banner" style="margin-bottom:6px; padding:5px 9px; background:#7c3aed18; border:1px solid #a78bfa50; border-left:3px solid #a78bfa; border-radius:3px; font-size:10.5px; color:#e9d5ff;">⛔ <b>NE RIEN COMMANDER</b> — la commande est passée par <b>Fabien</b>${a.dispatchHub ? ' (réception centralisée à ' + (SHOP_LABELS[a.dispatchHub] || a.dispatchHub) + ')' : ''}. La boutique : <b>réceptionner</b> puis <b>saisir la commande en stock Swappy</b>.${a.expeditionDate ? ' 🚚 Expédition fournisseur à partir du <b>' + fmtFR(a.expeditionDate) + '</b> — ça peut arriver en boutique dès cette date.' : ''}</div>`;
+          commandeAdminBlock += `<div class="pv-cmd-admin-banner" style="flex:1 1 100%; margin-bottom:2px; padding:5px 9px; background:#7c3aed18; border:1px solid #a78bfa50; border-left:3px solid #a78bfa; border-radius:3px; font-size:10.5px; color:#e9d5ff;">⛔ <b>NE RIEN COMMANDER</b> — la commande est passée par <b>Fabien</b>${a.dispatchHub ? ' (réception centralisée à ' + (SHOP_LABELS[a.dispatchHub] || a.dispatchHub) + ')' : ''}. La boutique : <b>réceptionner</b> puis <b>saisir la commande en stock Swappy</b>.${a.expeditionDate ? ' 🚚 Expédition fournisseur à partir du <b>' + fmtFR(a.expeditionDate) + '</b> — ça peut arriver en boutique dès cette date.' : ''}</div>`;
         } else if (_caUnset) {
-          commandeAdminBlock += `<div class="pv-cmd-admin-banner" style="margin-bottom:6px; padding:5px 9px; background:#f59e0b12; border:1px solid #f59e0b45; border-left:3px solid #f59e0b; border-radius:3px; font-size:10.5px; color:#fde68a;">❓ <b>Qui commande ?</b> — pas encore tranché par Fabien. En attendant : <b>ne pas commander</b>.</div>`;
+          commandeAdminBlock += `<div class="pv-cmd-admin-banner" style="flex:1 1 100%; margin-bottom:2px; padding:5px 9px; background:#f59e0b12; border:1px solid #f59e0b45; border-left:3px solid #f59e0b; border-radius:3px; font-size:10.5px; color:#fde68a;">❓ <b>Qui commande ?</b> — pas encore tranché par Fabien. En attendant : <b>ne pas commander</b>.</div>`;
         }
         if (typeof isAdmin === 'function' && isAdmin()) {
-          commandeAdminBlock += `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+          commandeAdminBlock += `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
             <span style="font-size:10px; color:${_caUnset ? '#fbbf24' : '#64748b'}; ${_caUnset ? 'font-weight:700;' : ''}">Qui commande ?</span>
             <select onclick="event.stopPropagation()" onchange="setRentrerCommandeAdmin('${a.id}', this.value)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${_caUnset ? '#f59e0b80' : _ca ? '#a78bfa60' : '#475569'}; color:${_caUnset ? '#fbbf24' : _ca ? '#c4b5fd' : '#cbd5e1'}; border-radius:3px;">
               ${_caUnset ? '<option value="" selected disabled>❓ À trancher…</option>' : ''}
@@ -17601,7 +17601,7 @@ function renderDashboard() {
           // commande — dit aux boutiques à partir de quand ça peut arriver. Propagée à toute
           // la gamme (tous formats + parfums) car une commande fournisseur = une expédition.
           if (_ca) {
-            commandeAdminBlock += `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+            commandeAdminBlock += `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
               <span style="font-size:10px; color:#64748b;">🚚 Expédition fournisseur à partir du :</span>
               <input type="date" value="${a.expeditionDate || ''}" onchange="setRentrerExpeditionDate('${a.id}', this.value)" onclick="event.stopPropagation()" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #a78bfa60; color:#c4b5fd; border-radius:3px;">
               ${isLiq ? '<span style="font-size:9px; color:#64748b; font-style:italic;">appliquée à toute la gamme (tous formats & parfums)</span>' : ''}
@@ -17614,10 +17614,10 @@ function renderDashboard() {
         const _pac = (typeof a.paCommande === 'number' && a.paCommande > 0) ? a.paCommande : null;
         let paCommandeBlock = '';
         if (_pac) {
-          paCommandeBlock += `<div style="margin-bottom:6px; padding:4px 8px; background:#14532d20; border:1px solid #22c55e40; border-radius:3px; font-size:10px; color:#86efac;">💶 Saisir cette commande à <b>${_pac.toFixed(2)}€ HT</b>${_paNormal != null ? ' — prix normal <b>' + _paNormal.toFixed(2) + '€ HT</b> (inchangé en base)' : ''}.</div>`;
+          paCommandeBlock += `<div style="flex:1 1 100%; margin-bottom:2px; padding:4px 8px; background:#14532d20; border:1px solid #22c55e40; border-radius:3px; font-size:10px; color:#86efac;">💶 Saisir cette commande à <b>${_pac.toFixed(2)}€ HT</b>${_paNormal != null ? ' — prix normal <b>' + _paNormal.toFixed(2) + '€ HT</b> (inchangé en base)' : ''}.</div>`;
         }
         if (typeof isAdmin === 'function' && isAdmin()) {
-          paCommandeBlock += `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+          paCommandeBlock += `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
             <span style="font-size:10px; color:#64748b;">Prix de saisie (HT) pour cette commande ?</span>
             <input type="number" step="0.01" min="0" value="${_pac != null ? _pac.toFixed(2) : ''}" placeholder="${_paNormal != null ? _paNormal.toFixed(2) : 'PA'}" onchange="setRentrerPaCommande('${a.id}', this.value)" onclick="event.stopPropagation()" style="width:80px; padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #22c55e60; color:#86efac; border-radius:3px; font-weight:600; text-align:right;">
             <span style="font-size:10px; color:#64748b;">€ HT${_paNormal != null ? ' · normal ' + _paNormal.toFixed(2) + '€' : ''}</span>
@@ -17634,7 +17634,7 @@ function renderDashboard() {
             const _dhDone = _dhLies.filter(x => actionGlobalState(x) === 'FAIT').length;
             _dhStatus = `<span style="font-size:10px; color:#67e8f9;">${_dhDone}/${_dhLies.length} transfert${_dhLies.length>1?'s':''} terminé${_dhDone>1?'s':''} · suivi section 🔁</span>`;
           }
-          dispatchBlock = `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+          dispatchBlock = `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
             <span style="font-size:10px; color:#64748b;">📦 Réception centralisée ?</span>
             <select onclick="event.stopPropagation()" onchange="setDispatchHub('${a.id}', this.value || null)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${_dh ? '#06b6d460' : '#475569'}; color:${_dh ? '#67e8f9' : '#cbd5e1'}; border-radius:3px;">
               <option value="">Non — chaque boutique reçoit sa commande</option>
@@ -17643,14 +17643,19 @@ function renderDashboard() {
             ${_dhStatus}
           </div>`;
         } else if (a.dispatchHub) {
-          dispatchBlock = `<div style="margin-bottom:6px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:3px; font-size:10px; color:#67e8f9;">📦 Réception centralisée à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub} — les autres boutiques reçoivent leur lot par rétrocession (transport Fabien).</div>`;
+          dispatchBlock = `<div style="flex:1 1 100%; margin-bottom:2px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:3px; font-size:10px; color:#67e8f9;">📦 Réception centralisée à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub} — les autres boutiques reçoivent leur lot par rétrocession (transport Fabien).</div>`;
         }
-        return commandeAdminBlock + paCommandeBlock + dispatchBlock + `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        // ── Compactage 2026-07-13 (demande Fabien : « une ligne par élément c'est trop
+        // massif ») : les bannières gardent leur pleine largeur (flex 100%), les contrôles
+        // (qui commande, expédition, réception, prix de saisie, remplace, fanfare, étiquette,
+        // prix rouge) deviennent des segments qui PARTAGENT les lignes (flex-wrap).
+        return `<div style="display:flex; flex-wrap:wrap; gap:6px 26px; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed #33415580;">`
+          + commandeAdminBlock + paCommandeBlock + dispatchBlock + `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${remplBlock}
           <span style="font-size:10px; color:#64748b;">Entrée en fanfare ?</span>
           ${fanfareChips}
           ${fanfareOpLink}
-        </div>` + etiqBlock + _rentrerPRPicker + rentrerPrixRougeField;
+        </div>` + etiqBlock + _rentrerPRPicker + rentrerPrixRougeField + `</div>`;
       })() : ''}
       ${a.type === 'SORTIR' ? (() => {
         // Liste des parfums concernés pour les actions gamme entière (liquides)
@@ -17669,7 +17674,7 @@ function renderDashboard() {
           if (_autresParfums.length > 0) {
             listing += _autresParfums.map(p => `<span style="display:inline-flex; align-items:center; gap:3px; font-size:10px; padding:1px 7px; background:#33415540; color:#94a3b8; border:1px solid #33415560; border-radius:3px; white-space:nowrap; opacity:0.6;" title="Pas à sortir">${p.n}</span>`).join(' ');
           }
-          parfumsListing = `<div style="display:flex; gap:4px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+          parfumsListing = `<div style="flex:1 1 100%; display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
             <span style="font-size:10px; color:#64748b; flex-shrink:0;">Parfums (${_sortParfums.length} à sortir / ${prod.parfums.length - _sortisParfums.length}) :</span>
             ${listing}
           </div>`;
@@ -17707,7 +17712,7 @@ function renderDashboard() {
                : _isAutoLink ? '<span style="font-size:10px; color:#64748b; font-style:italic;">suggestion auto</span>'
                : '<span style="font-size:10px; color:#a78bfa;">lien explicite</span>')
             : '';
-          remplParBlock = '<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">' +
+          remplParBlock = '<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">' +
             '<span style="font-size:10px; color:#64748b;">Remplacé par :</span>' +
             '<select onchange="updateActionRemplacePar(\'' + a.id + '\', this.value)" onclick="event.stopPropagation()" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ' + (currentRPar ? (showsSelected ? '#f59e0b' : (_isAutoLink ? '#475569' : '#a78bfa')) : '#475569') + '; color:#cbd5e1; border-radius:3px; min-width:200px;">' +
               '<option value="">— auto / aucun —</option>' +
@@ -17728,15 +17733,17 @@ function renderDashboard() {
         ]);
         // Champ prix rouge éditable (visible si OP PRIX_ROUGE active ou prix déjà renseigné)
         const _hasDestockage = !_estReprise && (ops.some(o => o.sortirActionId === a.id && o.type === 'PRIX_ROUGE' && isOpOuverte(o)) || typeof a.prixRouge === 'number');
-        const prixRougeField = _hasDestockage ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        const prixRougeField = _hasDestockage ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <span style="font-size:10px; color:#ef4444; font-weight:600;">🔴 Prix rouge :</span>
           ${typeof a.prixAvantRouge === 'number' ? '<span style="font-size:10px; color:#94a3b8; text-decoration:line-through;">' + a.prixAvantRouge.toFixed(2) + '€</span> <span style="font-size:10px; color:#94a3b8;">→</span>' : '<span style="font-size:10px; color:#94a3b8; text-decoration:line-through;">' + _pvRef.toFixed(2) + '€</span> <span style="font-size:10px; color:#94a3b8;">→</span>'}
           <input type="number" step="0.01" min="0" value="${typeof a.prixRouge === 'number' ? a.prixRouge.toFixed(2) : ''}" placeholder="Prix rouge" onchange="updateActionPrixRouge('${a.id}', this.value)" onclick="event.stopPropagation()" style="width:80px; padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; font-weight:600; text-align:right;">
           <span style="font-size:10px; color:#64748b;">€</span>
         </div>` : '';
-        return parfumsListing + remplParBlock + (picker ? `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        // Compactage 2026-07-13 : mêmes règles que la zone RENTRER (segments qui partagent les lignes).
+        return `<div style="display:flex; flex-wrap:wrap; gap:6px 26px; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed #33415580;">`
+          + parfumsListing + remplParBlock + (picker ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${picker}
-        </div>` : '') + prixRougeField;
+        </div>` : '') + prixRougeField + `</div>`;
       })() : ''}
       ${a.type === 'MISE_EN_PLACE' && !isLiq ? (() => {
         // Pendant la MEP on peut choisir d'accompagner par une OP de mise en avant / nouveauté / etc.
@@ -17745,7 +17752,7 @@ function renderDashboard() {
           { key: 'NOUVEAUTE',     label: 'Nouveauté',     color: '#22d3ee' },
           { key: 'EXCLU',         label: 'Exclu',         color: '#a855f7' }
         ]);
-        return `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+        return `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${picker}
         </div>`;
       })() : ''}
