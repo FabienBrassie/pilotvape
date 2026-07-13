@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 14:52</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 15:06</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -447,7 +447,7 @@
           <!-- Création multi-format (2026-07-13, demande Fabien) : en mode « Gamme entière », une seule
                saisie crée une réf par format coché — chaque format a son PA/PV propre. -->
           <div class="form-group" id="propLiqFormatsMultiGroup" style="display:none; grid-column:span 2;">
-            <label>Formats à créer — coche chaque format existant, avec son prix (1 réf sera créée par format)</label>
+            <label id="propLiqFormatsMultiLabel">Formats à créer — coche chaque format existant, avec son prix (1 réf sera créée par format)</label>
             <div id="propLiqFormatsMulti" style="display:flex; flex-direction:column; gap:4px; margin-top:4px;"></div>
           </div>
           <div class="form-group"><label>Goût</label><select id="propLiqCt"><option value="">—</option><option value="Fruité">Fruité</option><option value="Fruité / Frais">Fruité / Frais</option><option value="Gourmand">Gourmand</option><option value="Gourmand / Fruité">Gourmand / Fruité</option><option value="Tabac">Tabac</option><option value="Tabac / Gourmand">Tabac / Gourmand</option><option value="Menthe">Menthe</option><option value="De_Tout">De Tout</option></select></div>
@@ -5650,26 +5650,42 @@ function _pvPromptQuiCommande(label) {
 // « Nouveauté <marque> <gamme> » — même logique que les one-shot par parfum : 1 OP par réf,
 // le regroupement se fait par campagne. Les dates de la 1ère OP de la série sont réutilisées
 // pour les suivantes (une seule saisie de dates pour 4 formats).
-async function proposerOpNouveauteApresCreation(produitType, produitId, label) {
+async function proposerOpNouveauteApresCreation(produitType, produitId, label, parfumId) {
   if (!isAdmin()) return;
   try { syncAutoActions(); } catch(e) {}
-  const a = actions.find(x => x.type === 'RENTRER' && x.produitId === produitId && !x.produitParfumId && !x.annulee);
+  // parfumId (2026-07-13) : parfum nouveau ajouté à une gamme EXISTANTE → tout se joue au
+  // niveau PARFUM (action parfum, OP ciblée produitParfumId — précédent du one-shot parfum).
+  const a = actions.find(x => x.type === 'RENTRER' && x.produitId === produitId && !x.annulee
+    && (parfumId ? x.produitParfumId === parfumId : !x.produitParfumId));
   if (!a) return;
   // Idempotent : une OP fanfare vit déjà sur cette action → rien à proposer.
   if (ops.some(o => o.rentrerActionId === a.id && !_deletedIds.has(o.id) && !o._archived && !o.dateFin)) return;
 
   // Série multi-format (liquides) : autres formats de la même gamme déjà créés ?
-  let g = null, siblingGammes = [];
+  // Au niveau parfum : la série = le MÊME parfum (par nom) dans les autres formats de la gamme.
+  let g = null, siblingGammes = [], parfum = null, siblingParfumIds = [];
   if (produitType === 'liq') {
     g = baseLiq.find(x => x.id === produitId);
     if (g) siblingGammes = baseLiq.filter(x => x.id !== g.id && x.marque === g.marque && x.gamme === g.gamme && x.statutVie !== 'SORTI');
+    if (g && parfumId) {
+      parfum = (g.parfums || []).find(pf => pf.id === parfumId) || null;
+      if (parfum) siblingGammes.forEach(sg => {
+        (sg.parfums || []).forEach(pf => {
+          if (pf.s !== 'SORTI' && (pf.n || '').toLowerCase() === (parfum.n || '').toLowerCase()) siblingParfumIds.push(pf.id);
+        });
+      });
+    }
   }
-  const multi = siblingGammes.length > 0;
-  // OP Nouveauté d'un format frère → réutiliser ses dates et sa campagne.
+  const multi = parfumId ? siblingParfumIds.length > 0 : siblingGammes.length > 0;
+  // OP Nouveauté d'un format frère (même granularité) → réutiliser ses dates et sa campagne.
   let siblingOp = null;
   if (multi) {
-    siblingOp = ops.find(o => o.type === 'NOUVEAUTE' && !o._archived && !_deletedIds.has(o.id)
-      && (o.produitIds || []).some(pid => siblingGammes.some(sg => sg.id === pid)));
+    siblingOp = parfumId
+      ? ops.find(o => o.type === 'NOUVEAUTE' && !o._archived && !_deletedIds.has(o.id)
+          && siblingParfumIds.includes(o.produitParfumId))
+      : ops.find(o => o.type === 'NOUVEAUTE' && !o._archived && !_deletedIds.has(o.id)
+          && !o.produitParfumId
+          && (o.produitIds || []).some(pid => siblingGammes.some(sg => sg.id === pid)));
   }
 
   const msg = '« ' + label + ' » est créé et passe en À rentrer.\n\nCréer une OP Nouveauté pour son lancement ?'
@@ -5689,7 +5705,7 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label) {
     id: 'OP-' + String(nextOpId++).padStart(4, '0'),
     type: 'NOUVEAUTE',
     produitIds: [produitId],
-    produitParfumId: '',
+    produitParfumId: parfumId || '',
     dateDebut: dates.dateDebut,
     dateFin: dates.dateFin,
     _dateDebutManuelle: true,
@@ -5707,8 +5723,9 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label) {
   a._ts = new Date().toISOString();
 
   // Campagne commune multi-format : créée (ou retrouvée par nom) et rattachements posés.
+  // Au niveau parfum, la campagne porte le nom du parfum (c'est LUI qu'on lance).
   if (multi && g) {
-    const campNom = 'Nouveauté ' + g.marque + ' ' + g.gamme;
+    const campNom = 'Nouveauté ' + g.marque + ' ' + g.gamme + (parfum ? ' — ' + parfum.n : '');
     const _norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
     let camp = campagnes.find(cc => !cc._archived && _norm(cc.nom) === _norm(campNom));
     if (!camp && siblingOp && siblingOp.campagneId) camp = getCampagne(siblingOp.campagneId);
@@ -5725,12 +5742,14 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label) {
       campagnes.push(camp);
     }
     newOp.campagneId = camp.id;
-    // Rattacher aussi les OP Nouveauté des formats frères pas encore en campagne.
+    // Rattacher aussi les OP Nouveauté des formats frères pas encore en campagne
+    // (même granularité : gamme entière ↔ gamme entière, parfum ↔ même parfum).
     ops.forEach(o => {
       if (o.type !== 'NOUVEAUTE' || o._archived || o.campagneId || _deletedIds.has(o.id)) return;
-      if ((o.produitIds || []).some(pid => siblingGammes.some(sg => sg.id === pid))) {
-        o.campagneId = camp.id; o._ts = new Date().toISOString();
-      }
+      const _memeSerie = parfumId
+        ? siblingParfumIds.includes(o.produitParfumId)
+        : (!o.produitParfumId && (o.produitIds || []).some(pid => siblingGammes.some(sg => sg.id === pid)));
+      if (_memeSerie) { o.campagneId = camp.id; o._ts = new Date().toISOString(); }
     });
   }
 
@@ -27518,22 +27537,35 @@ function onPropLiqTypeChange() {
   if (parfSec) parfSec.style.display = isParfum ? 'none' : 'block';
 
   if (isParfum) {
-    // Remplir le select avec les gammes existantes du même format
+    // 2026-07-13 : le select propose la gamme par NOM, tous formats confondus — un parfum
+    // nouveau se crée dans tous les formats de la gamme en UNE saisie (cas Fabien : parfum
+    // nouveau sur une gamme existante multi-format).
     const sel = document.getElementById('propLiqGammeExist');
     const prev = sel.value;
     sel.innerHTML = '<option value="">— Nouvelle gamme / marque —</option>';
-    const gammes = baseLiq.filter(g => g.format === format).sort((a,b) => (a.marque+a.gamme).localeCompare(b.marque+b.gamme));
-    gammes.forEach(g => {
-      sel.innerHTML += `<option value="${g.id}">${g.marque} — ${g.gamme} (${g.parfums ? g.parfums.length : 0} parfums)</option>`;
+    const grps = {};
+    const grpOrder = [];
+    baseLiq.slice().sort((a, b) => (a.marque + a.gamme).localeCompare(b.marque + b.gamme)).forEach(g => {
+      if (g.statutVie === 'SORTI') return;
+      const key = g.marque + '|||' + g.gamme;
+      if (!grps[key]) { grps[key] = []; grpOrder.push(key); }
+      grps[key].push(g);
+    });
+    grpOrder.forEach(key => {
+      const gs = grps[key];
+      const fmtLbls = gs.map(x => LIQ_FORMAT_LABELS[x.format] || x.format).join(' · ');
+      sel.innerHTML += `<option value="${key.replace(/"/g, '&quot;')}">${gs[0].marque} — ${gs[0].gamme} (${fmtLbls})</option>`;
     });
     if (prev) sel.value = prev;
     onPropLiqGammeExistChange();
   } else {
-    // Mode gamme : montrer marque/gamme libres
+    // Mode gamme : montrer marque/gamme libres + tableau générique des formats
     document.getElementById('propLiqMarqueGroup').style.display = 'block';
     document.getElementById('propLiqGammeGroup').style.display = 'block';
     document.getElementById('propLiqMarque').disabled = false;
     document.getElementById('propLiqGamme').disabled = false;
+    const _multiLbl = document.getElementById('propLiqFormatsMultiLabel');
+    if (_multiLbl) _multiLbl.textContent = 'Formats à créer — coche chaque format existant, avec son prix (1 réf sera créée par format)';
   }
 }
 
@@ -27541,27 +27573,45 @@ function onPropLiqGammeExistChange() {
   const selVal = document.getElementById('propLiqGammeExist').value;
   const marqueInput = document.getElementById('propLiqMarque');
   const gammeInput = document.getElementById('propLiqGamme');
+  const _fmtGrp = document.getElementById('propLiqFormatGroup');
+  const _paGrp = document.getElementById('propLiqPAGroup');
+  const _pvGrp = document.getElementById('propLiqPVGroup');
+  const _multiGrp = document.getElementById('propLiqFormatsMultiGroup');
+  const _multiLbl = document.getElementById('propLiqFormatsMultiLabel');
   if (selVal) {
-    // Gamme existante sélectionnée → pré-remplir et verrouiller marque/gamme
-    const g = baseLiq.find(x => x.id === selVal);
-    if (g) {
-      marqueInput.value = g.marque; marqueInput.disabled = true;
-      gammeInput.value = g.gamme; gammeInput.disabled = true;
-      // Pré-remplir PA/PV/goût si vides
-      const paInput = document.getElementById('propLiqPA');
-      const pvInput = document.getElementById('propLiqPV');
-      const ctInput = document.getElementById('propLiqCt');
-      if (!paInput.value) paInput.value = g.pa || '';
-      if (!pvInput.value) pvInput.value = g.pv || '';
-      if (!ctInput.value && g.ct) ctInput.value = g.ct;
-    }
+    // Gamme existante (par NOM, tous formats — 2026-07-13) → verrouiller marque/gamme et
+    // remplacer format/PA/PV uniques par le tableau des formats de la gamme : PA/PV proposés
+    // = ceux de chaque réf, tout coché par défaut (on décoche les formats non concernés).
+    const _sep = selVal.indexOf('|||');
+    const _m = selVal.slice(0, _sep);
+    const _g = selVal.slice(_sep + 3);
+    const gs = baseLiq.filter(x => x.marque === _m && x.gamme === _g && x.statutVie !== 'SORTI');
+    marqueInput.value = _m; marqueInput.disabled = true;
+    gammeInput.value = _g; gammeInput.disabled = true;
     document.getElementById('propLiqMarqueGroup').style.display = 'none';
     document.getElementById('propLiqGammeGroup').style.display = 'none';
+    const ctInput = document.getElementById('propLiqCt');
+    if (!ctInput.value && gs[0] && gs[0].ct) ctInput.value = gs[0].ct;
+    if (_fmtGrp) _fmtGrp.style.display = 'none';
+    if (_paGrp) _paGrp.style.display = 'none';
+    if (_pvGrp) _pvGrp.style.display = 'none';
+    if (_multiGrp) _multiGrp.style.display = 'block';
+    if (_multiLbl) _multiLbl.textContent = 'Formats où créer ce parfum — décoche ceux où il ne sortira pas (PA/PV proposés = ceux de la gamme)';
+    const _fmtOrder = { '10mL': 0, '10mL_SDN': 1, '20mL': 2, '50mL': 3, '100mL': 4, '+150mL': 5 };
+    _renderPropLiqFormatsMulti(
+      gs.slice().sort((a, b) => (_fmtOrder[a.format] ?? 9) - (_fmtOrder[b.format] ?? 9))
+        .map(x => ({ format: x.format, pa: x.pa || '', pv: x.pv || '', checked: true })),
+      true
+    );
   } else {
-    // Nouvelle gamme → libérer les champs
+    // Nouvelle gamme via parfum → champs libres, retour au mode mono-format historique
     marqueInput.disabled = false; gammeInput.disabled = false;
     document.getElementById('propLiqMarqueGroup').style.display = 'block';
     document.getElementById('propLiqGammeGroup').style.display = 'block';
+    if (_fmtGrp) _fmtGrp.style.display = 'block';
+    if (_paGrp) _paGrp.style.display = 'block';
+    if (_pvGrp) _pvGrp.style.display = 'block';
+    if (_multiGrp) _multiGrp.style.display = 'none';
   }
 }
 
@@ -27584,17 +27634,25 @@ function setPropLiqSort(col) {
 // « Je rentre une gamme de liquide, je dois créer 4 refs pour 4 formats » → une seule saisie :
 // on coche les formats existants, chacun avec son PA/PV (les prix diffèrent entre 10 et 50 mL),
 // et la soumission crée une proposition par format (le modèle 1 réf = 1 format est conservé).
-function _renderPropLiqFormatsMulti() {
+// presets (2026-07-13) : mode « parfum sur gamme existante » — lignes limitées aux formats de
+// la gamme, PA/PV préremplis, cochées par défaut. Sans presets : tableau générique (mode gamme).
+function _renderPropLiqFormatsMulti(presets, force) {
   const cont = document.getElementById('propLiqFormatsMulti');
-  if (!cont || cont.children.length > 0) return; // déjà rendu — on préserve la saisie en cours
+  if (!cont) return;
+  const _mode = (presets && presets.length) ? 'presets' : 'generic';
+  if (!force && cont.children.length > 0 && cont.dataset.mode === _mode) return; // on préserve la saisie en cours
   const _inpStyle = 'padding:4px 6px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:3px; width:100%;';
-  cont.innerHTML = Object.keys(LIQ_FORMAT_LABELS).map(f => `
+  const rows = (presets && presets.length)
+    ? presets
+    : Object.keys(LIQ_FORMAT_LABELS).map(f => ({ format: f, pa: '', pv: '', checked: false }));
+  cont.dataset.mode = _mode;
+  cont.innerHTML = rows.map(r => `
     <div style="display:grid; grid-template-columns:110px 1fr 1fr; gap:6px; align-items:center;">
       <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e2e8f0; cursor:pointer;">
-        <input type="checkbox" class="propLiqFmtCheck" value="${f}" style="accent-color:#8b5cf6;"> ${LIQ_FORMAT_LABELS[f]}
+        <input type="checkbox" class="propLiqFmtCheck" value="${r.format}" ${r.checked ? 'checked' : ''} style="accent-color:#8b5cf6;"> ${LIQ_FORMAT_LABELS[r.format] || r.format}
       </label>
-      <input type="number" step="0.01" class="propLiqFmtPA" data-fmt="${f}" placeholder="PA HT (€)" style="${_inpStyle}">
-      <input type="number" step="0.01" class="propLiqFmtPV" data-fmt="${f}" placeholder="PV TTC (€)" style="${_inpStyle}">
+      <input type="number" step="0.01" class="propLiqFmtPA" data-fmt="${r.format}" value="${r.pa != null && r.pa !== '' ? r.pa : ''}" placeholder="PA HT (€)" style="${_inpStyle}">
+      <input type="number" step="0.01" class="propLiqFmtPV" data-fmt="${r.format}" value="${r.pv != null && r.pv !== '' ? r.pv : ''}" placeholder="PV TTC (€)" style="${_inpStyle}">
     </div>`).join('');
 }
 function _collectPropLiqFormats() {
@@ -27655,35 +27713,65 @@ function submitNewPropositionLiq() {
   const _newPropId = () => 'PLIQ-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
 
   if (type === 'parfum') {
-    // ── Parfum individuel : comportement historique (1 format, 1 PA/PV) ──
-    const format = document.getElementById('propLiqFormat').value;
-    const pa = parseFloat(document.getElementById('propLiqPA').value);
-    const pv = parseFloat(document.getElementById('propLiqPV').value);
     const nom = document.getElementById('propLiqNom').value.trim();
-    const gammeExistId = document.getElementById('propLiqGammeExist').value;
-    let marque, gamme;
-    if (gammeExistId) {
-      const gExist = baseLiq.find(x => x.id === gammeExistId);
-      if (gExist) { marque = gExist.marque; gamme = gExist.gamme; }
-    } else {
-      marque = document.getElementById('propLiqMarque').value.trim();
-      gamme = document.getElementById('propLiqGamme').value.trim();
-    }
     if (!nom) { pvAlert('Remplissez le nom du parfum'); return; }
-    if (!marque || !gamme || !pa || !pv) { pvAlert('Remplissez Marque, Gamme, PA et PV'); return; }
+    const gammeKey = document.getElementById('propLiqGammeExist').value;
 
-    const { marge, margePct } = computeMarge(pa, pv);
-    const roleCalc = calcLiqRole(format, pa, pv);
-    propositionsLiq.unshift({
-      id: _newPropId(),
-      type, marque, gamme, nom, format, pa, pv, marge, margePct,
-      ct, fournisseur, nbRefs: 0, gammeExistId,
-      roleCalc, roleChoisi: roleCalc,
-      decision: '', commentaire,
-      parfums: [],
-      date: new Date().toISOString().slice(0,10),
-      auteur: ''
-    });
+    if (gammeKey) {
+      // ── Parfum sur gamme existante, MULTI-FORMAT (2026-07-13) : une proposition par format
+      // coché, chacune rattachée à la réf de son format (gammeExistId). ──
+      const _sep = gammeKey.indexOf('|||');
+      const marque = gammeKey.slice(0, _sep);
+      const gamme = gammeKey.slice(_sep + 3);
+      const fmts = _collectPropLiqFormats();
+      if (fmts.length === 0) { pvAlert('Coche au moins un format.'); return; }
+      const _manque = fmts.filter(f => !(f.pa > 0) || !(f.pv > 0));
+      if (_manque.length > 0) { pvAlert('PA et PV obligatoires pour : ' + _manque.map(f => LIQ_FORMAT_LABELS[f.format] || f.format).join(', ')); return; }
+      let _crees = 0, _doublons = [];
+      fmts.forEach(fq => {
+        const gExist = baseLiq.find(x => x.marque === marque && x.gamme === gamme && x.format === fq.format && x.statutVie !== 'SORTI');
+        if (!gExist) return;
+        if ((gExist.parfums || []).some(pf => (pf.n || '').toLowerCase() === nom.toLowerCase() && pf.s !== 'SORTI')) {
+          _doublons.push(LIQ_FORMAT_LABELS[fq.format] || fq.format);
+          return; // le parfum existe déjà dans ce format
+        }
+        const { marge, margePct } = computeMarge(fq.pa, fq.pv);
+        const roleCalc = calcLiqRole(fq.format, fq.pa, fq.pv);
+        propositionsLiq.unshift({
+          id: _newPropId(),
+          type: 'parfum', marque, gamme, nom, format: fq.format, pa: fq.pa, pv: fq.pv, marge, margePct,
+          ct, fournisseur, nbRefs: 0, gammeExistId: gExist.id,
+          roleCalc, roleChoisi: roleCalc,
+          decision: '', commentaire,
+          parfums: [],
+          date: new Date().toISOString().slice(0,10),
+          auteur: ''
+        });
+        _crees++;
+      });
+      if (_crees === 0) { pvAlert('Rien à créer : « ' + nom + ' » existe déjà dans les formats cochés' + (_doublons.length ? ' (' + _doublons.join(', ') + ')' : '') + '.'); return; }
+      if (_doublons.length > 0) pvAlert('« ' + nom + ' » existait déjà en ' + _doublons.join(', ') + ' — ces formats ont été ignorés (' + _crees + ' proposition' + (_crees > 1 ? 's' : '') + ' créée' + (_crees > 1 ? 's' : '') + ').');
+    } else {
+      // ── Parfum ouvrant une NOUVELLE gamme : comportement historique (1 format, 1 PA/PV) ──
+      const format = document.getElementById('propLiqFormat').value;
+      const pa = parseFloat(document.getElementById('propLiqPA').value);
+      const pv = parseFloat(document.getElementById('propLiqPV').value);
+      const marque = document.getElementById('propLiqMarque').value.trim();
+      const gamme = document.getElementById('propLiqGamme').value.trim();
+      if (!marque || !gamme || !pa || !pv) { pvAlert('Remplissez Marque, Gamme, PA et PV'); return; }
+      const { marge, margePct } = computeMarge(pa, pv);
+      const roleCalc = calcLiqRole(format, pa, pv);
+      propositionsLiq.unshift({
+        id: _newPropId(),
+        type: 'parfum', marque, gamme, nom, format, pa, pv, marge, margePct,
+        ct, fournisseur, nbRefs: 0, gammeExistId: '',
+        roleCalc, roleChoisi: roleCalc,
+        decision: '', commentaire,
+        parfums: [],
+        date: new Date().toISOString().slice(0,10),
+        auteur: ''
+      });
+    }
   } else {
     // ── Gamme entière MULTI-FORMAT (2026-07-13) : une proposition par format coché ──
     const marque = document.getElementById('propLiqMarque').value.trim();
@@ -27781,13 +27869,23 @@ function updatePropLiqDecision(id, decision) {
   renderPropositionsLiq();
   try { renderLiqAll(); } catch(e) {}
   try { renderDashboard(); } catch(e) {}
-  // OP Nouveauté proposée au moment de la décision (2026-07-13) — pour une CRÉATION de réf
-  // (gamme nouvelle, ou parfum ouvrant une nouvelle gamme), pas pour un parfum ajouté à une
-  // gamme déjà en rayon (là, le lancement se gère au niveau parfum : ⚡ one-shot ou badge fanfare).
-  if (decision === 'RETENU' && !(p.type === 'parfum' && p.gammeExistId)) {
-    const _g = baseLiq.find(x => x.id === p.id);
-    if (_g && _g.statutVie === 'A_RENTRER') {
-      proposerOpNouveauteApresCreation('liq', _g.id, _g.marque + ' ' + _g.gamme + ' ' + (LIQ_FORMAT_LABELS[_g.format] || _g.format || ''));
+  // OP Nouveauté proposée au moment de la décision (2026-07-13) :
+  // — gamme nouvelle (ou parfum ouvrant une nouvelle gamme) → OP au niveau gamme ;
+  // — parfum ajouté à une gamme existante → OP au niveau PARFUM (série multi-format
+  //   regroupée en campagne « Nouveauté <marque> <gamme> — <parfum> »).
+  if (decision === 'RETENU') {
+    if (p.type === 'parfum' && p.gammeExistId) {
+      const _g = baseLiq.find(x => x.id === p.gammeExistId);
+      const _pf = _g ? (_g.parfums || []).find(pf => pf.n === p.nom && pf.s === 'A_RENTRER') : null;
+      if (_g && _pf) {
+        proposerOpNouveauteApresCreation('liq', _g.id,
+          _g.marque + ' ' + _g.gamme + ' ' + (LIQ_FORMAT_LABELS[_g.format] || _g.format || '') + ' — ' + _pf.n, _pf.id);
+      }
+    } else {
+      const _g = baseLiq.find(x => x.id === p.id);
+      if (_g && _g.statutVie === 'A_RENTRER') {
+        proposerOpNouveauteApresCreation('liq', _g.id, _g.marque + ' ' + _g.gamme + ' ' + (LIQ_FORMAT_LABELS[_g.format] || _g.format || ''));
+      }
     }
   }
 }
