@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 16:08</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 16:35</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2229,6 +2229,15 @@ function getOpProductDisplay(op) {
       : `${_marque} — ${_parts.join(' / ')}`;
     return { label: _label, icon: '🧴', color: '#fca5a5', isKit: false };
   }
+  // OP multi-réfs d'une MÊME gamme liquide (2026-07-13, ex : Liquide du moment Bankiz
+  // valable sur les 3 formats) : label riche marque — gamme · N formats (10 · 50 · 100).
+  if ((op.produitIds || []).length > 1) {
+    const _gsMulti = op.produitIds.map(pid => baseLiq.find(l => l.id === pid)).filter(Boolean);
+    if (_gsMulti.length === op.produitIds.length && _gsMulti.every(x => x.marque === _gsMulti[0].marque && x.gamme === _gsMulti[0].gamme)) {
+      const _fmtsMulti = _gsMulti.map(x => LIQ_FORMAT_LABELS[x.format] || x.format).join(' · ');
+      return { label: _gsMulti[0].marque + ' — ' + _gsMulti[0].gamme + ' · ' + _gsMulti.length + ' formats (' + _fmtsMulti + ')', icon: '🧴', color: '#f1f5f9', isKit: false };
+    }
+  }
   const kit = baseKits.find(k => k.id === (op.produitIds || [])[0]);
   if (kit) {
     return { label: kit.marque + ' — ' + kit.modele, icon: '', color: '#f1f5f9', isKit: true, kit };
@@ -2524,6 +2533,14 @@ function seedOpDefaults(op) {
       break;
     }
     // LANCEMENT et MISE_EN_AVANT fusionnés dans NOUVEAUTE (migration mai 2026)
+    case 'LIQUIDE_DU_MOMENT': {
+      // Rang 9 de l'audit 2026-07-09 (« chaînes tournant à vide ») réparé le 2026-07-13 :
+      // une OP LDM n'avait AUCUNE étape boutique par défaut. Désormais : cartel à poser sur
+      // l'emplacement dédié « Liquide du moment » (référentiel existant EMPL_LIQUIDE_MOMENT).
+      // L'étape caisse vient de la mécanique (X_POUR_Y…), la fin de promo du chantier 3.
+      op.pieces.push(makePiece('ETIQUETTE_SPECIALE', 'freetouch', 'EMPL_LIQUIDE_MOMENT', 'Cartel Liquide du moment'));
+      break;
+    }
     case 'NATIONALE':
       // Pas de défaut prescriptif ; souvent la centrale envoie le kit
       op.prep.commanderProduits = false;
@@ -3692,6 +3709,21 @@ function statutEtape(def, stepsObj, coche) {
   if (stepEstEnAttente(def, stepsObj)) return def.nat === 'evt' ? 'livraison' : 'attente';
   return 'a_faire';
 }
+// ── Travail boutique immédiat d'une action pour UNE boutique (2026-07-13, demande Fabien :
+// « ce que je gère doit être en retrait, ce que la boutique doit faire en avant ») ──
+// S'appuie sur compteurEtapes (LA canonique) : restantsBoutique = étapes immédiatement
+// faisables par la boutique (hors étapes admin, hors attentes ⏳/📦). 0 = rien à faire
+// pour l'instant → la ligne passe en retrait dans les vues boutique.
+function actionResteBoutique(a, shop) {
+  if (!a || !shop) return 0;
+  try {
+    ensureActionSteps(a);
+    const st = (a.etats && a.etats[shop]) || {};
+    if (st.done) return 0;
+    return compteurEtapes(getActionSteps(a), st, { horsAdmin: true }).restantsBoutique;
+  } catch (e) { return 0; }
+}
+
 // RÈGLE 6-ter + audit 2026-07-09 : SEUL compteur autorisé pour tout x/y d'étapes — ne
 // jamais recompter à la main. Retourne { faits, total, attentes, attentesEvt, admin,
 // restantsBoutique } où :
@@ -4523,6 +4555,31 @@ function syncAutoActions() {
     ensureOpSteps(op);
     console.log('[SYNC] Ligne À rentrer créée pour OP hors base', op.id, '→', _rentA.id);
   });
+  // ── Fanfares créées par le FORMULAIRE OP sur un produit EN BASE : lien vivant vers la
+  // ligne À rentrer (2026-07-13, retour Fabien : badge « Nouveauté » libre). L'orphan-guard
+  // du chargement fait la même réparation, mais seulement au load — ici c'est à chaque sync.
+  ops.forEach(op => {
+    if ((op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') || op._archived || op.annulee || _deletedIds.has(op.id)) return;
+    if (!isOpOuverte(op)) return;
+    const pid = (op.produitIds || [])[0];
+    if (!pid || op.produitLibre) return;
+    const _opPf = op.produitParfumId || '';
+    let rA = op.rentrerActionId ? actions.find(x => x.id === op.rentrerActionId && !x.annulee) : null;
+    if (!rA) {
+      rA = actions.find(x => x.type === 'RENTRER' && x.produitId === pid && (x.produitParfumId || '') === _opPf && !x.annulee) || null;
+      if (rA) {
+        op.rentrerActionId = rA.id;
+        op._ts = new Date().toISOString();
+        console.log('[SYNC] Fanfare reliée à sa ligne À rentrer :', op.id, '→', rA.id);
+      }
+    }
+    if (rA && !rA.fanfareOpType) {
+      rA.fanfareOpType = op.type;
+      rA._ts = new Date().toISOString();
+      console.log('[SYNC] Badge fanfare restauré sur action', rA.id, '(', op.type, ')');
+    }
+  });
+
   // Et l'inverse : OP hors base terminée/archivée/supprimée → sa ligne À rentrer se referme.
   actions.forEach(a => {
     if (a.produitType !== 'op' || a.type !== 'RENTRER' || a.annulee || !a.horsBaseLabel) return;
@@ -16793,7 +16850,11 @@ function renderDashboard() {
     const prio = effectivePrio(a);
     const pc = prioColor(prio);
     const globalState = actionGlobalState(a);
-    const stateOpacity = globalState === 'FAIT' ? '0.45' : '1';
+    // Retrait visuel boutique (2026-07-13, demande Fabien) : en vue filtrée boutique, une
+    // ligne SANS travail immédiat pour cette boutique (géré par Fabien / en attente d'un
+    // événement) passe en retrait — le travail immédiat reste en avant.
+    const _dimBoutique = fShop && globalState !== 'FAIT' && actionResteBoutique(a, fShop) === 0;
+    const stateOpacity = globalState === 'FAIT' ? '0.45' : _dimBoutique ? '0.55' : '1';
 
     // Calcul des labels selon type de produit (kit, liquide ou PD)
     let caseLabel, profColor, profShort;
@@ -17006,6 +17067,8 @@ function renderDashboard() {
       // Qui commande ? → repère sur la ligne PLIÉE (demande Fabien 2026-06-20, ❓ ajouté 2026-07-11)
       badgeTag += _badgeQuiCommande(a);
       badgeTag += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-13)
+      // 💤 Retrait boutique (2026-07-13) : dit EXPLICITEMENT pourquoi la ligne est en retrait.
+      if (_dimBoutique) badgeTag += `<span title="Rien à faire pour ta boutique pour l'instant — géré par Fabien ou en attente d'un événement (livraison, écoulement…)" style="font-size:9px; padding:1px 6px; background:#33415530; color:#64748b; border:1px solid #47556950; border-radius:3px; white-space:nowrap;">💤 rien à faire ici</span>`;
       // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
       if (a.prixRouge) {
         const _prOpRent = ops.find(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && isOpOuverte(o) && (o.rentrerPrixActionId === a.id || o.rentrerActionId === a.id || (o.produitIds || []).includes(prod.id)));
@@ -17378,7 +17441,9 @@ function renderDashboard() {
           }
         }
         // Picker "Entrée en fanfare ?" — commun kits et liquides
-        const linkedFanfareOp = ops.find(o => o.rentrerActionId === a.id && !o.dateFin);
+        // Fix 2026-07-13 : une OP avec dateFin PLANIFIÉE (future) est toujours ouverte —
+        // l'ancien filtre !o.dateFin faisait afficher le badge « libre » à tort.
+        const linkedFanfareOp = ops.find(o => o.rentrerActionId === a.id && !o._archived && isOpOuverte(o));
         const currentFanfare = a.fanfareOpType || (linkedFanfareOp ? linkedFanfareOp.type : null);
         const fanfareOptions = [
           { key: '', label: 'Non', color: '#64748b' },
@@ -17783,7 +17848,7 @@ function renderDashboard() {
     const _lqHover = cfg.hoverBg || '#1e293b60';
     const _lqBorder = cfg.borderLeft ? ` border-left:3px solid ${cfg.borderLeft};` : '';
     return `<div style="margin-bottom:1px;">
-      <div onclick="toggleActionExpand('${cfg.groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px; background:${_lqBg};${_lqBorder}" onmouseover="this.style.background='${_lqHover}'" onmouseout="this.style.background='${_lqBg}'">
+      <div onclick="toggleActionExpand('${cfg.groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px; background:${_lqBg};${_lqBorder}${cfg.dimmed ? ' opacity:0.55;' : ''}" onmouseover="this.style.background='${_lqHover}'" onmouseout="this.style.background='${_lqBg}'">
         <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
         <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto; max-width:52%;" title="${String(cfg.nom || '').replace(/"/g, '&quot;')}">${cfg.nom}</span>${cfg.badgesHtml || ''}</div>
         <div style="font-size:9px; color:${cfg.profColor || '#64748b'}; font-weight:600; text-align:center;">${cfg.profShort || '—'}</div>
@@ -17907,6 +17972,7 @@ function renderDashboard() {
     return _ligneLiquide({
       groupKey,
       nom: g.gamme,
+      dimmed: !!(fShop && grp.some(x => actionGlobalState(x) !== 'FAIT') && grp.every(x => actionResteBoutique(x, fShop) === 0)),
       baseBg: _grpCmdAdmin ? '#261e3b' : undefined,
       hoverBg: _grpCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _grpCmdAdmin ? '#a78bfa' : _grpCmdUnset ? '#f59e0b' : undefined,
@@ -18034,6 +18100,7 @@ function renderDashboard() {
     return _ligneLiquide({
       groupKey,
       nom: g.gamme,
+      dimmed: !!(fShop && actionGlobalState(a) !== 'FAIT' && actionResteBoutique(a, fShop) === 0),
       baseBg: _glCmdAdmin ? '#261e3b' : undefined,
       hoverBg: _glCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _glCmdAdmin ? '#a78bfa' : _glCmdUnset ? '#f59e0b' : undefined,
@@ -18097,6 +18164,14 @@ function renderDashboard() {
       _unitFor(g, gammeId).blocks.push({ fmtRank: g ? (_fmtRank[g.format] ?? 9) : 9, actions: groups[gammeId], html: () => _renderGammeParfumGroup(groups[gammeId]) });
     });
 
+    // Retrait boutique (2026-07-13) : en vue filtrée, les gammes avec du travail immédiat
+    // pour la boutique passent devant celles gérées par Fabien / en attente (tri stable :
+    // l'ordre de priorité est conservé à l'intérieur de chaque groupe).
+    if (fShop) {
+      const _unitWork = key => units[key].blocks.some(bl => bl.actions.some(x => actionResteBoutique(x, fShop) > 0)) ? 0 : 1;
+      unitOrder.sort((ka, kb) => _unitWork(ka) - _unitWork(kb));
+    }
+
     let html = '';
     unitOrder.forEach(key => {
       const u = units[key];
@@ -18119,6 +18194,7 @@ function renderDashboard() {
       html += _ligneLiquide({
         groupKey,
         nom: u.nom,
+        dimmed: !!(fShop && allActions.some(x => actionGlobalState(x) !== 'FAIT') && allActions.every(x => actionResteBoutique(x, fShop) === 0)),
         baseBg: _allAdmin ? '#261e3b' : undefined,
         hoverBg: _allAdmin ? '#2f2549' : undefined,
         borderLeft: _allAdmin ? '#a78bfa' : _anyUnset ? '#f59e0b' : undefined,
@@ -18159,6 +18235,13 @@ function renderDashboard() {
       if (actions.length === 0) return '';
       // Tri : urgence substitution d'abord (RENTRER), puis priorité OP, puis avec remplaçant
       actions.sort((a, b) => {
+        // Retrait boutique (2026-07-13) : en vue filtrée, le travail immédiat de la boutique
+        // passe DEVANT ce qui est géré par Fabien ou en attente.
+        if (fShop) {
+          const wa = actionResteBoutique(a, fShop) > 0 ? 0 : 1;
+          const wb = actionResteBoutique(b, fShop) > 0 ? 0 : 1;
+          if (wa !== wb) return wa - wb;
+        }
         // Urgence substitution (uniquement pour RENTRER) — trou dans l'offre en tête
         if (a.type === 'RENTRER' || b.type === 'RENTRER') {
           const sa = typeof _subUrgencyScore === 'function' ? _subUrgencyScore(a) : { rank: 3, urgCount: 0 };
@@ -21170,6 +21253,27 @@ function setOpViewMode(v) {
 }
 
 // Toggle entre "kit en base" et "produit libre" dans le formulaire de création d'OP.
+// Sélecteur produit du formulaire OP (2026-07-13) : une gamme liquide choisie (valeur
+// 'LIQGRP:marque|||gamme') fait apparaître ses formats à cocher — défaut : tous.
+function opOnProduitBaseChange() {
+  const sel = document.getElementById('opKit');
+  const row = document.getElementById('opLiqFormatsRow');
+  const list = document.getElementById('opLiqFormatsList');
+  if (!sel || !row || !list) return;
+  const v = sel.value || '';
+  if (!v.startsWith('LIQGRP:')) { row.style.display = 'none'; list.innerHTML = ''; return; }
+  const key = v.slice(7);
+  const _sep = key.indexOf('|||');
+  const _m = key.slice(0, _sep), _g = key.slice(_sep + 3);
+  const _fmtOrder = { '10mL': 0, '10mL_SDN': 1, '20mL': 2, '50mL': 3, '100mL': 4, '+150mL': 5 };
+  const gs = baseLiq.filter(x => x.marque === _m && x.gamme === _g && ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(x.statutVie))
+    .sort((a, b) => (_fmtOrder[a.format] ?? 9) - (_fmtOrder[b.format] ?? 9));
+  list.innerHTML = gs.map(x => `<label style="display:inline-flex; align-items:center; gap:5px; font-size:11px; color:#e2e8f0; cursor:pointer;">
+    <input type="checkbox" class="opLiqFmtCheck" value="${x.id}" checked style="accent-color:#10b981;"> ${LIQ_FORMAT_LABELS[x.format] || x.format}
+  </label>`).join('');
+  row.style.display = 'block';
+}
+
 function opToggleProduitMode(mode) {
   const kitRow = document.getElementById('opKitRow');
   const libreRow = document.getElementById('opLibreRow');
@@ -21331,7 +21435,15 @@ function submitNewOp() {
   } else {
     const kitId = document.getElementById('opKit').value;
     if (!kitId) { pvAlert('Produit de la base requis (ou basculer en "produit libre")'); return; }
-    produitIds = [kitId];
+    if (kitId.startsWith('LIQGRP:')) {
+      // ── Gamme liquide multi-format (2026-07-13, cas Bankiz 2+1 sur 3 formats) :
+      // UNE OP couvrant les réfs cochées (modèle multi-produits des PR groupés). ──
+      const _checked = Array.from(document.querySelectorAll('#opLiqFormatsList .opLiqFmtCheck:checked')).map(cb => cb.value);
+      if (_checked.length === 0) { pvAlert('Coche au moins un format de la gamme.'); return; }
+      produitIds = _checked;
+    } else {
+      produitIds = [kitId];
+    }
   }
 
   const mecaType = (document.getElementById('opMecaType').value || '').trim();
@@ -21405,6 +21517,21 @@ function submitNewOp() {
     if (paCommande !== undefined) _rentA.paCommande = paCommande;
     _rentA._ts = new Date().toISOString();
     newOp.rentrerActionId = _rentA.id;
+  }
+  // ── Lier l'OP fanfare à sa ligne À rentrer dès la CRÉATION (2026-07-13, retour Fabien :
+  // badge « Nouveauté » libre sur la ligne alors que l'OP existe). Même lien que le badge
+  // fanfare (rentrerActionId + fanfareOpType) → chips et synchro immédiatement cohérents.
+  // Posé APRÈS le bloc dispatch (même raison que le hors base : ne pas court-circuiter les
+  // transferts OP à la création).
+  if (_TYPES_AVEC_COMMANDE.includes(type) && produitIds.length > 0 && !newOp.rentrerActionId) {
+    try { syncAutoActions(); } catch (e) {}
+    const _rA = actions.find(x => x.type === 'RENTRER' && x.produitId === produitIds[0] && !x.produitParfumId && !x.annulee);
+    if (_rA) {
+      newOp.rentrerActionId = _rA.id;
+      _rA.fanfareOpType = type;
+      if (!_rA.opId) _rA.opId = newOp.id;
+      _rA._ts = new Date().toISOString();
+    }
   }
   // Reset des champs (on garde Type et Campagne pour enchaîner les vagues d'une même campagne)
   ['opKit','opDateFin','opComment','opLibreLibelle','opDeclinaisonProduit','opDeclinaisonLibelle','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment','opMecaType','opMecaDescription','opPartenaire','opPaCommande'].forEach(id => {
@@ -22575,6 +22702,24 @@ function renderOps() {
   const kits = baseKits.filter(k => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(k.statutVie))
     .sort((a, b) => (a.marque + a.modele).localeCompare(b.marque + b.modele));
   const kitOptions = kits.map(k => `<option value="${k.id}">${k.marque} — ${k.modele}</option>`).join('');
+  // ── Liquides par GAMME, tous formats confondus (2026-07-13, cas Fabien : OP Liquide du
+  // moment « 2+1 Bankiz, valable sur les 3 formats » = UNE OP couvrant les 3 réfs).
+  // Valeur d'option : 'LIQGRP:marque|||gamme' → la ligne 3a-bis propose les formats à cocher.
+  const _liqGrps = {};
+  const _liqGrpOrder = [];
+  baseLiq.filter(g => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(g.statutVie))
+    .sort((a, b) => (a.marque + a.gamme).localeCompare(b.marque + b.gamme))
+    .forEach(g => {
+      const key = g.marque + '|||' + g.gamme;
+      if (!_liqGrps[key]) { _liqGrps[key] = []; _liqGrpOrder.push(key); }
+      _liqGrps[key].push(g);
+    });
+  const liqGrpOptions = _liqGrpOrder.map(key => {
+    const gs = _liqGrps[key];
+    const fmts = gs.map(x => LIQ_FORMAT_LABELS[x.format] || x.format).join(' · ');
+    return `<option value="LIQGRP:${key.replace(/"/g, '&quot;')}">${gs[0].marque} — ${gs[0].gamme} (${fmts})</option>`;
+  }).join('');
+  const produitBaseOptions = `<optgroup label="🔧 Kits">${kitOptions}</optgroup><optgroup label="💧 Liquides (par gamme — tous formats)">${liqGrpOptions}</optgroup>`;
 
   const typeOptions = OP_TYPES.filter(t => !t.auto).map(t => `<option value="${t.key}">${t.label}</option>`).join('');
   // 'declinaison' a son propre mode produit (radio dédiée) — exclu du select libre pour éviter la confusion.
@@ -22669,12 +22814,18 @@ function renderOps() {
       <span style="margin-left:auto; font-size:9.5px; color:#64748b; font-style:italic;">Libre / déclinaison : ni cascade kit, ni historique prix — juste PLV + pilotage dates.</span>
     </div>
 
-    <!-- Ligne 3a : sélecteur kit -->
+    <!-- Ligne 3a : sélecteur produit en base (kits + gammes liquides tous formats) -->
     <div id="opKitRow" style="display:grid; grid-template-columns: 1fr; gap:8px; margin-bottom:8px;">
-      <select id="opKit" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:4px; font-size:12px;">
+      <select id="opKit" onchange="opOnProduitBaseChange()" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:4px; font-size:12px;">
         <option value="">— Produit de la base —</option>
-        ${kitOptions}
+        ${produitBaseOptions}
       </select>
+    </div>
+    <!-- Ligne 3a-bis : formats de la gamme liquide choisie (2026-07-13) — l'OP couvre les
+         formats cochés (défaut : tous). Une seule OP, plusieurs réfs (modèle des PR groupés). -->
+    <div id="opLiqFormatsRow" style="display:none; margin:-4px 0 8px 0; padding:6px 10px; background:#0f172a; border:1px dashed #10b98160; border-radius:4px;">
+      <span style="font-size:10px; color:#34d399; font-weight:700; margin-right:10px;">Formats couverts par l'OP :</span>
+      <span id="opLiqFormatsList" style="display:inline-flex; gap:14px; flex-wrap:wrap;"></span>
     </div>
     <!-- Ligne 3b : saisie produit libre (famille + libellé) -->
     <div id="opLibreRow" style="display:none; grid-template-columns: 1fr 3fr; gap:8px; margin-bottom:8px;">
@@ -23192,6 +23343,8 @@ function renderOps() {
         const _cs2 = document.getElementById('opCampagneSelect');
         if (_cs2) { _cs2.value = _opFormSnap._campagne; _opShowCampagneRows(_opFormSnap._campagne); }
       }
+      // Gamme liquide sélectionnée → reconstruire la ligne des formats (tous cochés par défaut).
+      try { opOnProduitBaseChange(); } catch (e) {}
     } catch (e) { console.warn('[renderOps] restauration form échouée:', e); }
   }
 
