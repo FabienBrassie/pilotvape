@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 16:56</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 17:04</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3722,6 +3722,31 @@ function actionResteBoutique(a, shop) {
     if (st.done) return 0;
     return compteurEtapes(getActionSteps(a), st, { horsAdmin: true }).restantsBoutique;
   } catch (e) { return 0; }
+}
+
+// Une action est « EN RETRAIT » (recadrage Fabien 2026-07-13 : valable AUSSI en vue
+// admin / 3 boutiques, pas seulement en vue filtrée — une commande gérée par Fabien n'a
+// pas à trôner au milieu du travail des boutiques) : shop précis → cette boutique n'a
+// rien d'immédiat ; shop null → AUCUNE boutique n'a rien d'immédiat.
+function actionEnRetrait(a, shop) {
+  if (!a) return false;
+  try { if (actionGlobalState(a) === 'FAIT') return false; } catch (e) {}
+  const shops = shop ? [shop] : SHOPS;
+  return shops.every(sh => actionResteBoutique(a, sh) === 0);
+}
+// Version groupe : en retrait si TOUTES les actions encore ouvertes le sont (les FAIT
+// n'empêchent pas le retrait), et qu'il reste au moins une action ouverte.
+function groupeEnRetrait(acts, shop) {
+  let anyOpen = false;
+  for (const x of (acts || [])) {
+    let fait = false;
+    try { fait = actionGlobalState(x) === 'FAIT'; } catch (e) {}
+    if (!fait) {
+      anyOpen = true;
+      if (!actionEnRetrait(x, shop)) return false;
+    }
+  }
+  return anyOpen;
 }
 
 // RÈGLE 6-ter + audit 2026-07-09 : SEUL compteur autorisé pour tout x/y d'étapes — ne
@@ -16087,7 +16112,18 @@ function _semaineCollect() {
     (opMiss[g.op.id] = opMiss[g.op.id] || []).push(_SEM_VERBES[g.type] || g.type);
   });
   groups.forEach(g => {
-    if (semaineShopFilter && !(g.shops[semaineShopFilter] > 0)) return;
+    // Recadrage Fabien 2026-07-13 : « en retrait ne veut pas dire enlever totalement ! »
+    // Sous filtre boutique : un chantier où la boutique est encore IMPLIQUÉE (pas tout coché
+    // chez elle) mais sans travail immédiat reste AFFICHÉ, marqué en retrait (💤) et trié en
+    // bas — il ne disparaît que si elle a tout coché.
+    if (semaineShopFilter) {
+      const _implique = g.acts.some(a => { const st = a.etats && a.etats[semaineShopFilter]; return st && !st.done; });
+      if (!_implique) return; // vraiment terminé pour cette boutique
+      g._retrait = !(g.shops[semaineShopFilter] > 0);
+    } else {
+      // Sans filtre : en retrait si aucune boutique n'a de travail immédiat
+      g._retrait = SHOPS.every(sh => !(g.shops[sh] > 0)) ? true : false;
+    }
     if (g.score != null && g.score < 0) g.motif = 'l\'OP a démarré — toujours pas fait';
     if (g.reprise) { bands.reprise.push(g); return; }
     if (g.type === 'SORTIR' || g.type === 'SWAP_COMPOSANT') { bands.sortir.push(g); return; }
@@ -16101,13 +16137,18 @@ function _semaineCollect() {
     bands.rentrer.push(g);
   });
   // Tri : d'abord les retards d'OP, puis les plus anciens — le caca en tête.
+  // Retrait 2026-07-13 : les chantiers 💤 (rien d'immédiat) passent en BAS, jamais enlevés.
   const _triRetard = (a, b) => {
+    if ((a._retrait ? 1 : 0) !== (b._retrait ? 1 : 0)) return (a._retrait ? 1 : 0) - (b._retrait ? 1 : 0);
     const ra = a.score != null && a.score < 0 ? a.score : 0;
     const rb = b.score != null && b.score < 0 ? b.score : 0;
     if (ra !== rb) return ra - rb;
     return (b.age || 0) - (a.age || 0);
   };
-  bands.sortir.sort((a, b) => (b.age || 0) - (a.age || 0));
+  bands.sortir.sort((a, b) => {
+    if ((a._retrait ? 1 : 0) !== (b._retrait ? 1 : 0)) return (a._retrait ? 1 : 0) - (b._retrait ? 1 : 0);
+    return (b.age || 0) - (a.age || 0);
+  });
   bands.rentrer.sort(_triRetard);
   bands.prix.sort(_triRetard);
   const opsFuturs = ops.filter(o => o && !o._archived && o.dateDebut && o.dateDebut > today)
@@ -16141,8 +16182,9 @@ function _semOpMiniHtml(op, today, miss, idx) {
 function _semMiniHtml(g, idx) {
   const actId = g.actId || (g.acts[0] ? g.acts[0].id : '');
   const L = { pessac: 'P', merignac: 'M', langon: 'L' };
-  const shTxt = SHOPS.filter(sh => g.shops[sh] > 0).map(sh => L[sh] + (g.shops[sh] > 1 ? g.shops[sh] : '')).join('·');
-  let h = '<div class="pvsem-mini" onclick="semGoAction(\'' + _semEsc(actId) + '\')" title="' + _semEsc(g.label) + ' — ouvrir dans le Dashboard">';
+  const shTxt = SHOPS.filter(sh => g.shops[sh] > 0).map(sh => L[sh] + (g.shops[sh] > 1 ? g.shops[sh] : '')).join('·')
+    || (g._retrait ? '💤' : '');
+  let h = '<div class="pvsem-mini"' + (g._retrait ? ' style="opacity:0.55;"' : '') + ' onclick="semGoAction(\'' + _semEsc(actId) + '\')" title="' + _semEsc(g.label) + (g._retrait ? ' — rien d\'immédiat (géré par Fabien ou en attente)' : ' — ouvrir dans le Dashboard') + '">';
   h += '<span class="nm">' + _semEsc(g.label) + '</span>';
   if (g.cnt) h += '<span class="cnt2">' + _semEsc(g.cnt) + '</span>';
   h += '<span class="sh">' + shTxt + '</span>';
@@ -16906,10 +16948,10 @@ function renderDashboard() {
     const prio = effectivePrio(a);
     const pc = prioColor(prio);
     const globalState = actionGlobalState(a);
-    // Retrait visuel boutique (2026-07-13, demande Fabien) : en vue filtrée boutique, une
-    // ligne SANS travail immédiat pour cette boutique (géré par Fabien / en attente d'un
-    // événement) passe en retrait — le travail immédiat reste en avant.
-    const _dimBoutique = fShop && globalState !== 'FAIT' && actionResteBoutique(a, fShop) === 0;
+    // Retrait visuel (2026-07-13, recadrage Fabien : TOUTES les vues, y compris admin) :
+    // une ligne sans travail boutique immédiat (géré par Fabien / en attente) passe en
+    // retrait — le travail immédiat des boutiques reste en avant.
+    const _dimBoutique = globalState !== 'FAIT' && actionEnRetrait(a, fShop || null);
     const stateOpacity = globalState === 'FAIT' ? '0.45' : _dimBoutique ? '0.55' : '1';
 
     // Calcul des labels selon type de produit (kit, liquide ou PD)
@@ -17123,8 +17165,8 @@ function renderDashboard() {
       // Qui commande ? → repère sur la ligne PLIÉE (demande Fabien 2026-06-20, ❓ ajouté 2026-07-11)
       badgeTag += _badgeQuiCommande(a);
       badgeTag += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-13)
-      // 💤 Retrait boutique (2026-07-13) : dit EXPLICITEMENT pourquoi la ligne est en retrait.
-      if (_dimBoutique) badgeTag += `<span title="Rien à faire pour ta boutique pour l'instant — géré par Fabien ou en attente d'un événement (livraison, écoulement…)" style="font-size:9px; padding:1px 6px; background:#33415530; color:#64748b; border:1px solid #47556950; border-radius:3px; white-space:nowrap;">💤 rien à faire ici</span>`;
+      // 💤 Retrait (2026-07-13) : dit EXPLICITEMENT pourquoi la ligne est en retrait.
+      if (_dimBoutique) badgeTag += `<span title="${fShop ? 'Rien à faire pour ta boutique pour l\'instant' : 'Aucune boutique n\'a de travail immédiat'} — géré par Fabien ou en attente d'un événement (livraison, écoulement…)" style="font-size:9px; padding:1px 6px; background:#33415530; color:#64748b; border:1px solid #47556950; border-radius:3px; white-space:nowrap;">💤 ${fShop ? 'rien à faire ici' : 'rien à faire côté boutiques'}</span>`;
       // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
       if (a.prixRouge) {
         const _prOpRent = ops.find(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && isOpOuverte(o) && (o.rentrerPrixActionId === a.id || o.rentrerActionId === a.id || (o.produitIds || []).includes(prod.id)));
@@ -18028,7 +18070,7 @@ function renderDashboard() {
     return _ligneLiquide({
       groupKey,
       nom: g.gamme,
-      dimmed: !!(fShop && grp.some(x => actionGlobalState(x) !== 'FAIT') && grp.every(x => actionResteBoutique(x, fShop) === 0)),
+      dimmed: groupeEnRetrait(grp, fShop || null),
       baseBg: _grpCmdAdmin ? '#261e3b' : undefined,
       hoverBg: _grpCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _grpCmdAdmin ? '#a78bfa' : _grpCmdUnset ? '#f59e0b' : undefined,
@@ -18156,7 +18198,7 @@ function renderDashboard() {
     return _ligneLiquide({
       groupKey,
       nom: g.gamme,
-      dimmed: !!(fShop && actionGlobalState(a) !== 'FAIT' && actionResteBoutique(a, fShop) === 0),
+      dimmed: groupeEnRetrait([a], fShop || null),
       baseBg: _glCmdAdmin ? '#261e3b' : undefined,
       hoverBg: _glCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _glCmdAdmin ? '#a78bfa' : _glCmdUnset ? '#f59e0b' : undefined,
@@ -18220,11 +18262,11 @@ function renderDashboard() {
       _unitFor(g, gammeId).blocks.push({ fmtRank: g ? (_fmtRank[g.format] ?? 9) : 9, actions: groups[gammeId], html: () => _renderGammeParfumGroup(groups[gammeId]) });
     });
 
-    // Retrait boutique (2026-07-13) : en vue filtrée, les gammes avec du travail immédiat
-    // pour la boutique passent devant celles gérées par Fabien / en attente (tri stable :
-    // l'ordre de priorité est conservé à l'intérieur de chaque groupe).
-    if (fShop) {
-      const _unitWork = key => units[key].blocks.some(bl => bl.actions.some(x => actionResteBoutique(x, fShop) > 0)) ? 0 : 1;
+    // Retrait (2026-07-13, recadrage Fabien : TOUTES les vues) : les gammes avec du travail
+    // immédiat pour les boutiques passent devant celles gérées par Fabien / en attente
+    // (tri stable : l'ordre de priorité est conservé à l'intérieur de chaque groupe).
+    {
+      const _unitWork = key => groupeEnRetrait(units[key].blocks.reduce((acc, bl) => acc.concat(bl.actions), []), fShop || null) ? 1 : 0;
       unitOrder.sort((ka, kb) => _unitWork(ka) - _unitWork(kb));
     }
 
@@ -18250,7 +18292,7 @@ function renderDashboard() {
       html += _ligneLiquide({
         groupKey,
         nom: u.nom,
-        dimmed: !!(fShop && allActions.some(x => actionGlobalState(x) !== 'FAIT') && allActions.every(x => actionResteBoutique(x, fShop) === 0)),
+        dimmed: groupeEnRetrait(allActions, fShop || null),
         baseBg: _allAdmin ? '#261e3b' : undefined,
         hoverBg: _allAdmin ? '#2f2549' : undefined,
         borderLeft: _allAdmin ? '#a78bfa' : _anyUnset ? '#f59e0b' : undefined,
@@ -18291,13 +18333,11 @@ function renderDashboard() {
       if (actions.length === 0) return '';
       // Tri : urgence substitution d'abord (RENTRER), puis priorité OP, puis avec remplaçant
       actions.sort((a, b) => {
-        // Retrait boutique (2026-07-13) : en vue filtrée, le travail immédiat de la boutique
-        // passe DEVANT ce qui est géré par Fabien ou en attente.
-        if (fShop) {
-          const wa = actionResteBoutique(a, fShop) > 0 ? 0 : 1;
-          const wb = actionResteBoutique(b, fShop) > 0 ? 0 : 1;
-          if (wa !== wb) return wa - wb;
-        }
+        // Retrait (2026-07-13, recadrage Fabien : TOUTES les vues) : le travail immédiat
+        // des boutiques passe DEVANT ce qui est géré par Fabien ou en attente.
+        const wa = actionEnRetrait(a, fShop || null) ? 1 : 0;
+        const wb = actionEnRetrait(b, fShop || null) ? 1 : 0;
+        if (wa !== wb) return wa - wb;
         // Urgence substitution (uniquement pour RENTRER) — trou dans l'offre en tête
         if (a.type === 'RENTRER' || b.type === 'RENTRER') {
           const sa = typeof _subUrgencyScore === 'function' ? _subUrgencyScore(a) : { rank: 3, urgCount: 0 };
