@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 15:06</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 15:18</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2183,6 +2183,7 @@ const MECA_IMPACTE_PRIX = ['PRIX_ROUGE','REMISE_SECHE','SECOND_REMISE','X_POUR_Y
 // qui ne sont pas encore dans la base (liquides, accessoires, cartouches, box, etc.).
 // En attendant l'extension du catalogue baseKits à ces familles.
 const PRODUIT_LIBRE_FAMILLES = [
+  { key: 'declinaison', label: 'Déclinaison', icon: '🎨', color: '#ec4899' }, // coloris / édition limitée d'un produit EN BASE (2026-07-13) — porte produitLibre.declinaisonDe
   { key: 'liquide',    label: 'Liquide',     icon: '💧', color: '#06b6d4' },
   { key: 'accessoire', label: 'Accessoire',  icon: '🔧', color: '#f59e0b' },
   { key: 'consommable', label: 'Consommable', icon: '🎯', color: '#8b5cf6' }, // cartouche / résistance / autre consommable
@@ -7396,6 +7397,57 @@ function setRentrerPaCommande(actionId, val) {
   saveData(); try { renderDashboard(); } catch(e) {}
 }
 
+// ── 🚚 Date de début d'expédition (2026-07-13, demande Fabien) ──
+// Uniquement quand la commande est gérée par Fabien : dit aux boutiques à partir de quand la
+// marchandise peut COMMENCER à arriver (elles ne commandent pas, elles attendent — lecture à
+// zéro inférence). Champ additif `expeditionDate` sur l'action RENTRER + miroir sur l'OP liée,
+// même modèle que paCommande (merge non touché).
+// Une gamme liquide multi-format = une seule commande fournisseur → la date se propage à
+// toutes les actions RENTRER de la même gamme (tous formats, gamme-level + parfums).
+function setRentrerExpeditionDate(actionId, val) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'RENTRER') return;
+  const v = (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) ? val : null;
+  const _now = new Date().toISOString();
+  const _apply = (act) => {
+    if (v === null) delete act.expeditionDate; else act.expeditionDate = v;
+    act._ts = _now;
+    const _op = ops.find(o => o.rentrerActionId === act.id);
+    if (_op) { if (v === null) delete _op.expeditionDate; else _op.expeditionDate = v; _op._ts = _now; }
+  };
+  _apply(a);
+  if (a.produitType === 'liq') {
+    const g = baseLiq.find(x => x.id === a.produitId);
+    if (g) {
+      const serieIds = baseLiq.filter(x => x.marque === g.marque && x.gamme === g.gamme).map(x => x.id);
+      actions.forEach(x => {
+        if (x.id === a.id || x.type !== 'RENTRER' || x.annulee || x.produitType !== 'liq') return;
+        if (serieIds.includes(x.produitId)) _apply(x);
+      });
+    }
+  }
+  if (typeof logAction === 'function') logAction('Date d\'expédition', _logActionLabel(actionId) + ' → ' + (v ? fmtFR(v) : 'effacée'));
+  saveData(); try { renderDashboard(); } catch(e) {}
+}
+
+// Badge canonique 🚚 (règle 8) — LA source unique de l'étiquette « expédition à partir du … ».
+// Vert quand la date est passée (ça peut arriver à tout moment), violet sinon (à venir).
+function _badgeExpeditionDate(d) {
+  if (!d) return '';
+  const _passee = d <= ymd(new Date());
+  const bg = _passee ? '#14532d30' : '#7c3aed15';
+  const col = _passee ? '#86efac' : '#c4b5fd';
+  const border = _passee ? '#22c55e50' : '#a78bfa50';
+  const txt = _passee ? '🚚 peut arriver (expédié dès le ' + fmtFR(d) + ')' : '🚚 expédition à partir du ' + fmtFR(d);
+  return `<span title="Commande Fabien — le fournisseur expédie à partir du ${fmtFR(d)} : la marchandise peut arriver en boutique dès cette date" style="font-size:9px; font-weight:700; padding:1px 6px; background:${bg}; color:${col}; border:1px solid ${border}; border-radius:3px; white-space:nowrap;">${txt}</span>`;
+}
+// Variante par action : ne s'affiche QUE si la commande est gérée par Fabien.
+function _badgeExpeditionAction(a) {
+  if (!a || a.type !== 'RENTRER' || a.commandeAdmin !== true || !a.expeditionDate) return '';
+  return _badgeExpeditionDate(a.expeditionDate);
+}
+
 // ── RÉCEPTION CENTRALISÉE sur une OP, SÉPARÉE produit / PLV (refonte 2026-06-13, demande
 // Fabien : "la PLV peut être concernée par la rétro et pas le produit, ou l'inverse").
 // kind = 'produit' → pose op.dispatchProduit ; kind = 'plv' → pose op.dispatchPlv.
@@ -7762,8 +7814,9 @@ function toggleActionExpand(id) {
   const el = document.getElementById('action-detail-' + id);
   if (el) {
     el.style.display = expandedActions.has(id) ? 'block' : 'none';
-  } else if (id.startsWith('grp_') || id.startsWith('grplvl_') || id.startsWith('mrq_') || id.startsWith('sub_') || id.startsWith('besoins_')) {
-    // Groupe de parfums, marque, sous-accordéon kits/liq ou besoins : re-render le dashboard
+  } else if (id.startsWith('grp_') || id.startsWith('grplvl_') || id.startsWith('mrq_') || id.startsWith('sub_') || id.startsWith('besoins_') || id.startsWith('gfuse_')) {
+    // Groupe de parfums, marque, sous-accordéon kits/liq, besoins ou ligne gamme multi-format
+    // fusionnée (gfuse_, 2026-07-13) : pas d'élément détail dédié → re-render du dashboard.
     renderDashboard();
   }
 }
@@ -16907,6 +16960,7 @@ function renderDashboard() {
       }
       // Qui commande ? → repère sur la ligne PLIÉE (demande Fabien 2026-06-20, ❓ ajouté 2026-07-11)
       badgeTag += _badgeQuiCommande(a);
+      badgeTag += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-13)
       // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
       if (a.prixRouge) {
         const _prOpRent = ops.find(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && isOpOuverte(o) && (o.rentrerPrixActionId === a.id || o.rentrerActionId === a.id || (o.produitIds || []).includes(prod.id)));
@@ -17322,7 +17376,7 @@ function renderDashboard() {
           // ⛔ L'interdit est énoncé aussi visiblement que l'action (incident 2026-07-11 :
           // les boutiques ont commandé malgré la consigne écrite). La réception, elle,
           // reste évidemment cochable par la boutique.
-          commandeAdminBlock += `<div class="pv-cmd-admin-banner" style="margin-bottom:6px; padding:5px 9px; background:#7c3aed18; border:1px solid #a78bfa50; border-left:3px solid #a78bfa; border-radius:3px; font-size:10.5px; color:#e9d5ff;">⛔ <b>NE RIEN COMMANDER</b> — la commande est passée par <b>Fabien</b>${a.dispatchHub ? ' (réception centralisée à ' + (SHOP_LABELS[a.dispatchHub] || a.dispatchHub) + ')' : ''}. La boutique : <b>réceptionner</b> puis <b>saisir la commande en stock Swappy</b>.</div>`;
+          commandeAdminBlock += `<div class="pv-cmd-admin-banner" style="margin-bottom:6px; padding:5px 9px; background:#7c3aed18; border:1px solid #a78bfa50; border-left:3px solid #a78bfa; border-radius:3px; font-size:10.5px; color:#e9d5ff;">⛔ <b>NE RIEN COMMANDER</b> — la commande est passée par <b>Fabien</b>${a.dispatchHub ? ' (réception centralisée à ' + (SHOP_LABELS[a.dispatchHub] || a.dispatchHub) + ')' : ''}. La boutique : <b>réceptionner</b> puis <b>saisir la commande en stock Swappy</b>.${a.expeditionDate ? ' 🚚 Expédition fournisseur à partir du <b>' + fmtFR(a.expeditionDate) + '</b> — ça peut arriver en boutique dès cette date.' : ''}</div>`;
         } else if (_caUnset) {
           commandeAdminBlock += `<div class="pv-cmd-admin-banner" style="margin-bottom:6px; padding:5px 9px; background:#f59e0b12; border:1px solid #f59e0b45; border-left:3px solid #f59e0b; border-radius:3px; font-size:10.5px; color:#fde68a;">❓ <b>Qui commande ?</b> — pas encore tranché par Fabien. En attendant : <b>ne pas commander</b>.</div>`;
         }
@@ -17335,6 +17389,16 @@ function renderDashboard() {
               <option value="admin" ${_ca ? 'selected' : ''}>Fabien commande — la boutique réceptionne & saisit</option>
             </select>
           </div>`;
+          // 🚚 Date de début d'expédition (2026-07-13) : seulement quand c'est Fabien qui
+          // commande — dit aux boutiques à partir de quand ça peut arriver. Propagée à toute
+          // la gamme (tous formats + parfums) car une commande fournisseur = une expédition.
+          if (_ca) {
+            commandeAdminBlock += `<div style="display:flex; gap:8px; align-items:center; margin-bottom:6px; flex-wrap:wrap; padding-bottom:6px; border-bottom:1px dashed #33415580;">
+              <span style="font-size:10px; color:#64748b;">🚚 Expédition fournisseur à partir du :</span>
+              <input type="date" value="${a.expeditionDate || ''}" onchange="setRentrerExpeditionDate('${a.id}', this.value)" onclick="event.stopPropagation()" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #a78bfa60; color:#c4b5fd; border-radius:3px;">
+              ${isLiq ? '<span style="font-size:9px; color:#64748b; font-style:italic;">appliquée à toute la gamme (tous formats & parfums)</span>' : ''}
+            </div>`;
+          }
         }
         // ── 💶 Prix de saisie temporaire pour CETTE commande (feature 2026-06-18) ──
         // Le PA base reste inchangé (marge) ; on indique juste le prix à saisir cette fois.
@@ -17778,9 +17842,12 @@ function renderDashboard() {
     // Repères À rentrer sur la ligne pliée « groupe de parfums » (demande Fabien 2026-06-25) :
     // seulement si tout le groupe partage l'info (même OP/réception → cohérent).
     const _grpRentrer = grp.length > 0 && grp.every(a => a.type === 'RENTRER');
+    // 🚚 date d'expédition (2026-07-13) : la ligne pliée porte la date la plus proche du groupe.
+    const _grpExpDates = _grpRentrer ? grp.map(a => a.expeditionDate).filter(Boolean).sort() : [];
     const _grpExtraBadges =
       (_grpRentrer && grp.every(a => a.commandeAdmin === true) ? _badgeCommandeAdmin()
         : (_grpRentrer && grp.some(a => a.commandeAdmin === undefined) ? _badgeQuiCommandeAttente() : ''))
+      + ((_grpRentrer && grp.every(a => a.commandeAdmin === true) && _grpExpDates.length > 0) ? _badgeExpeditionDate(_grpExpDates[0]) : '')
       + ((_grpRentrer && grp[0].dispatchHub && grp.every(a => a.dispatchHub === grp[0].dispatchHub)) ? _badgeHub(grp[0].dispatchHub) : '');
 
     // Teinte « qui commande » du groupe (2026-07-11) : violet = Fabien commande, ambre = à trancher.
@@ -17890,6 +17957,7 @@ function renderDashboard() {
     }
     // Repères À rentrer sur la ligne pliée « gamme entière » (demande Fabien 2026-06-25, ❓ 2026-07-11)
     _glBadges += _badgeQuiCommande(a);
+    _glBadges += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-13)
     if (a.type === 'RENTRER' && a.dispatchHub) _glBadges += _badgeHub(a.dispatchHub);
     // 🐌 Écoulement lent (Fabien 2026-07-09) : sur la ligne gamme pliée — les lignes parfum
     // virtuelles de cette action ne portent pas le badge (voir _renderActionCardInner).
@@ -17983,13 +18051,18 @@ function renderDashboard() {
       const _rentrers = allActions.filter(x => x.type === 'RENTRER');
       const _allAdmin = _rentrers.length > 0 && _rentrers.every(x => x.commandeAdmin === true);
       const _anyUnset = _rentrers.some(x => x.commandeAdmin === undefined);
+      // 🚚 date d'expédition la plus proche de la série (2026-07-13)
+      const _fuseExpDates = _rentrers.map(x => x.expeditionDate).filter(Boolean).sort();
       html += _ligneLiquide({
         groupKey,
         nom: u.nom,
         baseBg: _allAdmin ? '#261e3b' : undefined,
         hoverBg: _allAdmin ? '#2f2549' : undefined,
         borderLeft: _allAdmin ? '#a78bfa' : _anyUnset ? '#f59e0b' : undefined,
-        badgesHtml: `<span style="font-size:8.5px; padding:1px 5px; background:#33415560; color:#94a3b8; border-radius:2px; white-space:nowrap;">${_libelleParfumsParFormat(allActions) || (allActions.length + ' action' + (allActions.length > 1 ? 's' : ''))}</span>` + (_allAdmin ? `<span style="font-size:8.5px; padding:1px 5px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; white-space:nowrap;">📦 Commande Fabien</span>` : ''),
+        badgesHtml: `<span style="font-size:8.5px; padding:1px 5px; background:#33415560; color:#94a3b8; border-radius:2px; white-space:nowrap;">${_libelleParfumsParFormat(allActions) || (allActions.length + ' action' + (allActions.length > 1 ? 's' : ''))}</span>`
+          + (_allAdmin ? `<span style="font-size:8.5px; padding:1px 5px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; white-space:nowrap;">📦 Commande Fabien</span>` : '')
+          // 🚚 date d'expédition (2026-07-13) : la ligne fusionnée porte la plus proche de la série
+          + ((_allAdmin && _fuseExpDates.length > 0) ? _badgeExpeditionDate(_fuseExpDates[0]) : ''),
         profShort: '', profColor: '',
         formatBadge: { bg: '#0ea5e920', text: '#7dd3fc' },
         formatLabel: u.blocks.length + ' formats',
@@ -19221,7 +19294,7 @@ function renderDashboard() {
       // boutiques NE recommandent PAS (sinon doublon). On le garde visible dans "À anticiper"
       // mais avec ce repère clair plutôt que de le masquer.
       const _cmdAdminBadge = (a.type === 'RENTRER' && a.commandeAdmin === true)
-        ? ` <span style="font-size:9px; padding:0 5px; background:#7c3aed22; color:#c4b5fd; border:1px solid #a78bfa70; border-radius:3px; font-weight:700; white-space:nowrap;" title="Fabien passe la commande — réception + saisie seulement, NE PAS commander">📦 Commande Fabien — ne pas commander</span>`
+        ? ` <span style="font-size:9px; padding:0 5px; background:#7c3aed22; color:#c4b5fd; border:1px solid #a78bfa70; border-radius:3px; font-weight:700; white-space:nowrap;" title="Fabien passe la commande — réception + saisie seulement, NE PAS commander">📦 Commande Fabien — ne pas commander</span>` + _badgeExpeditionAction(a)
         : (a.type === 'RENTRER' && a.commandeAdmin === undefined)
         ? ` <span style="font-size:9px; padding:0 5px; background:#f59e0b22; color:#fbbf24; border:1px solid #f59e0b60; border-radius:3px; font-weight:700; white-space:nowrap;" title="Qui commande ? Pas encore tranché par Fabien — en attendant, ne PAS commander">❓ qui commande ?</span>`
         : '';
@@ -21034,14 +21107,11 @@ function setOpViewMode(v) {
 function opToggleProduitMode(mode) {
   const kitRow = document.getElementById('opKitRow');
   const libreRow = document.getElementById('opLibreRow');
+  const declRow = document.getElementById('opDeclinaisonRow');
   if (!kitRow || !libreRow) return;
-  if (mode === 'libre') {
-    kitRow.style.display = 'none';
-    libreRow.style.display = 'grid';
-  } else {
-    kitRow.style.display = 'grid';
-    libreRow.style.display = 'none';
-  }
+  kitRow.style.display = mode === 'libre' || mode === 'declinaison' ? 'none' : 'grid';
+  libreRow.style.display = mode === 'libre' ? 'grid' : 'none';
+  if (declRow) declRow.style.display = mode === 'declinaison' ? 'grid' : 'none';
 }
 
 // Affiche les lignes campagne (info existante / nouvelle) SANS prompt — utilisé par la
@@ -21181,6 +21251,17 @@ function submitNewOp() {
     const libelle = (document.getElementById('opLibreLibelle').value || '').trim();
     if (!libelle) { pvAlert('Libellé du produit libre requis'); return; }
     produitLibre = { famille: famille || 'autre', libelle };
+  } else if (mode === 'declinaison') {
+    // 🎨 Déclinaison temporaire d'un produit EN BASE (2026-07-13) : coloris, édition limitée…
+    // Pas de nouveau kit — un produit libre étiqueté au nom du produit + le lien declinaisonDe
+    // (informative : si le produit de base sort un jour, le libellé reste lisible).
+    const _declProdId = document.getElementById('opDeclinaisonProduit').value;
+    const _declTxt = (document.getElementById('opDeclinaisonLibelle').value || '').trim();
+    if (!_declProdId) { pvAlert('Choisis le produit de la base qui se décline.'); return; }
+    if (!_declTxt) { pvAlert('Décris la déclinaison (ex : 2 nouveaux coloris été — Sky Blue & Mint).'); return; }
+    const _declProd = baseKits.find(k => k.id === _declProdId) || basePD.find(p => p.id === _declProdId);
+    const _declProdLbl = _declProd ? (((_declProd.marque || '') + ' ' + (_declProd.modele || '')).trim()) : _declProdId;
+    produitLibre = { famille: 'declinaison', libelle: _declProdLbl + ' — ' + _declTxt, declinaisonDe: _declProdId };
   } else {
     const kitId = document.getElementById('opKit').value;
     if (!kitId) { pvAlert('Produit de la base requis (ou basculer en "produit libre")'); return; }
@@ -21217,12 +21298,15 @@ function submitNewOp() {
   // boutiques commandent. Pas de choix (types sans à-rentrer) → champ absent (= à trancher).
   if (_quiCmd) newOp.commandeAdmin = (_quiCmd === 'admin');
   if (paCommande !== undefined) newOp.paCommande = paCommande;
+  // Déclinaison (2026-07-13) : c'est une marchandise à commander/recevoir → les étapes
+  // « commandé / reçu » par boutique sont activées d'office (décochable via ✎ Éditer).
+  if (mode === 'declinaison') newOp.prep = { commanderProduits: true };
   seedOpDefaults(newOp);
   ensureOpSteps(newOp);
   pushOpTraced(newOp, 'submitNewOp');
   logAction('Nouvelle OP', (OP_TYPE_META[type] || {}).label + ' — ' + (produitLibre ? produitLibre.libelle : _logProdName(produitIds[0])));
   // Reset des champs (on garde Type et Campagne pour enchaîner les vagues d'une même campagne)
-  ['opKit','opDateFin','opComment','opLibreLibelle','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment','opMecaType','opMecaDescription','opPartenaire','opPaCommande'].forEach(id => {
+  ['opKit','opDateFin','opComment','opLibreLibelle','opDeclinaisonProduit','opDeclinaisonLibelle','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment','opMecaType','opMecaDescription','opPartenaire','opPaCommande'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   document.querySelectorAll('input[name="opQuiCommande"]').forEach(r => { r.checked = false; });
@@ -22072,7 +22156,7 @@ function duplicateOp(id) {
 }
 
 // Champs du formulaire "Nouvelle OP manuelle" à préserver à travers les re-renders.
-const _OP_FORM_FIELDS = ['opType','opKit','opLibreFamille','opLibreLibelle','opDateDebut','opDateFin','opMecaType','opMecaDescription','opPartenaire','opPaCommande','opComment','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment'];
+const _OP_FORM_FIELDS = ['opType','opKit','opLibreFamille','opLibreLibelle','opDeclinaisonProduit','opDeclinaisonLibelle','opDateDebut','opDateFin','opMecaType','opMecaDescription','opPartenaire','opPaCommande','opComment','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment'];
 
 function renderOps() {
   const container = document.getElementById('opsContent');
@@ -22098,7 +22182,13 @@ function renderOps() {
   const kitOptions = kits.map(k => `<option value="${k.id}">${k.marque} — ${k.modele}</option>`).join('');
 
   const typeOptions = OP_TYPES.filter(t => !t.auto).map(t => `<option value="${t.key}">${t.label}</option>`).join('');
-  const familleOptions = PRODUIT_LIBRE_FAMILLES.map(f => `<option value="${f.key}">${f.icon} ${f.label}</option>`).join('');
+  // 'declinaison' a son propre mode produit (radio dédiée) — exclu du select libre pour éviter la confusion.
+  const familleOptions = PRODUIT_LIBRE_FAMILLES.filter(f => f.key !== 'declinaison').map(f => `<option value="${f.key}">${f.icon} ${f.label}</option>`).join('');
+  // Produits déclinables (2026-07-13) : kits + pièces détachées en vie (coloris, édition limitée…)
+  const _declPdList = basePD.filter(p => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(p.statutVie))
+    .sort((a, b) => ((a.marque || '') + (a.modele || '')).localeCompare((b.marque || '') + (b.modele || '')));
+  const declProduitOptions = `<optgroup label="Kits">${kits.map(k => `<option value="${k.id}">${k.marque} — ${k.modele}</option>`).join('')}</optgroup>`
+    + (_declPdList.length ? `<optgroup label="Pièces détachées">${_declPdList.map(p => `<option value="${p.id}">${(p.marque || '')} — ${(p.modele || '')}</option>`).join('')}</optgroup>` : '');
   // Options campagnes : — aucune —, campagnes actives triées, + nouvelle (terminées masquées)
   const campagneOptions = campagnes
     .filter(c => !isCampagneTerminee(c))
@@ -22178,7 +22268,10 @@ function renderOps() {
       <label style="cursor:pointer; display:flex; align-items:center; gap:5px;">
         <input type="radio" name="opProduitMode" value="libre" onclick="opToggleProduitMode('libre')"> Produit libre (liquide, accessoire, consommable…)
       </label>
-      <span style="margin-left:auto; font-size:9.5px; color:#64748b; font-style:italic;">Produit libre : ni cascade kit, ni historique prix — juste PLV + pilotage dates.</span>
+      <label style="cursor:pointer; display:flex; align-items:center; gap:5px;">
+        <input type="radio" name="opProduitMode" value="declinaison" onclick="opToggleProduitMode('declinaison')"> 🎨 Déclinaison d'un produit en base (coloris, édition…)
+      </label>
+      <span style="margin-left:auto; font-size:9.5px; color:#64748b; font-style:italic;">Libre / déclinaison : ni cascade kit, ni historique prix — juste PLV + pilotage dates.</span>
     </div>
 
     <!-- Ligne 3a : sélecteur kit -->
@@ -22194,6 +22287,15 @@ function renderOps() {
         ${familleOptions}
       </select>
       <input type="text" id="opLibreLibelle" placeholder="Libellé (ex: Pod Hello, Liquides A&L Ultimate, Étui individuel…)" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:4px; font-size:12px;">
+    </div>
+    <!-- Ligne 3c : déclinaison d'un produit en base (2026-07-13, demande Fabien : nouveauté
+         temporaire type coloris SANS créer de kit — le produit de base sert de rattachement) -->
+    <div id="opDeclinaisonRow" style="display:none; grid-template-columns: 1fr 2fr; gap:8px; margin-bottom:8px;">
+      <select id="opDeclinaisonProduit" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #ec489960; border-radius:4px; font-size:12px;">
+        <option value="">— Produit décliné —</option>
+        ${declProduitOptions}
+      </select>
+      <input type="text" id="opDeclinaisonLibelle" placeholder="Déclinaison (ex : 2 nouveaux coloris été — Sky Blue & Mint)" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #ec489960; border-radius:4px; font-size:12px;">
     </div>
 
     <!-- Ligne 4 : mécanique + description + partenaire -->
