@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 16:35</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 16:56</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4541,7 +4541,11 @@ function syncAutoActions() {
     // NB : une dateFin PLANIFIÉE ne veut pas dire close — on passe par le statut temporel canonique.
     if (op._archived || op.annulee || _deletedIds.has(op.id)) return;
     if (typeof opTimeStatus === 'function' && opTimeStatus(op) === 'TERMINEE') return;
-    if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return;
+    // Généralisation 2026-07-13 : plus seulement Nouveauté/Exclu — TOUT type d'OP hors base
+    // dont les produits sont à commander (prep.commanderProduits) a sa ligne À rentrer
+    // (ex : Liquide du moment sur un accessoire libre).
+    const _cmdable = (op.type === 'NOUVEAUTE' || op.type === 'EXCLU') || !!(op.prep && op.prep.commanderProduits === true);
+    if (!_cmdable) return;
     if (!op.produitLibre || !op.produitLibre.libelle) return;
     if ((op.produitIds || []).length > 0) return;
     if (op.rentrerActionId && actions.some(a => a.id === op.rentrerActionId && !a.annulee)) return;
@@ -4580,15 +4584,17 @@ function syncAutoActions() {
     }
   });
 
-  // Et l'inverse : OP hors base terminée/archivée/supprimée → sa ligne À rentrer se referme.
+  // Et l'inverse : OP hors base terminée/archivée/supprimée — ou commande décochée pour un
+  // type non-fanfare (généralisation 2026-07-13) → sa ligne À rentrer se referme.
   actions.forEach(a => {
     if (a.produitType !== 'op' || a.type !== 'RENTRER' || a.annulee || !a.horsBaseLabel) return;
     const _op = ops.find(o => o.id === a.opId);
     const _morte = !_op || _op._archived || _op.annulee || _deletedIds.has(_op.id)
-      || (typeof opTimeStatus === 'function' && opTimeStatus(_op) === 'TERMINEE');
+      || (typeof opTimeStatus === 'function' && opTimeStatus(_op) === 'TERMINEE')
+      || (_op.type !== 'NOUVEAUTE' && _op.type !== 'EXCLU' && !(_op.prep && _op.prep.commanderProduits === true));
     if (_morte) {
       _cancelAction(a);
-      console.log('[SYNC] Ligne À rentrer hors base refermée (OP close/absente)', a.id);
+      console.log('[SYNC] Ligne À rentrer hors base refermée (OP close/absente/commande décochée)', a.id);
     }
   });
 
@@ -5724,6 +5730,22 @@ function setRentrerFanfare(actionId, opType) {
 // ── Choix « qui commande » à la création d'une OP Nouveauté (2026-07-13) ──
 // Liaison matrice évt 1 : la variante A/B doit être tranchée, sinon l'étape commande
 // reste ❓ et verrouillée côté boutique. On pose la question dans le même geste.
+// Choix « qui réceptionne » à la création d'une OP Nouveauté (généralisation 2026-07-13 :
+// le formulaire OP posait la question, le flux « Retenu » non). Deux temps pour rester
+// sûr au clavier (Échap/clic-dehors = dernier bouton de _pvModal = toujours l'option sans
+// effet). Retourne un shop (hub) ou null (chaque boutique reçoit — défaut).
+async function _pvPromptQuiRecoit(label) {
+  const veutHub = await pvConfirm('Qui réceptionne ' + label + ' ?\n\n🏪 Chaque boutique reçoit sa part (défaut).\n📦 Hub : tout arrive à UNE boutique, tu dispatches (transferts créés automatiquement).',
+    { title: '📦 Réception', ok: '📦 Un hub', cancel: '🏪 Chaque boutique', okColor: '#06b6d4' });
+  if (!veutHub) return null;
+  return new Promise(resolve => {
+    _pvModal('<div style="color:#38bdf8; font-weight:700; font-size:14px; margin-bottom:8px;">Quel hub ?</div>Tout arrive à cette boutique ; Fabien dispatche vers les autres.',
+      SHOPS.map(sh => ({ label: '📦 ' + (SHOP_LABELS[sh] || sh) })).concat([{ label: 'Annuler (chaque boutique)' }]),
+      idx => resolve(idx >= 0 && idx < SHOPS.length ? SHOPS[idx] : null)
+    );
+  });
+}
+
 function _pvPromptQuiCommande(label) {
   return new Promise(resolve => {
     _pvModal('<div style="color:#a78bfa; font-weight:700; font-size:14px; margin-bottom:8px;">Qui commande ' + label + ' ?</div>📦 Fabien : les boutiques ne commandent pas (étape verrouillée chez elles).\n🏪 Boutiques : chaque boutique passe sa commande.',
@@ -5860,10 +5882,26 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label, p
   }
   if (qui) {
     setRentrerCommandeAdmin(a.id, qui); // pose action + OP + descente parfums (save + render inclus)
-  } else {
-    try { renderDashboard(); } catch(e) {}
-    try { if (typeof renderOps === 'function') renderOps(); } catch(e) {}
   }
+  // Qui réceptionne ? (généralisation 2026-07-13) — posé seulement si Fabien commande
+  // (c'est le cas où la réception centralisée a un sens). Série multi-format : le hub du
+  // format déjà lancé est réutilisé sans re-demander.
+  if (qui === 'admin') {
+    let hub = null, hubDecide = false;
+    if (siblingOp && siblingOp.rentrerActionId) {
+      const _sibA = actions.find(x => x.id === siblingOp.rentrerActionId && !x.annulee);
+      if (_sibA && 'dispatchHub' in _sibA) { hub = _sibA.dispatchHub || null; hubDecide = true; }
+    }
+    if (!hubDecide) hub = await _pvPromptQuiRecoit('« ' + label + ' »');
+    if (hub) {
+      _appliquerDispatchHubAction(a, hub); // champ + rétros + log (cœur canonique)
+      newOp.dispatchProduit = hub;          // hub OP aligné sur le hub action (cohérence)
+      newOp._ts = new Date().toISOString();
+      saveData();
+    }
+  }
+  try { renderDashboard(); } catch(e) {}
+  try { if (typeof renderOps === 'function') renderOps(); } catch(e) {}
 }
 
 // Promotion générique : crée une OP d'un type donné liée à une action du dashboard.
@@ -7396,6 +7434,32 @@ function creerPaireRetro(opts) {
 // dispatcher — une étape de plus dans les processus existants"). La décision se prend SUR la
 // ligne À rentrer (règle 6) : choisir la boutique hub crée les rétrocessions hub → autres
 // boutiques, liées par retroRentrerActionId. Annuler le choix annule les rétros non entamées.
+// Cœur NON-INTERACTIF de la réception centralisée d'une action RENTRER (extrait de
+// setDispatchHub le 2026-07-13, règle 8) : annule les rétros d'un ancien hub, pose le champ,
+// crée les paires de transfert. Partagé par setDispatchHub (avec confirmation) et le flux
+// « OP Nouveauté au Retenu » (où le choix du prompt EST la confirmation).
+function _appliquerDispatchHubAction(a, hub) {
+  if (!a || a.type !== 'RENTRER' || !hub) return;
+  const nowIso = new Date().toISOString();
+  actions.filter(x => x.retroRentrerActionId === a.id && !x.annulee).forEach(x => _cancelAction(x));
+  a.dispatchHub = hub;
+  a._ts = nowIso; a._adminTs = nowIso;
+  const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
+    : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
+    : baseKits.find(k => k.id === a.produitId);
+  const nom = prod ? ((prod.marque || '') + ' ' + (prod.modele || prod.gamme || '')) : (a.horsBaseLabel || a.produitId);
+  let _pfNom = null;
+  if (a.produitParfumId && prod && Array.isArray(prod.parfums)) {
+    const pf = prod.parfums.find(x => x.id === a.produitParfumId);
+    _pfNom = pf ? (pf.n || null) : (a._parfumNom || null);
+  }
+  SHOPS.forEach(sh => {
+    if (sh === hub) return;
+    creerPaireRetro({ produitType: a.produitType || 'kit', produitId: a.produitId, parfumId: a.produitParfumId || null, parfumNom: _pfNom, from: hub, to: sh, qte: null, date: null, rentrerActionId: a.id, retroLabel: a.horsBaseLabel || undefined });
+  });
+  logAction('Réception centralisée', nom + ' → hub ' + (SHOP_LABELS[hub] || hub) + ', rétrocessions créées vers ' + SHOPS.filter(s => s !== hub).map(s => SHOP_LABELS[s] || s).join(' et '));
+}
+
 async function setDispatchHub(actionId, hub) {
   if (!isAdmin()) { pvAlert('La réception centralisée est décidée par Fabien.'); return; }
   const a = actions.find(x => x.id === actionId);
@@ -7424,20 +7488,8 @@ async function setDispatchHub(actionId, hub) {
   const nom = prod ? ((prod.marque || '') + ' ' + (prod.modele || prod.gamme || '')) : a.produitId;
   const ok = await pvConfirm('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' pour « ' + nom + ' » ?\n\n' + (SHOP_LABELS[hub] || hub) + ' reçoit TOUT le stock, prépare les lots et fait les rétrocessions Swappy ; Fabien transporte ; les autres boutiques reçoivent leur lot et vérifient leur stock. Le suivi des transferts apparaît dans la section 🔁 Rétrocessions.', { title: '📦 Réception centralisée', ok: 'Lancer', okColor: '#06b6d4' });
   if (!ok) return;
-  // Annuler les éventuelles rétros d'un ancien hub avant de recréer
-  _linked().forEach(x => _cancelAction(x));
-  a.dispatchHub = hub;
-  a._ts = nowIso; a._adminTs = nowIso;
-  let _pfNom = null;
-  if (a.produitParfumId && prod && Array.isArray(prod.parfums)) {
-    const pf = prod.parfums.find(x => x.id === a.produitParfumId);
-    _pfNom = pf ? (pf.n || null) : (a._parfumNom || null);
-  }
-  SHOPS.forEach(sh => {
-    if (sh === hub) return;
-    creerPaireRetro({ produitType: a.produitType || 'kit', produitId: a.produitId, parfumId: a.produitParfumId || null, parfumNom: _pfNom, from: hub, to: sh, qte: null, date: null, rentrerActionId: a.id });
-  });
-  logAction('Réception centralisée', nom + ' → hub ' + (SHOP_LABELS[hub] || hub) + ', rétrocessions créées vers ' + SHOPS.filter(s => s !== hub).map(s => SHOP_LABELS[s] || s).join(' et '));
+  // Cœur factorisé (2026-07-13) : annulation des anciennes rétros + champ + paires + log.
+  _appliquerDispatchHubAction(a, hub);
   saveData();
   try { renderDashboard(); } catch(e) {}
   pvAlert('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' activée.\nLes transferts vers les autres boutiques sont créés (section 🔁 Rétrocessions).');
@@ -15952,8 +16004,12 @@ function _semNbRestants(g) {
 // Dashboard filtré sur elle (isVisible : masquée seulement si la boutique a coché done).
 // Corrigé 2026-07-07 : « 50 à sortir à Pessac » ici vs « 31 » au Dashboard — même unité désormais.
 function _semShopsRestants(g) {
+  // CHANTIER COMPTEURS HONNÊTES (2026-07-13 — reste du chantier 1 du 09/07, backlog n°2) :
+  // un shop ne « reste » que s'il a du travail IMMÉDIAT (actionResteBoutique canonique —
+  // hors étapes admin, hors attentes ⏳/📦). Avant : tout shop non-done comptait, y compris
+  // « attend la livraison » — le récap gonflait la charge avec des attentes.
   const r = { pessac: 0, merignac: 0, langon: 0 };
-  g.acts.forEach(a => { SHOPS.forEach(sh => { const st = a.etats && a.etats[sh]; if (!(st && st.done)) r[sh]++; }); });
+  g.acts.forEach(a => { SHOPS.forEach(sh => { if (actionResteBoutique(a, sh) > 0) r[sh]++; }); });
   return r;
 }
 // Réplique de la règle one-shot du Dashboard (isVisible / _oneShotSortirAvantReception) :
@@ -22719,7 +22775,12 @@ function renderOps() {
     const fmts = gs.map(x => LIQ_FORMAT_LABELS[x.format] || x.format).join(' · ');
     return `<option value="LIQGRP:${key.replace(/"/g, '&quot;')}">${gs[0].marque} — ${gs[0].gamme} (${fmts})</option>`;
   }).join('');
-  const produitBaseOptions = `<optgroup label="🔧 Kits">${kitOptions}</optgroup><optgroup label="💧 Liquides (par gamme — tous formats)">${liqGrpOptions}</optgroup>`;
+  // Pièces détachées au sélecteur (généralisation 2026-07-13 — avant : passage obligé par
+  // « produit libre » alors que la réf existe en base).
+  const _pdBase = basePD.filter(p => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(p.statutVie))
+    .sort((a, b) => ((a.marque || '') + (a.modele || '')).localeCompare((b.marque || '') + (b.modele || '')));
+  const pdBaseOptions = _pdBase.map(p => `<option value="${p.id}">${(p.marque || '')} — ${(p.modele || '')}</option>`).join('');
+  const produitBaseOptions = `<optgroup label="🔧 Kits">${kitOptions}</optgroup><optgroup label="💧 Liquides (par gamme — tous formats)">${liqGrpOptions}</optgroup>` + (pdBaseOptions ? `<optgroup label="🔩 Pièces détachées">${pdBaseOptions}</optgroup>` : '');
 
   const typeOptions = OP_TYPES.filter(t => !t.auto).map(t => `<option value="${t.key}">${t.label}</option>`).join('');
   // 'declinaison' a son propre mode produit (radio dédiée) — exclu du select libre pour éviter la confusion.
@@ -24475,6 +24536,7 @@ function _renderOpCardHtmlInner(op, options) {
       ${(() => { const d = getOpProductDisplay(op); const famBadge = (!d.isKit && d.famille) ? `<span style="font-size:9px; padding:1px 5px; background:${d.color}25; color:${d.color}; border:1px solid ${d.color}60; border-radius:3px; font-weight:600; margin-right:4px;" title="Produit libre — ${d.famille.label}">${d.icon} ${d.famille.label}</span>` : ''; const pdBadge = d.isPd ? `<span style="font-size:9px; padding:1px 6px; background:#06b6d422; color:#22d3ee; border:1px solid #06b6d450; border-radius:3px; font-weight:600; margin-right:4px;">🔩 PD</span>` : ''; return `${famBadge}${pdBadge}<span style="font-size:12px; color:${d.color}; font-weight:700;">${d.label}</span>`; })()}
       ${(() => { const nom = getCampagneLabel(op.campagneId); if (!nom) return ''; const w = getCampagneWindow(op.campagneId); const out = isOpOutsideCampagne(op); const wLbl = w ? ` (${fmtFR(w.dateDebut) || '?'} → ${fmtFR(w.dateFin) || '?'})` : ''; const warn = out.outside ? `<span style="font-size:9px; padding:1px 5px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-weight:700;" title="Hors fenêtre campagne : ${out.reason}">⚠</span>` : ''; return `<span style="font-size:9px; padding:1px 6px; background:#f59e0b25; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; font-weight:600;" title="Campagne${wLbl}">📣 ${nom}</span>${warn}`; })()}
       ${linkedInfo}
+      ${(op.commandeAdmin === true && op.expeditionDate) ? _badgeExpeditionDate(op.expeditionDate) : ''}
       <span style="margin-left:auto; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
         <span style="display:flex; gap:3px;">${shopDots}</span>
         ${timeBadge} ${dateLine} ${actionBtns}
@@ -25119,6 +25181,9 @@ function setOpCommanderProduits(opId, checked) {
     var _ra2 = actions.find(function(x) { return x.id === op.rentrerActionId; });
     if (_ra2) syncActionStepsToOp(_ra2);
   }
+  // Généralisation 2026-07-13 : produit HORS BASE → la ligne À rentrer suit la case
+  // « Produits à commander » (création/fermeture par la passe idempotente de syncAutoActions).
+  try { syncAutoActions(); } catch (e) {}
   saveData(); renderDashboard(); renderOps && renderOps();
 }
 
