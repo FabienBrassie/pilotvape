@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 15:38</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 15:53</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2752,6 +2752,8 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
       const byKey = sibDefs.find(d => d.key === stepKey);
       if (byKey) {
         sib.progress.global[stepKey] = !!checked;
+        // Chantier synchro 2026-07-13 : la propagation n'est plus INVISIBLE — tracée au journal.
+        logAction('Étape globale propagée (campagne)', (checked ? '✓' : '✕') + ' ' + _logStepLabel(stepKey, sib) + ' sur ' + _logOpLabel(sib.id) + ' (depuis ' + _logOpLabel(op.id) + ')');
         return;
       }
       // Match par label (même pièce type/source mais ID différent)
@@ -2759,6 +2761,7 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
         const byLabel = sibDefs.find(d => d.label === srcLabel);
         if (byLabel) {
           sib.progress.global[byLabel.key] = !!checked;
+          logAction('Étape globale propagée (campagne)', (checked ? '✓' : '✕') + ' « ' + srcLabel + ' » sur ' + _logOpLabel(sib.id) + ' (depuis ' + _logOpLabel(op.id) + ', correspondance par libellé)');
         }
       }
     });
@@ -5916,45 +5919,78 @@ function _opActionStepMirror(a, op) {
 
 // ── Sync bidirectionnel one-shot : action ↔ OP avec respect des timestamps ──
 // Appelé par ensureOneShotOp / ensureOneShotOpLiq pour les OPs EXISTANTES.
-// Contrairement à syncActionStepsToOp (qui écrase inconditionnellement OP ← action),
-// cette fonction compare les _stepTs des deux côtés et garde la valeur la plus récente.
-// Cela empêche les coches posées côté OP d'être effacées par des steps action stale.
-function _syncOneShotStepsBidi(op, aRentrer, aSortir) {
-  [aRentrer, aSortir].forEach(a => {
-    if (!a) return;
-    ensureActionSteps(a);
-    const m = _opActionStepMirror(a, op);
-    if (!m) return;
-    SHOPS.forEach(sh => {
-      const ast = a.etats && a.etats[sh];
-      const ost = op.etats && op.etats[sh];
-      if (!ast || !ast.steps || !ost || !ost.steps) return;
-      Object.entries(m.a_to_o).forEach(([ak, ok]) => {
-        if (typeof ast.steps[ak] !== 'boolean' || typeof ost.steps[ok] !== 'boolean') return;
-        const aTs = (ast._stepTs && ast._stepTs[ak]) || '';
-        const oTs = (ost._stepTs && ost._stepTs[ok]) || '';
-        if (aTs > oTs) {
-          // Action plus récente → copier vers OP
-          ost.steps[ok] = ast.steps[ak];
-          if (!ost._stepTs) ost._stepTs = {};
-          ost._stepTs[ok] = aTs;
-        } else if (oTs > aTs) {
-          // OP plus récente → copier vers action
-          ast.steps[ak] = ost.steps[ok];
-          if (!ast._stepTs) ast._stepTs = {};
-          ast._stepTs[ak] = oTs;
-        }
-        // Si égaux (ou les deux vides) → on ne touche à rien
-      });
-      // Recalculer done des deux côtés
+// ══════════════════════════════════════════════════════════════════════════════
+// LE MÉCANISME UNIQUE DE SYNCHRO DE COCHE ACTION ↔ OP — chantier du 2026-07-13
+// (étape 5 du chemin structurel de l'AUDIT_LIAISONS_2026-07-09, actée par Fabien).
+// Avant : 4 mécanismes concurrents (recopie écrasante action→OP, recopie écrasante
+// OP→action, bidirectionnel horodaté réservé aux one-shot, lecture dynamique) qui
+// devaient rester d'accord entre eux à la main. Désormais TOUTE écriture de miroir
+// passe ici ; les deux fonctions sync* historiques gardent leur résolution de liens
+// (quelles OPs pour cette action, quelles actions pour cette OP) et DÉLÈGUENT.
+// La lecture dynamique (_getOpStepChecked) reste : c'est une lecture, pas une copie.
+// Règles :
+//  • pour chaque étape miroir (_opActionStepMirror), la coche la plus RÉCENTE (_stepTs)
+//    gagne — dans les deux sens, plus jamais d'écrasement par une valeur périmée ;
+//  • timestamps égaux (données historiques non horodatées) avec valeurs différentes →
+//    OU logique : aucun travail coché n'est jamais perdu (même règle que la migration
+//    de chargement PRIX_ROUGE) ;
+//  • quand le côté ACTION change, la cascade normale s'applique (_applyActionShopChange) :
+//    une coche posée sur la carte OP a EXACTEMENT les mêmes effets qu'une coche dashboard
+//    (statutVie, réouvertures D2, timestamps) — avant, la cascade ne partait que du dashboard.
+function _syncCocheBidi(a, op) {
+  if (!a || !op) return false;
+  ensureActionSteps(a);
+  ensureOpSteps(op);
+  const m = _opActionStepMirror(a, op);
+  if (!m) return false;
+  let changedAny = false;
+  SHOPS.forEach(sh => {
+    const ast = a.etats && a.etats[sh];
+    const ost = op.etats && op.etats[sh];
+    if (!ast || !ast.steps || !ost || !ost.steps) return;
+    let aChanged = false, oChanged = false;
+    Object.entries(m.a_to_o).forEach(([ak, ok]) => {
+      if (typeof ast.steps[ak] !== 'boolean' || typeof ost.steps[ok] !== 'boolean') return;
+      if (ast.steps[ak] === ost.steps[ok]) return; // déjà d'accord — rien à faire
+      const aTs = (ast._stepTs && ast._stepTs[ak]) || '';
+      const oTs = (ost._stepTs && ost._stepTs[ok]) || '';
+      if (aTs > oTs) {
+        // Action plus récente → OP s'aligne
+        ost.steps[ok] = ast.steps[ak];
+        if (!ost._stepTs) ost._stepTs = {};
+        ost._stepTs[ok] = aTs;
+        oChanged = true;
+      } else if (oTs > aTs) {
+        // OP plus récente → action s'aligne
+        ast.steps[ak] = ost.steps[ok];
+        if (!ast._stepTs) ast._stepTs = {};
+        ast._stepTs[ak] = oTs;
+        aChanged = true;
+      } else {
+        // Égalité (souvent : aucun horodatage des deux côtés) et désaccord → OU logique
+        ast.steps[ak] = true;
+        ost.steps[ok] = true;
+        aChanged = true; oChanged = true;
+      }
+    });
+    if (oChanged) {
       ost.done = opAllStepsDone(op, sh);
       if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
       if (!ost.done) ost.dateFait = null;
-      ast.done = allStepsDone(a, sh);
-      if (ast.done && !ast.dateFait) ast.dateFait = ymd(new Date());
-      if (!ast.done) ast.dateFait = null;
-    });
+    }
+    if (aChanged) {
+      // done/dateFait + cascades statutVie + passeport de réouverture — même chemin
+      // que le dashboard (fonction canonique, pas de recalcul local divergent).
+      _applyActionShopChange(a, sh);
+    }
+    if (aChanged || oChanged) changedAny = true;
   });
+  return changedAny;
+}
+
+// Wrapper historique conservé pour ses 3 sites d'appel one-shot — délègue au mécanisme unique.
+function _syncOneShotStepsBidi(op, aRentrer, aSortir) {
+  [aRentrer, aSortir].forEach(a => { if (a) _syncCocheBidi(a, op); });
 }
 
 // 2026-05-28 audit OP : helper pour vérifier qu'une OP est bien compatible avec un parfum d'action.
@@ -5974,8 +6010,11 @@ function _opMatchesActionParfum(op, action) {
   return false;
 }
 
-// Recopie l'état des sous-étapes de l'action → OP liée (PRIX_ROUGE auto OU COUP).
-// Appelé après toggleActionStep pour qu'un clic côté Dashboard se reflète côté OP.
+// RÉSOLUTION DES LIENS action → OP(s) puis délégation au mécanisme unique _syncCocheBidi
+// (chantier 2026-07-13 — plus aucune recopie écrasante ici). Appelé après toggleActionStep
+// pour qu'un clic côté Dashboard se reflète côté OP. La valeur ajoutée conservée de cette
+// fonction : trouver les OPs liées (PRIX_ROUGE auto, COUP, fanfare, non-COUP commanderProduits)
+// et RÉPARER les liens manquants (rentrerActionId/sortirActionId désynchronisés).
 function syncActionStepsToOp(a) {
   if (!a) return;
   // Collecte toutes les OPs liées à l'action (peut être PRIX_ROUGE auto, COUP, etc.)
@@ -6047,36 +6086,17 @@ function syncActionStepsToOp(a) {
       });
       return; // pas de miroir 1:1 pour les fanfares
     }
-    // ── Cas normal : miroir 1:1 ──
-    const m = _opActionStepMirror(a, op);
-    if (!m) return;
-    SHOPS.forEach(sh => {
-      const ast = a.etats && a.etats[sh];
-      const ost = op.etats && op.etats[sh];
-      if (!ast || !ast.steps || !ost || !ost.steps) return;
-      Object.entries(m.a_to_o).forEach(([ak, ok]) => {
-        if (typeof ast.steps[ak] === 'boolean' && typeof ost.steps[ok] === 'boolean') {
-          ost.steps[ok] = ast.steps[ak];
-          // Ne propager le timestamp QUE s'il existe côté source. PAS de fallback
-          // new Date() ici : sinon on horodate "maintenant" un miroir au chargement,
-          // ce qui battrait ensuite à tort une vraie coche admin sans timestamp.
-          if (ast._stepTs && ast._stepTs[ak]) {
-            if (!ost._stepTs) ost._stepTs = {};
-            ost._stepTs[ok] = ast._stepTs[ak];
-          }
-        }
-      });
-      ost.done = opAllStepsDone(op, sh);
-      if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
-      if (!ost.done) ost.dateFait = null;
-    });
+    // ── Cas normal : miroir via LE mécanisme unique (chantier 2026-07-13) ──
+    // Avant : recopie écrasante action→OP qui pouvait effacer une coche OP plus récente.
+    _syncCocheBidi(a, op);
   });
 }
 
-// Recopie l'état des sous-étapes de l'OP → action(s) liée(s). Appelé après toggleOpStep
+// RÉSOLUTION DES LIENS OP → action(s) puis délégation au mécanisme unique _syncCocheBidi
+// (chantier 2026-07-13 — plus aucune recopie écrasante ici). Appelé après toggleOpStep
 // pour qu'un clic côté OP se reflète côté Dashboard. Gère PRIX_ROUGE auto, COUP
-// (qui miroite vers 2 actions : RENTRER + SORTIR), et non-COUP avec commanderProduits
-// (qui miroite « Produit commandé / reçu » ↔ RENTRER « Commandé / En stock »).
+// (2 actions : RENTRER + SORTIR), et non-COUP avec commanderProduits, en réparant les
+// liens manquants au passage.
 function syncOpStepsToAction(op) {
   if (!op) return;
   const targets = [];
@@ -6126,27 +6146,10 @@ function syncOpStepsToAction(op) {
     }
   }
   targets.forEach(a => {
-    ensureActionSteps(a);
-    const m = _opActionStepMirror(a, op);
-    if (!m) return;
-    SHOPS.forEach(sh => {
-      const ast = a.etats && a.etats[sh];
-      const ost = op.etats && op.etats[sh];
-      if (!ast || !ast.steps || !ost || !ost.steps) return;
-      Object.entries(m.o_to_a).forEach(([ok, ak]) => {
-        if (typeof ost.steps[ok] === 'boolean' && typeof ast.steps[ak] === 'boolean') {
-          ast.steps[ak] = ost.steps[ok];
-          // Ne propager le timestamp QUE s'il existe côté source (cf. syncActionStepsToOp).
-          if (ost._stepTs && ost._stepTs[ok]) {
-            if (!ast._stepTs) ast._stepTs = {};
-            ast._stepTs[ak] = ost._stepTs[ok];
-          }
-        }
-      });
-      ast.done = allStepsDone(a, sh);
-      if (ast.done && !ast.dateFait) ast.dateFait = ymd(new Date());
-      if (!ast.done) ast.dateFait = null;
-    });
+    // Miroir via LE mécanisme unique (chantier 2026-07-13). Avant : recopie écrasante
+    // OP→action, sans cascade — une coche posée côté OP ne déclenchait ni statutVie ni
+    // réouverture. Désormais même chemin que le dashboard (_applyActionShopChange inclus).
+    _syncCocheBidi(a, op);
   });
 }
 
