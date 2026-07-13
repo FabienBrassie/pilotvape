@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 17:21</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 18:07</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4630,6 +4630,16 @@ function syncAutoActions() {
     ensureOpSteps(op);
     console.log('[SYNC] Ligne À rentrer créée pour OP hors base', op.id, '→', _rentA.id);
   });
+  // ── Reprises à zéro (2026-07-13) : répare l'existant — comptage 0 ⇒ comptage + mis de
+  // côté validés (idempotent, _appliquerZeroReprise sort immédiatement si déjà appliqué).
+  actions.forEach(a => {
+    if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || a.annulee) return;
+    SHOPS.forEach(sh => {
+      const st = a.etats && a.etats[sh];
+      if (st && st.comptageQte === 0) _appliquerZeroReprise(a, sh);
+    });
+  });
+
   // ── Fanfares créées par le FORMULAIRE OP sur un produit EN BASE : lien vivant vers la
   // ligne À rentrer (2026-07-13, retour Fabien : badge « Nouveauté » libre). L'orphan-guard
   // du chargement fait la même réparation, mais seulement au load — ici c'est à chaque sync.
@@ -7096,6 +7106,15 @@ function toggleActionStep(actionId, shop, stepKey) {
   // _adminStepReadOnly côté OP). Le rendu n'a plus de onclick, mais on blinde aussi ici.
   const _defAdm = getActionSteps(a).find(d => d.key === stepKey);
   if (_defAdm && _defAdm.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin()) return;
+  // Reprise à zéro (2026-07-13) : comptage 0 ⇒ comptage & mis_de_cote restent validés
+  // (les décocher n'a pas de sens — corriger le comptage d'abord si c'est une erreur).
+  if (a.motifSortie === 'REPRISE' && (stepKey === 'comptage' || stepKey === 'mis_de_cote')) {
+    const _stZ = a.etats[shop];
+    if (_stZ && _stZ.comptageQte === 0 && _stZ.steps && _stZ.steps[stepKey] === true) {
+      pvAlert('Comptage à zéro ici — rien à mettre de côté. Modifie d\'abord le comptage si c\'est une erreur.');
+      return;
+    }
+  }
   logAction('Mise en place', _logShopName(shop) + ' → ' + _logStepLabel(stepKey, a) + ' sur ' + _logActionLabel(actionId));
   if (!st.steps) st.steps = makeStepMap(a);
   st.steps[stepKey] = !st.steps[stepKey];
@@ -7403,6 +7422,8 @@ function setActionStepQte(actionId, shop, stepKey, value) {
   st._comptageQteTs = new Date().toISOString();
   a._ts = new Date().toISOString();
   logAction('Comptage reprise', _logShopName(shop) + ' → ' + (_v === null ? 'vide' : _v + ' réf.') + ' sur ' + _logActionLabel(actionId));
+  // Zéro compté ⇒ comptage + mis de côté auto-validés (2026-07-13)
+  if (a.motifSortie === 'REPRISE' && _v === 0) { _appliquerZeroReprise(a, shop); try { renderDashboard(); } catch (e) {} }
   saveData();
   // Pas de re-render systématique : le champ reste cohérent en place
 }
@@ -7432,8 +7453,112 @@ function setRepriseComptageParfum(actionId, shop, parfumId, value) {
   const _g = baseLiq.find(l => l.id === a.produitId);
   const _pf = (_g && Array.isArray(_g.parfums)) ? _g.parfums.find(p => p.id === parfumId) : null;
   logAction('Comptage reprise (parfum)', _logShopName(shop) + ' → ' + (_pf ? _pf.n : parfumId) + ' : ' + (_v === null ? 'vide' : _v + ' réf.') + ' sur ' + _logActionLabel(actionId));
+  // Total à zéro (tous parfums saisis à 0) ⇒ comptage + mis de côté auto-validés (2026-07-13)
+  if (st.comptageQte === 0) { _appliquerZeroReprise(a, shop); try { renderDashboard(); } catch (e) {} }
   saveData();
   // Pas de re-render systématique : le champ reste cohérent en place (comme setActionStepQte)
+}
+
+// ── REPRISE À ZÉRO (2026-07-13, demande Fabien) ─────────────────────────────────
+// « Quand une boutique note qu'elle en a zéro, la case mis de côté doit être considérée
+// automatiquement comme cochée » : comptage 0 ⇒ étapes comptage + mis_de_cote validées
+// d'office (avec horodatage — même circuit que les coches normales, synchro OP comprise).
+function _appliquerZeroReprise(a, shop) {
+  if (!a || a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || a.annulee) return;
+  const st = a.etats && a.etats[shop];
+  if (!st || st.comptageQte !== 0) return;
+  if (!st.steps) st.steps = makeStepMap(a);
+  if (st.steps.comptage === true && st.steps.mis_de_cote === true) return; // déjà appliqué
+  const ts = new Date().toISOString();
+  if (!st._stepTs) st._stepTs = {};
+  if (st.steps.comptage !== true) { st.steps.comptage = true; st._stepTs.comptage = ts; }
+  if (st.steps.mis_de_cote !== true) { st.steps.mis_de_cote = true; st._stepTs.mis_de_cote = ts; }
+  a._ts = ts;
+  if (typeof logAction === 'function') logAction('Reprise — zéro compté', _logShopName(shop) + ' : comptage 0 → comptage + « mis de côté » auto-validés sur ' + _logActionLabel(a.id));
+  _applyActionShopChange(a, shop);
+  try { syncActionStepsToOp(a); } catch (e) {}
+}
+
+// « Une case je n'en ai pas court-circuite l'ensemble » : bouton par boutique sur les
+// lignes de reprise — pose comptage 0 (parfums compris) et valide TOUTES les étapes de
+// cette boutique (même mécanique que le court-circuit tiroir / commande client).
+async function repriseRienIci(actionId, shop) {
+  if (!(isAdmin() || (typeof currentShop !== 'undefined' && currentShop === shop))) { pvAlert('Réservé à cette boutique (ou à l\'admin).'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE') return;
+  ensureActionSteps(a);
+  const st = a.etats[shop];
+  if (!st) return;
+  const ok = await pvConfirm((SHOP_LABELS[shop] || shop) + ' n\'a AUCUN exemplaire de cette référence ?\n\nComptage posé à 0 et toutes les étapes de cette boutique validées (réappro coupée, stock à zéro, désactivation, rien à mettre de côté).', { title: '🚫 Je n\'en ai pas', ok: 'Oui, zéro ici', okColor: '#0ea5e9' });
+  if (!ok) return;
+  const ts = new Date().toISOString();
+  st.comptageQte = 0;
+  st._comptageQteTs = ts;
+  // Parfums d'une gamme entière : zéros explicites (sinon la somme resterait « vide »)
+  const _g = a.produitType === 'liq' ? baseLiq.find(l => l.id === a.produitId) : null;
+  if (_g && !a.produitParfumId && Array.isArray(_g.parfums)) {
+    if (!st.comptageParfums) st.comptageParfums = {};
+    if (!st._comptageParfumsTs) st._comptageParfumsTs = {};
+    _g.parfums.filter(p => p.s !== 'SORTI').forEach(p => {
+      if (typeof st.comptageParfums[p.id] !== 'number') { st.comptageParfums[p.id] = 0; st._comptageParfumsTs[p.id] = ts; }
+    });
+  }
+  if (!st.steps) st.steps = makeStepMap(a);
+  if (!st._stepTs) st._stepTs = {};
+  getActionSteps(a).forEach(s => { if (st.steps[s.key] !== true) { st.steps[s.key] = true; st._stepTs[s.key] = ts; } });
+  a._ts = ts;
+  if (typeof logAction === 'function') logAction('Reprise — je n\'en ai pas', _logShopName(shop) + ' : comptage 0, toutes étapes court-circuitées sur ' + _logActionLabel(actionId));
+  _applyActionShopChange(a, shop);
+  try { syncActionStepsToOp(a); } catch (e) {}
+  saveData();
+  try { renderDashboard(); } catch (e) {}
+}
+
+// ── Récap par FORMAT en tête des exports de reprise (2026-07-13, demande Fabien) ──
+// Pour chaque format : nombre de réfs comptées (réf = produit/parfum dont le total compté > 0)
+// et total de flacons/unités. LA fonction unique des deux exports (règle 8).
+function _recapReprisesParFormat(list, esc) {
+  const byFmt = {}; // label format → { refs: Map(refKey → total), flacons }
+  list.forEach(a => {
+    let fmt = '—';
+    if (a.produitType === 'liq') {
+      const g = baseLiq.find(x => x.id === a.produitId);
+      fmt = g ? (LIQ_FORMAT_LABELS[g.format] || g.format || '—') : '—';
+    } else if (a.produitType === 'pd') {
+      const p = basePD.find(x => x.id === a.produitId);
+      fmt = 'PD — ' + (p ? ((typeof PD_CAT_LABELS !== 'undefined' && PD_CAT_LABELS[p.categorie]) || p.categorie || '') : '');
+    } else fmt = 'Kits';
+    if (!byFmt[fmt]) byFmt[fmt] = { refs: {}, flacons: 0 };
+    const B = byFmt[fmt];
+    SHOPS.forEach(sh => {
+      const st = a.etats && a.etats[sh];
+      if (!st) return;
+      if (a.produitType === 'liq' && !a.produitParfumId && st.comptageParfums) {
+        Object.keys(st.comptageParfums).forEach(pid => {
+          const q = st.comptageParfums[pid];
+          if (typeof q !== 'number') return;
+          const k = a.produitId + '|' + pid;
+          B.refs[k] = (B.refs[k] || 0) + q;
+          B.flacons += q;
+        });
+      } else if (typeof st.comptageQte === 'number') {
+        const k = a.produitId + '|' + (a.produitParfumId || '');
+        B.refs[k] = (B.refs[k] || 0) + st.comptageQte;
+        B.flacons += st.comptageQte;
+      }
+    });
+  });
+  const lines = [['RÉCAP PAR FORMAT', 'Réfs comptées (total > 0)', 'Unités comptées'].map(esc).join(';')];
+  let totR = 0, totF = 0;
+  Object.keys(byFmt).sort().forEach(fmt => {
+    const B = byFmt[fmt];
+    const nbRefs = Object.values(B.refs).filter(t => t > 0).length;
+    totR += nbRefs; totF += B.flacons;
+    lines.push([fmt, nbRefs, B.flacons].map(esc).join(';'));
+  });
+  lines.push(['TOTAL', totR, totF].map(esc).join(';'));
+  lines.push('');
+  return lines;
 }
 
 // ══ RÉTROCESSION INTER-BOUTIQUES (chantier 2026-06-12, décisions Fabien : v1 ponctuelle
@@ -11197,7 +11322,8 @@ function exportReprisesExcel() {
     'Avancement (étapes faites / total)', 'Date du dernier check',
     'État global', 'ID action'
   ];
-  const rows = [headers.map(_esc).join(';')];
+  // Récap par format EN TÊTE (2026-07-13, demande Fabien) — fonction unique des deux exports.
+  const rows = _recapReprisesParFormat(all, _esc).concat([headers.map(_esc).join(';')]);
   // Tri : campagne ASC, puis date création DESC, puis produit
   const sorted = all.slice().sort((a, b) => {
     const ca = a.campagneReprise || '';
@@ -11815,7 +11941,8 @@ window._pvExporterCampagneReprise = function(name) {
     return s;
   };
   const headers = ['Campagne', 'Commentaire', 'Date création', 'Type produit', 'Marque', 'Gamme/Modèle', 'Format', 'Parfum', 'Boutique', 'Quantité comptée', 'Avancement', 'Date dernier check', 'État global', 'ID action'];
-  const rows = [headers.map(_esc).join(';')];
+  // Récap par format EN TÊTE (2026-07-13, demande Fabien) — fonction unique des deux exports.
+  const rows = _recapReprisesParFormat(all, _esc).concat([headers.map(_esc).join(';')]);
   all.forEach(a => {
     let prodType, marque = '', label = '', format = '', parfum = '';
     if (a.produitType === 'liq') {
@@ -16845,13 +16972,24 @@ function renderDashboard() {
         style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_dispLocked ? 'opacity:0.45;' : _adminRO ? '' : 'cursor:pointer;'} font-size:11px; color:${checked ? '#e2e8f0' : '#94a3b8'}; border-radius:3px; user-select:none;"
         ${(_dispLocked || _adminRO) ? '' : `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'"`}>
         ${box}
-        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}${!checked ? stepBadgeAttente(d, (a.etats[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}${stepBadgeDispatch(a, sh, d, checked)}</span>
+        <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}; flex:1;">${d.label}${(a.motifSortie === 'REPRISE' && d.key === 'mis_de_cote' && (a.etats[sh] || {}).comptageQte === 0) ? ' <span style="font-size:9px; color:#64748b; font-style:italic;">— 0 compté, rien à mettre de côté</span>' : ''}${!checked ? stepBadgeAttente(d, (a.etats[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}${stepBadgeDispatch(a, sh, d, checked)}</span>
         ${qteField}
       </div>`;
     }).join('');
     // ── 🗄️ Commande client AU CŒUR du bloc de coches (correctif 2026-06-11 soir) ──
     // C'est ici que ça se joue : si cette boutique garde la réf pour ses clients, un
     // bouton court-circuite ses coches. Bandeau si c'est déjà fait.
+    // ── 🚫 « Je n'en ai pas » (2026-07-13, demande Fabien) : court-circuit total de la
+    // boutique sur une reprise — comptage 0 + toutes étapes validées en un geste. ──
+    let rienZone = '';
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE') {
+      const _stR = a.etats[sh];
+      if (_stR && _stR.comptageQte === 0) {
+        rienZone = `<div style="margin-top:5px; padding:4px 8px; background:#0ea5e912; border:1px solid #0ea5e940; border-radius:3px; font-size:10px; color:#7dd3fc; font-weight:600;">🚫 Zéro exemplaire ici — comptage 0, rien à mettre de côté.</div>`;
+      } else if (_stR && !_stR.done && (isAdmin() || (typeof currentShop !== 'undefined' && currentShop === sh))) {
+        rienZone = `<button onclick="event.stopPropagation(); repriseRienIci('${a.id}','${sh}')" style="margin-top:5px; width:100%; padding:4px 8px; font-size:10px; background:transparent; color:#7dd3fc; border:1px dashed #0ea5e950; border-radius:3px; cursor:pointer; text-align:left;" title="Cette boutique n'a aucun exemplaire : comptage posé à 0 et toutes ses étapes validées d'un coup">🚫 ${label} n'en a pas → tout valider (comptage 0)</button>`;
+      }
+    }
     let ccZone = '';
     // Inclut désormais les REPRISES (demande Fabien 2026-06-18) : une boutique peut garder une réf
     // en tiroir pour un client plutôt que de la renvoyer au fournisseur. Court-circuite ses coches
@@ -16885,6 +17023,7 @@ function renderDashboard() {
     return `<div style="padding:6px 8px; background:#1e293b; border:1px solid ${col}30; border-radius:4px;">
       ${header}
       ${rows}
+      ${rienZone}
       ${ccZone}
     </div>`;
   }
