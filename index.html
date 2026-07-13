@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-11 15:09</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 14:52</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -441,9 +441,15 @@
           <div class="form-group" id="propLiqMarqueGroup"><label>Marque</label><input type="text" id="propLiqMarque"></div>
           <div class="form-group" id="propLiqGammeGroup"><label>Gamme</label><input type="text" id="propLiqGamme"></div>
           <div class="form-group" id="propLiqNomGroup" style="display:none;"><label>Nom parfum</label><input type="text" id="propLiqNom"></div>
-          <div class="form-group"><label>Format</label><select id="propLiqFormat" onchange="onPropLiqTypeChange()"><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option></select></div>
-          <div class="form-group"><label>PA HT (€)</label><input type="number" id="propLiqPA" step="0.01"></div>
-          <div class="form-group"><label>PV TTC (€)</label><input type="number" id="propLiqPV" step="0.01"></div>
+          <div class="form-group" id="propLiqFormatGroup"><label>Format</label><select id="propLiqFormat" onchange="onPropLiqTypeChange()"><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option></select></div>
+          <div class="form-group" id="propLiqPAGroup"><label>PA HT (€)</label><input type="number" id="propLiqPA" step="0.01"></div>
+          <div class="form-group" id="propLiqPVGroup"><label>PV TTC (€)</label><input type="number" id="propLiqPV" step="0.01"></div>
+          <!-- Création multi-format (2026-07-13, demande Fabien) : en mode « Gamme entière », une seule
+               saisie crée une réf par format coché — chaque format a son PA/PV propre. -->
+          <div class="form-group" id="propLiqFormatsMultiGroup" style="display:none; grid-column:span 2;">
+            <label>Formats à créer — coche chaque format existant, avec son prix (1 réf sera créée par format)</label>
+            <div id="propLiqFormatsMulti" style="display:flex; flex-direction:column; gap:4px; margin-top:4px;"></div>
+          </div>
           <div class="form-group"><label>Goût</label><select id="propLiqCt"><option value="">—</option><option value="Fruité">Fruité</option><option value="Fruité / Frais">Fruité / Frais</option><option value="Gourmand">Gourmand</option><option value="Gourmand / Fruité">Gourmand / Fruité</option><option value="Tabac">Tabac</option><option value="Tabac / Gourmand">Tabac / Gourmand</option><option value="Menthe">Menthe</option><option value="De_Tout">De Tout</option></select></div>
           <div class="form-group"><label>Fournisseur</label><input type="text" id="propLiqFournisseur"></div>
           <div class="form-group" id="propLiqNbRefsGroup" style="display:none;"><label>Nb parfums</label><input type="number" id="propLiqNbRefs" min="0" value="0"></div>
@@ -5619,6 +5625,132 @@ function setRentrerFanfare(actionId, opType) {
   saveData();
   renderDashboard();
   renderOps && renderOps();
+}
+
+// ── Choix « qui commande » à la création d'une OP Nouveauté (2026-07-13) ──
+// Liaison matrice évt 1 : la variante A/B doit être tranchée, sinon l'étape commande
+// reste ❓ et verrouillée côté boutique. On pose la question dans le même geste.
+function _pvPromptQuiCommande(label) {
+  return new Promise(resolve => {
+    _pvModal('<div style="color:#a78bfa; font-weight:700; font-size:14px; margin-bottom:8px;">Qui commande ' + label + ' ?</div>📦 Fabien : les boutiques ne commandent pas (étape verrouillée chez elles).\n🏪 Boutiques : chaque boutique passe sa commande.',
+      [{ label: '📦 Fabien (admin)', color: '#a78bfa' }, { label: '🏪 Les boutiques' }, { label: 'Décider plus tard' }],
+      idx => resolve(idx === 0 ? 'admin' : idx === 1 ? 'boutique' : null)
+    );
+  });
+}
+
+// ══ OP NOUVEAUTÉ PROPOSÉE À LA CRÉATION (2026-07-13, demande Fabien) ══
+// Quand une proposition passe en RETENU (kit, gamme liquide, PD), le produit part en
+// À rentrer : c'est LÀ que la décision « on lance en fanfare ? » se prend (règle 6).
+// On propose donc l'OP Nouveauté immédiatement, au lieu de laisser le badge fanfare
+// à retrouver plus tard sur la ligne À rentrer (le badge reste dispo et synchro : même
+// lien rentrerActionId/fanfareOpType que setRentrerFanfare).
+// Mutualisation multi-format (liquides) : si d'autres réfs actives partagent marque+gamme
+// (autres formats), les OP Nouveauté sont rattachées à une campagne commune
+// « Nouveauté <marque> <gamme> » — même logique que les one-shot par parfum : 1 OP par réf,
+// le regroupement se fait par campagne. Les dates de la 1ère OP de la série sont réutilisées
+// pour les suivantes (une seule saisie de dates pour 4 formats).
+async function proposerOpNouveauteApresCreation(produitType, produitId, label) {
+  if (!isAdmin()) return;
+  try { syncAutoActions(); } catch(e) {}
+  const a = actions.find(x => x.type === 'RENTRER' && x.produitId === produitId && !x.produitParfumId && !x.annulee);
+  if (!a) return;
+  // Idempotent : une OP fanfare vit déjà sur cette action → rien à proposer.
+  if (ops.some(o => o.rentrerActionId === a.id && !_deletedIds.has(o.id) && !o._archived && !o.dateFin)) return;
+
+  // Série multi-format (liquides) : autres formats de la même gamme déjà créés ?
+  let g = null, siblingGammes = [];
+  if (produitType === 'liq') {
+    g = baseLiq.find(x => x.id === produitId);
+    if (g) siblingGammes = baseLiq.filter(x => x.id !== g.id && x.marque === g.marque && x.gamme === g.gamme && x.statutVie !== 'SORTI');
+  }
+  const multi = siblingGammes.length > 0;
+  // OP Nouveauté d'un format frère → réutiliser ses dates et sa campagne.
+  let siblingOp = null;
+  if (multi) {
+    siblingOp = ops.find(o => o.type === 'NOUVEAUTE' && !o._archived && !_deletedIds.has(o.id)
+      && (o.produitIds || []).some(pid => siblingGammes.some(sg => sg.id === pid)));
+  }
+
+  const msg = '« ' + label + ' » est créé et passe en À rentrer.\n\nCréer une OP Nouveauté pour son lancement ?'
+    + (multi ? '\n\n(série multi-format : l\'OP sera rattachée à la campagne commune de la gamme' + (siblingOp ? ', avec les mêmes dates que le format déjà lancé' : '') + ')' : '');
+  const ok = await pvConfirm(msg, { title: '🌟 Nouveauté', ok: 'Créer l\'OP', cancel: 'Pas d\'OP', okColor: '#22d3ee' });
+  if (!ok) return;
+
+  let dates;
+  if (siblingOp) {
+    dates = { dateDebut: siblingOp.dateDebut || ymd(new Date()), dateFin: siblingOp.dateFin || null };
+  } else {
+    dates = await pvPromptDates({ title: 'Dates de l\'OP Nouveauté — ' + label });
+    if (!dates) return;
+  }
+
+  const newOp = {
+    id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+    type: 'NOUVEAUTE',
+    produitIds: [produitId],
+    produitParfumId: '',
+    dateDebut: dates.dateDebut,
+    dateFin: dates.dateFin,
+    _dateDebutManuelle: true,
+    commentaire: 'Créée à la validation de la proposition (' + label + ')',
+    rentrerActionId: a.id,
+    auto: false,
+    etats: {},
+    pieces: []
+  };
+  seedOpDefaults(newOp);
+  ensureOpSteps(newOp);
+  pushOpTraced(newOp, 'proposerOpNouveauteApresCreation');
+  a.fanfareOpType = 'NOUVEAUTE';
+  if (!a.opId) a.opId = newOp.id;
+  a._ts = new Date().toISOString();
+
+  // Campagne commune multi-format : créée (ou retrouvée par nom) et rattachements posés.
+  if (multi && g) {
+    const campNom = 'Nouveauté ' + g.marque + ' ' + g.gamme;
+    const _norm = s => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+    let camp = campagnes.find(cc => !cc._archived && _norm(cc.nom) === _norm(campNom));
+    if (!camp && siblingOp && siblingOp.campagneId) camp = getCampagne(siblingOp.campagneId);
+    if (!camp) {
+      camp = {
+        id: 'CAMP-' + String(nextCampagneId++).padStart(4, '0'),
+        nom: campNom,
+        dateDebut: dates.dateDebut || '',
+        dateFin: dates.dateFin || '',
+        commentaire: 'Campagne auto — lancement multi-format',
+        _ts: new Date().toISOString()
+      };
+      if (typeof ensureCampagneModel === 'function') ensureCampagneModel(camp);
+      campagnes.push(camp);
+    }
+    newOp.campagneId = camp.id;
+    // Rattacher aussi les OP Nouveauté des formats frères pas encore en campagne.
+    ops.forEach(o => {
+      if (o.type !== 'NOUVEAUTE' || o._archived || o.campagneId || _deletedIds.has(o.id)) return;
+      if ((o.produitIds || []).some(pid => siblingGammes.some(sg => sg.id === pid))) {
+        o.campagneId = camp.id; o._ts = new Date().toISOString();
+      }
+    });
+  }
+
+  saveData();
+  if (typeof logAction === 'function') logAction('OP Nouveauté à la création', '🌟 ' + label + ' → ' + newOp.id + (newOp.campagneId ? ' (campagne ' + getCampagneLabel(newOp.campagneId) + ')' : ''));
+
+  // Qui commande ? — sans réponse, l'étape commande reste « à trancher » (❓, verrouillée boutique).
+  // Série multi-format : si le format déjà lancé a tranché, on applique le même choix sans re-demander.
+  let qui = null;
+  if (siblingOp && siblingOp.commandeAdmin !== undefined) {
+    qui = siblingOp.commandeAdmin === true ? 'admin' : 'boutique';
+  } else {
+    qui = await _pvPromptQuiCommande('« ' + label + ' »');
+  }
+  if (qui) {
+    setRentrerCommandeAdmin(a.id, qui); // pose action + OP + descente parfums (save + render inclus)
+  } else {
+    try { renderDashboard(); } catch(e) {}
+    try { if (typeof renderOps === 'function') renderOps(); } catch(e) {}
+  }
 }
 
 // Promotion générique : crée une OP d'un type donné liée à une action du dashboard.
@@ -11680,6 +11812,12 @@ function updatePropDecision(id, decision) {
     renderWalls();
     renderDashboard();
     highlightProp(id);
+    // OP Nouveauté proposée au moment de la décision (2026-07-13) — même geste que pour
+    // les liquides et les PD (règle 6-bis : uniformisation des 3 bases).
+    if (decision === 'RETENU') {
+      const _k = baseKits.find(k => k.id === id);
+      if (_k && _k.statutVie === 'A_RENTRER') proposerOpNouveauteApresCreation('kit', _k.id, _k.marque + ' ' + _k.modele);
+    }
   }
 }
 
@@ -17779,16 +17917,67 @@ function renderDashboard() {
     // alors que les compteurs (calculés via la canonique) continuaient de la compter → en-têtes
     // sans lignes, et affichage divergent entre postes dès que les données différaient un peu.
     const gammeActions = _filterAntiDoublonLiq(liqActions).filter(a => !a.produitParfumId);
-    // Gamme-level actions → rendu en groupe de parfums (même format)
-    let html = gammeActions.map(a => _renderGammeLevelAsParfumGroup(a)).join('');
-    // Trier les groupes par meilleure priorité
+
+    // ── REGROUPEMENT MULTI-FORMAT (2026-07-13, demande Fabien — capture CigustoMDD) ──
+    // Une gamme déclinée en plusieurs formats = plusieurs réfs dans la base, donc plusieurs
+    // blocs qui s'entremêlaient (le tri par priorité seule alternait Fruiteo / Miami).
+    // L'unité d'affichage devient la GAMME (marque + nom) : un seul format → rendu strictement
+    // inchangé ; plusieurs formats → UNE ligne dépliable, un sous-niveau par format (puis les
+    // parfums, comme avant). Vaut pour toutes les sections liquides du dashboard (règle 6-bis).
+    const units = {};       // clé marque|gamme → { nom, blocks:[{fmtRank, actions, html()}] }
+    const unitOrder = [];   // ordre d'apparition = ordre de priorité (conservé)
+    const _fmtRank = { '10mL': 0, '10mL_SDN': 1, '20mL': 2, '50mL': 3, '100mL': 4, '+150mL': 5 };
+    function _unitFor(g, fallbackKey) {
+      const key = g ? (g.marque + '|' + g.gamme) : ('?|' + fallbackKey);
+      if (!units[key]) { units[key] = { key, nom: g ? g.gamme : '?', blocks: [] }; unitOrder.push(key); }
+      return units[key];
+    }
+    gammeActions.forEach(a => {
+      const g = baseLiq.find(l => l.id === a.produitId);
+      _unitFor(g, a.produitId).blocks.push({ fmtRank: g ? (_fmtRank[g.format] ?? 9) : 9, actions: [a], html: () => _renderGammeLevelAsParfumGroup(a) });
+    });
+    // Trier les groupes parfum par meilleure priorité (comportement conservé)
     const groupKeys = Object.keys(groups).sort((a, b) => {
       const pa = Math.min(...groups[a].map(x => _prioRank[effectivePrio(x)] ?? 1));
       const pb = Math.min(...groups[b].map(x => _prioRank[effectivePrio(x)] ?? 1));
       return pa - pb;
     });
     groupKeys.forEach(gammeId => {
-      html += _renderGammeParfumGroup(groups[gammeId]);
+      const g = baseLiq.find(l => l.id === gammeId);
+      _unitFor(g, gammeId).blocks.push({ fmtRank: g ? (_fmtRank[g.format] ?? 9) : 9, actions: groups[gammeId], html: () => _renderGammeParfumGroup(groups[gammeId]) });
+    });
+
+    let html = '';
+    unitOrder.forEach(key => {
+      const u = units[key];
+      if (u.blocks.length <= 1) { html += u.blocks.map(b => b.html()).join(''); return; }
+      // Plusieurs formats → ligne fusionnée (canonique _ligneLiquide) + sous-niveau par format
+      u.blocks.sort((a, b) => a.fmtRank - b.fmtRank);
+      const allActions = u.blocks.reduce((acc, b) => acc.concat(b.actions), []);
+      const T = TYPE_META[allActions[0].type] || TYPE_META.SORTIR;
+      // Clé d'expansion SANITISÉE : marque/gamme peuvent contenir apostrophes ou guillemets,
+      // qui casseraient l'attribut onclick de la ligne (les autres clés sont des ids sûrs).
+      const groupKey = 'gfuse_' + allActions[0].type + '_' + (allActions[0].motifSortie === 'REPRISE' ? 'R_' : '') + key.replace(/[^a-zA-Z0-9|_-]/g, '_');
+      const isExpanded = expandedActions.has(groupKey);
+      // Teinte « qui commande » (même code couleur que les lignes gamme) : violette si TOUTES
+      // les actions RENTRER sont commande admin, ambre si au moins une n'est pas tranchée.
+      const _rentrers = allActions.filter(x => x.type === 'RENTRER');
+      const _allAdmin = _rentrers.length > 0 && _rentrers.every(x => x.commandeAdmin === true);
+      const _anyUnset = _rentrers.some(x => x.commandeAdmin === undefined);
+      html += _ligneLiquide({
+        groupKey,
+        nom: u.nom,
+        baseBg: _allAdmin ? '#261e3b' : undefined,
+        hoverBg: _allAdmin ? '#2f2549' : undefined,
+        borderLeft: _allAdmin ? '#a78bfa' : _anyUnset ? '#f59e0b' : undefined,
+        badgesHtml: `<span style="font-size:8.5px; padding:1px 5px; background:#33415560; color:#94a3b8; border-radius:2px; white-space:nowrap;">${_libelleParfumsParFormat(allActions) || (allActions.length + ' action' + (allActions.length > 1 ? 's' : ''))}</span>` + (_allAdmin ? `<span style="font-size:8.5px; padding:1px 5px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; white-space:nowrap;">📦 Commande Fabien</span>` : ''),
+        profShort: '', profColor: '',
+        formatBadge: { bg: '#0ea5e920', text: '#7dd3fc' },
+        formatLabel: u.blocks.length + ' formats',
+        btnHtml: '', chipHtml: '',
+        dotsHtml: _renderDashCardDots(allActions),
+        innerHtml: isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">${u.blocks.map(b => b.html()).join('')}</div>` : ''
+      });
     });
     return html;
   }
@@ -21202,10 +21391,27 @@ function pvCampagneFormulaire(campagneId, opIdsPreselected, opts) {
         <span id="_pvCampSelAll" style="cursor:pointer; font-size:10px; color:#60a5fa; text-decoration:underline;">Tout cocher</span>
         <span id="_pvCampSelNone" style="cursor:pointer; font-size:10px; color:#94a3b8; text-decoration:underline;">Tout décocher</span>
       </div>
-      <div id="_pvCampOpsList" style="max-height:360px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; padding:4px 2px;">
+      <div id="_pvCampOpsList" style="max-height:300px; overflow-y:auto; display:flex; flex-direction:column; gap:4px; padding:4px 2px;">
         ${candidateOps.length === 0 ? '<div style="color:#64748b; font-size:11px; padding:20px; text-align:center;">Aucune OP active à rattacher.</div>' : candidateOps.map(o => renderOpRow(o, initSel.has(o.id))).join('')}
       </div>
     </div>
+    ${isEdit ? `
+    <!-- ── Éléments (PLV) de la campagne (2026-07-13, demande Fabien) : toutes les pièces des
+         OPs rattachées, avec pour chacune → à quel produit elle sert, où l'installer. ── -->
+    <div style="border-top:1px solid #33415540; padding-top:12px; margin-top:14px;">
+      <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+        <span style="color:#94a3b8; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;">🧩 Éléments de la campagne (PLV)</span>
+        <span style="font-size:10px; color:#64748b;">chaque pièce : pour quel produit, à installer où — modifications appliquées immédiatement</span>
+      </div>
+      <div id="_pvCampElems"></div>
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+        <span style="font-size:10px; color:#94a3b8;">Ajouter :</span>
+        <select id="_pvCampAddPieceType" style="padding:4px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; font-size:11px;">${PIECE_TYPES.filter(pt => pt.key !== 'PRODUIT').map(pt => `<option value="${pt.key}">${pt.label}</option>`).join('')}</select>
+        <span style="font-size:10px; color:#64748b;">pour</span>
+        <select id="_pvCampAddPieceOp" style="flex:1; min-width:160px; padding:4px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; font-size:11px;"></select>
+        <span id="_pvCampAddPieceBtn" style="cursor:pointer; padding:4px 12px; background:#8b5cf6; color:#fff; border-radius:3px; font-size:11px; font-weight:700;">+ Ajouter la pièce</span>
+      </div>
+    </div>` : ''}
   `;
 
   return new Promise(resolve => {
@@ -21249,6 +21455,92 @@ function pvCampagneFormulaire(campagneId, opIdsPreselected, opts) {
         row.style.display = (!q || txt.indexOf(q) >= 0) ? '' : 'none';
       });
     });
+    // ── Éléments (PLV) de la campagne : rendu + gestes (2026-07-13) ──
+    // Édition LIVE (comme le panneau ✎ Éditer d'une carte OP) : produit visé, emplacement,
+    // mode commun/par boutique, retrait, ajout. Les setters canoniques existants sont réutilisés
+    // (setPieceEmplacement*, setPieceAffMode, removePiece, addPieceToOp, _pvCampMovePiece).
+    function _campAttachedOps() {
+      return ops.filter(o => o.campagneId === campagneId && !o._archived && !_deletedIds.has(o.id));
+    }
+    function _renderCampElems() {
+      const cont = overlay.querySelector('#_pvCampElems');
+      if (!cont) return;
+      const attached = _campAttachedOps();
+      const addOpSel = overlay.querySelector('#_pvCampAddPieceOp');
+      if (addOpSel) {
+        const prevVal = addOpSel.value;
+        addOpSel.innerHTML = attached.map(o => `<option value="${o.id}">${escText((getOpProductDisplay(o) || {}).label || o.id)}</option>`).join('');
+        if (prevVal) addOpSel.value = prevVal;
+      }
+      if (attached.length === 0) {
+        cont.innerHTML = '<div style="color:#64748b; font-size:11px; padding:12px; text-align:center; font-style:italic;">Aucune OP rattachée à cette campagne — coche des OPs ci-dessus puis Enregistrer, et rouvre ce module.</div>';
+        return;
+      }
+      const selStyle = 'padding:3px 6px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:3px; font-size:10.5px; max-width:100%;';
+      let rows = '';
+      attached.forEach(o => {
+        (o.pieces || []).forEach(p => {
+          if (pieceEstProduit(p)) return; // « produit-pièce » legacy : pas une PLV
+          const validEmpls = pieceValidEmplacements(p);
+          const perShop = pieceIsPerShop(p);
+          const affMode = p.affMode || 'commun';
+          let affHtml = '';
+          if (!perShop) {
+            affHtml = '<span style="font-size:10px; color:#64748b; font-style:italic;">pièce globale (non affectée)</span>';
+          } else if (affMode === 'commun') {
+            const cur = SHOPS.map(sh => (p.affectations[sh] || {}).emplacement).find(e => e) || '';
+            affHtml = `<select data-act="emplCommun" data-op="${o.id}" data-piece="${p.id}" style="${selStyle} flex:1; min-width:120px;" title="Où installer cette pièce (les 3 boutiques)">
+                <option value="">— où l'installer ? —</option>${validEmpls.map(e => `<option value="${e.key}" ${cur === e.key ? 'selected' : ''}>${e.label}</option>`).join('')}
+              </select>
+              <span data-act="mode" data-mode="perShop" data-op="${o.id}" data-piece="${p.id}" style="cursor:pointer; font-size:9px; color:#60a5fa; text-decoration:underline; white-space:nowrap;" title="Choisir un emplacement différent par boutique">par boutique</span>`;
+          } else {
+            affHtml = SHOPS.map(sh => {
+              const aff = p.affectations[sh] || {};
+              return `<select data-act="empl" data-op="${o.id}" data-piece="${p.id}" data-shop="${sh}" title="${SHOP_LABELS[sh]}" style="${selStyle} border-color:${SHOP_COLORS[sh]}60; min-width:70px; flex:1;">
+                <option value="">— ${SHOP_LABELS[sh][0]} —</option>${validEmpls.map(e => `<option value="${e.key}" ${aff.emplacement === e.key ? 'selected' : ''}>${e.label}</option>`).join('')}
+              </select>`;
+            }).join('') + `<span data-act="mode" data-mode="commun" data-op="${o.id}" data-piece="${p.id}" style="cursor:pointer; font-size:9px; color:#60a5fa; text-decoration:underline; white-space:nowrap;" title="Revenir à un emplacement commun aux 3 boutiques">commun</span>`;
+          }
+          rows += `<div style="display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) minmax(0,1.6fr) 22px; gap:6px; align-items:center; padding:5px 8px; background:#1e293b; border:1px solid #33415540; border-radius:4px; margin-bottom:4px;">
+            <span style="font-size:11px; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escAttr(pieceLabel(p))}">🧩 ${escText(pieceLabel(p))}</span>
+            <select data-act="produit" data-op="${o.id}" data-piece="${p.id}" style="${selStyle}" title="À quel produit de la campagne cette pièce sert (changer = déplacer la pièce sur l'OP de ce produit)">
+              ${attached.map(oo => `<option value="${oo.id}" ${oo.id === o.id ? 'selected' : ''}>${escText((getOpProductDisplay(oo) || {}).label || oo.id)}</option>`).join('')}
+            </select>
+            <div style="display:flex; gap:4px; align-items:center; flex-wrap:wrap;">${affHtml}</div>
+            <span data-act="remove" data-op="${o.id}" data-piece="${p.id}" style="cursor:pointer; font-size:11px; padding:2px 6px; background:#ef444415; color:#fca5a5; border:1px solid #ef444450; border-radius:3px; text-align:center;" title="Retirer cette pièce">✕</span>
+          </div>`;
+        });
+      });
+      cont.innerHTML = rows || '<div style="color:#64748b; font-size:11px; padding:12px; text-align:center; font-style:italic;">Aucune pièce PLV sur les OPs de cette campagne — ajoute-en une ci-dessous.</div>';
+    }
+    const _elemsCont = overlay.querySelector('#_pvCampElems');
+    if (_elemsCont) {
+      _elemsCont.addEventListener('change', e => {
+        const t = e.target; const act = t && t.dataset ? t.dataset.act : null;
+        if (!act) return;
+        if (act === 'produit') { _pvCampMovePiece(t.dataset.op, t.dataset.piece, t.value); _renderCampElems(); }
+        else if (act === 'emplCommun') { setPieceEmplacementCommun(t.dataset.op, t.dataset.piece, t.value); }
+        else if (act === 'empl') { setPieceEmplacement(t.dataset.op, t.dataset.piece, t.dataset.shop, t.value); }
+      });
+      _elemsCont.addEventListener('click', async e => {
+        const t = e.target.closest ? e.target.closest('[data-act]') : null;
+        if (!t) return;
+        if (t.dataset.act === 'mode') { setPieceAffMode(t.dataset.op, t.dataset.piece, t.dataset.mode); _renderCampElems(); }
+        else if (t.dataset.act === 'remove') {
+          if (await pvConfirm('Retirer cette pièce PLV de son OP ?')) { removePiece(t.dataset.op, t.dataset.piece); _renderCampElems(); }
+        }
+      });
+      const _addBtn = overlay.querySelector('#_pvCampAddPieceBtn');
+      if (_addBtn) _addBtn.addEventListener('click', () => {
+        const typeSel = overlay.querySelector('#_pvCampAddPieceType');
+        const opSel = overlay.querySelector('#_pvCampAddPieceOp');
+        if (!opSel || !opSel.value) { pvAlert('Rattache d\'abord une OP à la campagne (la pièce appartient à l\'OP de son produit).'); return; }
+        addPieceToOp(opSel.value, typeSel ? typeSel.value : 'PLV_AUTRE');
+        _renderCampElems();
+      });
+      _renderCampElems();
+    }
+
     function close(result) { overlay.remove(); resolve(result); }
     overlay.querySelector('#_pvCampCancel').addEventListener('click', () => close(null));
     overlay.addEventListener('click', e => { if (e.target === overlay) close(null); });
@@ -24173,6 +24465,29 @@ function removePiece(opId, pieceId) {
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
 }
+// Déplace une pièce PLV d'une OP vers une autre (module campagne 2026-07-13 : « cet élément
+// PLV sert à tel produit de la campagne »). Les affectations d'emplacement suivent la pièce ;
+// les coches d'installation repartent à zéro côté OP d'arrivée (une pièce réaffectée est une
+// pièce à (ré)installer — les clés de steps plv_<id>_* de l'ancienne OP restent orphelines,
+// sans effet).
+function _pvCampMovePiece(fromOpId, pieceId, toOpId) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  if (!fromOpId || !toOpId || fromOpId === toOpId) return;
+  const from = ops.find(o => o.id === fromOpId);
+  const to = ops.find(o => o.id === toOpId);
+  if (!from || !to) return;
+  const idx = (from.pieces || []).findIndex(p => p.id === pieceId);
+  if (idx < 0) return;
+  ensureOpModel(to);
+  const p = from.pieces.splice(idx, 1)[0];
+  to.pieces.push(p);
+  const _now = new Date().toISOString();
+  from._ts = _now; to._ts = _now;
+  ensureOpSteps(from); ensureOpSteps(to);
+  if (typeof logAction === 'function') logAction('Pièce PLV réaffectée', pieceLabel(p) + ' : ' + _logOpLabel(fromOpId) + ' → ' + _logOpLabel(toOpId));
+  saveData(); renderDashboard(); renderOps && renderOps();
+}
+
 function movePiece(opId, pieceId, dir) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
@@ -26684,6 +26999,11 @@ function updatePropPdDecision(id, decision) {
   renderPropositionsPD();
   try { renderBasePD(); } catch(e) {}
   try { renderDashboard(); } catch(e) {}
+  // OP Nouveauté proposée au moment de la décision (2026-07-13, règle 6-bis : les 3 bases).
+  if (decision === 'RETENU') {
+    const _pd = basePD.find(x => (x.marque||'').toLowerCase() === (prop.marque||'').toLowerCase() && (x.modele||'').toLowerCase() === (prop.modele||'').toLowerCase());
+    if (_pd && _pd.statutVie === 'A_RENTRER') proposerOpNouveauteApresCreation('pd', _pd.id, (_pd.marque || '') + ' ' + (_pd.modele || ''));
+  }
 }
 
 function decidePropPdNew(propId, decision) {
@@ -26714,6 +27034,8 @@ function decidePropPdNew(propId, decision) {
       ensurePdModel(newPd);
       basePD.push(newPd);
       syncAutoActions();
+      // OP Nouveauté proposée au moment de la décision (2026-07-13, règle 6-bis : les 3 bases).
+      proposerOpNouveauteApresCreation('pd', newPd.id, (newPd.marque || '') + ' ' + (newPd.modele || ''));
     }
   }
   saveData();
@@ -27180,6 +27502,17 @@ function onPropLiqTypeChange() {
   document.getElementById('propLiqNomGroup').style.display = isParfum ? 'block' : 'none';
   document.getElementById('propLiqGammeExistGroup').style.display = isParfum ? 'block' : 'none';
   document.getElementById('propLiqNbRefsGroup').style.display = 'none';
+  // Multi-format (2026-07-13) : en mode gamme, le format/PA/PV uniques laissent place au
+  // tableau « un prix par format » ; en mode parfum, comportement historique inchangé.
+  const _fmtGrp = document.getElementById('propLiqFormatGroup');
+  const _paGrp = document.getElementById('propLiqPAGroup');
+  const _pvGrp = document.getElementById('propLiqPVGroup');
+  const _multiGrp = document.getElementById('propLiqFormatsMultiGroup');
+  if (_fmtGrp) _fmtGrp.style.display = isParfum ? 'block' : 'none';
+  if (_paGrp) _paGrp.style.display = isParfum ? 'block' : 'none';
+  if (_pvGrp) _pvGrp.style.display = isParfum ? 'block' : 'none';
+  if (_multiGrp) _multiGrp.style.display = isParfum ? 'none' : 'block';
+  if (!isParfum) _renderPropLiqFormatsMulti();
   // Parfums section: visible only for gamme type
   const parfSec = document.getElementById('propLiqParfumsSection');
   if (parfSec) parfSec.style.display = isParfum ? 'none' : 'block';
@@ -27247,6 +27580,39 @@ function setPropLiqSort(col) {
   renderPropositionsLiq();
 }
 
+// ── Création multi-format (2026-07-13, demande Fabien) ──
+// « Je rentre une gamme de liquide, je dois créer 4 refs pour 4 formats » → une seule saisie :
+// on coche les formats existants, chacun avec son PA/PV (les prix diffèrent entre 10 et 50 mL),
+// et la soumission crée une proposition par format (le modèle 1 réf = 1 format est conservé).
+function _renderPropLiqFormatsMulti() {
+  const cont = document.getElementById('propLiqFormatsMulti');
+  if (!cont || cont.children.length > 0) return; // déjà rendu — on préserve la saisie en cours
+  const _inpStyle = 'padding:4px 6px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:3px; width:100%;';
+  cont.innerHTML = Object.keys(LIQ_FORMAT_LABELS).map(f => `
+    <div style="display:grid; grid-template-columns:110px 1fr 1fr; gap:6px; align-items:center;">
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#e2e8f0; cursor:pointer;">
+        <input type="checkbox" class="propLiqFmtCheck" value="${f}" style="accent-color:#8b5cf6;"> ${LIQ_FORMAT_LABELS[f]}
+      </label>
+      <input type="number" step="0.01" class="propLiqFmtPA" data-fmt="${f}" placeholder="PA HT (€)" style="${_inpStyle}">
+      <input type="number" step="0.01" class="propLiqFmtPV" data-fmt="${f}" placeholder="PV TTC (€)" style="${_inpStyle}">
+    </div>`).join('');
+}
+function _collectPropLiqFormats() {
+  const out = [];
+  document.querySelectorAll('#propLiqFormatsMulti .propLiqFmtCheck').forEach(cb => {
+    if (!cb.checked) return;
+    const f = cb.value;
+    const paEl = document.querySelector('.propLiqFmtPA[data-fmt="' + f + '"]');
+    const pvEl = document.querySelector('.propLiqFmtPV[data-fmt="' + f + '"]');
+    out.push({ format: f, pa: parseFloat(paEl ? paEl.value : ''), pv: parseFloat(pvEl ? pvEl.value : '') });
+  });
+  return out;
+}
+function _resetPropLiqFormatsMulti() {
+  const cont = document.getElementById('propLiqFormatsMulti');
+  if (cont) cont.innerHTML = '';
+}
+
 let _propLiqParfumCounter = 0;
 function addPropLiqParfumRow() {
   const container = document.getElementById('propLiqParfumsList');
@@ -27282,18 +27648,20 @@ function collectPropLiqParfums() {
 
 function submitNewPropositionLiq() {
   const type = document.getElementById('propLiqType').value;
-  const format = document.getElementById('propLiqFormat').value;
-  const pa = parseFloat(document.getElementById('propLiqPA').value);
-  const pv = parseFloat(document.getElementById('propLiqPV').value);
   const ct = document.getElementById('propLiqCt').value;
   const fournisseur = document.getElementById('propLiqFournisseur').value.trim();
   const commentaire = document.getElementById('propLiqCommentaire').value.trim();
 
-  let marque, gamme, nom = '', nbRefs = 0, gammeExistId = '';
+  const _newPropId = () => 'PLIQ-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6);
 
   if (type === 'parfum') {
-    nom = document.getElementById('propLiqNom').value.trim();
-    gammeExistId = document.getElementById('propLiqGammeExist').value;
+    // ── Parfum individuel : comportement historique (1 format, 1 PA/PV) ──
+    const format = document.getElementById('propLiqFormat').value;
+    const pa = parseFloat(document.getElementById('propLiqPA').value);
+    const pv = parseFloat(document.getElementById('propLiqPV').value);
+    const nom = document.getElementById('propLiqNom').value.trim();
+    const gammeExistId = document.getElementById('propLiqGammeExist').value;
+    let marque, gamme;
     if (gammeExistId) {
       const gExist = baseLiq.find(x => x.id === gammeExistId);
       if (gExist) { marque = gExist.marque; gamme = gExist.gamme; }
@@ -27302,35 +27670,47 @@ function submitNewPropositionLiq() {
       gamme = document.getElementById('propLiqGamme').value.trim();
     }
     if (!nom) { pvAlert('Remplissez le nom du parfum'); return; }
+    if (!marque || !gamme || !pa || !pv) { pvAlert('Remplissez Marque, Gamme, PA et PV'); return; }
+
+    const { marge, margePct } = computeMarge(pa, pv);
+    const roleCalc = calcLiqRole(format, pa, pv);
+    propositionsLiq.unshift({
+      id: _newPropId(),
+      type, marque, gamme, nom, format, pa, pv, marge, margePct,
+      ct, fournisseur, nbRefs: 0, gammeExistId,
+      roleCalc, roleChoisi: roleCalc,
+      decision: '', commentaire,
+      parfums: [],
+      date: new Date().toISOString().slice(0,10),
+      auteur: ''
+    });
   } else {
-    marque = document.getElementById('propLiqMarque').value.trim();
-    gamme = document.getElementById('propLiqGamme').value.trim();
+    // ── Gamme entière MULTI-FORMAT (2026-07-13) : une proposition par format coché ──
+    const marque = document.getElementById('propLiqMarque').value.trim();
+    const gamme = document.getElementById('propLiqGamme').value.trim();
+    if (!marque || !gamme) { pvAlert('Remplissez Marque et Gamme'); return; }
+    const fmts = _collectPropLiqFormats();
+    if (fmts.length === 0) { pvAlert('Coche au moins un format (avec son PA et son PV).'); return; }
+    const _manque = fmts.filter(f => !(f.pa > 0) || !(f.pv > 0));
+    if (_manque.length > 0) { pvAlert('PA et PV obligatoires pour : ' + _manque.map(f => LIQ_FORMAT_LABELS[f.format] || f.format).join(', ')); return; }
+    const parfums = collectPropLiqParfums();
+
+    fmts.forEach(fq => {
+      const { marge, margePct } = computeMarge(fq.pa, fq.pv);
+      const roleCalc = calcLiqRole(fq.format, fq.pa, fq.pv);
+      propositionsLiq.unshift({
+        id: _newPropId(),
+        type: 'gamme', marque, gamme, nom: '', format: fq.format, pa: fq.pa, pv: fq.pv, marge, margePct,
+        ct, fournisseur, nbRefs: parfums.length, gammeExistId: '',
+        roleCalc, roleChoisi: roleCalc,
+        decision: '', commentaire,
+        parfums: parfums.map(pf => ({ n: pf.n, ct: pf.ct })), // copie par format (objets indépendants)
+        date: new Date().toISOString().slice(0,10),
+        auteur: ''
+      });
+    });
   }
 
-  if (!marque || !gamme || !pa || !pv) { pvAlert('Remplissez Marque, Gamme, PA et PV'); return; }
-
-  // Collect parfums for gamme type
-  let parfums = [];
-  if (type === 'gamme') {
-    parfums = collectPropLiqParfums();
-    nbRefs = parfums.length;
-  }
-
-  const { marge, margePct } = computeMarge(pa, pv);
-  const roleCalc = calcLiqRole(format, pa, pv);
-
-  const prop = {
-    id: 'PLIQ-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,6),
-    type, marque, gamme, nom, format, pa, pv, marge, margePct,
-    ct, fournisseur, nbRefs, gammeExistId,
-    roleCalc, roleChoisi: roleCalc,
-    decision: '', commentaire,
-    parfums: parfums,
-    date: new Date().toISOString().slice(0,10),
-    auteur: ''
-  };
-
-  propositionsLiq.unshift(prop);
   saveData();
 
   // Reset form
@@ -27340,6 +27720,7 @@ function submitNewPropositionLiq() {
   document.getElementById('propLiqNbRefs').value = '0';
   const parfumsListEl = document.getElementById('propLiqParfumsList');
   if (parfumsListEl) parfumsListEl.innerHTML = '';
+  _resetPropLiqFormatsMulti();
   const geSel = document.getElementById('propLiqGammeExist'); if (geSel) geSel.value = '';
   togglePropLiqForm();
   renderPropositionsLiq();
@@ -27400,6 +27781,15 @@ function updatePropLiqDecision(id, decision) {
   renderPropositionsLiq();
   try { renderLiqAll(); } catch(e) {}
   try { renderDashboard(); } catch(e) {}
+  // OP Nouveauté proposée au moment de la décision (2026-07-13) — pour une CRÉATION de réf
+  // (gamme nouvelle, ou parfum ouvrant une nouvelle gamme), pas pour un parfum ajouté à une
+  // gamme déjà en rayon (là, le lancement se gère au niveau parfum : ⚡ one-shot ou badge fanfare).
+  if (decision === 'RETENU' && !(p.type === 'parfum' && p.gammeExistId)) {
+    const _g = baseLiq.find(x => x.id === p.id);
+    if (_g && _g.statutVie === 'A_RENTRER') {
+      proposerOpNouveauteApresCreation('liq', _g.id, _g.marque + ' ' + _g.gamme + ' ' + (LIQ_FORMAT_LABELS[_g.format] || _g.format || ''));
+    }
+  }
 }
 
 function syncPropLiqToBaseLiq(prop) {
