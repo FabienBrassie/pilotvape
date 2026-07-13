@@ -174,7 +174,7 @@
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 15:18</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 15:38</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4499,6 +4499,39 @@ function syncAutoActions() {
       a.decisionChoice = a.prixCible < a.prixAvant ? 'recalibrer' : 'remonter';
     }
   });
+  // ── OPs HORS BASE (déclinaison / produit libre) en Nouveauté-Exclu : garantir la ligne
+  // À rentrer (2026-07-13, retour Fabien) — répare aussi les OPs créées avant la feature.
+  // Idempotent : ensureAction dédoublonne par produitId 'OPGOODS-<opId>'.
+  ops.forEach(op => {
+    // NB : une dateFin PLANIFIÉE ne veut pas dire close — on passe par le statut temporel canonique.
+    if (op._archived || op.annulee || _deletedIds.has(op.id)) return;
+    if (typeof opTimeStatus === 'function' && opTimeStatus(op) === 'TERMINEE') return;
+    if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return;
+    if (!op.produitLibre || !op.produitLibre.libelle) return;
+    if ((op.produitIds || []).length > 0) return;
+    if (op.rentrerActionId && actions.some(a => a.id === op.rentrerActionId && !a.annulee)) return;
+    if (!op.prep || typeof op.prep !== 'object') op.prep = {};
+    op.prep.commanderProduits = true;
+    const _rentA = ensureAction('OPGOODS-' + op.id, 'RENTRER', 'op', {
+      extraFields: { opId: op.id, horsBaseLabel: op.produitLibre.libelle, commandeAdmin: op.commandeAdmin }
+    });
+    op.rentrerActionId = _rentA.id;
+    op._ts = new Date().toISOString();
+    ensureOpSteps(op);
+    console.log('[SYNC] Ligne À rentrer créée pour OP hors base', op.id, '→', _rentA.id);
+  });
+  // Et l'inverse : OP hors base terminée/archivée/supprimée → sa ligne À rentrer se referme.
+  actions.forEach(a => {
+    if (a.produitType !== 'op' || a.type !== 'RENTRER' || a.annulee || !a.horsBaseLabel) return;
+    const _op = ops.find(o => o.id === a.opId);
+    const _morte = !_op || _op._archived || _op.annulee || _deletedIds.has(_op.id)
+      || (typeof opTimeStatus === 'function' && opTimeStatus(_op) === 'TERMINEE');
+    if (_morte) {
+      _cancelAction(a);
+      console.log('[SYNC] Ligne À rentrer hors base refermée (OP close/absente)', a.id);
+    }
+  });
+
   baseKits.forEach(k => {
     if (k.statutVie === 'A_SORTIR') ensureActionForKit(k, 'SORTIR');
     // FIN_DE_VIE : pas d'action SORTIR, le produit s'écoule. Apparaît dans Besoins à combler.
@@ -7439,7 +7472,10 @@ function _badgeExpeditionDate(d) {
   const bg = _passee ? '#14532d30' : '#7c3aed15';
   const col = _passee ? '#86efac' : '#c4b5fd';
   const border = _passee ? '#22c55e50' : '#a78bfa50';
-  const txt = _passee ? '🚚 peut arriver (expédié dès le ' + fmtFR(d) + ')' : '🚚 expédition à partir du ' + fmtFR(d);
+  // Libellé COURT (bug d'affichage 2026-07-13 : le badge long écrasait le nom de gamme) —
+  // jour/mois seulement, le détail complet reste dans le title et la bannière ⛔.
+  const _jm = (fmtFR(d) || '').slice(0, 5); // JJ/MM
+  const txt = _passee ? '🚚 peut arriver' : '🚚 à partir du ' + _jm;
   return `<span title="Commande Fabien — le fournisseur expédie à partir du ${fmtFR(d)} : la marchandise peut arriver en boutique dès cette date" style="font-size:9px; font-weight:700; padding:1px 6px; background:${bg}; color:${col}; border:1px solid ${border}; border-radius:3px; white-space:nowrap;">${txt}</span>`;
 }
 // Variante par action : ne s'affiche QUE si la commande est gérée par Fabien.
@@ -16738,6 +16774,12 @@ function renderDashboard() {
     if (!prod && (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') && a.retroLabel) {
       prod = { id: a.produitId, marque: '', modele: a.retroLabel, gamme: a.retroLabel, caseTech: '', pv: 0, statutVie: 'DANS_OFFRE', parfums: [] };
     }
+    // Produit HORS BASE d'une OP (déclinaison, produit libre — 2026-07-13, retour Fabien :
+    // « une déclinaison reste une déclinaison à rentrer ») : produit minimal depuis le
+    // libellé porté par l'action, pour que la ligne À rentrer existe sur le dashboard.
+    if (!prod && a.produitType === 'op' && a.horsBaseLabel) {
+      prod = { id: a.produitId, marque: '', modele: a.horsBaseLabel, gamme: a.horsBaseLabel, caseTech: '', pv: 0, statutVie: 'A_RENTRER', parfums: [] };
+    }
     if (!prod) return '';
     const kit = (!isLiq && !isPd) ? prod : null;  // Pour les retros-compatibilités avec les variables qui utilisent "kit"
     let T = TYPE_META[a.type] || TYPE_META.SORTIR;
@@ -17734,7 +17776,7 @@ function renderDashboard() {
     return `<div style="margin-bottom:1px;">
       <div onclick="toggleActionExpand('${cfg.groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px; background:${_lqBg};${_lqBorder}" onmouseover="this.style.background='${_lqHover}'" onmouseout="this.style.background='${_lqBg}'">
         <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
-        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${cfg.nom}</span>${cfg.badgesHtml || ''}</div>
+        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto; max-width:52%;" title="${String(cfg.nom || '').replace(/"/g, '&quot;')}">${cfg.nom}</span>${cfg.badgesHtml || ''}</div>
         <div style="font-size:9px; color:${cfg.profColor || '#64748b'}; font-weight:600; text-align:center;">${cfg.profShort || '—'}</div>
         <div style="font-size:9px; text-align:center;">${cfg.formatBadge ? `<span style="padding:1px 5px; background:${cfg.formatBadge.bg}; color:${cfg.formatBadge.text}; border-radius:2px; white-space:nowrap;">${cfg.formatLabel}</span>` : ''}</div>
         <div></div>
@@ -17859,7 +17901,19 @@ function renderDashboard() {
       baseBg: _grpCmdAdmin ? '#261e3b' : undefined,
       hoverBg: _grpCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _grpCmdAdmin ? '#a78bfa' : _grpCmdUnset ? '#f59e0b' : undefined,
-      badgesHtml: `<span style="font-size:9px; padding:1px 5px; background:#33415540; color:#94a3b8; border-radius:2px; white-space:nowrap;">${grp.length} parfum${grp.length>1?'s':''}</span>${progressLabel}${_grpExtraBadges}`,
+      badgesHtml: (() => {
+        // Bug d'affichage 2026-07-13 (Fabien : « on ne voit pas le nom du nouveau parfum ») :
+        // jusqu'à 3 parfums, la ligne pliée affiche les NOMS au lieu du simple compteur.
+        let _grpLbl = grp.length + ' parfum' + (grp.length > 1 ? 's' : '');
+        if (grp.length <= 3) {
+          const _noms = grp.map(a => {
+            const _pf = (g.parfums || []).find(p => p.id === a.produitParfumId);
+            return _pf ? _pf.n : null;
+          }).filter(Boolean);
+          if (_noms.length === grp.length) _grpLbl = _noms.join(' · ');
+        }
+        return `<span style="font-size:9px; padding:1px 5px; background:#33415540; color:#cbd5e1; border-radius:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;" title="${grp.length} parfum${grp.length > 1 ? 's' : ''} : ${grp.map(a => { const _pf = (g.parfums || []).find(p => p.id === a.produitParfumId); return _pf ? _pf.n : '?'; }).join(', ').replace(/"/g, '&quot;')}">${_grpLbl}</span>${progressLabel}${_grpExtraBadges}`;
+      })(),
       profShort, profColor,
       formatBadge: _liqFormatBadge(g.format), formatLabel,
       btnHtml: prixRougeBtn,
@@ -18066,7 +18120,8 @@ function renderDashboard() {
         profShort: '', profColor: '',
         formatBadge: { bg: '#0ea5e920', text: '#7dd3fc' },
         formatLabel: u.blocks.length + ' formats',
-        btnHtml: '', chipHtml: '',
+        btnHtml: `<button onclick="event.stopPropagation(); pvOpenCheckList('serie','${allActions.map(x => x.id).join('|')}')" style="font-size:9px; padding:2px 8px; background:#fbbf2415; color:#fcd34d; border:1px solid #fbbf2450; border-radius:3px; cursor:pointer; font-weight:600; white-space:nowrap;" title="Toutes les étapes de la série (réceptions, OPs…) à cocher au même endroit">✅ Check-list</button>`,
+        chipHtml: '',
         dotsHtml: _renderDashCardDots(allActions),
         innerHtml: isExpanded ? `<div style="margin:0 0 2px 16px; border-left:2px solid ${T.color}20; padding-left:4px;">${u.blocks.map(b => b.html()).join('')}</div>` : ''
       });
@@ -18151,8 +18206,8 @@ function renderDashboard() {
     // ── Sous-accordéon PD ──
     html += _renderSubAccordion('Pièces détachées', '🔩', pdActions, 'sub_pd');
 
-    // ── Sous-accordéon Accessoires & PLV d'OP (produits hors base) ──
-    html += _renderSubAccordion('Accessoires & PLV (OP)', '📦', opActions, 'sub_op');
+    // ── Sous-accordéon produits hors base (déclinaisons, accessoires & PLV d'OP) ──
+    html += _renderSubAccordion('Hors base — déclinaisons, accessoires & PLV (OP)', '📦', opActions, 'sub_op');
 
     // ── Sous-accordéon Liquides ──
     if (liqActions.length === 0) return html;
@@ -21298,18 +21353,54 @@ function submitNewOp() {
   // boutiques commandent. Pas de choix (types sans à-rentrer) → champ absent (= à trancher).
   if (_quiCmd) newOp.commandeAdmin = (_quiCmd === 'admin');
   if (paCommande !== undefined) newOp.paCommande = paCommande;
-  // Déclinaison (2026-07-13) : c'est une marchandise à commander/recevoir → les étapes
-  // « commandé / reçu » par boutique sont activées d'office (décochable via ✎ Éditer).
-  if (mode === 'declinaison') newOp.prep = { commanderProduits: true };
+  // Déclinaison / produit libre en NOUVEAUTE-EXCLU (2026-07-13) : c'est une marchandise à
+  // commander/recevoir → étapes « commandé / reçu » activées d'office (décochable via ✎ Éditer).
+  if ((mode === 'declinaison' || mode === 'libre') && _TYPES_AVEC_COMMANDE.includes(type)) newOp.prep = { commanderProduits: true };
   seedOpDefaults(newOp);
   ensureOpSteps(newOp);
   pushOpTraced(newOp, 'submitNewOp');
   logAction('Nouvelle OP', (OP_TYPE_META[type] || {}).label + ' — ' + (produitLibre ? produitLibre.libelle : _logProdName(produitIds[0])));
+  // ── Qui réceptionne ? (2026-07-13) : hub choisi à la création → réception centralisée
+  // produit + PLV posée d'office (la canonique creerRetrosDispatchOp crée les transferts).
+  // Le choix du formulaire EST la décision — pas de re-confirmation. Ajustable ensuite
+  // séparément produit/PLV via les boutons de la carte OP (setOpDispatchHub).
+  const _quiRecoit = (document.querySelector('input[name="opQuiRecoit"]:checked') || {}).value || 'boutique';
+  const _recoitHub = (document.getElementById('opRecoitHub') || {}).value || '';
+  if (_quiRecoit === 'hub' && _recoitHub) {
+    newOp.dispatchProduit = _recoitHub;
+    newOp.dispatchPlv = _recoitHub;
+    newOp._adminTs = new Date().toISOString();
+    try {
+      const _nbP = creerRetrosDispatchOp(newOp, 'produit', _recoitHub) || 0;
+      const _nbV = creerRetrosDispatchOp(newOp, 'plv', _recoitHub) || 0;
+      logAction('Réception centralisée (création OP)', newOp.id + ' → hub ' + (SHOP_LABELS[_recoitHub] || _recoitHub) + ((_nbP + _nbV) ? ' · ' + (_nbP + _nbV) + ' transfert(s)' : ''));
+    } catch(e) { console.error('[submitNewOp] dispatch création', e); }
+  }
+  // ── Ligne À rentrer du dashboard pour un produit HORS BASE (2026-07-13, retour Fabien :
+  // « une déclinaison reste une déclinaison à rentrer ») : déclinaison ou produit libre en
+  // Nouveauté/Exclu crée son action RENTRER (fabrique canonique ensureAction, produitType 'op'
+  // → sous-accordéon hors base de la section À rentrer). Le lien rentrerActionId +
+  // prep.commanderProduits branche la synchro existante action↔OP (commande/recu ↔
+  // prod_commandee/prod_recue). Créée APRÈS le dispatch pour ne pas court-circuiter les
+  // transferts OP (creerRetrosDispatchOp saute le produit quand un À rentrer lié existe).
+  if ((mode === 'declinaison' || mode === 'libre') && _TYPES_AVEC_COMMANDE.includes(type) && produitLibre) {
+    const _rentA = ensureAction('OPGOODS-' + newOp.id, 'RENTRER', 'op', {
+      extraFields: {
+        opId: newOp.id,
+        horsBaseLabel: produitLibre.libelle,
+        commandeAdmin: newOp.commandeAdmin
+      }
+    });
+    if (paCommande !== undefined) _rentA.paCommande = paCommande;
+    _rentA._ts = new Date().toISOString();
+    newOp.rentrerActionId = _rentA.id;
+  }
   // Reset des champs (on garde Type et Campagne pour enchaîner les vagues d'une même campagne)
   ['opKit','opDateFin','opComment','opLibreLibelle','opDeclinaisonProduit','opDeclinaisonLibelle','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment','opMecaType','opMecaDescription','opPartenaire','opPaCommande'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
   document.querySelectorAll('input[name="opQuiCommande"]').forEach(r => { r.checked = false; });
+  document.querySelectorAll('input[name="opQuiRecoit"]').forEach(r => { r.checked = r.value === 'boutique'; });
   // Si on vient de créer une nouvelle campagne, on la sélectionne dans le dropdown
   // pour que la 2ème vague soit proposée d'emblée sous elle.
   if (campagneSel === '__new__' && campagneId) {
@@ -21422,6 +21513,280 @@ async function quickDetachCampagne(opId) {
 // Modale unifiée création/édition d'une campagne avec liste cochable d'OPs.
 // Remplace le prompt-texte buggy de quickAttachCampagne par une UI fiable.
 // ═══════════════════════════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHECK-LIST GROUPÉE — 2026-07-13 (demande Fabien : « version boutique de Gérer »)
+// LA surface unique de coche groupée (règle 8 appliquée à l'écran) : pour un périmètre
+// donné — campagne entière, ou série multi-format du dashboard — toutes les étapes de la
+// boutique affichée, produit par produit, dans UNE fenêtre. AUCUNE nouvelle mécanique :
+// chaque case passe par les toggles canoniques (toggleActionStep / toggleOpStep), donc
+// mêmes verrous (étapes admin, miroirs dashboard↔OP), même synchro, mêmes cascades.
+// Boutique : voit et coche SA boutique. Admin : chips P/M/L + coche (parité dashboard).
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _pvCheckListState = null; // { scopeType, scopeId, shop, titre }
+
+// Les unités du périmètre : une OP (avec ses étapes dérivées) ou une action nue (sans OP).
+function _pvCheckListUnits(scopeType, scopeId) {
+  const units = [];
+  if (scopeType === 'campagne') {
+    ops.filter(o => o.campagneId === scopeId && !o._archived && !_deletedIds.has(o.id)).forEach(o => {
+      units.push({ kind: 'op', op: o, label: ((getOpProductDisplay(o) || {}).label || o.id), sous: ((OP_TYPE_META[o.type] || {}).label || o.type) + ' · ' + o.id });
+    });
+  } else if (scopeType === 'serie') {
+    const seenOp = new Set();
+    String(scopeId).split('|').forEach(aid => {
+      const a = actions.find(x => x.id === aid && !x.annulee);
+      if (!a) return;
+      const op = ops.find(o => !o._archived && !_deletedIds.has(o.id) && (o.rentrerActionId === a.id || o.sortirActionId === a.id));
+      if (op) {
+        if (seenOp.has(op.id)) return;
+        seenOp.add(op.id);
+        units.push({ kind: 'op', op, label: ((getOpProductDisplay(op) || {}).label || op.id), sous: ((OP_TYPE_META[op.type] || {}).label || op.type) + ' · ' + op.id });
+      } else {
+        let lbl = a.produitId || '?';
+        const g = baseLiq.find(x => x.id === a.produitId);
+        const k = baseKits.find(x => x.id === a.produitId);
+        const pd = basePD.find(x => x.id === a.produitId);
+        if (g) {
+          lbl = g.marque + ' ' + g.gamme + ' ' + (LIQ_FORMAT_LABELS[g.format] || g.format || '');
+          if (a.produitParfumId) { const pf = (g.parfums || []).find(p => p.id === a.produitParfumId); if (pf) lbl += ' · ' + pf.n; }
+        } else if (k) lbl = k.marque + ' ' + k.modele;
+        else if (pd) lbl = ((pd.marque || '') + ' ' + (pd.modele || '')).trim();
+        units.push({ kind: 'action', a, label: lbl, sous: a.type === 'RENTRER' ? 'À rentrer' : a.type });
+      }
+    });
+  }
+  return units;
+}
+
+// Où s'écrit physiquement la coche d'une étape d'OP (miroirs → l'action du dashboard,
+// une coche = un seul propriétaire). Retourne [{type:'action',id,key}] / [{type:'op',key}] /
+// null (= lecture seule : aucune cible d'écriture valide).
+function _pvCheckListWriteTargets(op, shop, def) {
+  const MIROIR = ['fanfare_rentrer', 'coup_rentrer', 'coup_sortir'];
+  if (MIROIR.includes(def.kind) && def.actionStep) {
+    if (def.kind === 'fanfare_rentrer') {
+      const gammeId = (op.produitIds || [])[0];
+      const pfs = gammeId ? actions.filter(x => x.type === 'RENTRER' && x.produitId === gammeId && x.produitParfumId && !x.annulee) : [];
+      if (pfs.length > 0) return pfs.map(x => ({ type: 'action', id: x.id, key: def.actionStep }));
+    }
+    const linkedId = def.kind === 'coup_sortir' ? op.sortirActionId : op.rentrerActionId;
+    const la = linkedId ? actions.find(x => x.id === linkedId && !x.annulee) : null;
+    return la ? [{ type: 'action', id: la.id, key: def.actionStep }] : null;
+  }
+  if (def.kind === 'prod') {
+    const _pid = (op.produitIds || [])[0];
+    const _ra = op.rentrerActionId ? actions.find(x => x.id === op.rentrerActionId && !x.annulee)
+      : (_pid ? actions.find(x => x.type === 'RENTRER' && x.produitId === _pid && !x.annulee) : null);
+    if (_ra) {
+      const k = def.key === 'prod_commandee' ? 'commande' : def.key === 'prod_recue' ? 'recu' : null;
+      if (k) return [{ type: 'action', id: _ra.id, key: k }];
+    }
+    return _opProductInBase(op) ? null : [{ type: 'op', key: def.key }];
+  }
+  return [{ type: 'op', key: def.key }];
+}
+
+// Applique un état cible à une étape d'unité (les toggles canoniques font le reste).
+function _pvCheckListApply(unit, shop, def, target) {
+  if (unit.kind === 'action') {
+    const st = unit.a.etats && unit.a.etats[shop];
+    const cur = !!(st && st.steps && st.steps[def.key] === true);
+    if (cur !== target) toggleActionStep(unit.a.id, shop, def.key);
+    return;
+  }
+  const ts = _pvCheckListWriteTargets(unit.op, shop, def);
+  if (!ts) return;
+  ts.forEach(t => {
+    if (t.type === 'action') {
+      const x = actions.find(z => z.id === t.id);
+      const xs = x && x.etats && x.etats[shop];
+      const cur = !!(xs && xs.steps && xs.steps[t.key] === true);
+      if (cur !== target) toggleActionStep(t.id, shop, t.key);
+    } else {
+      toggleOpStep(unit.op.id, shop, t.key, target);
+    }
+  });
+}
+
+// Le modèle affichable : unités + lignes d'étapes (statut via statutEtape, LA canonique).
+function _pvCheckListModel() {
+  const s = _pvCheckListState;
+  if (!s) return null;
+  const units = _pvCheckListUnits(s.scopeType, s.scopeId);
+  const model = [];
+  units.forEach(u => {
+    let defs, stepsObj, getChecked;
+    if (u.kind === 'action') {
+      ensureActionSteps(u.a);
+      defs = getActionSteps(u.a);
+      const st = (u.a.etats && u.a.etats[s.shop]) || {};
+      stepsObj = st.steps || {};
+      getChecked = def => !!(stepsObj[def.key] === true);
+    } else {
+      ensureOpSteps(u.op);
+      defs = computeOpShopStepDefs(u.op, s.shop);
+      const st = (u.op.etats && u.op.etats[s.shop]) || {};
+      stepsObj = st.steps || {};
+      getChecked = def => _getOpStepChecked(u.op, s.shop, def) === true;
+    }
+    const rows = defs.map(def => {
+      const checked = getChecked(def);
+      const status = statutEtape(def, stepsObj, checked);
+      const adminLock = def.resp === 'admin' && !isAdmin();
+      const noTarget = u.kind === 'op' && !_pvCheckListWriteTargets(u.op, s.shop, def);
+      return { def, checked, status, writable: !adminLock && !noTarget };
+    });
+    const cpt = compteurEtapes(defs, stepsObj, { horsAdmin: !isAdmin(), getChecked: def => getChecked(def) });
+    model.push({ unit: u, rows, cpt });
+  });
+  return model;
+}
+
+function pvCloseCheckList() {
+  const ov = document.getElementById('pvCheckListOverlay');
+  if (ov) ov.remove();
+  _pvCheckListState = null;
+}
+
+function pvOpenCheckList(scopeType, scopeId) {
+  // Boutique = sa boutique ; admin = boutique du filtre dashboard sinon la 1ère.
+  const _fShop = (document.getElementById('dashShop') || {}).value || '';
+  const shop = (!isAdmin() && typeof currentShop !== 'undefined' && currentShop) ? currentShop
+    : (_fShop || SHOPS[0]);
+  let titre = '';
+  if (scopeType === 'campagne') titre = '📣 ' + (getCampagneLabel(scopeId) || 'Campagne');
+  else {
+    const firstA = actions.find(x => x.id === String(scopeId).split('|')[0]);
+    const g = firstA ? baseLiq.find(x => x.id === firstA.produitId) : null;
+    titre = g ? (g.marque + ' ' + g.gamme + ' — série multi-format') : 'Série';
+  }
+  pvCloseCheckList();
+  _pvCheckListState = { scopeType, scopeId, shop, titre };
+  const overlay = document.createElement('div');
+  overlay.id = 'pvCheckListOverlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center; animation:pvModalFadeIn 0.15s ease-out;';
+  overlay.innerHTML = '<div id="pvCheckListBox" style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:18px 20px; max-width:760px; width:94%; max-height:88vh; overflow-y:auto; box-shadow:0 20px 60px rgba(0,0,0,0.5); animation:pvModalSlideIn 0.15s ease-out;"></div>';
+  overlay.addEventListener('click', e => { if (e.target === overlay) pvCloseCheckList(); });
+  overlay.addEventListener('keydown', e => { if (e.key === 'Escape') pvCloseCheckList(); });
+  document.body.appendChild(overlay);
+  _pvCheckListRerender();
+}
+
+function _pvCheckListRerender() {
+  const s = _pvCheckListState;
+  const box = document.getElementById('pvCheckListBox');
+  if (!s || !box) return;
+  const model = _pvCheckListModel();
+  const esc = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+  const canCheck = isAdmin() || (typeof currentShop !== 'undefined' && currentShop === s.shop);
+
+  // Chips boutique (admin seulement — une boutique ne voit que la sienne)
+  const shopChips = isAdmin()
+    ? '<div style="display:flex; gap:4px; align-items:center;">' + SHOPS.map(sh => {
+        const on = sh === s.shop;
+        const col = SHOP_COLORS[sh];
+        return `<span data-clshop="${sh}" style="cursor:pointer; padding:3px 10px; font-size:10.5px; font-weight:700; border-radius:3px; background:${on ? col : 'transparent'}; color:${on ? '#0f172a' : col}; border:1px solid ${col}80;">${SHOP_LABELS[sh]}</span>`;
+      }).join('') + '</div>'
+    : `<span style="font-size:10.5px; font-weight:700; color:${SHOP_COLORS[s.shop] || '#94a3b8'};">${SHOP_LABELS[s.shop] || s.shop}</span>`;
+
+  // Lignes maîtres « tout cocher » : mêmes libellés d'étape sur ≥ 2 unités, cochables.
+  const byLabel = {};
+  model.forEach((m, ui) => m.rows.forEach(r => {
+    if (!r.writable) return;
+    if (!byLabel[r.def.label]) byLabel[r.def.label] = [];
+    byLabel[r.def.label].push({ ui, key: r.def.key, checked: r.checked });
+  }));
+  const masterLabels = Object.keys(byLabel).filter(l => byLabel[l].length >= 2);
+  const masterHtml = (canCheck && masterLabels.length > 0)
+    ? `<div style="margin-bottom:12px; padding:8px 10px; background:#1e293b; border:1px solid #33415560; border-radius:6px;">
+        <div style="font-size:10px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:6px;">Étapes communes — tout cocher d'un geste</div>
+        ${masterLabels.map((l, li) => {
+          const arr = byLabel[l];
+          const done = arr.filter(x => x.checked).length;
+          const all = done === arr.length;
+          return `<div data-clmaster="${li}" style="display:flex; align-items:center; gap:8px; padding:3px 4px; cursor:pointer; border-radius:3px;" onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'">
+            <span style="display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; border-radius:3px; font-size:11px; font-weight:700; ${all ? 'background:#22c55e; color:#0f172a; border:1px solid #22c55e;' : 'background:transparent; border:1px solid #64748b;'}">${all ? '✓' : ''}</span>
+            <span style="font-size:11.5px; color:${all ? '#64748b' : '#e2e8f0'}; ${all ? 'text-decoration:line-through;' : ''}">${esc(l)}</span>
+            <span style="font-size:9.5px; color:#64748b;">${done}/${arr.length} produit${arr.length > 1 ? 's' : ''}${all ? ' — re-cliquer pour tout décocher' : ''}</span>
+          </div>`;
+        }).join('')}
+      </div>` : '';
+  _pvCheckListMasterIndex = masterLabels.map(l => byLabel[l]);
+
+  const unitsHtml = model.length === 0
+    ? '<div style="color:#64748b; font-size:11px; padding:16px; text-align:center; font-style:italic;">Rien dans ce périmètre pour l\'instant.</div>'
+    : model.map((m, ui) => {
+      const rowsHtml = m.rows.map(r => {
+        const st = r.status;
+        const badge = st === 'admin' ? '<span style="font-size:9px; color:#94a3b8;">👤 Fabien</span>'
+          : st === 'attente' ? '<span style="font-size:9px; color:#fbbf24;">⏳ en attente</span>'
+          : st === 'livraison' ? '<span style="font-size:9px; color:#38bdf8;">📦 livraison</span>' : '';
+        const clickable = canCheck && r.writable;
+        const box2 = r.checked
+          ? '<span style="display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; background:#22c55e; color:#0f172a; border:1px solid #22c55e; border-radius:3px; font-size:11px; font-weight:700;">✓</span>'
+          : `<span style="display:inline-block; width:15px; height:15px; background:transparent; border:1px solid ${st === 'admin' ? '#47556960' : '#64748b'}; border-radius:3px;"></span>`;
+        return `<div ${clickable ? `data-clrow="${ui}" data-clkey="${esc(r.def.key)}" style="cursor:pointer;` : `title="${st === 'admin' ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : 'Se coche depuis sa ligne d’origine'}" style="`} display:flex; align-items:center; gap:8px; padding:2px 4px; border-radius:3px;" ${clickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'"` : ''}>
+          ${box2}
+          <span style="font-size:11.5px; color:${r.checked ? '#64748b' : (st === 'admin' ? '#94a3b8' : '#e2e8f0')}; ${r.checked ? 'text-decoration:line-through;' : ''}">${esc(r.def.label)}</span>
+          ${badge}
+        </div>`;
+      }).join('');
+      const c = m.cpt;
+      const cptTxt = `${c.faits}/${c.total}` + (c.attentes > 0 ? ` · ⏳${c.attentes}` : '') + (c.admin > 0 ? ` · 👤${c.admin}` : '');
+      return `<div style="margin-bottom:10px; padding:8px 10px; background:#1e293b; border:1px solid #33415540; border-radius:6px;">
+        <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:5px; flex-wrap:wrap;">
+          <span style="font-size:12px; font-weight:700; color:#f1f5f9;">${esc(m.unit.label)}</span>
+          <span style="font-size:9.5px; color:#64748b;">${esc(m.unit.sous)}</span>
+          <span style="margin-left:auto; font-size:10px; font-weight:700; color:${c.faits === c.total && c.total > 0 ? '#22c55e' : '#94a3b8'};">${cptTxt}</span>
+        </div>
+        ${rowsHtml || '<div style="font-size:10px; color:#64748b; font-style:italic;">Aucune étape pour cette boutique.</div>'}
+      </div>`;
+    }).join('');
+
+  box.innerHTML = `
+    <div style="display:flex; align-items:center; gap:12px; margin-bottom:4px; flex-wrap:wrap;">
+      <span style="font-size:14px; font-weight:700; color:#fbbf24;">✅ Check-list — ${esc(s.titre)}</span>
+      <span style="margin-left:auto;"></span>
+      ${shopChips}
+      <span id="pvCheckListClose" style="cursor:pointer; font-size:14px; color:#94a3b8; padding:2px 8px;" title="Fermer">✕</span>
+    </div>
+    <div style="font-size:10px; color:#64748b; margin-bottom:12px;">Toutes les étapes ${isAdmin() ? 'de la boutique sélectionnée' : 'de ta boutique'} pour ce périmètre, au même endroit. Chaque coche est la même qu'ailleurs (dashboard, cartes OP) — synchronisée partout.</div>
+    ${masterHtml}
+    ${unitsHtml}`;
+
+  box.querySelector('#pvCheckListClose').addEventListener('click', pvCloseCheckList);
+  box.querySelectorAll('[data-clshop]').forEach(el => el.addEventListener('click', () => {
+    _pvCheckListState.shop = el.dataset.clshop;
+    _pvCheckListRerender();
+  }));
+  if (canCheck) {
+    box.querySelectorAll('[data-clrow]').forEach(el => el.addEventListener('click', () => {
+      const model2 = _pvCheckListModel();
+      const m = model2[parseInt(el.dataset.clrow)];
+      if (!m) return;
+      const r = m.rows.find(x => x.def.key === el.dataset.clkey);
+      if (!r || !r.writable) return;
+      _pvCheckListApply(m.unit, _pvCheckListState.shop, r.def, !r.checked);
+      _pvCheckListRerender();
+    }));
+    box.querySelectorAll('[data-clmaster]').forEach(el => el.addEventListener('click', () => {
+      const arr = _pvCheckListMasterIndex[parseInt(el.dataset.clmaster)];
+      if (!arr) return;
+      const model2 = _pvCheckListModel();
+      const target = !arr.every(x => x.checked);
+      arr.forEach(x => {
+        const m = model2[x.ui];
+        if (!m) return;
+        const r = m.rows.find(z => z.def.key === x.key);
+        if (r && r.writable && r.checked !== target) _pvCheckListApply(m.unit, _pvCheckListState.shop, r.def, target);
+      });
+      _pvCheckListRerender();
+    }));
+  }
+}
+let _pvCheckListMasterIndex = [];
 
 // Modale large : édite (ou crée) une campagne et choisit ses OPs.
 // Args :
@@ -22156,7 +22521,7 @@ function duplicateOp(id) {
 }
 
 // Champs du formulaire "Nouvelle OP manuelle" à préserver à travers les re-renders.
-const _OP_FORM_FIELDS = ['opType','opKit','opLibreFamille','opLibreLibelle','opDeclinaisonProduit','opDeclinaisonLibelle','opDateDebut','opDateFin','opMecaType','opMecaDescription','opPartenaire','opPaCommande','opComment','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment'];
+const _OP_FORM_FIELDS = ['opType','opKit','opLibreFamille','opLibreLibelle','opDeclinaisonProduit','opDeclinaisonLibelle','opRecoitHub','opDateDebut','opDateFin','opMecaType','opMecaDescription','opPartenaire','opPaCommande','opComment','opCampagneNewNom','opCampagneNewDebut','opCampagneNewFin','opCampagneNewComment'];
 
 function renderOps() {
   const container = document.getElementById('opsContent');
@@ -22173,6 +22538,7 @@ function renderOps() {
     _OP_FORM_FIELDS.forEach(id => { const el = document.getElementById(id); if (el) _opFormSnap[id] = el.value; });
     const _m = document.querySelector('input[name="opProduitMode"]:checked'); _opFormSnap._mode = _m ? _m.value : null;
     _opFormSnap._quiCommande = (document.querySelector('input[name="opQuiCommande"]:checked') || {}).value || '';
+    _opFormSnap._quiRecoit = (document.querySelector('input[name="opQuiRecoit"]:checked') || {}).value || '';
     const _cs = document.getElementById('opCampagneSelect'); _opFormSnap._campagne = _cs ? _cs.value : '';
   }
 
@@ -22323,6 +22689,24 @@ function renderOps() {
       </label>
       <span style="font-size:11px; color:#64748b;">Prix de saisie HT pour cette commande :</span>
       <input type="number" step="0.01" min="0" id="opPaCommande" placeholder="ex : 1.94 (si ≠ prix normal)" title="Prix d'achat à saisir pour CETTE commande. Le prix normal de la fiche reste inchangé." style="width:170px; padding:6px 8px; background:#0f172a; color:#86efac; border:1px solid #334155; border-radius:4px; font-size:11px; text-align:right;">
+    </div>
+
+    <!-- Ligne 4-ter : QUI RÉCEPTIONNE ? (2026-07-13, demande Fabien : la réception centralisée
+         se décide À LA CRÉATION, pas seulement après coup sur la carte / la ligne À rentrer) -->
+    <div style="display:flex; gap:14px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
+      <span style="font-size:11px; color:#38bdf8; font-weight:700;">Qui réceptionne ?</span>
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#cbd5e1; cursor:pointer;">
+        <input type="radio" name="opQuiRecoit" value="boutique" checked style="cursor:pointer; accent-color:#38bdf8;">
+        🏪 Chaque boutique reçoit sa commande
+      </label>
+      <label style="display:flex; align-items:center; gap:6px; font-size:11px; color:#cbd5e1; cursor:pointer;">
+        <input type="radio" name="opQuiRecoit" value="hub" style="cursor:pointer; accent-color:#06b6d4;">
+        📦 Tout arrive à un hub :
+      </label>
+      <select id="opRecoitHub" style="padding:5px 8px; background:#0f172a; color:#7dd3fc; border:1px solid #06b6d460; border-radius:4px; font-size:11px;">
+        ${SHOPS.map(sh => `<option value="${sh}">${SHOP_LABELS[sh]}</option>`).join('')}
+      </select>
+      <span style="font-size:9.5px; color:#64748b; font-style:italic;">hub = Fabien dispatche ensuite (transferts créés automatiquement) ; ajustable produit / PLV séparément sur la carte OP</span>
     </div>
 
     <!-- Ligne 5 : commentaire + bouton -->
@@ -22690,6 +23074,7 @@ function renderOps() {
             <span style="display: inline-flex; gap: 4px; justify-content: flex-end; flex-wrap: wrap;">
               <span onclick="event.stopPropagation(); openCampagneEtiquettesDialog('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Générer étiquettes pour tous les produits">🏷️</span>
               ${_hasPR ? `<span onclick="event.stopPropagation(); generateAffichePrixRouge('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Affiche PDF Prix Rouge">📄</span>` : ''}
+              <span onclick="event.stopPropagation(); pvOpenCheckList('campagne','${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#fbbf2415; color:#fcd34d; border:1px solid #fbbf2440; border-radius:3px; font-weight:600; white-space:nowrap;" title="La check-list boutique : toutes les étapes de tous les produits de la campagne, à cocher au même endroit">✅ Check-list</span>
               <span onclick="event.stopPropagation(); openCampagneFormulaire('${cid}', [])" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Ajouter ou retirer des OPs de cette campagne">📋 Gérer</span>
               <span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#8b5cf61a; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Modifier le nom et les dates">✎</span>
               <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
@@ -22772,6 +23157,7 @@ function renderOps() {
       _OP_FORM_FIELDS.forEach(id => { const el = document.getElementById(id); if (el && _opFormSnap[id] !== undefined) el.value = _opFormSnap[id]; });
       if (_opFormSnap._mode) { const r = document.querySelector('input[name="opProduitMode"][value="' + _opFormSnap._mode + '"]'); if (r) { r.checked = true; opToggleProduitMode(_opFormSnap._mode); } }
       if (_opFormSnap._quiCommande) { const _qc2 = document.querySelector('input[name="opQuiCommande"][value="' + _opFormSnap._quiCommande + '"]'); if (_qc2) _qc2.checked = true; }
+      if (_opFormSnap._quiRecoit) { const _qr2 = document.querySelector('input[name="opQuiRecoit"][value="' + _opFormSnap._quiRecoit + '"]'); if (_qr2) _qr2.checked = true; }
       // Campagne : restaurer SANS re-prompt (sauf si une pré-sélection post-création est en attente).
       if (!opPreselectCampagneId && _opFormSnap._campagne) {
         const _cs2 = document.getElementById('opCampagneSelect');
