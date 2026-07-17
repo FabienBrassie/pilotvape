@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-17 21:15 — Formation : l'étape affichée sur un bloc est celle DU JOUR du bloc — réel figé par les validations pour le passé (le 1er juillet reste « 1/4 » même si l'étape 3 est finie depuis), prévu (dates du/au) pour le futur. -->
 <!-- v 2026-07-17 21:00 — Formation, pastel par JOUR affiché : sur le planning, les jours d'avant la date prévue « 100 % autonome » (ou la validation apte comptoir si plus tôt) sont pastel, ceux d'après reprennent la couleur pleine — la transition se voit en naviguant dans les semaines futures (2e recadrage Fabien : « dégrisé à la date prévue d'autonomie »). -->
 <!-- v 2026-07-17 20:45 — Formation : la carte devient VISUELLE (retour Fabien : « je suis visuel, pas des champs partout ») — frise chronologique par personne (barres d'étapes colorées par état, drapeaux 🎯 des caps, pastilles d'évaluations, trait « aujourd'hui », repères des lundis), ligne d'action réduite à l'étape en cours + prochain cap, champs de dates repliés derrière « ✎ ajuster les dates ». Même frise dans Mon espace du salarié (info-bulles sans commentaires). -->
 <!-- v 2026-07-17 20:25 — Formation : changer une date d'étape ou de cap redessine aussi le planning (le pastel suit immédiatement — avant, il fallait changer de vue pour voir le dégrisage à la date d'autonomie). -->
@@ -3875,11 +3876,25 @@ function formEtapeLabel(k){const s=FORM_ETAPES.find(x=>x.k===k);return s?s.label
 // planning, les jours situés AVANT la limite sont pastel, ceux d'APRÈS reprennent la couleur pleine —
 // on VOIT donc la transition en naviguant dans les semaines futures. Limite = date prévue du cap
 // « 100 % autonome », ou date de validation du cap « apte comptoir » si elle arrive avant.
+// L'étape affichée sur un bloc est celle DU JOUR de ce bloc (recadrage Fabien 2026-07-17) :
+// pour le passé, le RÉEL figé par les validations (le 1er juillet il était en 1/4 → le 1er juillet
+// reste noté 1/4 même s'il a fini l'étape 3 depuis) ; pour le futur, le PRÉVU (les dates du/au).
+function formEtapeAt(f,d){
+  // réel : la première étape validée à une date >= d → ce jour-là, il était encore dessus
+  for(const s of f.etapes){if(s.valide&&d<=s.valide)return s;}
+  // prévu : la dernière étape non validée déjà commencée au jour d (sinon la prochaine à venir)
+  const rest=f.etapes.filter(s=>!s.valide);
+  if(!rest.length)return null; // tout est validé et d est après la dernière validation
+  let cur=rest[0];
+  for(const s of rest){if(s.du<=d)cur=s;}
+  return cur;
+}
 function formVisu(e,d){const f=formationOf(e.id);if(!f)return null;
+  const day=d||todayISO();
   const c=(f.caps||[]).find(x=>x.k==='comptoir'),a=(f.caps||[]).find(x=>x.k==='autonome');
   const lim=(c&&c.fait&&(!a||c.fait<a.date))?c.fait:(a?a.date:(c&&c.fait?c.fait:null));
-  const idx=f.etapes.findIndex(s=>!s.valide),cur=idx>=0?f.etapes[idx]:null;
-  return {f,grise:!!lim&&(d||todayISO())<lim,cur,num:idx>=0?idx+1:f.etapes.length,tot:f.etapes.length};}
+  const cur=formEtapeAt(f,day);
+  return {f,grise:!!lim&&day<lim,cur,num:cur?f.etapes.indexOf(cur)+1:f.etapes.length,tot:f.etapes.length};}
 // Affichage compact de l'étape en cours ('2/4' ou '✓' si toutes validées) + info-bulle complète
 function formDisp(fo){return fo.cur?fo.num+'/'+fo.tot:'✓';}
 function formTitle(fo){const s=fo.cur;
