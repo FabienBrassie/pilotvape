@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-17 19:16 — 📚 Formation : parcours d'intégration (4 étapes de 15 j + caps 1 mois / 1 mois ½ / 2 mois), évaluations statut+commentaire par l'admin et les responsables, décalage proposé quand une étape est validée en retard, salarié grisé 📚 sur les plannings tant qu'il n'est pas apte comptoir, « Ma formation » dans Mon espace (verdicts sans commentaires), récap dans le panneau 📚. -->
+<!-- v 2026-07-17 18:05 — Barre du haut : le sélecteur de date suit la semaine affichée (flèches, Aujourd'hui…) au lieu de rester figé sur la dernière date saisie. -->
 <!-- v 2026-07-17 17:58 — Barre du haut : vues + flèches/Aujourd'hui ancrés à gauche, badge + boutons alignés à droite ; les dates « 27 juillet → 2 août » retirées de la barre (gardées sur petit écran où elles sont le seul repère). -->
 <!-- v 2026-07-09 — Pointage des pauses : départ/retour horodatés au clic (salarié + responsable), le planning se recale sur la pause réelle, tout dépassement s'affiche en rouge façon retard (non compté), récap des écarts 🍽️ (admin/resp), repris automatiquement au Journal RH et dans le récap paie. -->
 <meta name="theme-color" content="#2563eb">
@@ -317,7 +319,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   .seg{width:100%;order:-1}
   .seg button{flex:1;padding:9px 6px;font-size:12.5px}
   button.nav{padding:9px 12px;font-size:15px}
-  header button[id="setbtn"],#testbtn,#themebtn,#minebtn,#reqbtn{width:44px;height:42px;font-size:18px;display:inline-flex;align-items:center;justify-content:center;padding:0}
+  header button[id="setbtn"],#testbtn,#themebtn,#minebtn,#reqbtn,#formbtn{width:44px;height:42px;font-size:18px;display:inline-flex;align-items:center;justify-content:center;padding:0}
   #syncdot{position:static;top:auto;right:auto;order:9;font-size:10px}
   .whoami{font-size:11px;order:8}
   header input,header select{padding:8px;font-size:16px}
@@ -395,6 +397,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
     <button id="setbtn" class="paieok" onclick="togPaie()" title="Récap paie mensuel">💶</button>
     <button id="setbtn" class="adminonly" onclick="togSettings()" title="Équipe & données">⚙️</button>
     <button id="pauserecapbtn" onclick="togPauses()" title="Écarts de pause — prévu vs pointé" style="display:none">🍽️</button>
+    <button id="formbtn" onclick="togForm()" title="Formation — parcours, objectifs, évaluations" style="display:none">📚</button>
     <button id="pausebtn" onclick="pfabClick()" title="Pointer ma pause" style="display:none">⏸️</button>
     <button id="minebtn" onclick="togMine()" title="Mon espace" style="display:none">🙋</button>
     <button id="reqbtn" onclick="togReq()" title="Demandes en cours" style="display:none">📋</button>
@@ -422,6 +425,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
 <div id="reqpanel" class="panel" style="width:min(820px,96vw)"></div>
 <div id="journalpanel" class="panel" style="width:min(1120px,98vw)"></div>
 <div id="pausepanel" class="panel" style="width:min(920px,97vw)"></div>
+<div id="formpanel" class="panel" style="width:min(1150px,98vw)"></div>
 <div id="hspanel" class="panel" style="width:min(440px,94vw)"></div>
 <div id="calpanel" class="panel" style="width:min(560px,96vw)"></div>
 <main>
@@ -990,8 +994,8 @@ function mergeData(L,R){
   }
   L.hsdemandes=L.hsdemandes.filter(x=>{const tk=L.tomb['hs|'+x.id];return !(tk&&tk>((x&&x._ts)||''))});
   // congés / maladies / pauses pointées (par numéro, suppressions mémorisées)
-  for(const arr of ['conges','maladies','ecoles','entreprises','pauses']){
-    const pre={conges:'cg|',maladies:'ml|',ecoles:'ec|',entreprises:'en|',pauses:'pz|'}[arr];
+  for(const arr of ['conges','maladies','ecoles','entreprises','pauses','formations']){
+    const pre={conges:'cg|',maladies:'ml|',ecoles:'ec|',entreprises:'en|',pauses:'pz|',formations:'fo|'}[arr];
     L[arr]=L[arr]||[];
     for(const r of R[arr]||[]){
       if(L.tomb[pre+r.id]&&L.tomb[pre+r.id]>ts(r))continue;
@@ -1125,6 +1129,7 @@ function migrate(S){
   S.boutiques.forEach(b=>{if(b.pin===undefined)b.pin=''});
   S.employees.forEach(e=>{if(e.pin===undefined)e.pin='';if(e.admin===undefined)e.admin=false;if(e.resp===undefined)e.resp=false;if(e.ecoleMin===undefined)e.ecoleMin=420});
   S.pauses=S.pauses||[]; // pointages de pause (départ/retour réels)
+  S.formations=S.formations||[]; // parcours de formation (étapes, caps, évaluations)
   // Code admin : plus de code maître. L'accès admin = coche 👑 + code PERSONNEL de la fiche.
   // Migration : l'ancien code maître devient le code perso de l'admin qui n'en a pas (anti-verrouillage),
   // puis on le retire — mais seulement une fois qu'un admin possède bien un code.
@@ -1415,7 +1420,8 @@ function teamCell(bId,d){
     if(e.b!==bId && !((presence(e,d).blocks||[]).some(bl=>bl[2]===bId)))continue;
     const tg=dayTag(e,d,bId);if(!tg)continue;
     const pend=(S.hsdemandes||[]).some(x=>x.statut==='attente'&&x.empId===e.id&&x.date===d);
-    const line='<div class="mline"><span class="md" style="background:'+colOf(e)+'"></span>'+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
+    const fo=formVisu(e); // 📚 en formation : pastille grisée tant que pas apte comptoir
+    const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?'#8b93a1':colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
     if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
       const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===bId);
       workItems.push({st:mine.length?t2m(mine[0][0]):9999,en:mine.length?t2m(mine[mine.length-1][1]):0,line});
@@ -1661,8 +1667,9 @@ function renderMineWeek(){
       for(const ev of evs){
         const top=(ev.s-CAL_START)*PX,hpx=(ev.f-ev.s)*PX,l=Math.min(ev.col*24,64);
         const _isRet=isRetardLbl(ev.lbl);
-        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e)))+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':'')+'>'+
-          '<b>'+(ev.me?'★ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
+        const fo=formVisu(ev.e); // 📚 en formation : grisé tant que pas apte comptoir
+        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(fo&&fo.grise?(ev.hs?'#a3a9b5':'#8b93a1'):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':(fo&&fo.grise?' title="📚 En formation — pas encore apte à la vente comptoir"':''))+'>'+
+          '<b>'+(ev.me?'★ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
       }
     }
     // calendriers personnels (RDV, orga…) : pleine largeur s'il n'y a pas d'équipe ce jour,
@@ -1723,7 +1730,8 @@ function renderMonth(){
       for(const e of emps){
         if(e.b!==curB && !((presence(e,d).blocks||[]).some(bl=>bl[2]===curB)))continue;
         const tg=dayTag(e,d);if(!tg)continue;
-        const line='<div class="mline"><span class="md" style="background:'+colOf(e)+'"></span>'+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
+        const fo=formVisu(e); // 📚 en formation : pastille grisée tant que pas apte comptoir
+        const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?'#8b93a1':colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
         if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
           const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===curB);
           const st=mine.length?t2m(mine[0][0]):9999;const en=mine.length?t2m(mine[mine.length-1][1]):0;
@@ -1884,10 +1892,11 @@ function render(){
     for(const ev of evs){
       const top=(ev.s-CAL_START)*PX, hpx=(ev.f-ev.s)*PX;
       const l=Math.min(ev.col*24,64); // cascade façon Google Agenda
+      const fo=formVisu(ev.e); // 📚 en formation : grisé tant que pas apte comptoir (le retard rouge garde la priorité)
       bb+='<div class="blk'+(ev.ex?' ex':'')+(ev.confl?' selfov':'')+(ev.lbl?' rep':'')+'" data-emp="'+ev.e.id+'" data-iso="'+d+'" data-bi="'+ev.bi+'"'+
-        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e)))+'"'+
-        (ev.lbl?' title="'+esc(ev.lbl)+'"':(ev.note?' title="'+esc(ev.note)+'"':''))+'>'+
-        '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span><i class="rz"></i></div>';
+        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(fo&&fo.grise?(ev.hs?'#a3a9b5':'#8b93a1'):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+'"'+
+        (ev.lbl?' title="'+esc(ev.lbl)+'"':(fo&&fo.grise?' title="📚 En formation — pas encore apte à la vente comptoir"':(ev.note?' title="'+esc(ev.note)+'"':'')))+'>'+
+        '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span><i class="rz"></i></div>';
     }
     if(isLive(d)){
     // hachures rouges : créneaux d'un même salarié qui se chevauchent
@@ -3027,7 +3036,7 @@ document.addEventListener('click',ev=>{
   const sm=$('scopemodal');if(sm&&sm.style.display&&sm.style.display!=='none'){sm.style.display='none';closed=true;}
   if(closed)render();
 },true);
-document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';if($('journalpanel'))$('journalpanel').style.display='none';if($('pausepanel'))$('pausepanel').style.display='none';render()}});
+document.addEventListener('keydown',ev=>{if(ev.key==='Escape'){edit=null;pending=null;pendingCal=null;$('scopemodal').style.display='none';$('settings').style.display='none';$('hdetail').style.display='none';$('evpanel').style.display='none';$('feriepanel').style.display='none';$('abspanel').style.display='none';if($('minepanel'))$('minepanel').style.display='none';if($('paiepanel'))$('paiepanel').style.display='none';if($('reqpanel'))$('reqpanel').style.display='none';if($('hspanel'))$('hspanel').style.display='none';if($('assistpanel'))$('assistpanel').style.display='none';if($('journalpanel'))$('journalpanel').style.display='none';if($('pausepanel'))$('pausepanel').style.display='none';if($('formpanel'))$('formpanel').style.display='none';render()}});
 
 // ============ PARAMÈTRES (équipe & données) ============
 function togSettings(){if(!isAdmin())return;const el=$('settings');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderSettings();saveUI()}
@@ -3059,6 +3068,7 @@ async function renderSettings(){
      '<span class="small" title="Code personnel du salarié (accès à son espace)">🔑<input value="'+esc(e.pin||'')+'" placeholder="code" inputmode="numeric" maxlength="6" style="width:60px" onchange="updE('+i+',\'pin\',this.value.trim())"></span>'+
      '<label class="small" title="Donne les droits admin (gère tout) à cette personne — son code la connecte en admin"><input type="checkbox" '+(e.admin?'checked':'')+' onchange="updE('+i+',\'admin\',this.checked)"> 👑 admin</label>'+
      '<label class="small" title="Responsable de la boutique : peut déclarer congés / maladie / heures sup pour lui ET ses collègues de la même boutique. Tout part en validation chez l\'admin."><input type="checkbox" '+(e.resp?'checked':'')+' onchange="updE('+i+',\'resp\',this.checked)"> 🛡️ responsable</label>'+
+     (formationOf(e.id)?'<span class="modif" style="background:#7c3aed" title="Parcours de formation en cours — détail dans le panneau 📚 Formation">📚 en formation</span>':'')+
      '<button class="mini ghost" onclick="delEmpl('+i+')" title="Supprimer définitivement (préférer archiver)">🗑</button>'+
      '<div class="brow" style="width:100%;padding-top:2px"><span class="small">📅 Entrée</span><input type="date" value="'+(e.dateIn||'')+'" onchange="updE('+i+',\'dateIn\',this.value)"><span class="small">Sortie</span><input type="date" value="'+(e.dateOut||'')+'" onchange="updE('+i+',\'dateOut\',this.value)"><span class="small">'+(e.dateOut?'— masqué du planning après cette date, historique conservé':'(laisser vide si toujours en poste)')+'</span></div></div>';
   });
@@ -3831,6 +3841,200 @@ function renderPausePanel(){
   $('pausepanel').innerHTML=h;
 }
 
+// ============ FORMATION (parcours d'intégration : étapes, caps, évaluations) ============
+// Parcours type : 4 étapes de 15 jours (Liquides → Matériel → Plan de vente → Perfectionnement)
+// et 3 caps (apte comptoir ~1 mois, 100 % autonome ~1 mois ½, parfait ~2 mois), dates ajustables.
+// Le PRÉVU reste tel quel (historique) ; le RÉEL (dates de validation) s'enregistre à côté — même
+// principe que les pauses (prévu figé / réel pointé). Tant que le cap « apte comptoir » n'est pas
+// validé, le salarié apparaît grisé 📚 sur tous les plannings ; ensuite badge 📚 jusqu'à la fin.
+// Le salarié voit ses étapes, dates et verdicts dans Mon espace — PAS les commentaires (choix Fabien).
+const FORM_ETAPES=[
+ {k:'liquides',label:'Liquides'},
+ {k:'materiel',label:'Résistances · kits · batteries'},
+ {k:'vente',label:'Plan de vente · argumentaire'},
+ {k:'perf',label:'Perfectionnement vente'}];
+const FORM_CAPS=[
+ {k:'comptoir',label:'Apte à la vente comptoir (hors matériel)',j:30},
+ {k:'autonome',label:'100 % autonome',j:45},
+ {k:'parfait',label:'Parfait',j:60}];
+const FORM_VERD={acquis:{t:'Acquis',c:'#16a34a'},encours:{t:'En cours',c:'#d97706'},arevoir:{t:'À revoir',c:'#dc2626'}};
+function formationOf(empId){return (S.formations||[]).find(f=>f.empId===empId&&!f.fin);}
+function formEtapeLabel(k){const s=FORM_ETAPES.find(x=>x.k===k);return s?s.label:k;}
+// Marquage planning : {grise:true} tant que « apte comptoir » non validé, sinon {grise:false} (badge seul)
+function formVisu(e){const f=formationOf(e.id);if(!f)return null;const c=(f.caps||[]).find(x=>x.k==='comptoir');return {f,grise:!(c&&c.fait)};}
+function canFormEdit(f){if(isAdmin())return true;if(!isResp())return false;const t=emp(f.empId),m=emp(ROLE.empId);return !!(t&&m&&t.b===m.b);}
+function _fDays(a,b){return Math.round((new Date(a)-new Date(b))/864e5)}
+function _fPar(){const e=ROLE&&ROLE.empId?emp(ROLE.empId):null;return e?e.nom:'Admin';}
+function _fForm(fid){return (S.formations||[]).find(x=>x.id===fid);}
+function _fTouch(f){f._ts=NOW();save();}
+let _formShift=null; // proposition de décalage après validation en retard {fid,days,pivot,quoi}
+function addFormation(){
+  const sel=$('fo-emp'),dt=$('fo-debut');if(!sel||!sel.value){alert('Choisis un salarié.');return;}
+  const eSel=S.employees.find(x=>String(x.id)===sel.value);if(!eSel){alert('Choisis un salarié.');return;}
+  const empId=eSel.id,debut=(dt&&dt.value)||todayISO(); // id tel quel (texte pour l'équipe d'origine, nombre pour les ajouts récents)
+  if(formationOf(empId)){alert('Cette personne a déjà un parcours en cours.');return;}
+  const etapes=FORM_ETAPES.map((s,i)=>({k:s.k,label:s.label,du:addD(debut,i*15),au:addD(debut,i*15+14),valide:null,par:''}));
+  const caps=FORM_CAPS.map(c=>({k:c.k,label:c.label,date:addD(debut,c.j),fait:null,par:''}));
+  S.formations.push({id:Date.now(),empId,debut,etapes,caps,evals:[],fin:null,_ts:NOW()});
+  save();renderFormPanel();render();
+}
+function formValidEtape(fid,k){
+  const f=_fForm(fid);if(!f||!canFormEdit(f))return;
+  const s=f.etapes.find(x=>x.k===k);if(!s||s.valide)return;
+  s.valide=todayISO();s.par=_fPar();_fTouch(f);
+  const late=_fDays(todayISO(),s.au);
+  if(late>0)_formShift={fid,days:late,pivot:s.au,quoi:'l\'étape « '+s.label+' »'};
+  renderFormPanel();render();
+}
+function formValidCap(fid,k){
+  const f=_fForm(fid);if(!f||!canFormEdit(f))return;
+  const c=f.caps.find(x=>x.k===k);if(!c||c.fait)return;
+  c.fait=todayISO();c.par=_fPar();
+  if(k==='parfait'&&f.caps.every(x=>x.fait)&&f.etapes.every(s=>s.valide))f.fin=todayISO(); // tout est validé → parcours terminé (historique conservé)
+  _fTouch(f);
+  const late=_fDays(todayISO(),c.date);
+  if(late>0&&!f.fin)_formShift={fid,days:late,pivot:c.date,quoi:'le cap « '+c.label+' »'};
+  renderFormPanel();render();
+}
+function formUnvalid(fid,kind,k){ // ↩ corrige une validation faite par erreur
+  const f=_fForm(fid);if(!f||!canFormEdit(f))return;
+  if(kind==='etape'){const s=f.etapes.find(x=>x.k===k);if(s){s.valide=null;s.par='';}}
+  else{const c=f.caps.find(x=>x.k===k);if(c){c.fait=null;c.par='';}}
+  f.fin=null;_fTouch(f);renderFormPanel();render();
+}
+function formShiftApply(){
+  if(!_formShift)return;const f=_fForm(_formShift.fid);if(!f||!canFormEdit(f)){_formShift=null;return;}
+  const {days,pivot}=_formShift;
+  for(const s of f.etapes){if(s.valide)continue;if(s.du>=pivot){s.du=addD(s.du,days);s.au=addD(s.au,days);}else if(s.au>=pivot){s.au=addD(s.au,days);}}
+  for(const c of f.caps){if(!c.fait&&c.date>=pivot)c.date=addD(c.date,days);}
+  _fTouch(f);_formShift=null;renderFormPanel();render();
+}
+function formShiftDismiss(){_formShift=null;renderFormPanel();}
+function formSetEtapeDate(fid,k,field,val){
+  const f=_fForm(fid);if(!f||!canFormEdit(f)||!val)return;
+  const s=f.etapes.find(x=>x.k===k);if(!s)return;
+  s[field]=val;if(s.au<s.du){if(field==='du')s.au=s.du;else s.du=s.au;}
+  _fTouch(f);renderFormPanel();
+}
+function formSetCapDate(fid,k,val){
+  const f=_fForm(fid);if(!f||!canFormEdit(f)||!val)return;
+  const c=f.caps.find(x=>x.k===k);if(!c)return;c.date=val;_fTouch(f);renderFormPanel();
+}
+function addFormEval(fid){
+  const f=_fForm(fid);if(!f||!canFormEdit(f))return;
+  const et=$('fe-et-'+fid).value,verd=$('fe-v-'+fid).value,com=($('fe-c-'+fid).value||'').trim(),date=$('fe-d-'+fid).value||todayISO();
+  f.evals=f.evals||[];f.evals.push({id:Date.now(),date,etape:et,verdict:verd,comment:com,par:_fPar()});
+  _fTouch(f);renderFormPanel();
+}
+function delFormEval(fid,eid){const f=_fForm(fid);if(!f||!canFormEdit(f))return;f.evals=(f.evals||[]).filter(x=>x.id!==eid);_fTouch(f);renderFormPanel();}
+function formClose(fid){const f=_fForm(fid);if(!f||!isAdmin())return;if(!confirm('Clôturer ce parcours ? Le salarié n\'apparaîtra plus en formation ; tout l\'historique (étapes, caps, évaluations) est conservé dans « Parcours terminés ».'))return;f.fin=todayISO();_fTouch(f);renderFormPanel();render();}
+function formReopen(fid){const f=(S.formations||[]).find(x=>x.id===fid);if(!f||!isAdmin())return;f.fin=null;_fTouch(f);renderFormPanel();render();}
+function formDelete(fid){if(!isAdmin())return;if(!confirm('Supprimer DÉFINITIVEMENT ce parcours, évaluations comprises ? Pour garder la trace, préfère « Clôturer ».'))return;S.tomb['fo|'+fid]=NOW();S.formations=S.formations.filter(x=>x.id!==fid);save();renderFormPanel();render();}
+function _fEtapeStat(s){
+  const t=todayISO();
+  if(s.valide)return {t:'validée le '+fmtFR(s.valide)+' ✓',c:'#16a34a'};
+  if(t>s.au)return {t:'en retard de '+_fDays(t,s.au)+' j',c:'#dc2626'};
+  if(t>=s.du)return {t:'en cours',c:'#d97706'};
+  return {t:'à venir',c:'#94a3b8'};
+}
+function _fEtapeCourante(f){return f.etapes.find(s=>!s.valide);}
+function togForm(){if(!(isAdmin()||isResp()))return;const el=$('formpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderFormPanel();}
+function renderFormPanel(){
+  if(!(isAdmin()||isResp()))return;
+  const myB=isAdmin()?null:(emp(ROLE.empId)||{}).b;
+  const scope=f=>{const e=emp(f.empId);return e&&(!myB||e.b===myB);};
+  const actives=(S.formations||[]).filter(f=>!f.fin&&scope(f)&&emp(f.empId)).sort((a,b)=>a.debut<b.debut?-1:1);
+  const finies=(S.formations||[]).filter(f=>f.fin&&scope(f)&&emp(f.empId)).sort((a,b)=>a.fin<b.fin?1:-1);
+  const t=todayISO();
+  let h='<div class="phead"><h2>📚 Formation</h2><button class="act grey" style="margin-left:auto" onclick="$(\'formpanel\').style.display=\'none\'">Fermer</button></div>';
+  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Parcours type : <b>Liquides</b> (15 j) → <b>Résistances · kits · batteries</b> (15 j) → <b>Plan de vente</b> (15 j) → <b>Perfectionnement</b> (15 j), avec 3 caps : <b>apte comptoir</b> à 1 mois, <b>100 % autonome</b> à 1 mois ½, <b>parfait</b> à 2 mois. Les dates prévues sont ajustables ; quand une étape est validée en retard, l\'outil propose de décaler la suite. Le salarié reste <b>grisé 📚</b> sur les plannings tant qu\'il n\'est pas apte comptoir. Il voit ses étapes et verdicts dans Mon espace (pas les commentaires).</div>';
+  // ── En un coup d'œil ──
+  if(actives.length){
+    h+='<div class="mhead">👀 En formation ('+actives.length+')</div>';
+    for(const f of actives){const e=emp(f.empId);const cur=_fEtapeCourante(f);const cptr=f.caps.find(c=>c.k==='comptoir');
+      const next=[...f.etapes.filter(s=>!s.valide).map(s=>({d:s.au,q:s.label})),...f.caps.filter(c=>!c.fait).map(c=>({d:c.date,q:c.label}))].sort((a,b)=>a.d<b.d?-1:1)[0];
+      const late=next&&t>next.d;
+      h+='<div class="brow" style="padding:3px 6px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+')">'+esc((bout(e.b)||{}).nom||'')+'</span>'+
+        '<span class="small">J+'+_fDays(t,f.debut)+'</span>'+
+        '<span class="small">'+(cur?'étape : <b>'+esc(cur.label)+'</b>':'étapes finies')+'</span>'+
+        (cptr&&cptr.fait?'<span class="small" style="color:#16a34a;font-weight:700">apte comptoir ✓</span>':'<span class="small" style="color:#94a3b8;font-weight:700">📚 pas encore apte comptoir</span>')+
+        (next?'<span class="small" style="margin-left:auto;'+(late?'color:#dc2626;font-weight:700':'color:var(--mut)')+'">'+(late?'⚠ en retard : ':'prochaine échéance : ')+esc(next.q)+' — '+fmtFR(next.d)+'</span>':'')+
+        '</div>';}
+  }
+  // ── Mise en formation ──
+  const dispo=S.employees.filter(e=>e.actif&&(!myB||e.b===myB)&&!formationOf(e.id));
+  h+='<div class="addrow">➕ <select id="fo-emp" onchange="var e=S.employees.find(x=>String(x.id)===this.value);if(e&&e.dateIn&&$(\'fo-debut\'))$(\'fo-debut\').value=e.dateIn">'+
+    '<option value="">— salarié —</option>'+dispo.map(e=>'<option value="'+e.id+'">'+esc(e.nom)+' ('+esc((bout(e.b)||{}).nom||'')+')</option>').join('')+'</select>'+
+    ' début <input type="date" id="fo-debut" value="'+t+'" title="Par défaut : la date d\'entrée de la fiche salarié si elle est renseignée">'+
+    ' <button class="act green" onclick="addFormation()">Mettre en formation</button>'+
+    '<span class="small" style="color:var(--mut)">— le parcours type se pose sur cette date, ajustable ensuite</span></div>';
+  // ── Cartes détaillées ──
+  for(const f of actives)h+=_formCard(f,false);
+  // ── Terminés ──
+  if(finies.length){
+    h+='<div class="mhead">📦 Parcours terminés ('+finies.length+')</div>';
+    for(const f of finies){const e=emp(f.empId);
+      h+='<div class="brow" style="padding:3px 6px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
+        '<span class="small">'+fmtFR(f.debut)+' → '+fmtFR(f.fin)+' ('+_fDays(f.fin,f.debut)+' j)</span>'+
+        f.caps.map(c=>'<span class="small" title="'+esc(c.label)+'">'+(c.fait?'✓ '+fmtFR(c.fait):'—')+'</span>').join('')+
+        '<span class="small">'+((f.evals||[]).length)+' éval.</span>'+
+        (isAdmin()?'<span style="margin-left:auto;white-space:nowrap"><button class="mini" title="Rouvrir ce parcours (le détail complet réapparaît)" onclick="formReopen('+f.id+')">🔓 rouvrir</button> <button class="mini ghost" title="Supprimer définitivement" onclick="formDelete('+f.id+')">🗑</button></span>':'')+
+        '</div>';}
+  }
+  if(!actives.length&&!finies.length)h+='<div class="small" style="padding:8px 0">Personne en formation pour l\'instant. Choisis un salarié ci-dessus pour démarrer un parcours.</div>';
+  $('formpanel').innerHTML=h;
+}
+function _formCard(f){
+  const e=emp(f.empId);const ed=canFormEdit(f);const t=todayISO();
+  let h='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:4px">';
+  h+='<div class="brow"><span class="bdot big" style="background:'+colOf(e)+'"></span><b style="font-size:14px">'+esc(e.nom)+'</b>'+
+    '<span class="small" style="color:var(--'+e.b+')">'+esc((bout(e.b)||{}).nom||'')+'</span>'+
+    '<span class="small">débuté le <b>'+fmtFR(f.debut)+'</b> — J+'+_fDays(t,f.debut)+'</span>'+
+    (isAdmin()?'<span style="margin-left:auto;white-space:nowrap"><button class="mini" title="Clôturer : fin du parcours, historique conservé" onclick="formClose('+f.id+')">📦 Clôturer</button> <button class="mini ghost" title="Supprimer définitivement (préférer Clôturer)" onclick="formDelete('+f.id+')">🗑</button></span>':'')+'</div>';
+  // proposition de décalage
+  if(_formShift&&_formShift.fid===f.id&&ed){
+    h+='<div class="brow" style="background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);border-radius:8px;padding:6px 10px">⏳ <span class="small" style="flex:1">Tu viens de valider '+_formShift.quoi+' avec <b>'+_formShift.days+' j de retard</b>. Décaler d\'autant tout ce qui reste (étapes et caps non validés) ? Les dates prévues d\'origine restent visibles dans l\'historique des validations.</span>'+
+      '<button class="act" onclick="formShiftApply()">Décaler de '+_formShift.days+' j</button><button class="act grey" onclick="formShiftDismiss()">Laisser</button></div>';
+  }
+  // étapes
+  h+='<div class="small" style="font-weight:700;margin-top:2px">Étapes</div>';
+  f.etapes.forEach((s,i)=>{const st=_fEtapeStat(s);
+    h+='<div class="brow" style="padding:2px 0 2px 12px;flex-wrap:wrap"><span class="small" style="width:14px;color:var(--mut)">'+(i+1)+'.</span><b style="width:210px">'+esc(s.label)+'</b>'+
+      (ed?'<span class="small" style="white-space:nowrap">du <input type="date" value="'+s.du+'" onchange="formSetEtapeDate('+f.id+',\''+s.k+'\',\'du\',this.value)"> au <input type="date" value="'+s.au+'" onchange="formSetEtapeDate('+f.id+',\''+s.k+'\',\'au\',this.value)"></span>'
+         :'<span class="small">du '+fmtFR(s.du)+' au '+fmtFR(s.au)+'</span>')+
+      '<span class="small" style="color:'+st.c+';font-weight:700">'+st.t+'</span>'+
+      (s.valide?('<span class="small" style="color:var(--mut)">par '+esc(s.par||'?')+'</span>'+(ed?' <button class="mini ghost" title="Annuler la validation (erreur)" onclick="formUnvalid('+f.id+',\'etape\',\''+s.k+'\')">↩</button>':''))
+        :(ed?'<button class="mini" style="margin-left:auto" title="Marquer l\'étape comme acquise (date du jour)" onclick="formValidEtape('+f.id+',\''+s.k+'\')">✓ Acquise</button>':''))+
+      '</div>';});
+  // caps
+  h+='<div class="small" style="font-weight:700;margin-top:4px">Caps</div>';
+  f.caps.forEach(c=>{const late=!c.fait&&t>c.date;
+    h+='<div class="brow" style="padding:2px 0 2px 12px;flex-wrap:wrap"><span>🎯</span><b style="width:296px">'+esc(c.label)+'</b>'+
+      (ed&&!c.fait?'<span class="small">prévu le <input type="date" value="'+c.date+'" onchange="formSetCapDate('+f.id+',\''+c.k+'\',this.value)"></span>':'<span class="small">prévu le '+fmtFR(c.date)+'</span>')+
+      (c.fait?'<span class="small" style="color:#16a34a;font-weight:700">atteint le '+fmtFR(c.fait)+' ✓</span><span class="small" style="color:var(--mut)">par '+esc(c.par||'?')+'</span>'+(ed?' <button class="mini ghost" title="Annuler la validation (erreur)" onclick="formUnvalid('+f.id+',\'cap\',\''+c.k+'\')">↩</button>':'')
+        :('<span class="small" style="color:'+(late?'#dc2626':'#94a3b8')+';font-weight:700">'+(late?'en retard de '+_fDays(t,c.date)+' j':'dans '+_fDays(c.date,t)+' j')+'</span>'+(ed?'<button class="mini" style="margin-left:auto" title="Marquer le cap comme atteint (date du jour)" onclick="formValidCap('+f.id+',\''+c.k+'\')">✓ Atteint</button>':'')))+
+      '</div>';});
+  // évaluations
+  const evs=(f.evals||[]).slice().sort((a,b)=>a.date<b.date?1:-1);
+  h+='<div class="small" style="font-weight:700;margin-top:4px">Évaluations ('+evs.length+')</div>';
+  if(ed)h+='<div class="addrow" style="margin:2px 0 4px"><input type="date" id="fe-d-'+f.id+'" value="'+t+'">'+
+    '<select id="fe-et-'+f.id+'">'+f.etapes.map(s=>'<option value="'+s.k+'"'+((_fEtapeCourante(f)||{}).k===s.k?' selected':'')+'>'+esc(s.label)+'</option>').join('')+'</select>'+
+    '<select id="fe-v-'+f.id+'"><option value="acquis">Acquis</option><option value="encours" selected>En cours</option><option value="arevoir">À revoir</option></select>'+
+    '<input id="fe-c-'+f.id+'" placeholder="Commentaire (invisible pour le salarié)…" style="flex:1;min-width:160px">'+
+    '<button class="act green" onclick="addFormEval('+f.id+')">＋ Évaluer</button></div>';
+  for(const ev of evs){const v=FORM_VERD[ev.verdict]||FORM_VERD.encours;
+    h+='<div class="brow" style="padding:2px 0 2px 12px"><span class="small" style="width:82px;color:var(--mut)">'+fmtFR(ev.date)+'</span>'+
+      '<span class="small" style="width:210px">'+esc(formEtapeLabel(ev.etape))+'</span>'+
+      '<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;background:'+v.c+';color:#fff;white-space:nowrap">'+v.t+'</span>'+
+      '<span class="small" style="flex:1">'+esc(ev.comment||'')+'</span>'+
+      '<span class="small" style="color:var(--mut)">'+esc(ev.par||'')+'</span>'+
+      (ed?'<button class="mini ghost" title="Supprimer cette évaluation" onclick="delFormEval('+f.id+','+ev.id+')">🗑</button>':'')+
+      '</div>';}
+  if(!evs.length)h+='<div class="small" style="padding-left:12px;color:var(--mut)">Aucune évaluation pour l\'instant.</div>';
+  h+='</div>';
+  return h;
+}
+
 // Vue "Demandes en cours" — boutique (toute la boutique) ou salarié (les siennes), lecture seule
 function togReq(){const el=$('reqpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderReq();}
 function renderReq(){
@@ -4181,6 +4385,9 @@ function navOrient(){
   if(rel){rel.textContent=txt;
     const _c=isNow?{bg:'rgba(22,163,74,.16)',bd:'rgba(22,163,74,.5)',fg:'#16a34a'}:future?{bg:'rgba(245,158,11,.18)',bd:'rgba(245,158,11,.55)',fg:'#fbbf24'}:{bg:'rgba(120,113,108,.18)',bd:'rgba(120,113,108,.5)',fg:'#a8a29e'};
     rel.style.background=_c.bg;rel.style.borderColor=_c.bd;rel.style.color=_c.fg;}
+  // Le sélecteur de date suit la période affichée (il garde une date choisie tant qu'on reste sur sa semaine, sinon il se cale sur le lundi affiché)
+  const gt=document.getElementById('goto');
+  if(gt&&document.activeElement!==gt){if(!gt.value||monday(gt.value)!==curMonday)gt.value=curMonday;}
 }
 function monthDays(anchor){const y=+anchor.slice(0,4),m=+anchor.slice(5,7);const out=[];
   let d=y+'-'+String(m).padStart(2,'0')+'-01';while(+d.slice(5,7)===m){out.push(d);d=addD(d,1)}return out;}
@@ -4254,6 +4461,32 @@ function renderMine(){
         (x.ret?(dm>0?'<span class="small" style="color:#dc2626;font-weight:700">+'+fmtDur(dm)+' dépassement (déduit)</span>':'<span class="small" style="color:var(--green);font-weight:700">✓</span>'):'')+
         (x.parResp?'<span class="small" title="pointé par le responsable">🛡️</span>':'')+'</div>';}
     h+='<div class="small" style="color:var(--mut);margin:2px 0 6px">Pointage : clique sur ⏸️ en haut (aujourd\'hui) ou sur le jour dans la vue Semaine. L\'heure enregistrée est celle du clic.</div>';}
+  // 3-ter) MA FORMATION (transparence : étapes, dates et verdicts — les commentaires restent côté encadrement)
+  const myf=formationOf(e.id);
+  if(myf){
+    const tf=todayISO();
+    h+='<div class="mhead">📚 Ma formation</div>';
+    h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:3px">';
+    h+='<div class="brow"><span class="small">débutée le <b>'+fmtFR(myf.debut)+'</b> — J+'+_fDays(tf,myf.debut)+'</span></div>';
+    myf.etapes.forEach((s,i)=>{const st=_fEtapeStat(s);
+      h+='<div class="brow" style="padding:2px 0 2px 14px"><span class="small" style="width:14px;color:var(--mut)">'+(i+1)+'.</span><b style="width:210px">'+esc(s.label)+'</b>'+
+        '<span class="small">du '+fmtFR(s.du)+' au '+fmtFR(s.au)+'</span>'+
+        '<span class="small" style="color:'+st.c+';font-weight:700">'+st.t+'</span></div>';});
+    myf.caps.forEach(c=>{const late=!c.fait&&tf>c.date;
+      h+='<div class="brow" style="padding:2px 0 2px 14px"><span>🎯</span><b style="width:296px">'+esc(c.label)+'</b>'+
+        '<span class="small">objectif : '+fmtFR(c.date)+'</span>'+
+        (c.fait?'<span class="small" style="color:#16a34a;font-weight:700">atteint le '+fmtFR(c.fait)+' ✓</span>'
+          :'<span class="small" style="color:'+(late?'#dc2626':'#94a3b8')+';font-weight:700">'+(late?'dépassé':'dans '+_fDays(c.date,tf)+' j')+'</span>')+'</div>';});
+    const myevs=(myf.evals||[]).slice().sort((a,b)=>a.date<b.date?1:-1);
+    if(myevs.length){h+='<div class="small" style="font-weight:700;margin-top:4px;padding-left:2px">Mes évaluations</div>';
+      for(const ev2 of myevs){const v=FORM_VERD[ev2.verdict]||FORM_VERD.encours;
+        h+='<div class="brow" style="padding:2px 0 2px 14px"><span class="small" style="width:82px;color:var(--mut)">'+fmtFR(ev2.date)+'</span>'+
+          '<span class="small" style="width:210px">'+esc(formEtapeLabel(ev2.etape))+'</span>'+
+          '<span style="font-size:10px;font-weight:800;padding:2px 8px;border-radius:6px;background:'+v.c+';color:#fff;white-space:nowrap">'+v.t+'</span>'+
+          '<span class="small" style="color:var(--mut)">par '+esc(ev2.par||'')+'</span></div>';}}
+    h+='<div class="small" style="color:var(--mut);margin-top:4px">Les dates d\'objectifs peuvent être ajustées par ta boutique selon ta progression.</div>';
+    h+='</div>';
+  }
   // 4) RÉCAP D'HEURES (compact, en bas)
   const days=[...Array(7)].map((_,i)=>addD(curMonday,i));
   const wk=sumNormHS(e,days);const mo=sumNormHS(e,monthDays(curMonday));
@@ -4344,7 +4577,7 @@ function setRole(r){
   applyRole();render();
 }
 function logout(){ROLE=null;try{localStorage.removeItem('gestionrh-role')}catch(e){}
-  edit=null;['settings','feriepanel','abspanel','minepanel','evpanel','hdetail','paiepanel','reqpanel','hspanel','journalpanel','pausepanel'].forEach(id=>{if($(id))$(id).style.display='none'});
+  edit=null;['settings','feriepanel','abspanel','minepanel','evpanel','hdetail','paiepanel','reqpanel','hspanel','journalpanel','pausepanel','formpanel'].forEach(id=>{if($(id))$(id).style.display='none'});
   renderLoginBq();$('login').style.display='flex';setTimeout(()=>$('pinin').focus(),50);}
 function canPaie(){return ROLE&&(ROLE.type==='admin'||ROLE.type==='rh');}
 // ===== JOURNAL RH (onglet « Problèmes ») : incidents saisis + ponctualité (retards/départs) =====
@@ -4486,6 +4719,7 @@ function applyRole(){
   else $('whoami').textContent='🔧 Admin';
   const mb=document.getElementById('minebtn');if(mb)mb.style.display=(ROLE&&ROLE.empId)?'':'none';
   const prb=document.getElementById('pauserecapbtn');if(prb)prb.style.display=(admin||isResp())?'':'none';
+  const fbt=document.getElementById('formbtn');if(fbt)fbt.style.display=(admin||isResp())?'':'none';
   updatePfab();
   const bq=ROLE&&ROLE.type==='boutique';
   document.querySelectorAll('.bchip').forEach(c=>c.style.display=(bq&&c.dataset.b!==ROLE.b)?'none':'');
