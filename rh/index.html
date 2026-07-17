@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-17 19:55 — 📚 Formation, marquage planning : couleur PASTEL du salarié (plus de gris — deux personnes en formation restent reconnaissables) et dégrisage automatique à la date PRÉVUE du cap « 100 % autonome » même sans validation (en plus de la validation du cap apte comptoir). -->
 <!-- v 2026-07-17 19:35 — 📚 Formation : une évaluation « Acquis » valide désormais l'étape correspondante (même date, même auteur, décalage proposé si retard) — retour Fabien : les deux vivaient côte à côte sans être liés. -->
 <!-- v 2026-07-17 19:16 — 📚 Formation : parcours d'intégration (4 étapes de 15 j + caps 1 mois / 1 mois ½ / 2 mois), évaluations statut+commentaire par l'admin et les responsables, décalage proposé quand une étape est validée en retard, salarié grisé 📚 sur les plannings tant qu'il n'est pas apte comptoir, « Ma formation » dans Mon espace (verdicts sans commentaires), récap dans le panneau 📚. -->
 <!-- v 2026-07-17 18:05 — Barre du haut : le sélecteur de date suit la semaine affichée (flèches, Aujourd'hui…) au lieu de rester figé sur la dernière date saisie. -->
@@ -1421,8 +1422,8 @@ function teamCell(bId,d){
     if(e.b!==bId && !((presence(e,d).blocks||[]).some(bl=>bl[2]===bId)))continue;
     const tg=dayTag(e,d,bId);if(!tg)continue;
     const pend=(S.hsdemandes||[]).some(x=>x.statut==='attente'&&x.empId===e.id&&x.date===d);
-    const fo=formVisu(e); // 📚 en formation : pastille grisée tant que pas apte comptoir
-    const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?'#8b93a1':colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
+    const fo=formVisu(e); // 📚 en formation : pastille pastel tant que pas apte comptoir
+    const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
     if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
       const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===bId);
       workItems.push({st:mine.length?t2m(mine[0][0]):9999,en:mine.length?t2m(mine[mine.length-1][1]):0,line});
@@ -1669,7 +1670,7 @@ function renderMineWeek(){
         const top=(ev.s-CAL_START)*PX,hpx=(ev.f-ev.s)*PX,l=Math.min(ev.col*24,64);
         const _isRet=isRetardLbl(ev.lbl);
         const fo=formVisu(ev.e); // 📚 en formation : grisé tant que pas apte comptoir
-        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(fo&&fo.grise?(ev.hs?'#a3a9b5':'#8b93a1'):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':(fo&&fo.grise?' title="📚 En formation — pas encore apte à la vente comptoir"':''))+'>'+
+        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(fo&&fo.grise?pastelOf(colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!_isRet?';color:#1e293b':'')+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':(fo&&fo.grise?' title="📚 En formation — pas encore apte à la vente comptoir"':''))+'>'+
           '<b>'+(ev.me?'★ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
       }
     }
@@ -1731,8 +1732,8 @@ function renderMonth(){
       for(const e of emps){
         if(e.b!==curB && !((presence(e,d).blocks||[]).some(bl=>bl[2]===curB)))continue;
         const tg=dayTag(e,d);if(!tg)continue;
-        const fo=formVisu(e); // 📚 en formation : pastille grisée tant que pas apte comptoir
-        const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?'#8b93a1':colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
+        const fo=formVisu(e); // 📚 en formation : pastille pastel tant que pas apte comptoir
+        const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
         if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
           const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===curB);
           const st=mine.length?t2m(mine[0][0]):9999;const en=mine.length?t2m(mine[mine.length-1][1]):0;
@@ -1895,7 +1896,7 @@ function render(){
       const l=Math.min(ev.col*24,64); // cascade façon Google Agenda
       const fo=formVisu(ev.e); // 📚 en formation : grisé tant que pas apte comptoir (le retard rouge garde la priorité)
       bb+='<div class="blk'+(ev.ex?' ex':'')+(ev.confl?' selfov':'')+(ev.lbl?' rep':'')+'" data-emp="'+ev.e.id+'" data-iso="'+d+'" data-bi="'+ev.bi+'"'+
-        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(fo&&fo.grise?(ev.hs?'#a3a9b5':'#8b93a1'):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+'"'+
+        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(fo&&fo.grise?pastelOf(colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!isRetardLbl(ev.lbl)?';color:#1e293b':'')+'"'+
         (ev.lbl?' title="'+esc(ev.lbl)+'"':(fo&&fo.grise?' title="📚 En formation — pas encore apte à la vente comptoir"':(ev.note?' title="'+esc(ev.note)+'"':'')))+'>'+
         '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span><i class="rz"></i></div>';
     }
@@ -3861,8 +3862,15 @@ const FORM_CAPS=[
 const FORM_VERD={acquis:{t:'Acquis',c:'#16a34a'},encours:{t:'En cours',c:'#d97706'},arevoir:{t:'À revoir',c:'#dc2626'}};
 function formationOf(empId){return (S.formations||[]).find(f=>f.empId===empId&&!f.fin);}
 function formEtapeLabel(k){const s=FORM_ETAPES.find(x=>x.k===k);return s?s.label:k;}
-// Marquage planning : {grise:true} tant que « apte comptoir » non validé, sinon {grise:false} (badge seul)
-function formVisu(e){const f=formationOf(e.id);if(!f)return null;const c=(f.caps||[]).find(x=>x.k==='comptoir');return {f,grise:!(c&&c.fait)};}
+// Marquage planning : {grise:true} = couleur PASTEL (pas gris : deux personnes en formation restent
+// reconnaissables par leur couleur). Fin du pastel dès que le cap « apte comptoir » est validé OU que
+// la date PRÉVUE du cap « 100 % autonome » est atteinte (demande Fabien 2026-07-17 : dégrisage
+// automatique à la date prévue d'autonomie, pas seulement à la validation — les dates décalées suivent).
+function formVisu(e){const f=formationOf(e.id);if(!f)return null;
+  const c=(f.caps||[]).find(x=>x.k==='comptoir'),a=(f.caps||[]).find(x=>x.k==='autonome');
+  return {f,grise:!(c&&c.fait)&&!(a&&todayISO()>=a.date)};}
+// Version pastel d'une couleur (45 % de la couleur + 55 % de blanc) — texte foncé par-dessus
+function pastelOf(hex){const n=String(hex).replace('#','');const v=i=>Math.round(parseInt(n.substr(i,2),16)*0.45+255*0.55).toString(16).padStart(2,'0');return '#'+v(0)+v(2)+v(4);}
 function canFormEdit(f){if(isAdmin())return true;if(!isResp())return false;const t=emp(f.empId),m=emp(ROLE.empId);return !!(t&&m&&t.b===m.b);}
 function _fDays(a,b){return Math.round((new Date(a)-new Date(b))/864e5)}
 function _fPar(){const e=ROLE&&ROLE.empId?emp(ROLE.empId):null;return e?e.nom:'Admin';}
@@ -3955,7 +3963,7 @@ function renderFormPanel(){
   const finies=(S.formations||[]).filter(f=>f.fin&&scope(f)&&emp(f.empId)).sort((a,b)=>a.fin<b.fin?1:-1);
   const t=todayISO();
   let h='<div class="phead"><h2>📚 Formation</h2><button class="act grey" style="margin-left:auto" onclick="$(\'formpanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Parcours type : <b>Liquides</b> (15 j) → <b>Résistances · kits · batteries</b> (15 j) → <b>Plan de vente</b> (15 j) → <b>Perfectionnement</b> (15 j), avec 3 caps : <b>apte comptoir</b> à 1 mois, <b>100 % autonome</b> à 1 mois ½, <b>parfait</b> à 2 mois. Les dates prévues sont ajustables ; quand une étape est validée en retard, l\'outil propose de décaler la suite. Une évaluation « <b>Acquis</b> » valide l\'étape correspondante (même chose que le bouton ✓). Le salarié reste <b>grisé 📚</b> sur les plannings tant qu\'il n\'est pas apte comptoir. Il voit ses étapes et verdicts dans Mon espace (pas les commentaires).</div>';
+  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Parcours type : <b>Liquides</b> (15 j) → <b>Résistances · kits · batteries</b> (15 j) → <b>Plan de vente</b> (15 j) → <b>Perfectionnement</b> (15 j), avec 3 caps : <b>apte comptoir</b> à 1 mois, <b>100 % autonome</b> à 1 mois ½, <b>parfait</b> à 2 mois. Les dates prévues sont ajustables ; quand une étape est validée en retard, l\'outil propose de décaler la suite. Une évaluation « <b>Acquis</b> » valide l\'étape correspondante (même chose que le bouton ✓). Le salarié apparaît en <b>couleur pastel 📚</b> sur les plannings (sa couleur, délavée — deux personnes en formation restent reconnaissables) jusqu\'à la validation du cap « apte comptoir » OU la date prévue du cap « 100 % autonome », première des deux. Il voit ses étapes et verdicts dans Mon espace (pas les commentaires).</div>';
   // ── En un coup d'œil ──
   if(actives.length){
     h+='<div class="mhead">👀 En formation ('+actives.length+')</div>';
