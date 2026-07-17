@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-17 20:25 — Formation : changer une date d'étape ou de cap redessine aussi le planning (le pastel suit immédiatement — avant, il fallait changer de vue pour voir le dégrisage à la date d'autonomie). -->
+<!-- v 2026-07-17 20:15 — Planning : l'étape de formation se lit directement sur les blocs (« · 2/4 Matériel » sous l'heure, info-bulle complète au survol, « 📚2/4 » sur les vues Mois/3 boutiques). Header : les boutons 🍽️ 📚 ⏸️ 🙋 📋 prennent le style adaptatif clair/sombre comme les autres (fond blanc corrigé). -->
 <!-- v 2026-07-17 19:55 — 📚 Formation, marquage planning : couleur PASTEL du salarié (plus de gris — deux personnes en formation restent reconnaissables) et dégrisage automatique à la date PRÉVUE du cap « 100 % autonome » même sans validation (en plus de la validation du cap apte comptoir). -->
 <!-- v 2026-07-17 19:35 — 📚 Formation : une évaluation « Acquis » valide désormais l'étape correspondante (même date, même auteur, décalage proposé si retard) — retour Fabien : les deux vivaient côte à côte sans être liés. -->
 <!-- v 2026-07-17 19:16 — 📚 Formation : parcours d'intégration (4 étapes de 15 j + caps 1 mois / 1 mois ½ / 2 mois), évaluations statut+commentaire par l'admin et les responsables, décalage proposé quand une étape est validée en retard, salarié grisé 📚 sur les plannings tant qu'il n'est pas apte comptoir, « Ma formation » dans Mon espace (verdicts sans commentaires), récap dans le panneau 📚. -->
@@ -216,7 +218,7 @@ button.mini{border:1px solid var(--line);background:var(--card);color:var(--txt)
 table{border-collapse:collapse;width:100%}
 th,td{border:1px solid var(--line);padding:4px 7px;text-align:left;font-size:12.5px}
 th{background:var(--bg);font-weight:600}
-#themebtn,#setbtn{background:none;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px}
+#themebtn,#setbtn,#pauserecapbtn,#formbtn,#pausebtn,#minebtn,#reqbtn{background:none;border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:4px 10px;cursor:pointer;font-size:13px}
 #testbtn.on{background:#7c3aed;border-color:#7c3aed;color:#fff}
 #login{position:fixed;inset:0;background:var(--bg);z-index:200;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px}
 #login .box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:26px 30px;box-shadow:0 18px 50px rgba(0,0,0,.3);width:min(340px,92vw);text-align:center}
@@ -1423,7 +1425,7 @@ function teamCell(bId,d){
     const tg=dayTag(e,d,bId);if(!tg)continue;
     const pend=(S.hsdemandes||[]).some(x=>x.statut==='attente'&&x.empId===e.id&&x.date===d);
     const fo=formVisu(e); // 📚 en formation : pastille pastel tant que pas apte comptoir
-    const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
+    const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+esc(formTitle(fo))+'">📚'+formDisp(fo)+'</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
     if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
       const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===bId);
       workItems.push({st:mine.length?t2m(mine[0][0]):9999,en:mine.length?t2m(mine[mine.length-1][1]):0,line});
@@ -1670,8 +1672,8 @@ function renderMineWeek(){
         const top=(ev.s-CAL_START)*PX,hpx=(ev.f-ev.s)*PX,l=Math.min(ev.col*24,64);
         const _isRet=isRetardLbl(ev.lbl);
         const fo=formVisu(ev.e); // 📚 en formation : grisé tant que pas apte comptoir
-        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(fo&&fo.grise?pastelOf(colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!_isRet?';color:#1e293b':'')+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':(fo&&fo.grise?' title="📚 En formation — pas encore apte à la vente comptoir"':''))+'>'+
-          '<b>'+(ev.me?'★ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span></div>';
+        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(fo&&fo.grise?pastelOf(colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!_isRet?';color:#1e293b':'')+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':(fo?' title="'+esc(formTitle(fo))+'"':''))+'>'+
+          '<b>'+(ev.me?'★ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+(fo?' · '+formDisp(fo)+(fo.cur?' '+esc(formEtapeCourt(fo.cur.k)):''):'')+'</span></div>';
       }
     }
     // calendriers personnels (RDV, orga…) : pleine largeur s'il n'y a pas d'équipe ce jour,
@@ -1733,7 +1735,7 @@ function renderMonth(){
         if(e.b!==curB && !((presence(e,d).blocks||[]).some(bl=>bl[2]===curB)))continue;
         const tg=dayTag(e,d);if(!tg)continue;
         const fo=formVisu(e); // 📚 en formation : pastille pastel tant que pas apte comptoir
-        const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+(fo.grise?'En formation — pas encore apte à la vente comptoir':'En formation')+'">📚</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
+        const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+esc(formTitle(fo))+'">📚'+formDisp(fo)+'</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
         if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
           const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===curB);
           const st=mine.length?t2m(mine[0][0]):9999;const en=mine.length?t2m(mine[mine.length-1][1]):0;
@@ -1897,8 +1899,8 @@ function render(){
       const fo=formVisu(ev.e); // 📚 en formation : grisé tant que pas apte comptoir (le retard rouge garde la priorité)
       bb+='<div class="blk'+(ev.ex?' ex':'')+(ev.confl?' selfov':'')+(ev.lbl?' rep':'')+'" data-emp="'+ev.e.id+'" data-iso="'+d+'" data-bi="'+ev.bi+'"'+
         ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(fo&&fo.grise?pastelOf(colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!isRetardLbl(ev.lbl)?';color:#1e293b':'')+'"'+
-        (ev.lbl?' title="'+esc(ev.lbl)+'"':(fo&&fo.grise?' title="📚 En formation — pas encore apte à la vente comptoir"':(ev.note?' title="'+esc(ev.note)+'"':'')))+'>'+
-        '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+'</span><i class="rz"></i></div>';
+        (ev.lbl?' title="'+esc(ev.lbl)+'"':(fo?' title="'+esc(formTitle(fo))+'"':(ev.note?' title="'+esc(ev.note)+'"':'')))+'>'+
+        '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+(fo?' · '+formDisp(fo)+(fo.cur?' '+esc(formEtapeCourt(fo.cur.k)):'')+'':'')+'</span><i class="rz"></i></div>';
     }
     if(isLive(d)){
     // hachures rouges : créneaux d'un même salarié qui se chevauchent
@@ -3851,10 +3853,11 @@ function renderPausePanel(){
 // validé, le salarié apparaît grisé 📚 sur tous les plannings ; ensuite badge 📚 jusqu'à la fin.
 // Le salarié voit ses étapes, dates et verdicts dans Mon espace — PAS les commentaires (choix Fabien).
 const FORM_ETAPES=[
- {k:'liquides',label:'Liquides'},
- {k:'materiel',label:'Résistances · kits · batteries'},
- {k:'vente',label:'Plan de vente · argumentaire'},
- {k:'perf',label:'Perfectionnement vente'}];
+ {k:'liquides',label:'Liquides',court:'Liquides'},
+ {k:'materiel',label:'Résistances · kits · batteries',court:'Matériel'},
+ {k:'vente',label:'Plan de vente · argumentaire',court:'Vente'},
+ {k:'perf',label:'Perfectionnement vente',court:'Perf.'}];
+function formEtapeCourt(k){const s=FORM_ETAPES.find(x=>x.k===k);return s?s.court:k;}
 const FORM_CAPS=[
  {k:'comptoir',label:'Apte à la vente comptoir (hors matériel)',j:30},
  {k:'autonome',label:'100 % autonome',j:45},
@@ -3868,7 +3871,12 @@ function formEtapeLabel(k){const s=FORM_ETAPES.find(x=>x.k===k);return s?s.label
 // automatique à la date prévue d'autonomie, pas seulement à la validation — les dates décalées suivent).
 function formVisu(e){const f=formationOf(e.id);if(!f)return null;
   const c=(f.caps||[]).find(x=>x.k==='comptoir'),a=(f.caps||[]).find(x=>x.k==='autonome');
-  return {f,grise:!(c&&c.fait)&&!(a&&todayISO()>=a.date)};}
+  const idx=f.etapes.findIndex(s=>!s.valide),cur=idx>=0?f.etapes[idx]:null;
+  return {f,grise:!(c&&c.fait)&&!(a&&todayISO()>=a.date),cur,num:idx>=0?idx+1:f.etapes.length,tot:f.etapes.length};}
+// Affichage compact de l'étape en cours ('2/4' ou '✓' si toutes validées) + info-bulle complète
+function formDisp(fo){return fo.cur?fo.num+'/'+fo.tot:'✓';}
+function formTitle(fo){const s=fo.cur;
+  return '📚 En formation — '+(s?('étape '+fo.num+'/'+fo.tot+' : '+s.label+' (du '+fmtFR(s.du)+' au '+fmtFR(s.au)+')'):'toutes les étapes validées')+(fo.grise?' — pas encore apte à la vente comptoir':'');}
 // Version pastel d'une couleur (45 % de la couleur + 55 % de blanc) — texte foncé par-dessus
 function pastelOf(hex){const n=String(hex).replace('#','');const v=i=>Math.round(parseInt(n.substr(i,2),16)*0.45+255*0.55).toString(16).padStart(2,'0');return '#'+v(0)+v(2)+v(4);}
 function canFormEdit(f){if(isAdmin())return true;if(!isResp())return false;const t=emp(f.empId),m=emp(ROLE.empId);return !!(t&&m&&t.b===m.b);}
@@ -3923,11 +3931,11 @@ function formSetEtapeDate(fid,k,field,val){
   const f=_fForm(fid);if(!f||!canFormEdit(f)||!val)return;
   const s=f.etapes.find(x=>x.k===k);if(!s)return;
   s[field]=val;if(s.au<s.du){if(field==='du')s.au=s.du;else s.du=s.au;}
-  _fTouch(f);renderFormPanel();
+  _fTouch(f);renderFormPanel();render(); // render() : les dates pilotent le pastel du planning
 }
 function formSetCapDate(fid,k,val){
   const f=_fForm(fid);if(!f||!canFormEdit(f)||!val)return;
-  const c=f.caps.find(x=>x.k===k);if(!c)return;c.date=val;_fTouch(f);renderFormPanel();
+  const c=f.caps.find(x=>x.k===k);if(!c)return;c.date=val;_fTouch(f);renderFormPanel();render(); // render() : la date du cap « 100 % autonome » pilote le dégrisage
 }
 function addFormEval(fid){
   const f=_fForm(fid);if(!f||!canFormEdit(f))return;
