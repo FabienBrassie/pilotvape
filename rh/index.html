@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-17 17:55 — Barre du haut : vues + flèches/Aujourd'hui ancrés à gauche (les flèches ne bougent plus quand « dans 2 semaines / dans 1 mois » change de taille), dates + badge + boutons alignés à droite. -->
 <!-- v 2026-07-09 — Pointage des pauses : départ/retour horodatés au clic (salarié + responsable), le planning se recale sur la pause réelle, tout dépassement s'affiche en rouge façon retard (non compté), récap des écarts 🍽️ (admin/resp), repris automatiquement au Journal RH et dans le récap paie. -->
 <meta name="theme-color" content="#2563eb">
 <style>
@@ -15,7 +16,8 @@ header h1{font-size:16px;font-weight:700;margin-right:6px}
 .bchip{border:none;border-radius:16px;padding:5px 14px;cursor:pointer;font-size:13px;font-weight:600;opacity:.45;color:#fff}
 .bchip.on{opacity:1;box-shadow:0 1px 4px rgba(0,0,0,.25)}
 .bchip.P{background:var(--P)}.bchip.M{background:var(--M)}.bchip.L{background:var(--L)}
-.wnav{display:flex;align-items:center;gap:6px;margin-left:auto}
+.wnav{display:flex;align-items:center;gap:6px;margin-left:auto;flex:1 1 auto}
+.wspacer{flex:1 1 12px}
 /* Indicateurs synchro + sauvegarde épinglés en haut à droite (hors flux) : leur apparition/changement ne décale plus rien */
 #syncdot{position:fixed;top:13px;right:14px;z-index:40;pointer-events:none}
 #savestate{position:fixed;top:31px;right:14px;z-index:40;pointer-events:none;text-align:right}
@@ -308,6 +310,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   header h1{font-size:15px;margin-right:2px}
   .bchip{padding:7px 13px;font-size:13px}
   #weekrel,#goto,#savestate{display:none}
+  .wspacer{display:none}
   #weeklabel{min-width:0;font-size:13px;flex:1;text-align:center}
   .wnav{margin-left:0;width:100%;gap:6px;flex-wrap:wrap;justify-content:center}
   .seg{width:100%;order:-1}
@@ -379,6 +382,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
     <button class="nav" id="navprev" onclick="navCal(-1)">◀</button>
     <button class="nav" id="todaybtn" onclick="curMonday=monday(todayISO());render()">Aujourd'hui</button>
     <button class="nav" onclick="navCal(1)">▶</button>
+    <span class="wspacer"></span>
     <span id="weeklabel"></span>
     <span id="weekrel" class="weekrel"></span>
     <input type="date" id="goto" style="width:130px" onchange="if(this.value){curMonday=monday(this.value);render()}">
