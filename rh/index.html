@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-17 19:35 — 📚 Formation : une évaluation « Acquis » valide désormais l'étape correspondante (même date, même auteur, décalage proposé si retard) — retour Fabien : les deux vivaient côte à côte sans être liés. -->
 <!-- v 2026-07-17 19:16 — 📚 Formation : parcours d'intégration (4 étapes de 15 j + caps 1 mois / 1 mois ½ / 2 mois), évaluations statut+commentaire par l'admin et les responsables, décalage proposé quand une étape est validée en retard, salarié grisé 📚 sur les plannings tant qu'il n'est pas apte comptoir, « Ma formation » dans Mon espace (verdicts sans commentaires), récap dans le panneau 📚. -->
 <!-- v 2026-07-17 18:05 — Barre du haut : le sélecteur de date suit la semaine affichée (flèches, Aujourd'hui…) au lieu de rester figé sur la dernière date saisie. -->
 <!-- v 2026-07-17 17:58 — Barre du haut : vues + flèches/Aujourd'hui ancrés à gauche, badge + boutons alignés à droite ; les dates « 27 juillet → 2 août » retirées de la barre (gardées sur petit écran où elles sont le seul repère). -->
@@ -3924,7 +3925,14 @@ function addFormEval(fid){
   const f=_fForm(fid);if(!f||!canFormEdit(f))return;
   const et=$('fe-et-'+fid).value,verd=$('fe-v-'+fid).value,com=($('fe-c-'+fid).value||'').trim(),date=$('fe-d-'+fid).value||todayISO();
   f.evals=f.evals||[];f.evals.push({id:Date.now(),date,etape:et,verdict:verd,comment:com,par:_fPar()});
-  _fTouch(f);renderFormPanel();
+  // Une évaluation « Acquis » VALIDE l'étape (même date, même auteur) — les deux sont liés.
+  // L'inverse n'est pas automatique : une éval « À revoir » sur une étape déjà validée ne l'annule
+  // pas toute seule (ce serait surprenant) — le bouton ↩ est là pour ça.
+  if(verd==='acquis'){const s=f.etapes.find(x=>x.k===et);
+    if(s&&!s.valide){s.valide=date;s.par=_fPar();
+      const late=_fDays(date,s.au);
+      if(late>0)_formShift={fid,days:late,pivot:s.au,quoi:'l\'étape « '+s.label+' »'};}}
+  _fTouch(f);renderFormPanel();render();
 }
 function delFormEval(fid,eid){const f=_fForm(fid);if(!f||!canFormEdit(f))return;f.evals=(f.evals||[]).filter(x=>x.id!==eid);_fTouch(f);renderFormPanel();}
 function formClose(fid){const f=_fForm(fid);if(!f||!isAdmin())return;if(!confirm('Clôturer ce parcours ? Le salarié n\'apparaîtra plus en formation ; tout l\'historique (étapes, caps, évaluations) est conservé dans « Parcours terminés ».'))return;f.fin=todayISO();_fTouch(f);renderFormPanel();render();}
@@ -3947,7 +3955,7 @@ function renderFormPanel(){
   const finies=(S.formations||[]).filter(f=>f.fin&&scope(f)&&emp(f.empId)).sort((a,b)=>a.fin<b.fin?1:-1);
   const t=todayISO();
   let h='<div class="phead"><h2>📚 Formation</h2><button class="act grey" style="margin-left:auto" onclick="$(\'formpanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Parcours type : <b>Liquides</b> (15 j) → <b>Résistances · kits · batteries</b> (15 j) → <b>Plan de vente</b> (15 j) → <b>Perfectionnement</b> (15 j), avec 3 caps : <b>apte comptoir</b> à 1 mois, <b>100 % autonome</b> à 1 mois ½, <b>parfait</b> à 2 mois. Les dates prévues sont ajustables ; quand une étape est validée en retard, l\'outil propose de décaler la suite. Le salarié reste <b>grisé 📚</b> sur les plannings tant qu\'il n\'est pas apte comptoir. Il voit ses étapes et verdicts dans Mon espace (pas les commentaires).</div>';
+  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Parcours type : <b>Liquides</b> (15 j) → <b>Résistances · kits · batteries</b> (15 j) → <b>Plan de vente</b> (15 j) → <b>Perfectionnement</b> (15 j), avec 3 caps : <b>apte comptoir</b> à 1 mois, <b>100 % autonome</b> à 1 mois ½, <b>parfait</b> à 2 mois. Les dates prévues sont ajustables ; quand une étape est validée en retard, l\'outil propose de décaler la suite. Une évaluation « <b>Acquis</b> » valide l\'étape correspondante (même chose que le bouton ✓). Le salarié reste <b>grisé 📚</b> sur les plannings tant qu\'il n\'est pas apte comptoir. Il voit ses étapes et verdicts dans Mon espace (pas les commentaires).</div>';
   // ── En un coup d'œil ──
   if(actives.length){
     h+='<div class="mhead">👀 En formation ('+actives.length+')</div>';
