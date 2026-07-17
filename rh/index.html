@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-07-17 17:55 — Barre du haut : vues + flèches/Aujourd'hui ancrés à gauche (les flèches ne bougent plus quand « dans 2 semaines / dans 1 mois » change de taille), dates + badge + boutons alignés à droite. -->
+<!-- v 2026-07-17 17:58 — Barre du haut : vues + flèches/Aujourd'hui ancrés à gauche, badge + boutons alignés à droite ; les dates « 27 juillet → 2 août » retirées de la barre (gardées sur petit écran où elles sont le seul repère). -->
 <!-- v 2026-07-09 — Pointage des pauses : départ/retour horodatés au clic (salarié + responsable), le planning se recale sur la pause réelle, tout dépassement s'affiche en rouge façon retard (non compté), récap des écarts 🍽️ (admin/resp), repris automatiquement au Journal RH et dans le récap paie. -->
 <meta name="theme-color" content="#2563eb">
 <style>
@@ -18,6 +18,7 @@ header h1{font-size:16px;font-weight:700;margin-right:6px}
 .bchip.P{background:var(--P)}.bchip.M{background:var(--M)}.bchip.L{background:var(--L)}
 .wnav{display:flex;align-items:center;gap:6px;margin-left:auto;flex:1 1 auto}
 .wspacer{flex:1 1 12px}
+.wnav .seg,.wnav button.nav{flex:none}
 /* Indicateurs synchro + sauvegarde épinglés en haut à droite (hors flux) : leur apparition/changement ne décale plus rien */
 #syncdot{position:fixed;top:13px;right:14px;z-index:40;pointer-events:none}
 #savestate{position:fixed;top:31px;right:14px;z-index:40;pointer-events:none;text-align:right}
@@ -25,7 +26,7 @@ button.nav{border:1px solid var(--line);background:var(--card);color:var(--txt);
 button.nav:hover{background:var(--bg)}
 button.nav.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 .weekrel{font-size:11px;color:var(--mut);font-weight:600;white-space:nowrap;padding:2px 8px;border:1px solid var(--line);border-radius:999px}
-#weeklabel{font-weight:600;font-size:13.5px;min-width:150px;text-align:center}
+#weeklabel{display:none;font-weight:600;font-size:13.5px;text-align:center}
 input,select{border:1px solid #cbd5e1;border-radius:6px;padding:5px 7px;font-size:13px;background:var(--card);color:var(--txt)}
 main{padding:12px 16px;max-width:1400px;margin:0 auto}
 /* ---- calendrier ---- */
@@ -311,7 +312,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   .bchip{padding:7px 13px;font-size:13px}
   #weekrel,#goto,#savestate{display:none}
   .wspacer{display:none}
-  #weeklabel{min-width:0;font-size:13px;flex:1;text-align:center}
+  #weeklabel{display:block;min-width:0;font-size:13px;flex:1;text-align:center}
   .wnav{margin-left:0;width:100%;gap:6px;flex-wrap:wrap;justify-content:center}
   .seg{width:100%;order:-1}
   .seg button{flex:1;padding:9px 6px;font-size:12.5px}
