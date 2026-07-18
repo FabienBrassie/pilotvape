@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-18 18:58 — Journal RH : une entrée peut viser « 🏬 Toute la boutique » (problème global : inventaire, ménage, tenue du magasin…) en plus d'un salarié — saisissable par l'admin et les responsables, filtre dédié, nouveau type « Ménage / tenue ». -->
 <!-- v 2026-07-17 21:45 — Formation, 3 recadrages Fabien : étapes calées sur les semaines (lundi → dimanche sur 2 semaines, la suivante commence le lundi ; décalage proposé en semaines entières) · caps AUTOMATIQUES en fin d'étape (apte comptoir = fin Matériel, 100 % autonome = fin Vente, parfait = fin Perfectionnement — plus aucun sélecteur de date de cap, tout suit les étapes, y compris quand on change la fin d'une étape : toute la suite se décale d'autant) · 3 niveaux de couleur par jour (très délavé avant apte comptoir, mi-délavé jusqu'à 100 % autonome, pleine ensuite). -->
 <!-- v 2026-07-17 21:15 — Formation : l'étape affichée sur un bloc est celle DU JOUR du bloc — réel figé par les validations pour le passé (le 1er juillet reste « 1/4 » même si l'étape 3 est finie depuis), prévu (dates du/au) pour le futur. -->
 <!-- v 2026-07-17 21:00 — Formation, pastel par JOUR affiché : sur le planning, les jours d'avant la date prévue « 100 % autonome » (ou la validation apte comptoir si plus tôt) sont pastel, ceux d'après reprennent la couleur pleine — la transition se voit en naviguant dans les semaines futures (2e recadrage Fabien : « dégrisé à la date prévue d'autonomie »). -->
@@ -4708,11 +4709,16 @@ const JTYPES=[
   {t:'Téléphone',c:'#7c3aed'},
   {t:'Comportement',c:'#d97706'},
   {t:'Inventaire',c:'#1d4ed8'},
+  {t:'Ménage / tenue',c:'#059669'},
   {t:'Problème client',c:'#0891b2'},
   {t:'Sanction / Avertissement',c:'#111827'},
   {t:'Autre',c:'#64748b'}
 ];
 function jtypeColor(t){const x=JTYPES.find(j=>j.t===t);return x?x.c:'#64748b';}
+// Problème GLOBAL de boutique (demande Fabien 2026-07-17) : une entrée du journal peut viser la
+// boutique entière plutôt qu'un salarié (référence manquante à l'inventaire, ménage pas fait…).
+// Stocké dans S.rh comme les autres (q = ce marqueur), même synchro/signatures, aucun impact paie.
+const JQ_BOUTIQUE='🏬 Boutique';
 function canJournal(){return isAdmin()||isResp()||!!(ROLE&&ROLE.type==='boutique');}
 function journalMyB(){if(isAdmin())return null;if(isResp())return emp(ROLE.empId)&&emp(ROLE.empId).b;if(ROLE&&ROLE.type==='boutique')return ROLE.b;return null;}
 let journalFilterB=null,journalFilterEmp='',journalFilterPeriod='mois';
@@ -4728,6 +4734,7 @@ function addJournalEntry(b){
   const d=$('jr-d').value,q=$('jr-q').value,t=$('jr-t').value,c=($('jr-c').value||'').trim();
   if(!d||!q){alert('Date et salarié requis.');return;}
   const sens=_PUNCT_SENS[t];
+  if(sens&&q===JQ_BOUTIQUE){alert('Un retard / départ anticipé concerne une personne — choisis le salarié.');return;}
   if(sens){
     // Retard / départ anticipé → on crée un AJUSTEMENT (même donnée que l'onglet Heures sup),
     // qui s'affiche sur le planning et, une fois validé, raccourcit le créneau + déduit les heures.
@@ -4782,18 +4789,18 @@ function renderJournal(){
   if(isA)h+=S.boutiques.map(b=>'<button class="bchip '+b.id+(selB===b.id?' on':'')+'" onclick="setJournalB(\''+b.id+'\')">'+b.nom+'</button>').join('');
   else if(selB)h+='<span class="chipb" style="color:var(--'+selB+')">'+bout(selB).nom+'</span>';
   h+='<button class="act grey" style="margin-left:auto" onclick="$(\'journalpanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:6px;color:var(--mut)">Comportement · attitude · fiabilité · ponctualité. Les retards / départs anticipés déclarés (ajustements horaires) sont repris ici automatiquement (🕒 auto).</div>';
+  h+='<div class="small" style="margin-bottom:6px;color:var(--mut)">Comportement · attitude · fiabilité · ponctualité — et <b>problèmes globaux de la boutique</b> (choisis « 🏬 Toute la boutique » : inventaire, ménage, tenue du magasin…). Les retards / départs anticipés déclarés (ajustements horaires) sont repris ici automatiquement (🕒 auto).</div>';
   const emps=S.employees.filter(e=>e.actif&&e.b===selB);
-  // si le salarié filtré n'est pas (ou plus) dans la boutique sélectionnée → on réinitialise
-  if(journalFilterEmp&&!emps.some(e=>e.nom===journalFilterEmp))journalFilterEmp='';
+  // si le salarié filtré n'est pas (ou plus) dans la boutique sélectionnée → on réinitialise (sauf le filtre 🏬 Boutique)
+  if(journalFilterEmp&&journalFilterEmp!==JQ_BOUTIQUE&&!emps.some(e=>e.nom===journalFilterEmp))journalFilterEmp='';
   // barre de filtres : salarié (selon boutique) + période
   h+='<div class="row" style="gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center">'+
     '<span class="small" style="color:var(--mut)">Filtrer :</span>'+
-    '<select onchange="setJournalEmp(this.value)"><option value="">👤 Tous les salariés</option>'+emps.map(e=>'<option value="'+esc(e.nom)+'"'+(journalFilterEmp===e.nom?' selected':'')+'>'+esc(e.nom)+'</option>').join('')+'</select>'+
+    '<select onchange="setJournalEmp(this.value)"><option value="">👤 Tous les salariés</option><option value="'+JQ_BOUTIQUE+'"'+(journalFilterEmp===JQ_BOUTIQUE?' selected':'')+'>🏬 Boutique (problèmes globaux)</option>'+emps.map(e=>'<option value="'+esc(e.nom)+'"'+(journalFilterEmp===e.nom?' selected':'')+'>'+esc(e.nom)+'</option>').join('')+'</select>'+
     '<select onchange="setJournalPeriod(this.value)">'+[['mois','📅 Ce mois-ci'],['mois-1','Mois dernier'],['j90','90 derniers jours'],['annee','Cette année'],['tout','Tout']].map(o=>'<option value="'+o[0]+'"'+(journalFilterPeriod===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>'+
     '</div>';
   h+='<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
-    '<select id="jr-q">'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
+    '<select id="jr-q"><option value="'+JQ_BOUTIQUE+'">🏬 Toute la boutique (problème global)</option>'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
     '<select id="jr-t">'+JTYPES.map(j=>'<option>'+j.t+'</option>').join('')+'</select>'+
     '<input id="jr-min" type="number" min="1" step="1" placeholder="min (retard/départ)" title="Durée en minutes — requise pour Retard / Retard à l\'ouverture / Parti plus tôt : crée un ajustement à valider qui modifie le planning" style="width:135px">'+
     '<input id="jr-c" placeholder="Commentaire (optionnel)" style="flex:1;min-width:140px">'+
@@ -4812,7 +4819,7 @@ function renderJournal(){
   list.sort((a,b)=>a.d<b.d?1:a.d>b.d?-1:0);
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
   if(!list.length)h+='<div class="small">Aucune entrée pour cette boutique.</div>';
-  for(const r of list){const col=jtypeColor(r.t);const _qe=S.employees.find(x=>x.nom===r.q&&x.b===selB)||S.employees.find(x=>x.nom===r.q);const qcol=_qe?colOf(_qe):'';
+  for(const r of list){const col=jtypeColor(r.t);const _qe=r.q===JQ_BOUTIQUE?null:(S.employees.find(x=>x.nom===r.q&&x.b===selB)||S.employees.find(x=>x.nom===r.q));const qcol=r.q===JQ_BOUTIQUE?'var(--'+selB+')':(_qe?colOf(_qe):'');
     h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.pause?(((isA||isResp())&&canPauseEdit((S.pauses||[]).find(x=>x.id===r.id)||{empId:''}))?'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span> <button class="mini" title="Corriger les heures pointées" onclick="editPause('+r.id+')">✎</button> <button class="mini ghost" title="Annuler ce pointage — remet le planning comme prévu" onclick="delPause('+r.id+')">🗑</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span>'):r.auto?(isA?((r.pending?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> ':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 validé ✓</span> ')+'<button class="mini" title="Modifier la durée" onclick="editRetard('+r.id+')">✎</button> <button class="mini ghost" title="Annuler — rétablit les heures du jour" onclick="delRetard('+r.id+')">🗑</button>'):'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
   }
   $('journalpanel').innerHTML=h;
