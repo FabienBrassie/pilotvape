@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-17 21:45 — Formation, 3 recadrages Fabien : étapes calées sur les semaines (lundi → dimanche sur 2 semaines, la suivante commence le lundi ; décalage proposé en semaines entières) · caps AUTOMATIQUES en fin d'étape (apte comptoir = fin Matériel, 100 % autonome = fin Vente, parfait = fin Perfectionnement — plus aucun sélecteur de date de cap, tout suit les étapes, y compris quand on change la fin d'une étape : toute la suite se décale d'autant) · 3 niveaux de couleur par jour (très délavé avant apte comptoir, mi-délavé jusqu'à 100 % autonome, pleine ensuite). -->
 <!-- v 2026-07-17 21:15 — Formation : l'étape affichée sur un bloc est celle DU JOUR du bloc — réel figé par les validations pour le passé (le 1er juillet reste « 1/4 » même si l'étape 3 est finie depuis), prévu (dates du/au) pour le futur. -->
 <!-- v 2026-07-17 21:00 — Formation, pastel par JOUR affiché : sur le planning, les jours d'avant la date prévue « 100 % autonome » (ou la validation apte comptoir si plus tôt) sont pastel, ceux d'après reprennent la couleur pleine — la transition se voit en naviguant dans les semaines futures (2e recadrage Fabien : « dégrisé à la date prévue d'autonomie »). -->
 <!-- v 2026-07-17 20:45 — Formation : la carte devient VISUELLE (retour Fabien : « je suis visuel, pas des champs partout ») — frise chronologique par personne (barres d'étapes colorées par état, drapeaux 🎯 des caps, pastilles d'évaluations, trait « aujourd'hui », repères des lundis), ligne d'action réduite à l'étape en cours + prochain cap, champs de dates repliés derrière « ✎ ajuster les dates ». Même frise dans Mon espace du salarié (info-bulles sans commentaires). -->
@@ -1428,7 +1429,7 @@ function teamCell(bId,d){
     const tg=dayTag(e,d,bId);if(!tg)continue;
     const pend=(S.hsdemandes||[]).some(x=>x.statut==='attente'&&x.empId===e.id&&x.date===d);
     const fo=formVisu(e,d); // 📚 en formation : pastille pastel sur les jours d'avant la limite d'autonomie
-    const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+esc(formTitle(fo))+'">📚'+formDisp(fo)+'</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
+    const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?formPastel(fo,colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+esc(formTitle(fo))+'">📚'+formDisp(fo)+'</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+(pend?'<span class="mtag HS" title="demande en attente">·?</span>':'')+lossTagFor(e.id,d)+'</div>';
     if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
       const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===bId);
       workItems.push({st:mine.length?t2m(mine[0][0]):9999,en:mine.length?t2m(mine[mine.length-1][1]):0,line});
@@ -1675,7 +1676,7 @@ function renderMineWeek(){
         const top=(ev.s-CAL_START)*PX,hpx=(ev.f-ev.s)*PX,l=Math.min(ev.col*24,64);
         const _isRet=isRetardLbl(ev.lbl);
         const fo=formVisu(ev.e,d); // 📚 en formation : pastel sur les jours d'avant la limite d'autonomie
-        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(fo&&fo.grise?pastelOf(colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!_isRet?';color:#1e293b':'')+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':(fo?' title="'+esc(formTitle(fo))+'"':''))+'>'+
+        bb+='<div class="blk" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(_isRet?'#dc2626':(fo&&fo.grise?formPastel(fo,colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!_isRet?';color:#1e293b':'')+(ev.me?';outline:3px solid var(--txt);outline-offset:-3px':'')+'"'+(ev.lbl?' title="'+esc(ev.lbl)+'"':(fo?' title="'+esc(formTitle(fo))+'"':''))+'>'+
           '<b>'+(ev.me?'★ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+(fo?' · '+formDisp(fo)+(fo.cur?' '+esc(formEtapeCourt(fo.cur.k)):''):'')+'</span></div>';
       }
     }
@@ -1738,7 +1739,7 @@ function renderMonth(){
         if(e.b!==curB && !((presence(e,d).blocks||[]).some(bl=>bl[2]===curB)))continue;
         const tg=dayTag(e,d);if(!tg)continue;
         const fo=formVisu(e,d); // 📚 en formation : pastille pastel sur les jours d'avant la limite d'autonomie
-        const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?pastelOf(colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+esc(formTitle(fo))+'">📚'+formDisp(fo)+'</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
+        const line='<div class="mline"><span class="md" style="background:'+(fo&&fo.grise?formPastel(fo,colOf(e)):colOf(e))+'"></span>'+(fo?'<span title="'+esc(formTitle(fo))+'">📚'+formDisp(fo)+'</span> ':'')+esc(e.nom.split(' ')[0])+' <span class="mtag '+tg.c+'">'+tg.t+(tg.hs?' <span class="mtag HS">+HS</span>':'')+'</span>'+lossTagFor(e.id,d)+'</div>';
         if(tg.c==='O'||tg.c==='F'||tg.c==='J'||tg.c==='Mil'){
           const mine=(presence(e,d).blocks||[]).filter(bl=>bl[2]===curB);
           const st=mine.length?t2m(mine[0][0]):9999;const en=mine.length?t2m(mine[mine.length-1][1]):0;
@@ -1901,7 +1902,7 @@ function render(){
       const l=Math.min(ev.col*24,64); // cascade façon Google Agenda
       const fo=formVisu(ev.e,d); // 📚 en formation : pastel sur les jours d'avant la limite d'autonomie (le retard rouge garde la priorité)
       bb+='<div class="blk'+(ev.ex?' ex':'')+(ev.confl?' selfov':'')+(ev.lbl?' rep':'')+'" data-emp="'+ev.e.id+'" data-iso="'+d+'" data-bi="'+ev.bi+'"'+
-        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(fo&&fo.grise?pastelOf(colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!isRetardLbl(ev.lbl)?';color:#1e293b':'')+'"'+
+        ' style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 2px);width:calc('+(100-l)+'% - 5px);z-index:'+(5+ev.col)+';background:'+(isRetardLbl(ev.lbl)?'#dc2626':(fo&&fo.grise?formPastel(fo,colOf(ev.e)):(ev.hs?shade(colOf(ev.e),0.62):colOf(ev.e))))+(fo&&fo.grise&&!isRetardLbl(ev.lbl)?';color:#1e293b':'')+'"'+
         (ev.lbl?' title="'+esc(ev.lbl)+'"':(fo?' title="'+esc(formTitle(fo))+'"':(ev.note?' title="'+esc(ev.note)+'"':'')))+'>'+
         '<i class="rzt"></i><b>'+(ev.confl?'⚠ ':'')+(fo?'📚 ':'')+esc(ev.e.nom)+(ev.hs?' · HS':'')+(ev.lbl?' · '+esc(ev.lbl):'')+'</b><span>'+fmtH(ev.bl[0])+' – '+fmtH(ev.bl[1])+(fo?' · '+formDisp(fo)+(fo.cur?' '+esc(formEtapeCourt(fo.cur.k)):'')+'':'')+'</span><i class="rz"></i></div>';
     }
@@ -3862,9 +3863,14 @@ const FORM_ETAPES=[
  {k:'perf',label:'Perfectionnement vente',court:'Perf.'}];
 function formEtapeCourt(k){const s=FORM_ETAPES.find(x=>x.k===k);return s?s.court:k;}
 const FORM_CAPS=[
- {k:'comptoir',label:'Apte à la vente comptoir (hors matériel)',j:30},
- {k:'autonome',label:'100 % autonome',j:45},
- {k:'parfait',label:'Parfait',j:60}];
+ {k:'comptoir',label:'Apte à la vente comptoir (hors matériel)'},
+ {k:'autonome',label:'100 % autonome'},
+ {k:'parfait',label:'Parfait'}];
+// Les caps n'ont PAS de date propre (recadrage Fabien 2026-07-17) : leur date est AUTOMATIQUE,
+// dérivée de la fin de l'étape liée — apte comptoir = fin de Matériel, 100 % autonome = fin de
+// Vente, parfait = fin de Perfectionnement. Quand les étapes bougent, les caps suivent tout seuls.
+const FORM_CAP_LINK={comptoir:'materiel',autonome:'vente',parfait:'perf'};
+function formCapDate(f,k){const s=f.etapes.find(x=>x.k===FORM_CAP_LINK[k]);if(s)return s.au;const c=(f.caps||[]).find(x=>x.k===k);return (c&&c.date)||f.debut;}
 const FORM_VERD={acquis:{t:'Acquis',c:'#16a34a'},encours:{t:'En cours',c:'#d97706'},arevoir:{t:'À revoir',c:'#dc2626'}};
 function formationOf(empId){return (S.formations||[]).find(f=>f.empId===empId&&!f.fin);}
 function formEtapeLabel(k){const s=FORM_ETAPES.find(x=>x.k===k);return s?s.label:k;}
@@ -3889,18 +3895,25 @@ function formEtapeAt(f,d){
   for(const s of rest){if(s.du<=d)cur=s;}
   return cur;
 }
+// 3 niveaux de couleur par jour (demande Fabien : un dégradé intermédiaire au cap apte comptoir) :
+// niveau 2 = pas encore apte comptoir (très délavé) · niveau 1 = apte comptoir mais pas 100 % autonome
+// (mi-délavé) · niveau 0 = autonome (couleur pleine). Bascule le lendemain de la fin de l'étape liée,
+// ou dès le jour de la validation manuelle du cap si elle existe.
 function formVisu(e,d){const f=formationOf(e.id);if(!f)return null;
   const day=d||todayISO();
   const c=(f.caps||[]).find(x=>x.k==='comptoir'),a=(f.caps||[]).find(x=>x.k==='autonome');
-  const lim=(c&&c.fait&&(!a||c.fait<a.date))?c.fait:(a?a.date:(c&&c.fait?c.fait:null));
+  const aptC=(c&&c.fait)?day>=c.fait:day>formCapDate(f,'comptoir');
+  const aptA=(a&&a.fait)?day>=a.fait:day>formCapDate(f,'autonome');
+  const niveau=aptA?0:(aptC?1:2);
   const cur=formEtapeAt(f,day);
-  return {f,grise:!!lim&&day<lim,cur,num:cur?f.etapes.indexOf(cur)+1:f.etapes.length,tot:f.etapes.length};}
+  return {f,niveau,grise:niveau>0,cur,num:cur?f.etapes.indexOf(cur)+1:f.etapes.length,tot:f.etapes.length};}
+function formPastel(fo,col){return pastelOf(col,fo.niveau===2?0.40:0.72);}
 // Affichage compact de l'étape en cours ('2/4' ou '✓' si toutes validées) + info-bulle complète
 function formDisp(fo){return fo.cur?fo.num+'/'+fo.tot:'✓';}
 function formTitle(fo){const s=fo.cur;
-  return '📚 En formation — '+(s?('étape '+fo.num+'/'+fo.tot+' : '+s.label+' (du '+fmtFR(s.du)+' au '+fmtFR(s.au)+')'):'toutes les étapes validées')+(fo.grise?' — pas encore apte à la vente comptoir':'');}
-// Version pastel d'une couleur (45 % de la couleur + 55 % de blanc) — texte foncé par-dessus
-function pastelOf(hex){const n=String(hex).replace('#','');const v=i=>Math.round(parseInt(n.substr(i,2),16)*0.45+255*0.55).toString(16).padStart(2,'0');return '#'+v(0)+v(2)+v(4);}
+  return '📚 En formation — '+(s?('étape '+fo.num+'/'+fo.tot+' : '+s.label+' (du '+fmtFR(s.du)+' au '+fmtFR(s.au)+')'):'toutes les étapes validées')+(fo.niveau===2?' — pas encore apte à la vente comptoir':fo.niveau===1?' — apte comptoir, pas encore 100 % autonome':'');}
+// Version pastel d'une couleur (k = part de couleur gardée, le reste en blanc) — texte foncé par-dessus
+function pastelOf(hex,k){k=k||0.45;const n=String(hex).replace('#','');const v=i=>Math.round(parseInt(n.substr(i,2),16)*k+255*(1-k)).toString(16).padStart(2,'0');return '#'+v(0)+v(2)+v(4);}
 function canFormEdit(f){if(isAdmin())return true;if(!isResp())return false;const t=emp(f.empId),m=emp(ROLE.empId);return !!(t&&m&&t.b===m.b);}
 function _fDays(a,b){return Math.round((new Date(a)-new Date(b))/864e5)}
 function _fPar(){const e=ROLE&&ROLE.empId?emp(ROLE.empId):null;return e?e.nom:'Admin';}
@@ -3912,8 +3925,12 @@ function addFormation(){
   const eSel=S.employees.find(x=>String(x.id)===sel.value);if(!eSel){alert('Choisis un salarié.');return;}
   const empId=eSel.id,debut=(dt&&dt.value)||todayISO(); // id tel quel (texte pour l'équipe d'origine, nombre pour les ajouts récents)
   if(formationOf(empId)){alert('Cette personne a déjà un parcours en cours.');return;}
-  const etapes=FORM_ETAPES.map((s,i)=>({k:s.k,label:s.label,du:addD(debut,i*15),au:addD(debut,i*15+14),valide:null,par:''}));
-  const caps=FORM_CAPS.map(c=>({k:c.k,label:c.label,date:addD(debut,c.j),fait:null,par:''}));
+  // Étapes calées sur les SEMAINES (Fabien : « 15 jours » = du lundi au dimanche, 14 j réels,
+  // l'étape suivante commence le lundi) : chaque étape va d'un lundi au dimanche 13 j plus tard.
+  // La 1re démarre au jour réel d'embauche mais finit au même dimanche que si elle avait commencé le lundi.
+  const base=monday(debut);
+  const etapes=FORM_ETAPES.map((s,i)=>({k:s.k,label:s.label,du:i===0?debut:addD(base,i*14),au:addD(base,i*14+13),valide:null,par:''}));
+  const caps=FORM_CAPS.map(c=>({k:c.k,label:c.label,fait:null,par:''})); // dates dérivées (formCapDate), jamais stockées
   S.formations.push({id:Date.now(),empId,debut,etapes,caps,evals:[],fin:null,_ts:NOW()});
   save();renderFormPanel();render();
 }
@@ -3922,7 +3939,7 @@ function formValidEtape(fid,k){
   const s=f.etapes.find(x=>x.k===k);if(!s||s.valide)return;
   s.valide=todayISO();s.par=_fPar();_fTouch(f);
   const late=_fDays(todayISO(),s.au);
-  if(late>0)_formShift={fid,days:late,pivot:s.au,quoi:'l\'étape « '+s.label+' »'};
+  if(late>0){const sem=Math.ceil(late/7);_formShift={fid,days:sem*7,sem,pivot:s.au,quoi:'l\'étape « '+s.label+' »'};} // décalage en semaines entières : les étapes restent du lundi au dimanche
   renderFormPanel();render();
 }
 function formValidCap(fid,k){
@@ -3931,8 +3948,9 @@ function formValidCap(fid,k){
   c.fait=todayISO();c.par=_fPar();
   if(k==='parfait'&&f.caps.every(x=>x.fait)&&f.etapes.every(s=>s.valide))f.fin=todayISO(); // tout est validé → parcours terminé (historique conservé)
   _fTouch(f);
-  const late=_fDays(todayISO(),c.date);
-  if(late>0&&!f.fin)_formShift={fid,days:late,pivot:c.date,quoi:'le cap « '+c.label+' »'};
+  const cd=formCapDate(f,k);
+  const late=_fDays(todayISO(),cd);
+  if(late>0&&!f.fin){const sem=Math.ceil(late/7);_formShift={fid,days:sem*7,sem,pivot:cd,quoi:'le cap « '+c.label+' »'};}
   renderFormPanel();render();
 }
 function formUnvalid(fid,kind,k){ // ↩ corrige une validation faite par erreur
@@ -3945,19 +3963,23 @@ function formShiftApply(){
   if(!_formShift)return;const f=_fForm(_formShift.fid);if(!f||!canFormEdit(f)){_formShift=null;return;}
   const {days,pivot}=_formShift;
   for(const s of f.etapes){if(s.valide)continue;if(s.du>=pivot){s.du=addD(s.du,days);s.au=addD(s.au,days);}else if(s.au>=pivot){s.au=addD(s.au,days);}}
-  for(const c of f.caps){if(!c.fait&&c.date>=pivot)c.date=addD(c.date,days);}
+  // les caps suivent automatiquement : leurs dates sont dérivées des fins d'étapes (formCapDate)
   _fTouch(f);_formShift=null;renderFormPanel();render();
 }
 function formShiftDismiss(){_formShift=null;renderFormPanel();}
 function formSetEtapeDate(fid,k,field,val){
   const f=_fForm(fid);if(!f||!canFormEdit(f)||!val)return;
-  const s=f.etapes.find(x=>x.k===k);if(!s)return;
-  s[field]=val;if(s.au<s.du){if(field==='du')s.au=s.du;else s.du=s.au;}
+  const i=f.etapes.findIndex(x=>x.k===k);if(i<0)return;
+  const s=f.etapes[i];
+  if(field==='au'){
+    // Changer la FIN d'une étape décale d'autant TOUT ce qui suit (demande Fabien : « si je change
+    // la fin de l'étape 1 d'une semaine, l'ensemble du suivant doit se décaler d'une semaine »).
+    // Les caps suivent automatiquement (dates dérivées des fins d'étapes).
+    const delta=_fDays(val,s.au);
+    s.au=val;if(s.du>s.au)s.du=s.au;
+    if(delta)for(let j=i+1;j<f.etapes.length;j++){const n=f.etapes[j];if(n.valide)continue;n.du=addD(n.du,delta);n.au=addD(n.au,delta);}
+  }else{s.du=val;if(s.au<s.du)s.au=s.du;}
   _fTouch(f);renderFormPanel();render(); // render() : les dates pilotent le pastel du planning
-}
-function formSetCapDate(fid,k,val){
-  const f=_fForm(fid);if(!f||!canFormEdit(f)||!val)return;
-  const c=f.caps.find(x=>x.k===k);if(!c)return;c.date=val;_fTouch(f);renderFormPanel();render(); // render() : la date du cap « 100 % autonome » pilote le dégrisage
 }
 function addFormEval(fid){
   const f=_fForm(fid);if(!f||!canFormEdit(f))return;
@@ -3993,7 +4015,7 @@ function formToggleDates(fid){if(_formDatesOpen.has(fid))_formDatesOpen.delete(f
 function _formFriseHtml(f,avecComs){
   const t=todayISO(),start=f.debut;
   let end=f.etapes[f.etapes.length-1].au;
-  for(const c of f.caps)if((c.fait||c.date)>end)end=(c.fait||c.date);
+  for(const c of f.caps){const cd=c.fait||formCapDate(f,c.k);if(cd>end)end=cd;}
   if(t>end)end=t;
   end=addD(end,2);
   const total=Math.max(1,_fDays(end,start));
@@ -4017,10 +4039,10 @@ function _formFriseHtml(f,avecComs){
   }
   // caps : trait + drapeau 🎯 étiqueté en bas
   for(const c of f.caps){
-    const late=!c.fait&&t>c.date,d=c.fait||c.date;
+    const cd=formCapDate(f,c.k),late=!c.fait&&t>cd,d=c.fait||cd;
     const col=c.fait?'#16a34a':late?'#dc2626':'#94a3b8';
     h+='<div style="position:absolute;left:'+pos(d)+'%;top:16px;bottom:22px;width:2px;background:'+col+';opacity:.75;transform:translateX(-50%)"></div>'+
-       '<div title="'+esc(c.label+' — prévu le '+fmtFR(c.date)+(c.fait?' — atteint le '+fmtFR(c.fait)+' ✓'+(c.par?' par '+c.par:''):late?' — en retard de '+_fDays(t,c.date)+' j':''))+'" style="position:absolute;left:'+pos(d)+'%;top:66px;transform:translateX(-50%);text-align:center;font-size:9.5px;font-weight:700;color:'+col+';white-space:nowrap;line-height:1.3">🎯<br>'+FORM_CAP_COURT[c.k]+(c.fait?' ✓':late?' ⚠':'')+'</div>';
+       '<div title="'+esc(c.label+' — fin de l\'étape '+formEtapeCourt(FORM_CAP_LINK[c.k])+', le '+fmtFR(cd)+' (automatique)'+(c.fait?' — atteint le '+fmtFR(c.fait)+' ✓'+(c.par?' par '+c.par:''):late?' — en retard de '+_fDays(t,cd)+' j':''))+'" style="position:absolute;left:'+pos(d)+'%;top:66px;transform:translateX(-50%);text-align:center;font-size:9.5px;font-weight:700;color:'+col+';white-space:nowrap;line-height:1.3">🎯<br>'+FORM_CAP_COURT[c.k]+(c.fait?' ✓':late?' ⚠':'')+'</div>';
   }
   // aujourd'hui
   if(t>=start){h+='<div style="position:absolute;left:'+pos(t)+'%;top:12px;bottom:22px;width:2px;background:var(--blue)"></div>'+
@@ -4037,12 +4059,12 @@ function renderFormPanel(){
   const finies=(S.formations||[]).filter(f=>f.fin&&scope(f)&&emp(f.empId)).sort((a,b)=>a.fin<b.fin?1:-1);
   const t=todayISO();
   let h='<div class="phead"><h2>📚 Formation</h2><button class="act grey" style="margin-left:auto" onclick="$(\'formpanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Parcours type : <b>Liquides</b> (15 j) → <b>Résistances · kits · batteries</b> (15 j) → <b>Plan de vente</b> (15 j) → <b>Perfectionnement</b> (15 j), avec 3 caps : <b>apte comptoir</b> à 1 mois, <b>100 % autonome</b> à 1 mois ½, <b>parfait</b> à 2 mois. Les dates prévues sont ajustables ; quand une étape est validée en retard, l\'outil propose de décaler la suite. Une évaluation « <b>Acquis</b> » valide l\'étape correspondante (même chose que le bouton ✓). Sur les plannings, les <b>jours situés avant</b> la date prévue du cap « 100 % autonome » (ou avant la validation du cap apte comptoir si elle arrive plus tôt) s\'affichent en <b>couleur pastel 📚</b> (sa couleur, délavée — deux personnes en formation restent reconnaissables) ; à partir de cette date, il reprend sa couleur pleine — la transition se voit en naviguant dans les semaines. Il voit ses étapes et verdicts dans Mon espace (pas les commentaires).</div>';
+  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Parcours type : <b>Liquides</b> → <b>Résistances · kits · batteries</b> → <b>Plan de vente</b> → <b>Perfectionnement</b>, chaque étape du <b>lundi au dimanche</b> sur 2 semaines, la suivante commence le lundi. Les 3 caps sont <b>automatiques</b> : <b>apte comptoir</b> = fin de Matériel, <b>100 % autonome</b> = fin de Vente, <b>parfait</b> = fin de Perfectionnement — quand les étapes bougent, les caps suivent. Les dates prévues sont ajustables ; quand une étape est validée en retard, l\'outil propose de décaler la suite. Une évaluation « <b>Acquis</b> » valide l\'étape correspondante (même chose que le bouton ✓). Sur les plannings, la couleur du salarié suit le niveau du <b>jour affiché</b> : <b>très délavée 📚</b> avant « apte comptoir », <b>mi-délavée</b> entre « apte comptoir » et « 100 % autonome », <b>pleine</b> ensuite (toujours SA couleur — deux personnes en formation restent reconnaissables) ; les transitions se voient en naviguant dans les semaines, et une validation manuelle d\'un cap avance la bascule. Il voit ses étapes et verdicts dans Mon espace (pas les commentaires).</div>';
   // ── En un coup d'œil ──
   if(actives.length){
     h+='<div class="mhead">👀 En formation ('+actives.length+')</div>';
     for(const f of actives){const e=emp(f.empId);const cur=_fEtapeCourante(f);const cptr=f.caps.find(c=>c.k==='comptoir');
-      const next=[...f.etapes.filter(s=>!s.valide).map(s=>({d:s.au,q:s.label})),...f.caps.filter(c=>!c.fait).map(c=>({d:c.date,q:c.label}))].sort((a,b)=>a.d<b.d?-1:1)[0];
+      const next=[...f.etapes.filter(s=>!s.valide).map(s=>({d:s.au,q:s.label})),...f.caps.filter(c=>!c.fait).map(c=>({d:formCapDate(f,c.k),q:c.label}))].sort((a,b)=>a.d<b.d?-1:1)[0];
       const late=next&&t>next.d;
       h+='<div class="brow" style="padding:3px 6px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+')">'+esc((bout(e.b)||{}).nom||'')+'</span>'+
         '<span class="small">J+'+_fDays(t,f.debut)+'</span>'+
@@ -4083,8 +4105,8 @@ function _formCard(f){
     (isAdmin()?'<span style="margin-left:auto;white-space:nowrap"><button class="mini" title="Clôturer : fin du parcours, historique conservé" onclick="formClose('+f.id+')">📦 Clôturer</button> <button class="mini ghost" title="Supprimer définitivement (préférer Clôturer)" onclick="formDelete('+f.id+')">🗑</button></span>':'')+'</div>';
   // proposition de décalage
   if(_formShift&&_formShift.fid===f.id&&ed){
-    h+='<div class="brow" style="background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);border-radius:8px;padding:6px 10px">⏳ <span class="small" style="flex:1">Tu viens de valider '+_formShift.quoi+' avec <b>'+_formShift.days+' j de retard</b>. Décaler d\'autant tout ce qui reste (étapes et caps non validés) ? Les dates prévues d\'origine restent visibles dans l\'historique des validations.</span>'+
-      '<button class="act" onclick="formShiftApply()">Décaler de '+_formShift.days+' j</button><button class="act grey" onclick="formShiftDismiss()">Laisser</button></div>';
+    h+='<div class="brow" style="background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.5);border-radius:8px;padding:6px 10px">⏳ <span class="small" style="flex:1">Tu viens de valider '+_formShift.quoi+' en retard. Décaler la suite de <b>'+_formShift.sem+' semaine'+(_formShift.sem>1?'s':'')+'</b> ? (les étapes restent du lundi au dimanche, les caps suivent tout seuls — les dates prévues d\'origine restent dans l\'historique)</span>'+
+      '<button class="act" onclick="formShiftApply()">Décaler de '+_formShift.sem+' sem.</button><button class="act grey" onclick="formShiftDismiss()">Laisser</button></div>';
   }
   // ── LA FRISE (le visuel principal) ──
   h+=_formFriseHtml(f,true);
@@ -4093,7 +4115,7 @@ function _formCard(f){
   h+='<div class="brow" style="padding:2px 0 2px 2px;flex-wrap:wrap">';
   if(_cur)h+='<span class="small">étape en cours : <b>'+esc(_cur.label)+'</b></span>'+(ed?'<button class="mini" title="Marquer l\'étape comme acquise (date du jour)" onclick="formValidEtape('+f.id+',\''+_cur.k+'\')">✓ Acquise</button>':'');
   else h+='<span class="small" style="color:#16a34a;font-weight:700">toutes les étapes validées ✓</span>';
-  if(_ncap)h+='<span class="small" style="margin-left:14px">prochain cap : <b>'+esc(_ncap.label)+'</b> — '+fmtFR(_ncap.date)+'</span>'+(ed?'<button class="mini" title="Marquer le cap comme atteint (date du jour)" onclick="formValidCap('+f.id+',\''+_ncap.k+'\')">✓ Atteint</button>':'');
+  if(_ncap)h+='<span class="small" style="margin-left:14px">prochain cap : <b>'+esc(_ncap.label)+'</b> — '+fmtFR(formCapDate(f,_ncap.k))+'</span>'+(ed?'<button class="mini" title="Marquer le cap comme atteint (date du jour)" onclick="formValidCap('+f.id+',\''+_ncap.k+'\')">✓ Atteint</button>':'');
   if(ed)h+='<button class="mini ghost" style="margin-left:auto" onclick="formToggleDates('+f.id+')">'+(_formDatesOpen.has(f.id)?'▴ masquer les dates':'✎ ajuster les dates')+'</button>';
   h+='</div>';
   // ── détail dates : replié par défaut (Fabien est visuel — la frise d'abord, les champs sur demande) ──
@@ -4109,11 +4131,11 @@ function _formCard(f){
       '</div>';});
   // caps
   h+='<div class="small" style="font-weight:700;margin-top:4px">Caps</div>';
-  f.caps.forEach(c=>{const late=!c.fait&&t>c.date;
+  f.caps.forEach(c=>{const cd=formCapDate(f,c.k),late=!c.fait&&t>cd;
     h+='<div class="brow" style="padding:2px 0 2px 12px;flex-wrap:wrap"><span>🎯</span><b style="width:296px">'+esc(c.label)+'</b>'+
-      (ed&&!c.fait?'<span class="small">prévu le <input type="date" value="'+c.date+'" onchange="formSetCapDate('+f.id+',\''+c.k+'\',this.value)"></span>':'<span class="small">prévu le '+fmtFR(c.date)+'</span>')+
+      '<span class="small">= fin de l\'étape <b>'+formEtapeCourt(FORM_CAP_LINK[c.k])+'</b> — '+fmtFR(cd)+' <span style="color:var(--mut)">(automatique)</span></span>'+
       (c.fait?'<span class="small" style="color:#16a34a;font-weight:700">atteint le '+fmtFR(c.fait)+' ✓</span><span class="small" style="color:var(--mut)">par '+esc(c.par||'?')+'</span>'+(ed?' <button class="mini ghost" title="Annuler la validation (erreur)" onclick="formUnvalid('+f.id+',\'cap\',\''+c.k+'\')">↩</button>':'')
-        :('<span class="small" style="color:'+(late?'#dc2626':'#94a3b8')+';font-weight:700">'+(late?'en retard de '+_fDays(t,c.date)+' j':'dans '+_fDays(c.date,t)+' j')+'</span>'+(ed?'<button class="mini" style="margin-left:auto" title="Marquer le cap comme atteint (date du jour)" onclick="formValidCap('+f.id+',\''+c.k+'\')">✓ Atteint</button>':'')))+
+        :('<span class="small" style="color:'+(late?'#dc2626':'#94a3b8')+';font-weight:700">'+(late?'en retard de '+_fDays(t,cd)+' j':'dans '+_fDays(cd,t)+' j')+'</span>'+(ed?'<button class="mini" style="margin-left:auto" title="Marquer le cap comme atteint (date du jour)" onclick="formValidCap('+f.id+',\''+c.k+'\')">✓ Atteint</button>':'')))+
       '</div>';});
   } // fin du détail dates replié
   // évaluations
