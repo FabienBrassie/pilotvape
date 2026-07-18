@@ -163,7 +163,7 @@
     }
   </style>
 
-<!-- ═══════════ STYLE COCKPIT — validé par Fabien le 2026-07-13 (généralisation de l'aperçu) ═══════════
+<!-- ═══════════ STYLE COCKPIT — validé par Fabien le 2026-07-18 (généralisation de l'aperçu) ═══════════
      Un seul bloc, réversible : le supprimer rend l'ancien thème slate. L'app reste en styles inline ;
      ce skin traduit les surfaces via sélecteurs d'attributs — toute nouvelle feature garde l'idiome
      inline existant (#1e293b, #0f172a…) et hérite du rendu cockpit automatiquement. -->
@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-13 18:07</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-18 17:38</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -490,7 +490,7 @@ window.addEventListener('DOMContentLoaded', function() {
           <div class="form-group" id="propLiqFormatGroup"><label>Format</label><select id="propLiqFormat" onchange="onPropLiqTypeChange()"><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option></select></div>
           <div class="form-group" id="propLiqPAGroup"><label>PA HT (€)</label><input type="number" id="propLiqPA" step="0.01"></div>
           <div class="form-group" id="propLiqPVGroup"><label>PV TTC (€)</label><input type="number" id="propLiqPV" step="0.01"></div>
-          <!-- Création multi-format (2026-07-13, demande Fabien) : en mode « Gamme entière », une seule
+          <!-- Création multi-format (2026-07-18, demande Fabien) : en mode « Gamme entière », une seule
                saisie crée une réf par format coché — chaque format a son PA/PV propre. -->
           <div class="form-group" id="propLiqFormatsMultiGroup" style="display:none; grid-column:span 2;">
             <label id="propLiqFormatsMultiLabel">Formats à créer — coche chaque format existant, avec son prix (1 réf sera créée par format)</label>
@@ -2229,7 +2229,7 @@ const MECA_IMPACTE_PRIX = ['PRIX_ROUGE','REMISE_SECHE','SECOND_REMISE','X_POUR_Y
 // qui ne sont pas encore dans la base (liquides, accessoires, cartouches, box, etc.).
 // En attendant l'extension du catalogue baseKits à ces familles.
 const PRODUIT_LIBRE_FAMILLES = [
-  { key: 'declinaison', label: 'Déclinaison', icon: '🎨', color: '#ec4899' }, // coloris / édition limitée d'un produit EN BASE (2026-07-13) — porte produitLibre.declinaisonDe
+  { key: 'declinaison', label: 'Déclinaison', icon: '🎨', color: '#ec4899' }, // coloris / édition limitée d'un produit EN BASE (2026-07-18) — porte produitLibre.declinaisonDe
   { key: 'liquide',    label: 'Liquide',     icon: '💧', color: '#06b6d4' },
   { key: 'accessoire', label: 'Accessoire',  icon: '🔧', color: '#f59e0b' },
   { key: 'consommable', label: 'Consommable', icon: '🎯', color: '#8b5cf6' }, // cartouche / résistance / autre consommable
@@ -2275,7 +2275,7 @@ function getOpProductDisplay(op) {
       : `${_marque} — ${_parts.join(' / ')}`;
     return { label: _label, icon: '🧴', color: '#fca5a5', isKit: false };
   }
-  // OP multi-réfs d'une MÊME gamme liquide (2026-07-13, ex : Liquide du moment Bankiz
+  // OP multi-réfs d'une MÊME gamme liquide (2026-07-18, ex : Liquide du moment Bankiz
   // valable sur les 3 formats) : label riche marque — gamme · N formats (10 · 50 · 100).
   if ((op.produitIds || []).length > 1) {
     const _gsMulti = op.produitIds.map(pid => baseLiq.find(l => l.id === pid)).filter(Boolean);
@@ -2580,7 +2580,7 @@ function seedOpDefaults(op) {
     }
     // LANCEMENT et MISE_EN_AVANT fusionnés dans NOUVEAUTE (migration mai 2026)
     case 'LIQUIDE_DU_MOMENT': {
-      // Rang 9 de l'audit 2026-07-09 (« chaînes tournant à vide ») réparé le 2026-07-13 :
+      // Rang 9 de l'audit 2026-07-09 (« chaînes tournant à vide ») réparé le 2026-07-18 :
       // une OP LDM n'avait AUCUNE étape boutique par défaut. Désormais : cartel à poser sur
       // l'emplacement dédié « Liquide du moment » (référentiel existant EMPL_LIQUIDE_MOMENT).
       // L'étape caisse vient de la mécanique (X_POUR_Y…), la fin de promo du chantier 3.
@@ -2815,7 +2815,7 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
       const byKey = sibDefs.find(d => d.key === stepKey);
       if (byKey) {
         sib.progress.global[stepKey] = !!checked;
-        // Chantier synchro 2026-07-13 : la propagation n'est plus INVISIBLE — tracée au journal.
+        // Chantier synchro 2026-07-18 : la propagation n'est plus INVISIBLE — tracée au journal.
         logAction('Étape globale propagée (campagne)', (checked ? '✓' : '✕') + ' ' + _logStepLabel(stepKey, sib) + ' sur ' + _logOpLabel(sib.id) + ' (depuis ' + _logOpLabel(op.id) + ')');
         return;
       }
@@ -3755,7 +3755,7 @@ function statutEtape(def, stepsObj, coche) {
   if (stepEstEnAttente(def, stepsObj)) return def.nat === 'evt' ? 'livraison' : 'attente';
   return 'a_faire';
 }
-// ── Travail boutique immédiat d'une action pour UNE boutique (2026-07-13, demande Fabien :
+// ── Travail boutique immédiat d'une action pour UNE boutique (2026-07-18, demande Fabien :
 // « ce que je gère doit être en retrait, ce que la boutique doit faire en avant ») ──
 // S'appuie sur compteurEtapes (LA canonique) : restantsBoutique = étapes immédiatement
 // faisables par la boutique (hors étapes admin, hors attentes ⏳/📦). 0 = rien à faire
@@ -3770,7 +3770,7 @@ function actionResteBoutique(a, shop) {
   } catch (e) { return 0; }
 }
 
-// Une action est « EN RETRAIT » (recadrage Fabien 2026-07-13 : valable AUSSI en vue
+// Une action est « EN RETRAIT » (recadrage Fabien 2026-07-18 : valable AUSSI en vue
 // admin / 3 boutiques, pas seulement en vue filtrée — une commande gérée par Fabien n'a
 // pas à trôner au milieu du travail des boutiques) : shop précis → cette boutique n'a
 // rien d'immédiat ; shop null → AUCUNE boutique n'a rien d'immédiat.
@@ -4606,13 +4606,13 @@ function syncAutoActions() {
     }
   });
   // ── OPs HORS BASE (déclinaison / produit libre) en Nouveauté-Exclu : garantir la ligne
-  // À rentrer (2026-07-13, retour Fabien) — répare aussi les OPs créées avant la feature.
+  // À rentrer (2026-07-18, retour Fabien) — répare aussi les OPs créées avant la feature.
   // Idempotent : ensureAction dédoublonne par produitId 'OPGOODS-<opId>'.
   ops.forEach(op => {
     // NB : une dateFin PLANIFIÉE ne veut pas dire close — on passe par le statut temporel canonique.
     if (op._archived || op.annulee || _deletedIds.has(op.id)) return;
     if (typeof opTimeStatus === 'function' && opTimeStatus(op) === 'TERMINEE') return;
-    // Généralisation 2026-07-13 : plus seulement Nouveauté/Exclu — TOUT type d'OP hors base
+    // Généralisation 2026-07-18 : plus seulement Nouveauté/Exclu — TOUT type d'OP hors base
     // dont les produits sont à commander (prep.commanderProduits) a sa ligne À rentrer
     // (ex : Liquide du moment sur un accessoire libre).
     const _cmdable = (op.type === 'NOUVEAUTE' || op.type === 'EXCLU') || !!(op.prep && op.prep.commanderProduits === true);
@@ -4630,7 +4630,7 @@ function syncAutoActions() {
     ensureOpSteps(op);
     console.log('[SYNC] Ligne À rentrer créée pour OP hors base', op.id, '→', _rentA.id);
   });
-  // ── Reprises à zéro (2026-07-13) : répare l'existant — comptage 0 ⇒ comptage + mis de
+  // ── Reprises à zéro (2026-07-18) : répare l'existant — comptage 0 ⇒ comptage + mis de
   // côté validés (idempotent, _appliquerZeroReprise sort immédiatement si déjà appliqué).
   actions.forEach(a => {
     if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE' || a.annulee) return;
@@ -4641,7 +4641,7 @@ function syncAutoActions() {
   });
 
   // ── Fanfares créées par le FORMULAIRE OP sur un produit EN BASE : lien vivant vers la
-  // ligne À rentrer (2026-07-13, retour Fabien : badge « Nouveauté » libre). L'orphan-guard
+  // ligne À rentrer (2026-07-18, retour Fabien : badge « Nouveauté » libre). L'orphan-guard
   // du chargement fait la même réparation, mais seulement au load — ici c'est à chaque sync.
   ops.forEach(op => {
     if ((op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') || op._archived || op.annulee || _deletedIds.has(op.id)) return;
@@ -4666,7 +4666,7 @@ function syncAutoActions() {
   });
 
   // Et l'inverse : OP hors base terminée/archivée/supprimée — ou commande décochée pour un
-  // type non-fanfare (généralisation 2026-07-13) → sa ligne À rentrer se referme.
+  // type non-fanfare (généralisation 2026-07-18) → sa ligne À rentrer se referme.
   actions.forEach(a => {
     if (a.produitType !== 'op' || a.type !== 'RENTRER' || a.annulee || !a.horsBaseLabel) return;
     const _op = ops.find(o => o.id === a.opId);
@@ -5808,10 +5808,10 @@ function setRentrerFanfare(actionId, opType) {
   renderOps && renderOps();
 }
 
-// ── Choix « qui commande » à la création d'une OP Nouveauté (2026-07-13) ──
+// ── Choix « qui commande » à la création d'une OP Nouveauté (2026-07-18) ──
 // Liaison matrice évt 1 : la variante A/B doit être tranchée, sinon l'étape commande
 // reste ❓ et verrouillée côté boutique. On pose la question dans le même geste.
-// Choix « qui réceptionne » à la création d'une OP Nouveauté (généralisation 2026-07-13 :
+// Choix « qui réceptionne » à la création d'une OP Nouveauté (généralisation 2026-07-18 :
 // le formulaire OP posait la question, le flux « Retenu » non). Deux temps pour rester
 // sûr au clavier (Échap/clic-dehors = dernier bouton de _pvModal = toujours l'option sans
 // effet). Retourne un shop (hub) ou null (chaque boutique reçoit — défaut).
@@ -5836,7 +5836,7 @@ function _pvPromptQuiCommande(label) {
   });
 }
 
-// ══ OP NOUVEAUTÉ PROPOSÉE À LA CRÉATION (2026-07-13, demande Fabien) ══
+// ══ OP NOUVEAUTÉ PROPOSÉE À LA CRÉATION (2026-07-18, demande Fabien) ══
 // Quand une proposition passe en RETENU (kit, gamme liquide, PD), le produit part en
 // À rentrer : c'est LÀ que la décision « on lance en fanfare ? » se prend (règle 6).
 // On propose donc l'OP Nouveauté immédiatement, au lieu de laisser le badge fanfare
@@ -5850,7 +5850,7 @@ function _pvPromptQuiCommande(label) {
 async function proposerOpNouveauteApresCreation(produitType, produitId, label, parfumId) {
   if (!isAdmin()) return;
   try { syncAutoActions(); } catch(e) {}
-  // parfumId (2026-07-13) : parfum nouveau ajouté à une gamme EXISTANTE → tout se joue au
+  // parfumId (2026-07-18) : parfum nouveau ajouté à une gamme EXISTANTE → tout se joue au
   // niveau PARFUM (action parfum, OP ciblée produitParfumId — précédent du one-shot parfum).
   const a = actions.find(x => x.type === 'RENTRER' && x.produitId === produitId && !x.annulee
     && (parfumId ? x.produitParfumId === parfumId : !x.produitParfumId));
@@ -5964,7 +5964,7 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label, p
   if (qui) {
     setRentrerCommandeAdmin(a.id, qui); // pose action + OP + descente parfums (save + render inclus)
   }
-  // Qui réceptionne ? (généralisation 2026-07-13) — posé seulement si Fabien commande
+  // Qui réceptionne ? (généralisation 2026-07-18) — posé seulement si Fabien commande
   // (c'est le cas où la réception centralisée a un sens). Série multi-format : le hub du
   // format déjà lancé est réutilisé sans re-demander.
   if (qui === 'admin') {
@@ -6096,7 +6096,7 @@ function _opActionStepMirror(a, op) {
 // ── Sync bidirectionnel one-shot : action ↔ OP avec respect des timestamps ──
 // Appelé par ensureOneShotOp / ensureOneShotOpLiq pour les OPs EXISTANTES.
 // ══════════════════════════════════════════════════════════════════════════════
-// LE MÉCANISME UNIQUE DE SYNCHRO DE COCHE ACTION ↔ OP — chantier du 2026-07-13
+// LE MÉCANISME UNIQUE DE SYNCHRO DE COCHE ACTION ↔ OP — chantier du 2026-07-18
 // (étape 5 du chemin structurel de l'AUDIT_LIAISONS_2026-07-09, actée par Fabien).
 // Avant : 4 mécanismes concurrents (recopie écrasante action→OP, recopie écrasante
 // OP→action, bidirectionnel horodaté réservé aux one-shot, lecture dynamique) qui
@@ -6187,7 +6187,7 @@ function _opMatchesActionParfum(op, action) {
 }
 
 // RÉSOLUTION DES LIENS action → OP(s) puis délégation au mécanisme unique _syncCocheBidi
-// (chantier 2026-07-13 — plus aucune recopie écrasante ici). Appelé après toggleActionStep
+// (chantier 2026-07-18 — plus aucune recopie écrasante ici). Appelé après toggleActionStep
 // pour qu'un clic côté Dashboard se reflète côté OP. La valeur ajoutée conservée de cette
 // fonction : trouver les OPs liées (PRIX_ROUGE auto, COUP, fanfare, non-COUP commanderProduits)
 // et RÉPARER les liens manquants (rentrerActionId/sortirActionId désynchronisés).
@@ -6262,14 +6262,14 @@ function syncActionStepsToOp(a) {
       });
       return; // pas de miroir 1:1 pour les fanfares
     }
-    // ── Cas normal : miroir via LE mécanisme unique (chantier 2026-07-13) ──
+    // ── Cas normal : miroir via LE mécanisme unique (chantier 2026-07-18) ──
     // Avant : recopie écrasante action→OP qui pouvait effacer une coche OP plus récente.
     _syncCocheBidi(a, op);
   });
 }
 
 // RÉSOLUTION DES LIENS OP → action(s) puis délégation au mécanisme unique _syncCocheBidi
-// (chantier 2026-07-13 — plus aucune recopie écrasante ici). Appelé après toggleOpStep
+// (chantier 2026-07-18 — plus aucune recopie écrasante ici). Appelé après toggleOpStep
 // pour qu'un clic côté OP se reflète côté Dashboard. Gère PRIX_ROUGE auto, COUP
 // (2 actions : RENTRER + SORTIR), et non-COUP avec commanderProduits, en réparant les
 // liens manquants au passage.
@@ -6322,7 +6322,7 @@ function syncOpStepsToAction(op) {
     }
   }
   targets.forEach(a => {
-    // Miroir via LE mécanisme unique (chantier 2026-07-13). Avant : recopie écrasante
+    // Miroir via LE mécanisme unique (chantier 2026-07-18). Avant : recopie écrasante
     // OP→action, sans cascade — une coche posée côté OP ne déclenchait ni statutVie ni
     // réouverture. Désormais même chemin que le dashboard (_applyActionShopChange inclus).
     _syncCocheBidi(a, op);
@@ -7106,7 +7106,7 @@ function toggleActionStep(actionId, shop, stepKey) {
   // _adminStepReadOnly côté OP). Le rendu n'a plus de onclick, mais on blinde aussi ici.
   const _defAdm = getActionSteps(a).find(d => d.key === stepKey);
   if (_defAdm && _defAdm.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin()) return;
-  // Reprise à zéro (2026-07-13) : comptage 0 ⇒ comptage & mis_de_cote restent validés
+  // Reprise à zéro (2026-07-18) : comptage 0 ⇒ comptage & mis_de_cote restent validés
   // (les décocher n'a pas de sens — corriger le comptage d'abord si c'est une erreur).
   if (a.motifSortie === 'REPRISE' && (stepKey === 'comptage' || stepKey === 'mis_de_cote')) {
     const _stZ = a.etats[shop];
@@ -7422,7 +7422,7 @@ function setActionStepQte(actionId, shop, stepKey, value) {
   st._comptageQteTs = new Date().toISOString();
   a._ts = new Date().toISOString();
   logAction('Comptage reprise', _logShopName(shop) + ' → ' + (_v === null ? 'vide' : _v + ' réf.') + ' sur ' + _logActionLabel(actionId));
-  // Zéro compté ⇒ comptage + mis de côté auto-validés (2026-07-13)
+  // Zéro compté ⇒ comptage + mis de côté auto-validés (2026-07-18)
   if (a.motifSortie === 'REPRISE' && _v === 0) { _appliquerZeroReprise(a, shop); try { renderDashboard(); } catch (e) {} }
   saveData();
   // Pas de re-render systématique : le champ reste cohérent en place
@@ -7453,13 +7453,13 @@ function setRepriseComptageParfum(actionId, shop, parfumId, value) {
   const _g = baseLiq.find(l => l.id === a.produitId);
   const _pf = (_g && Array.isArray(_g.parfums)) ? _g.parfums.find(p => p.id === parfumId) : null;
   logAction('Comptage reprise (parfum)', _logShopName(shop) + ' → ' + (_pf ? _pf.n : parfumId) + ' : ' + (_v === null ? 'vide' : _v + ' réf.') + ' sur ' + _logActionLabel(actionId));
-  // Total à zéro (tous parfums saisis à 0) ⇒ comptage + mis de côté auto-validés (2026-07-13)
+  // Total à zéro (tous parfums saisis à 0) ⇒ comptage + mis de côté auto-validés (2026-07-18)
   if (st.comptageQte === 0) { _appliquerZeroReprise(a, shop); try { renderDashboard(); } catch (e) {} }
   saveData();
   // Pas de re-render systématique : le champ reste cohérent en place (comme setActionStepQte)
 }
 
-// ── REPRISE À ZÉRO (2026-07-13, demande Fabien) ─────────────────────────────────
+// ── REPRISE À ZÉRO (2026-07-18, demande Fabien) ─────────────────────────────────
 // « Quand une boutique note qu'elle en a zéro, la case mis de côté doit être considérée
 // automatiquement comme cochée » : comptage 0 ⇒ étapes comptage + mis_de_cote validées
 // d'office (avec horodatage — même circuit que les coches normales, synchro OP comprise).
@@ -7514,7 +7514,39 @@ async function repriseRienIci(actionId, shop) {
   try { renderDashboard(); } catch (e) {}
 }
 
-// ── Récap par FORMAT en tête des exports de reprise (2026-07-13, demande Fabien) ──
+// ── « JE N'EN AI PAS » GÉNÉRALISÉ (2026-07-18, demande Fabien : « il faut généraliser,
+// par exemple quand un produit est à destocker, en PR ou que sais-je ») ──
+// Une boutique sans exemplaire d'un produit à destocker / re-tarifer / monter / swapper
+// n'a rien à faire : ses coches sont shuntées d'un geste — même mécanique éprouvée que le
+// tiroir et la reprise-zéro (horodatage, cascade, synchro OP). La REPRISE délègue à
+// repriseRienIci (sémantique comptage 0). RENTRER exclu : rien « à avoir » sur un produit
+// qui arrive — la réception reste une vraie étape.
+const RIEN_ICI_TYPES = ['SORTIR', 'PRIX', 'MISE_EN_PLACE', 'SWAP_COMPOSANT'];
+async function actionRienIci(actionId, shop) {
+  if (!(isAdmin() || (typeof currentShop !== 'undefined' && currentShop === shop))) { pvAlert('Réservé à cette boutique (ou à l\'admin).'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || !RIEN_ICI_TYPES.includes(a.type)) return;
+  if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE') return repriseRienIci(actionId, shop);
+  ensureActionSteps(a);
+  const st = a.etats[shop];
+  if (!st || st.done) return;
+  const _libT = a.type === 'SORTIR' ? 'à destocker' : a.type === 'PRIX' ? 'à re-tarifer' : a.type === 'MISE_EN_PLACE' ? 'à monter' : 'à traiter';
+  const ok = await pvConfirm((SHOP_LABELS[shop] || shop) + ' n\'a AUCUN exemplaire de ce produit ' + _libT + ' ?\n\nToutes ses étapes seront validées d\'un coup — rien à faire ici, la ligne continue chez les autres boutiques.', { title: '🚫 Je n\'en ai pas', ok: 'Oui, zéro ici', okColor: '#0ea5e9' });
+  if (!ok) return;
+  const ts = new Date().toISOString();
+  if (!st.steps) st.steps = makeStepMap(a);
+  if (!st._stepTs) st._stepTs = {};
+  getActionSteps(a).forEach(s => { if (st.steps[s.key] !== true) { st.steps[s.key] = true; st._stepTs[s.key] = ts; } });
+  a._ts = ts;
+  if (typeof logAction === 'function') logAction('Je n\'en ai pas', _logShopName(shop) + ' : étapes shuntées (aucun exemplaire) sur ' + _logActionLabel(actionId));
+  _applyActionShopChange(a, shop);
+  try { syncActionStepsToOp(a); } catch (e) {}
+  try { checkOneShotAutoClose(a); } catch (e) {}
+  saveData();
+  try { renderDashboard(); } catch (e) {}
+}
+
+// ── Récap par FORMAT en tête des exports de reprise (2026-07-18, demande Fabien) ──
 // Pour chaque format : nombre de réfs comptées (réf = produit/parfum dont le total compté > 0)
 // et total de flacons/unités. LA fonction unique des deux exports (règle 8).
 function _recapReprisesParFormat(list, esc) {
@@ -7631,7 +7663,7 @@ function creerPaireRetro(opts) {
 // ligne À rentrer (règle 6) : choisir la boutique hub crée les rétrocessions hub → autres
 // boutiques, liées par retroRentrerActionId. Annuler le choix annule les rétros non entamées.
 // Cœur NON-INTERACTIF de la réception centralisée d'une action RENTRER (extrait de
-// setDispatchHub le 2026-07-13, règle 8) : annule les rétros d'un ancien hub, pose le champ,
+// setDispatchHub le 2026-07-18, règle 8) : annule les rétros d'un ancien hub, pose le champ,
 // crée les paires de transfert. Partagé par setDispatchHub (avec confirmation) et le flux
 // « OP Nouveauté au Retenu » (où le choix du prompt EST la confirmation).
 function _appliquerDispatchHubAction(a, hub) {
@@ -7684,7 +7716,7 @@ async function setDispatchHub(actionId, hub) {
   const nom = prod ? ((prod.marque || '') + ' ' + (prod.modele || prod.gamme || '')) : a.produitId;
   const ok = await pvConfirm('Réception centralisée à ' + (SHOP_LABELS[hub] || hub) + ' pour « ' + nom + ' » ?\n\n' + (SHOP_LABELS[hub] || hub) + ' reçoit TOUT le stock, prépare les lots et fait les rétrocessions Swappy ; Fabien transporte ; les autres boutiques reçoivent leur lot et vérifient leur stock. Le suivi des transferts apparaît dans la section 🔁 Rétrocessions.', { title: '📦 Réception centralisée', ok: 'Lancer', okColor: '#06b6d4' });
   if (!ok) return;
-  // Cœur factorisé (2026-07-13) : annulation des anciennes rétros + champ + paires + log.
+  // Cœur factorisé (2026-07-18) : annulation des anciennes rétros + champ + paires + log.
   _appliquerDispatchHubAction(a, hub);
   saveData();
   try { renderDashboard(); } catch(e) {}
@@ -7738,7 +7770,7 @@ function setRentrerPaCommande(actionId, val) {
   saveData(); try { renderDashboard(); } catch(e) {}
 }
 
-// ── 🚚 Date de début d'expédition (2026-07-13, demande Fabien) ──
+// ── 🚚 Date de début d'expédition (2026-07-18, demande Fabien) ──
 // Uniquement quand la commande est gérée par Fabien : dit aux boutiques à partir de quand la
 // marchandise peut COMMENCER à arriver (elles ne commandent pas, elles attendent — lecture à
 // zéro inférence). Champ additif `expeditionDate` sur l'action RENTRER + miroir sur l'OP liée,
@@ -7780,7 +7812,7 @@ function _badgeExpeditionDate(d) {
   const bg = _passee ? '#14532d30' : '#7c3aed15';
   const col = _passee ? '#86efac' : '#c4b5fd';
   const border = _passee ? '#22c55e50' : '#a78bfa50';
-  // Libellé COURT (bug d'affichage 2026-07-13 : le badge long écrasait le nom de gamme) —
+  // Libellé COURT (bug d'affichage 2026-07-18 : le badge long écrasait le nom de gamme) —
   // jour/mois seulement, le détail complet reste dans le title et la bannière ⛔.
   const _jm = (fmtFR(d) || '').slice(0, 5); // JJ/MM
   const txt = _passee ? '🚚 peut arriver' : '🚚 à partir du ' + _jm;
@@ -8160,7 +8192,7 @@ function toggleActionExpand(id) {
     el.style.display = expandedActions.has(id) ? 'block' : 'none';
   } else if (id.startsWith('grp_') || id.startsWith('grplvl_') || id.startsWith('mrq_') || id.startsWith('sub_') || id.startsWith('besoins_') || id.startsWith('gfuse_')) {
     // Groupe de parfums, marque, sous-accordéon kits/liq, besoins ou ligne gamme multi-format
-    // fusionnée (gfuse_, 2026-07-13) : pas d'élément détail dédié → re-render du dashboard.
+    // fusionnée (gfuse_, 2026-07-18) : pas d'élément détail dédié → re-render du dashboard.
     renderDashboard();
   }
 }
@@ -11322,7 +11354,7 @@ function exportReprisesExcel() {
     'Avancement (étapes faites / total)', 'Date du dernier check',
     'État global', 'ID action'
   ];
-  // Récap par format EN TÊTE (2026-07-13, demande Fabien) — fonction unique des deux exports.
+  // Récap par format EN TÊTE (2026-07-18, demande Fabien) — fonction unique des deux exports.
   const rows = _recapReprisesParFormat(all, _esc).concat([headers.map(_esc).join(';')]);
   // Tri : campagne ASC, puis date création DESC, puis produit
   const sorted = all.slice().sort((a, b) => {
@@ -11941,7 +11973,7 @@ window._pvExporterCampagneReprise = function(name) {
     return s;
   };
   const headers = ['Campagne', 'Commentaire', 'Date création', 'Type produit', 'Marque', 'Gamme/Modèle', 'Format', 'Parfum', 'Boutique', 'Quantité comptée', 'Avancement', 'Date dernier check', 'État global', 'ID action'];
-  // Récap par format EN TÊTE (2026-07-13, demande Fabien) — fonction unique des deux exports.
+  // Récap par format EN TÊTE (2026-07-18, demande Fabien) — fonction unique des deux exports.
   const rows = _recapReprisesParFormat(all, _esc).concat([headers.map(_esc).join(';')]);
   all.forEach(a => {
     let prodType, marque = '', label = '', format = '', parfum = '';
@@ -12230,7 +12262,7 @@ function updatePropDecision(id, decision) {
     renderWalls();
     renderDashboard();
     highlightProp(id);
-    // OP Nouveauté proposée au moment de la décision (2026-07-13) — même geste que pour
+    // OP Nouveauté proposée au moment de la décision (2026-07-18) — même geste que pour
     // les liquides et les PD (règle 6-bis : uniformisation des 3 bases).
     if (decision === 'RETENU') {
       const _k = baseKits.find(k => k.id === id);
@@ -16202,7 +16234,7 @@ function _semNbRestants(g) {
 // Dashboard filtré sur elle (isVisible : masquée seulement si la boutique a coché done).
 // Corrigé 2026-07-07 : « 50 à sortir à Pessac » ici vs « 31 » au Dashboard — même unité désormais.
 function _semShopsRestants(g) {
-  // CHANTIER COMPTEURS HONNÊTES (2026-07-13 — reste du chantier 1 du 09/07, backlog n°2) :
+  // CHANTIER COMPTEURS HONNÊTES (2026-07-18 — reste du chantier 1 du 09/07, backlog n°2) :
   // un shop ne « reste » que s'il a du travail IMMÉDIAT (actionResteBoutique canonique —
   // hors étapes admin, hors attentes ⏳/📦). Avant : tout shop non-done comptait, y compris
   // « attend la livraison » — le récap gonflait la charge avec des attentes.
@@ -16285,7 +16317,7 @@ function _semaineCollect() {
     (opMiss[g.op.id] = opMiss[g.op.id] || []).push(_SEM_VERBES[g.type] || g.type);
   });
   groups.forEach(g => {
-    // Recadrage Fabien 2026-07-13 : « en retrait ne veut pas dire enlever totalement ! »
+    // Recadrage Fabien 2026-07-18 : « en retrait ne veut pas dire enlever totalement ! »
     // Sous filtre boutique : un chantier où la boutique est encore IMPLIQUÉE (pas tout coché
     // chez elle) mais sans travail immédiat reste AFFICHÉ, marqué en retrait (💤) et trié en
     // bas — il ne disparaît que si elle a tout coché.
@@ -16310,7 +16342,7 @@ function _semaineCollect() {
     bands.rentrer.push(g);
   });
   // Tri : d'abord les retards d'OP, puis les plus anciens — le caca en tête.
-  // Retrait 2026-07-13 : les chantiers 💤 (rien d'immédiat) passent en BAS, jamais enlevés.
+  // Retrait 2026-07-18 : les chantiers 💤 (rien d'immédiat) passent en BAS, jamais enlevés.
   const _triRetard = (a, b) => {
     if ((a._retrait ? 1 : 0) !== (b._retrait ? 1 : 0)) return (a._retrait ? 1 : 0) - (b._retrait ? 1 : 0);
     const ra = a.score != null && a.score < 0 ? a.score : 0;
@@ -16979,7 +17011,7 @@ function renderDashboard() {
     // ── 🗄️ Commande client AU CŒUR du bloc de coches (correctif 2026-06-11 soir) ──
     // C'est ici que ça se joue : si cette boutique garde la réf pour ses clients, un
     // bouton court-circuite ses coches. Bandeau si c'est déjà fait.
-    // ── 🚫 « Je n'en ai pas » (2026-07-13, demande Fabien) : court-circuit total de la
+    // ── 🚫 « Je n'en ai pas » (2026-07-18, demande Fabien) : court-circuit total de la
     // boutique sur une reprise — comptage 0 + toutes étapes validées en un geste. ──
     let rienZone = '';
     if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE') {
@@ -16988,6 +17020,13 @@ function renderDashboard() {
         rienZone = `<div style="margin-top:5px; padding:4px 8px; background:#0ea5e912; border:1px solid #0ea5e940; border-radius:3px; font-size:10px; color:#7dd3fc; font-weight:600;">🚫 Zéro exemplaire ici — comptage 0, rien à mettre de côté.</div>`;
       } else if (_stR && !_stR.done && (isAdmin() || (typeof currentShop !== 'undefined' && currentShop === sh))) {
         rienZone = `<button onclick="event.stopPropagation(); repriseRienIci('${a.id}','${sh}')" style="margin-top:5px; width:100%; padding:4px 8px; font-size:10px; background:transparent; color:#7dd3fc; border:1px dashed #0ea5e950; border-radius:3px; cursor:pointer; text-align:left;" title="Cette boutique n'a aucun exemplaire : comptage posé à 0 et toutes ses étapes validées d'un coup">🚫 ${label} n'en a pas → tout valider (comptage 0)</button>`;
+      }
+    } else if (typeof RIEN_ICI_TYPES !== 'undefined' && RIEN_ICI_TYPES.includes(a.type)) {
+      // Généralisation 2026-07-18 : destockage, prix (dont PR), mise en place, swap —
+      // une boutique sans exemplaire shunte ses coches d'un geste.
+      const _stG = a.etats[sh];
+      if (_stG && !_stG.done && (isAdmin() || (typeof currentShop !== 'undefined' && currentShop === sh))) {
+        rienZone = `<button onclick="event.stopPropagation(); actionRienIci('${a.id}','${sh}')" style="margin-top:5px; width:100%; padding:4px 8px; font-size:10px; background:transparent; color:#7dd3fc; border:1px dashed #0ea5e950; border-radius:3px; cursor:pointer; text-align:left;" title="Cette boutique n'a aucun exemplaire de ce produit : toutes ses étapes sont validées d'un coup, la ligne continue chez les autres">🚫 ${label} n'en a pas → étapes shuntées</button>`;
       }
     }
     let ccZone = '';
@@ -17117,7 +17156,7 @@ function renderDashboard() {
     if (!prod && (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') && a.retroLabel) {
       prod = { id: a.produitId, marque: '', modele: a.retroLabel, gamme: a.retroLabel, caseTech: '', pv: 0, statutVie: 'DANS_OFFRE', parfums: [] };
     }
-    // Produit HORS BASE d'une OP (déclinaison, produit libre — 2026-07-13, retour Fabien :
+    // Produit HORS BASE d'une OP (déclinaison, produit libre — 2026-07-18, retour Fabien :
     // « une déclinaison reste une déclinaison à rentrer ») : produit minimal depuis le
     // libellé porté par l'action, pour que la ligne À rentrer existe sur le dashboard.
     if (!prod && a.produitType === 'op' && a.horsBaseLabel) {
@@ -17133,7 +17172,7 @@ function renderDashboard() {
     const prio = effectivePrio(a);
     const pc = prioColor(prio);
     const globalState = actionGlobalState(a);
-    // Retrait visuel (2026-07-13, recadrage Fabien : TOUTES les vues, y compris admin) :
+    // Retrait visuel (2026-07-18, recadrage Fabien : TOUTES les vues, y compris admin) :
     // une ligne sans travail boutique immédiat (géré par Fabien / en attente) passe en
     // retrait — le travail immédiat des boutiques reste en avant.
     const _dimBoutique = globalState !== 'FAIT' && actionEnRetrait(a, fShop || null);
@@ -17349,8 +17388,8 @@ function renderDashboard() {
       }
       // Qui commande ? → repère sur la ligne PLIÉE (demande Fabien 2026-06-20, ❓ ajouté 2026-07-11)
       badgeTag += _badgeQuiCommande(a);
-      badgeTag += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-13)
-      // 💤 Retrait (2026-07-13) : dit EXPLICITEMENT pourquoi la ligne est en retrait.
+      badgeTag += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-18)
+      // 💤 Retrait (2026-07-18) : dit EXPLICITEMENT pourquoi la ligne est en retrait.
       if (_dimBoutique) badgeTag += `<span title="${fShop ? 'Rien à faire pour ta boutique pour l\'instant' : 'Aucune boutique n\'a de travail immédiat'} — géré par Fabien ou en attente d'un événement (livraison, écoulement…)" style="font-size:9px; padding:1px 6px; background:#33415530; color:#64748b; border:1px solid #47556950; border-radius:3px; white-space:nowrap;">💤 ${fShop ? 'rien à faire ici' : 'rien à faire côté boutiques'}</span>`;
       // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
       if (a.prixRouge) {
@@ -17724,7 +17763,7 @@ function renderDashboard() {
           }
         }
         // Picker "Entrée en fanfare ?" — commun kits et liquides
-        // Fix 2026-07-13 : une OP avec dateFin PLANIFIÉE (future) est toujours ouverte —
+        // Fix 2026-07-18 : une OP avec dateFin PLANIFIÉE (future) est toujours ouverte —
         // l'ancien filtre !o.dateFin faisait afficher le badge « libre » à tort.
         const linkedFanfareOp = ops.find(o => o.rentrerActionId === a.id && !o._archived && isOpOuverte(o));
         const currentFanfare = a.fanfareOpType || (linkedFanfareOp ? linkedFanfareOp.type : null);
@@ -17782,7 +17821,7 @@ function renderDashboard() {
               <option value="admin" ${_ca ? 'selected' : ''}>Fabien commande — la boutique réceptionne & saisit</option>
             </select>
           </div>`;
-          // 🚚 Date de début d'expédition (2026-07-13) : seulement quand c'est Fabien qui
+          // 🚚 Date de début d'expédition (2026-07-18) : seulement quand c'est Fabien qui
           // commande — dit aux boutiques à partir de quand ça peut arriver. Propagée à toute
           // la gamme (tous formats + parfums) car une commande fournisseur = une expédition.
           if (_ca) {
@@ -17830,7 +17869,7 @@ function renderDashboard() {
         } else if (a.dispatchHub) {
           dispatchBlock = `<div style="flex:1 1 100%; margin-bottom:2px; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:3px; font-size:10px; color:#67e8f9;">📦 Réception centralisée à ${SHOP_LABELS[a.dispatchHub] || a.dispatchHub} — les autres boutiques reçoivent leur lot par rétrocession (transport Fabien).</div>`;
         }
-        // ── Compactage 2026-07-13 (demande Fabien : « une ligne par élément c'est trop
+        // ── Compactage 2026-07-18 (demande Fabien : « une ligne par élément c'est trop
         // massif ») : les bannières gardent leur pleine largeur (flex 100%), les contrôles
         // (qui commande, expédition, réception, prix de saisie, remplace, fanfare, étiquette,
         // prix rouge) deviennent des segments qui PARTAGENT les lignes (flex-wrap).
@@ -17924,7 +17963,7 @@ function renderDashboard() {
           <input type="number" step="0.01" min="0" value="${typeof a.prixRouge === 'number' ? a.prixRouge.toFixed(2) : ''}" placeholder="Prix rouge" onchange="updateActionPrixRouge('${a.id}', this.value)" onclick="event.stopPropagation()" style="width:80px; padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; font-weight:600; text-align:right;">
           <span style="font-size:10px; color:#64748b;">€</span>
         </div>` : '';
-        // Compactage 2026-07-13 : mêmes règles que la zone RENTRER (segments qui partagent les lignes).
+        // Compactage 2026-07-18 : mêmes règles que la zone RENTRER (segments qui partagent les lignes).
         return `<div style="display:flex; flex-wrap:wrap; gap:6px 26px; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed #33415580;">`
           + parfumsListing + remplParBlock + (picker ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${picker}
@@ -18124,7 +18163,7 @@ function renderDashboard() {
   // (règle 8 : factoriser plutôt que discipliner).
   // cfg : { groupKey, nom, badgesHtml, profShort, profColor, formatBadge:{bg,text}|null,
   //         formatLabel, btnHtml, chipHtml, dotsHtml, innerHtml (contenu déplié, déjà indenté) }
-  // Bouton ✅ Check-list (2026-07-13, demande Fabien : « comme dans OP ») — entrée dashboard
+  // Bouton ✅ Check-list (2026-07-18, demande Fabien : « comme dans OP ») — entrée dashboard
   // vers LA même fenêtre de coche groupée que les campagnes (pvOpenCheckList, scope série).
   function _btnCheckList(actionIds, withLabel) {
     if (!actionIds || actionIds.length === 0) return '';
@@ -18248,7 +18287,7 @@ function renderDashboard() {
     // Repères À rentrer sur la ligne pliée « groupe de parfums » (demande Fabien 2026-06-25) :
     // seulement si tout le groupe partage l'info (même OP/réception → cohérent).
     const _grpRentrer = grp.length > 0 && grp.every(a => a.type === 'RENTRER');
-    // 🚚 date d'expédition (2026-07-13) : la ligne pliée porte la date la plus proche du groupe.
+    // 🚚 date d'expédition (2026-07-18) : la ligne pliée porte la date la plus proche du groupe.
     const _grpExpDates = _grpRentrer ? grp.map(a => a.expeditionDate).filter(Boolean).sort() : [];
     const _grpExtraBadges =
       (_grpRentrer && grp.every(a => a.commandeAdmin === true) ? _badgeCommandeAdmin()
@@ -18267,7 +18306,7 @@ function renderDashboard() {
       hoverBg: _grpCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _grpCmdAdmin ? '#a78bfa' : _grpCmdUnset ? '#f59e0b' : undefined,
       badgesHtml: (() => {
-        // Bug d'affichage 2026-07-13 (Fabien : « on ne voit pas le nom du nouveau parfum ») :
+        // Bug d'affichage 2026-07-18 (Fabien : « on ne voit pas le nom du nouveau parfum ») :
         // jusqu'à 3 parfums, la ligne pliée affiche les NOMS au lieu du simple compteur.
         let _grpLbl = grp.length + ' parfum' + (grp.length > 1 ? 's' : '');
         if (grp.length <= 3) {
@@ -18376,7 +18415,7 @@ function renderDashboard() {
     }
     // Repères À rentrer sur la ligne pliée « gamme entière » (demande Fabien 2026-06-25, ❓ 2026-07-11)
     _glBadges += _badgeQuiCommande(a);
-    _glBadges += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-13)
+    _glBadges += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-18)
     if (a.type === 'RENTRER' && a.dispatchHub) _glBadges += _badgeHub(a.dispatchHub);
     // 🐌 Écoulement lent (Fabien 2026-07-09) : sur la ligne gamme pliée — les lignes parfum
     // virtuelles de cette action ne portent pas le badge (voir _renderActionCardInner).
@@ -18425,7 +18464,7 @@ function renderDashboard() {
     // sans lignes, et affichage divergent entre postes dès que les données différaient un peu.
     const gammeActions = _filterAntiDoublonLiq(liqActions).filter(a => !a.produitParfumId);
 
-    // ── REGROUPEMENT MULTI-FORMAT (2026-07-13, demande Fabien — capture CigustoMDD) ──
+    // ── REGROUPEMENT MULTI-FORMAT (2026-07-18, demande Fabien — capture CigustoMDD) ──
     // Une gamme déclinée en plusieurs formats = plusieurs réfs dans la base, donc plusieurs
     // blocs qui s'entremêlaient (le tri par priorité seule alternait Fruiteo / Miami).
     // L'unité d'affichage devient la GAMME (marque + nom) : un seul format → rendu strictement
@@ -18454,7 +18493,7 @@ function renderDashboard() {
       _unitFor(g, gammeId).blocks.push({ fmtRank: g ? (_fmtRank[g.format] ?? 9) : 9, actions: groups[gammeId], html: () => _renderGammeParfumGroup(groups[gammeId]) });
     });
 
-    // Retrait (2026-07-13, recadrage Fabien : TOUTES les vues) : les gammes avec du travail
+    // Retrait (2026-07-18, recadrage Fabien : TOUTES les vues) : les gammes avec du travail
     // immédiat pour les boutiques passent devant celles gérées par Fabien / en attente
     // (tri stable : l'ordre de priorité est conservé à l'intérieur de chaque groupe).
     {
@@ -18479,7 +18518,7 @@ function renderDashboard() {
       const _rentrers = allActions.filter(x => x.type === 'RENTRER');
       const _allAdmin = _rentrers.length > 0 && _rentrers.every(x => x.commandeAdmin === true);
       const _anyUnset = _rentrers.some(x => x.commandeAdmin === undefined);
-      // 🚚 date d'expédition la plus proche de la série (2026-07-13)
+      // 🚚 date d'expédition la plus proche de la série (2026-07-18)
       const _fuseExpDates = _rentrers.map(x => x.expeditionDate).filter(Boolean).sort();
       html += _ligneLiquide({
         groupKey,
@@ -18490,7 +18529,7 @@ function renderDashboard() {
         borderLeft: _allAdmin ? '#a78bfa' : _anyUnset ? '#f59e0b' : undefined,
         badgesHtml: `<span style="font-size:8.5px; padding:1px 5px; background:#33415560; color:#94a3b8; border-radius:2px; white-space:nowrap;">${_libelleParfumsParFormat(allActions) || (allActions.length + ' action' + (allActions.length > 1 ? 's' : ''))}</span>`
           + (_allAdmin ? `<span style="font-size:8.5px; padding:1px 5px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; white-space:nowrap;">📦 Commande Fabien</span>` : '')
-          // 🚚 date d'expédition (2026-07-13) : la ligne fusionnée porte la plus proche de la série
+          // 🚚 date d'expédition (2026-07-18) : la ligne fusionnée porte la plus proche de la série
           + ((_allAdmin && _fuseExpDates.length > 0) ? _badgeExpeditionDate(_fuseExpDates[0]) : ''),
         profShort: '', profColor: '',
         formatBadge: { bg: '#0ea5e920', text: '#7dd3fc' },
@@ -18525,7 +18564,7 @@ function renderDashboard() {
       if (actions.length === 0) return '';
       // Tri : urgence substitution d'abord (RENTRER), puis priorité OP, puis avec remplaçant
       actions.sort((a, b) => {
-        // Retrait (2026-07-13, recadrage Fabien : TOUTES les vues) : le travail immédiat
+        // Retrait (2026-07-18, recadrage Fabien : TOUTES les vues) : le travail immédiat
         // des boutiques passe DEVANT ce qui est géré par Fabien ou en attente.
         const wa = actionEnRetrait(a, fShop || null) ? 1 : 0;
         const wb = actionEnRetrait(b, fShop || null) ? 1 : 0;
@@ -18638,7 +18677,7 @@ function renderDashboard() {
         // Compteur canonique parfums/format (règle Fabien 2026-06-11, balayage §0.12)
         const gammeLabel = _libelleParfumsParFormat(marqueActions) || '—';
         const actionLabel = marqueActions.length === 1 ? '1 action' : marqueActions.length + ' actions';
-        // Séparateur marque + ✅ check-list de toute la marque (commande groupée, 2026-07-13)
+        // Séparateur marque + ✅ check-list de toute la marque (commande groupée, 2026-07-18)
         liqInnerHtml += `<div style="display:flex; align-items:center; gap:8px; padding:${mIdx > 0 ? '8' : '4'}px 6px 3px;">
           <span style="font-size:10px; font-weight:700; color:#94a3b8; letter-spacing:0.5px; text-transform:uppercase; white-space:nowrap;">${marque}</span>
           <span style="font-size:9px; color:#475569; white-space:nowrap;">${gammeLabel} · ${actionLabel}</span>
@@ -21541,7 +21580,7 @@ function setOpViewMode(v) {
 }
 
 // Toggle entre "kit en base" et "produit libre" dans le formulaire de création d'OP.
-// Sélecteur produit du formulaire OP (2026-07-13) : une gamme liquide choisie (valeur
+// Sélecteur produit du formulaire OP (2026-07-18) : une gamme liquide choisie (valeur
 // 'LIQGRP:marque|||gamme') fait apparaître ses formats à cocher — défaut : tous.
 function opOnProduitBaseChange() {
   const sel = document.getElementById('opKit');
@@ -21710,7 +21749,7 @@ function submitNewOp() {
     if (!libelle) { pvAlert('Libellé du produit libre requis'); return; }
     produitLibre = { famille: famille || 'autre', libelle };
   } else if (mode === 'declinaison') {
-    // 🎨 Déclinaison temporaire d'un produit EN BASE (2026-07-13) : coloris, édition limitée…
+    // 🎨 Déclinaison temporaire d'un produit EN BASE (2026-07-18) : coloris, édition limitée…
     // Pas de nouveau kit — un produit libre étiqueté au nom du produit + le lien declinaisonDe
     // (informative : si le produit de base sort un jour, le libellé reste lisible).
     const _declProdId = document.getElementById('opDeclinaisonProduit').value;
@@ -21724,7 +21763,7 @@ function submitNewOp() {
     const kitId = document.getElementById('opKit').value;
     if (!kitId) { pvAlert('Produit de la base requis (ou basculer en "produit libre")'); return; }
     if (kitId.startsWith('LIQGRP:')) {
-      // ── Gamme liquide multi-format (2026-07-13, cas Bankiz 2+1 sur 3 formats) :
+      // ── Gamme liquide multi-format (2026-07-18, cas Bankiz 2+1 sur 3 formats) :
       // UNE OP couvrant les réfs cochées (modèle multi-produits des PR groupés). ──
       const _checked = Array.from(document.querySelectorAll('#opLiqFormatsList .opLiqFmtCheck:checked')).map(cb => cb.value);
       if (_checked.length === 0) { pvAlert('Coche au moins un format de la gamme.'); return; }
@@ -21764,14 +21803,14 @@ function submitNewOp() {
   // boutiques commandent. Pas de choix (types sans à-rentrer) → champ absent (= à trancher).
   if (_quiCmd) newOp.commandeAdmin = (_quiCmd === 'admin');
   if (paCommande !== undefined) newOp.paCommande = paCommande;
-  // Déclinaison / produit libre en NOUVEAUTE-EXCLU (2026-07-13) : c'est une marchandise à
+  // Déclinaison / produit libre en NOUVEAUTE-EXCLU (2026-07-18) : c'est une marchandise à
   // commander/recevoir → étapes « commandé / reçu » activées d'office (décochable via ✎ Éditer).
   if ((mode === 'declinaison' || mode === 'libre') && _TYPES_AVEC_COMMANDE.includes(type)) newOp.prep = { commanderProduits: true };
   seedOpDefaults(newOp);
   ensureOpSteps(newOp);
   pushOpTraced(newOp, 'submitNewOp');
   logAction('Nouvelle OP', (OP_TYPE_META[type] || {}).label + ' — ' + (produitLibre ? produitLibre.libelle : _logProdName(produitIds[0])));
-  // ── Qui réceptionne ? (2026-07-13) : hub choisi à la création → réception centralisée
+  // ── Qui réceptionne ? (2026-07-18) : hub choisi à la création → réception centralisée
   // produit + PLV posée d'office (la canonique creerRetrosDispatchOp crée les transferts).
   // Le choix du formulaire EST la décision — pas de re-confirmation. Ajustable ensuite
   // séparément produit/PLV via les boutons de la carte OP (setOpDispatchHub).
@@ -21787,7 +21826,7 @@ function submitNewOp() {
       logAction('Réception centralisée (création OP)', newOp.id + ' → hub ' + (SHOP_LABELS[_recoitHub] || _recoitHub) + ((_nbP + _nbV) ? ' · ' + (_nbP + _nbV) + ' transfert(s)' : ''));
     } catch(e) { console.error('[submitNewOp] dispatch création', e); }
   }
-  // ── Ligne À rentrer du dashboard pour un produit HORS BASE (2026-07-13, retour Fabien :
+  // ── Ligne À rentrer du dashboard pour un produit HORS BASE (2026-07-18, retour Fabien :
   // « une déclinaison reste une déclinaison à rentrer ») : déclinaison ou produit libre en
   // Nouveauté/Exclu crée son action RENTRER (fabrique canonique ensureAction, produitType 'op'
   // → sous-accordéon hors base de la section À rentrer). Le lien rentrerActionId +
@@ -21806,7 +21845,7 @@ function submitNewOp() {
     _rentA._ts = new Date().toISOString();
     newOp.rentrerActionId = _rentA.id;
   }
-  // ── Lier l'OP fanfare à sa ligne À rentrer dès la CRÉATION (2026-07-13, retour Fabien :
+  // ── Lier l'OP fanfare à sa ligne À rentrer dès la CRÉATION (2026-07-18, retour Fabien :
   // badge « Nouveauté » libre sur la ligne alors que l'OP existe). Même lien que le badge
   // fanfare (rentrerActionId + fanfareOpType) → chips et synchro immédiatement cohérents.
   // Posé APRÈS le bloc dispatch (même raison que le hors base : ne pas court-circuiter les
@@ -21941,7 +21980,7 @@ async function quickDetachCampagne(opId) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 // ═══════════════════════════════════════════════════════════════════════════
-// CHECK-LIST GROUPÉE — 2026-07-13 (demande Fabien : « version boutique de Gérer »)
+// CHECK-LIST GROUPÉE — 2026-07-18 (demande Fabien : « version boutique de Gérer »)
 // LA surface unique de coche groupée (règle 8 appliquée à l'écran) : pour un périmètre
 // donné — campagne entière, ou série multi-format du dashboard — toutes les étapes de la
 // boutique affichée, produit par produit, dans UNE fenêtre. AUCUNE nouvelle mécanique :
@@ -22308,7 +22347,7 @@ function pvCampagneFormulaire(campagneId, opIdsPreselected, opts) {
       </div>
     </div>
     ${isEdit ? `
-    <!-- ── Éléments (PLV) de la campagne (2026-07-13, demande Fabien) : toutes les pièces des
+    <!-- ── Éléments (PLV) de la campagne (2026-07-18, demande Fabien) : toutes les pièces des
          OPs rattachées, avec pour chacune → à quel produit elle sert, où l'installer. ── -->
     <div style="border-top:1px solid #33415540; padding-top:12px; margin-top:14px;">
       <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
@@ -22367,7 +22406,7 @@ function pvCampagneFormulaire(campagneId, opIdsPreselected, opts) {
         row.style.display = (!q || txt.indexOf(q) >= 0) ? '' : 'none';
       });
     });
-    // ── Éléments (PLV) de la campagne : rendu + gestes (2026-07-13) ──
+    // ── Éléments (PLV) de la campagne : rendu + gestes (2026-07-18) ──
     // Édition LIVE (comme le panneau ✎ Éditer d'une carte OP) : produit visé, emplacement,
     // mode commun/par boutique, retrait, ajout. Les setters canoniques existants sont réutilisés
     // (setPieceEmplacement*, setPieceAffMode, removePiece, addPieceToOp, _pvCampMovePiece).
@@ -22990,7 +23029,7 @@ function renderOps() {
   const kits = baseKits.filter(k => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(k.statutVie))
     .sort((a, b) => (a.marque + a.modele).localeCompare(b.marque + b.modele));
   const kitOptions = kits.map(k => `<option value="${k.id}">${k.marque} — ${k.modele}</option>`).join('');
-  // ── Liquides par GAMME, tous formats confondus (2026-07-13, cas Fabien : OP Liquide du
+  // ── Liquides par GAMME, tous formats confondus (2026-07-18, cas Fabien : OP Liquide du
   // moment « 2+1 Bankiz, valable sur les 3 formats » = UNE OP couvrant les 3 réfs).
   // Valeur d'option : 'LIQGRP:marque|||gamme' → la ligne 3a-bis propose les formats à cocher.
   const _liqGrps = {};
@@ -23007,7 +23046,7 @@ function renderOps() {
     const fmts = gs.map(x => LIQ_FORMAT_LABELS[x.format] || x.format).join(' · ');
     return `<option value="LIQGRP:${key.replace(/"/g, '&quot;')}">${gs[0].marque} — ${gs[0].gamme} (${fmts})</option>`;
   }).join('');
-  // Pièces détachées au sélecteur (généralisation 2026-07-13 — avant : passage obligé par
+  // Pièces détachées au sélecteur (généralisation 2026-07-18 — avant : passage obligé par
   // « produit libre » alors que la réf existe en base).
   const _pdBase = basePD.filter(p => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(p.statutVie))
     .sort((a, b) => ((a.marque || '') + (a.modele || '')).localeCompare((b.marque || '') + (b.modele || '')));
@@ -23017,7 +23056,7 @@ function renderOps() {
   const typeOptions = OP_TYPES.filter(t => !t.auto).map(t => `<option value="${t.key}">${t.label}</option>`).join('');
   // 'declinaison' a son propre mode produit (radio dédiée) — exclu du select libre pour éviter la confusion.
   const familleOptions = PRODUIT_LIBRE_FAMILLES.filter(f => f.key !== 'declinaison').map(f => `<option value="${f.key}">${f.icon} ${f.label}</option>`).join('');
-  // Produits déclinables (2026-07-13) : kits + pièces détachées en vie (coloris, édition limitée…)
+  // Produits déclinables (2026-07-18) : kits + pièces détachées en vie (coloris, édition limitée…)
   const _declPdList = basePD.filter(p => ['DANS_OFFRE', 'A_REMPLACER', 'A_RENTRER'].includes(p.statutVie))
     .sort((a, b) => ((a.marque || '') + (a.modele || '')).localeCompare((b.marque || '') + (b.modele || '')));
   const declProduitOptions = `<optgroup label="Kits">${kits.map(k => `<option value="${k.id}">${k.marque} — ${k.modele}</option>`).join('')}</optgroup>`
@@ -23114,7 +23153,7 @@ function renderOps() {
         ${produitBaseOptions}
       </select>
     </div>
-    <!-- Ligne 3a-bis : formats de la gamme liquide choisie (2026-07-13) — l'OP couvre les
+    <!-- Ligne 3a-bis : formats de la gamme liquide choisie (2026-07-18) — l'OP couvre les
          formats cochés (défaut : tous). Une seule OP, plusieurs réfs (modèle des PR groupés). -->
     <div id="opLiqFormatsRow" style="display:none; margin:-4px 0 8px 0; padding:6px 10px; background:#0f172a; border:1px dashed #10b98160; border-radius:4px;">
       <span style="font-size:10px; color:#34d399; font-weight:700; margin-right:10px;">Formats couverts par l'OP :</span>
@@ -23127,7 +23166,7 @@ function renderOps() {
       </select>
       <input type="text" id="opLibreLibelle" placeholder="Libellé (ex: Pod Hello, Liquides A&L Ultimate, Étui individuel…)" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:4px; font-size:12px;">
     </div>
-    <!-- Ligne 3c : déclinaison d'un produit en base (2026-07-13, demande Fabien : nouveauté
+    <!-- Ligne 3c : déclinaison d'un produit en base (2026-07-18, demande Fabien : nouveauté
          temporaire type coloris SANS créer de kit — le produit de base sert de rattachement) -->
     <div id="opDeclinaisonRow" style="display:none; grid-template-columns: 1fr 2fr; gap:8px; margin-bottom:8px;">
       <select id="opDeclinaisonProduit" style="padding:6px 8px; background:#0f172a; color:#e2e8f0; border:1px solid #ec489960; border-radius:4px; font-size:12px;">
@@ -23164,7 +23203,7 @@ function renderOps() {
       <input type="number" step="0.01" min="0" id="opPaCommande" placeholder="ex : 1.94 (si ≠ prix normal)" title="Prix d'achat à saisir pour CETTE commande. Le prix normal de la fiche reste inchangé." style="width:170px; padding:6px 8px; background:#0f172a; color:#86efac; border:1px solid #334155; border-radius:4px; font-size:11px; text-align:right;">
     </div>
 
-    <!-- Ligne 4-ter : QUI RÉCEPTIONNE ? (2026-07-13, demande Fabien : la réception centralisée
+    <!-- Ligne 4-ter : QUI RÉCEPTIONNE ? (2026-07-18, demande Fabien : la réception centralisée
          se décide À LA CRÉATION, pas seulement après coup sur la carte / la ligne À rentrer) -->
     <div style="display:flex; gap:14px; align-items:center; margin-bottom:8px; flex-wrap:wrap;">
       <span style="font-size:11px; color:#38bdf8; font-weight:700;">Qui réceptionne ?</span>
@@ -25413,7 +25452,7 @@ function setOpCommanderProduits(opId, checked) {
     var _ra2 = actions.find(function(x) { return x.id === op.rentrerActionId; });
     if (_ra2) syncActionStepsToOp(_ra2);
   }
-  // Généralisation 2026-07-13 : produit HORS BASE → la ligne À rentrer suit la case
+  // Généralisation 2026-07-18 : produit HORS BASE → la ligne À rentrer suit la case
   // « Produits à commander » (création/fermeture par la passe idempotente de syncAutoActions).
   try { syncAutoActions(); } catch (e) {}
   saveData(); renderDashboard(); renderOps && renderOps();
@@ -25451,7 +25490,7 @@ function removePiece(opId, pieceId) {
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
 }
-// Déplace une pièce PLV d'une OP vers une autre (module campagne 2026-07-13 : « cet élément
+// Déplace une pièce PLV d'une OP vers une autre (module campagne 2026-07-18 : « cet élément
 // PLV sert à tel produit de la campagne »). Les affectations d'emplacement suivent la pièce ;
 // les coches d'installation repartent à zéro côté OP d'arrivée (une pièce réaffectée est une
 // pièce à (ré)installer — les clés de steps plv_<id>_* de l'ancienne OP restent orphelines,
@@ -27985,7 +28024,7 @@ function updatePropPdDecision(id, decision) {
   renderPropositionsPD();
   try { renderBasePD(); } catch(e) {}
   try { renderDashboard(); } catch(e) {}
-  // OP Nouveauté proposée au moment de la décision (2026-07-13, règle 6-bis : les 3 bases).
+  // OP Nouveauté proposée au moment de la décision (2026-07-18, règle 6-bis : les 3 bases).
   if (decision === 'RETENU') {
     const _pd = basePD.find(x => (x.marque||'').toLowerCase() === (prop.marque||'').toLowerCase() && (x.modele||'').toLowerCase() === (prop.modele||'').toLowerCase());
     if (_pd && _pd.statutVie === 'A_RENTRER') proposerOpNouveauteApresCreation('pd', _pd.id, (_pd.marque || '') + ' ' + (_pd.modele || ''));
@@ -28020,7 +28059,7 @@ function decidePropPdNew(propId, decision) {
       ensurePdModel(newPd);
       basePD.push(newPd);
       syncAutoActions();
-      // OP Nouveauté proposée au moment de la décision (2026-07-13, règle 6-bis : les 3 bases).
+      // OP Nouveauté proposée au moment de la décision (2026-07-18, règle 6-bis : les 3 bases).
       proposerOpNouveauteApresCreation('pd', newPd.id, (newPd.marque || '') + ' ' + (newPd.modele || ''));
     }
   }
@@ -28488,7 +28527,7 @@ function onPropLiqTypeChange() {
   document.getElementById('propLiqNomGroup').style.display = isParfum ? 'block' : 'none';
   document.getElementById('propLiqGammeExistGroup').style.display = isParfum ? 'block' : 'none';
   document.getElementById('propLiqNbRefsGroup').style.display = 'none';
-  // Multi-format (2026-07-13) : en mode gamme, le format/PA/PV uniques laissent place au
+  // Multi-format (2026-07-18) : en mode gamme, le format/PA/PV uniques laissent place au
   // tableau « un prix par format » ; en mode parfum, comportement historique inchangé.
   const _fmtGrp = document.getElementById('propLiqFormatGroup');
   const _paGrp = document.getElementById('propLiqPAGroup');
@@ -28504,7 +28543,7 @@ function onPropLiqTypeChange() {
   if (parfSec) parfSec.style.display = isParfum ? 'none' : 'block';
 
   if (isParfum) {
-    // 2026-07-13 : le select propose la gamme par NOM, tous formats confondus — un parfum
+    // 2026-07-18 : le select propose la gamme par NOM, tous formats confondus — un parfum
     // nouveau se crée dans tous les formats de la gamme en UNE saisie (cas Fabien : parfum
     // nouveau sur une gamme existante multi-format).
     const sel = document.getElementById('propLiqGammeExist');
@@ -28546,7 +28585,7 @@ function onPropLiqGammeExistChange() {
   const _multiGrp = document.getElementById('propLiqFormatsMultiGroup');
   const _multiLbl = document.getElementById('propLiqFormatsMultiLabel');
   if (selVal) {
-    // Gamme existante (par NOM, tous formats — 2026-07-13) → verrouiller marque/gamme et
+    // Gamme existante (par NOM, tous formats — 2026-07-18) → verrouiller marque/gamme et
     // remplacer format/PA/PV uniques par le tableau des formats de la gamme : PA/PV proposés
     // = ceux de chaque réf, tout coché par défaut (on décoche les formats non concernés).
     const _sep = selVal.indexOf('|||');
@@ -28597,11 +28636,11 @@ function setPropLiqSort(col) {
   renderPropositionsLiq();
 }
 
-// ── Création multi-format (2026-07-13, demande Fabien) ──
+// ── Création multi-format (2026-07-18, demande Fabien) ──
 // « Je rentre une gamme de liquide, je dois créer 4 refs pour 4 formats » → une seule saisie :
 // on coche les formats existants, chacun avec son PA/PV (les prix diffèrent entre 10 et 50 mL),
 // et la soumission crée une proposition par format (le modèle 1 réf = 1 format est conservé).
-// presets (2026-07-13) : mode « parfum sur gamme existante » — lignes limitées aux formats de
+// presets (2026-07-18) : mode « parfum sur gamme existante » — lignes limitées aux formats de
 // la gamme, PA/PV préremplis, cochées par défaut. Sans presets : tableau générique (mode gamme).
 function _renderPropLiqFormatsMulti(presets, force) {
   const cont = document.getElementById('propLiqFormatsMulti');
@@ -28685,7 +28724,7 @@ function submitNewPropositionLiq() {
     const gammeKey = document.getElementById('propLiqGammeExist').value;
 
     if (gammeKey) {
-      // ── Parfum sur gamme existante, MULTI-FORMAT (2026-07-13) : une proposition par format
+      // ── Parfum sur gamme existante, MULTI-FORMAT (2026-07-18) : une proposition par format
       // coché, chacune rattachée à la réf de son format (gammeExistId). ──
       const _sep = gammeKey.indexOf('|||');
       const marque = gammeKey.slice(0, _sep);
@@ -28740,7 +28779,7 @@ function submitNewPropositionLiq() {
       });
     }
   } else {
-    // ── Gamme entière MULTI-FORMAT (2026-07-13) : une proposition par format coché ──
+    // ── Gamme entière MULTI-FORMAT (2026-07-18) : une proposition par format coché ──
     const marque = document.getElementById('propLiqMarque').value.trim();
     const gamme = document.getElementById('propLiqGamme').value.trim();
     if (!marque || !gamme) { pvAlert('Remplissez Marque et Gamme'); return; }
@@ -28836,7 +28875,7 @@ function updatePropLiqDecision(id, decision) {
   renderPropositionsLiq();
   try { renderLiqAll(); } catch(e) {}
   try { renderDashboard(); } catch(e) {}
-  // OP Nouveauté proposée au moment de la décision (2026-07-13) :
+  // OP Nouveauté proposée au moment de la décision (2026-07-18) :
   // — gamme nouvelle (ou parfum ouvrant une nouvelle gamme) → OP au niveau gamme ;
   // — parfum ajouté à une gamme existante → OP au niveau PARFUM (série multi-format
   //   regroupée en campagne « Nouveauté <marque> <gamme> — <parfum> »).
