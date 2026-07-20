@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-18 17:38</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-20 19:01</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -7822,6 +7822,91 @@ function _badgeExpeditionDate(d) {
 function _badgeExpeditionAction(a) {
   if (!a || a.type !== 'RENTRER' || a.commandeAdmin !== true || !a.expeditionDate) return '';
   return _badgeExpeditionDate(a.expeditionDate);
+}
+
+// ── 📅 Date « à rentrer » (2026-07-20, demande Fabien : « mettre les À rentrer dans
+// l'ordre — selon date d'OP si y en a, ou selon date à rentrer ») ──
+// LA source unique (règle 8) de la date qui ordonne une ligne À rentrer :
+//   1. l'OP ouverte liée pilote (sa dateDebut) — AUCUNE contradiction possible : quand une
+//      OP existe, la date manuelle est ignorée et sa saisie est désactivée ;
+//   2. sinon la date « à rentrer » posée à la main (champ additif a.dateRentrer, modèle
+//      paCommande/expeditionDate — merge non touché).
+// Retourne { date:'YYYY-MM-DD', source:'op'|'action' } ou null (ligne sans date).
+function dateRentrerEffective(a) {
+  if (!a || a.type !== 'RENTRER' || a.annulee) return null;
+  const link = (typeof activeOpForAction === 'function') ? activeOpForAction(a.id) : null;
+  if (link && link.op && link.op.dateDebut) return { date: link.op.dateDebut, source: 'op', op: link.op };
+  // Filet lignes hors base : lien opId direct si le rentrerActionId a sauté
+  if (a.opId) {
+    const o = ops.find(x => x.id === a.opId && !x._archived && isOpOuverte(x));
+    if (o && o.dateDebut) return { date: o.dateDebut, source: 'op', op: o };
+  }
+  if (a.dateRentrer && /^\d{4}-\d{2}-\d{2}$/.test(a.dateRentrer)) return { date: a.dateRentrer, source: 'action' };
+  return null;
+}
+// Date la plus proche d'un groupe de lignes (ligne pliée gamme / série multi-format).
+// mode 'action' → ne considère que les dates posées à la main (pour le badge 📅 :
+// quand une OP pilote, son chip 🎯 porte déjà la date — pas de doublon).
+function dateRentrerGroupe(acts, mode) {
+  const ds = (acts || []).map(x => {
+    const e = dateRentrerEffective(x);
+    if (!e) return null;
+    if (mode === 'action' && e.source !== 'action') return null;
+    return e.date;
+  }).filter(Boolean).sort();
+  return ds.length ? ds[0] : null;
+}
+function setRentrerDate(actionId, val) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'RENTRER') return;
+  // Une OP ouverte liée pilote — pas de double saisie contradictoire (le champ est
+  // normalement désactivé dans ce cas, ceci est le verrou de fond).
+  const eff = dateRentrerEffective(a);
+  if (eff && eff.source === 'op') {
+    pvAlert('Cette ligne suit son OP (début le ' + fmtFR(eff.date) + ') — modifie les dates de l\'OP.');
+    try { renderDashboard(); } catch (e) {}
+    return;
+  }
+  const v = (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) ? val : null;
+  const _now = new Date().toISOString();
+  const _apply = (act) => { if (v === null) delete act.dateRentrer; else act.dateRentrer = v; act._ts = _now; };
+  _apply(a);
+  // Gamme liquide multi-format : une arrivée = une série → même date pour tous les
+  // formats & parfums de la gamme (même propagation que l'expédition fournisseur).
+  if (a.produitType === 'liq') {
+    const g = baseLiq.find(x => x.id === a.produitId);
+    if (g) {
+      const serieIds = baseLiq.filter(x => x.marque === g.marque && x.gamme === g.gamme).map(x => x.id);
+      actions.forEach(x => {
+        if (x.id === a.id || x.type !== 'RENTRER' || x.annulee || x.produitType !== 'liq') return;
+        if (!serieIds.includes(x.produitId)) return;
+        // Ne pas écraser une ligne sœur pilotée par une OP (sa date reste celle de l'OP)
+        const effX = dateRentrerEffective(x);
+        if (effX && effX.source === 'op') return;
+        _apply(x);
+      });
+    }
+  }
+  if (typeof logAction === 'function') logAction('Date à rentrer', _logActionLabel(actionId) + ' → ' + (v ? fmtFR(v) : 'effacée'));
+  saveData(); try { renderDashboard(); } catch (e) {}
+}
+// Badge canonique 📅 (règle 8) — LA source unique de l'étiquette « à rentrer pour le … ».
+// Ne s'affiche que pour une date posée à la main (source 'action').
+function _badgeDateRentrer(d) {
+  if (!d) return '';
+  const _passee = d <= ymd(new Date());
+  const bg = _passee ? '#14532d30' : '#0c4a6e30';
+  const col = _passee ? '#86efac' : '#7dd3fc';
+  const border = _passee ? '#22c55e50' : '#0ea5e950';
+  const _jm = (fmtFR(d) || '').slice(0, 5); // JJ/MM
+  const txt = _passee ? '📅 à rentrer' : '📅 pour le ' + _jm;
+  return `<span title="À rentrer pour le ${fmtFR(d)} (date posée par Fabien — pas d'OP liée)" style="font-size:9px; font-weight:700; padding:1px 6px; background:${bg}; color:${col}; border:1px solid ${border}; border-radius:3px; white-space:nowrap;">${txt}</span>`;
+}
+// Variante par action.
+function _badgeDateRentrerAction(a) {
+  const e = dateRentrerEffective(a);
+  return (e && e.source === 'action') ? _badgeDateRentrer(e.date) : '';
 }
 
 // ── RÉCEPTION CENTRALISÉE sur une OP, SÉPARÉE produit / PLV (refonte 2026-06-13, demande
@@ -17389,6 +17474,7 @@ function renderDashboard() {
       // Qui commande ? → repère sur la ligne PLIÉE (demande Fabien 2026-06-20, ❓ ajouté 2026-07-11)
       badgeTag += _badgeQuiCommande(a);
       badgeTag += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-18)
+      badgeTag += _badgeDateRentrerAction(a); // 📅 date à rentrer posée (2026-07-20)
       // 💤 Retrait (2026-07-18) : dit EXPLICITEMENT pourquoi la ligne est en retrait.
       if (_dimBoutique) badgeTag += `<span title="${fShop ? 'Rien à faire pour ta boutique pour l\'instant' : 'Aucune boutique n\'a de travail immédiat'} — géré par Fabien ou en attente d'un événement (livraison, écoulement…)" style="font-size:9px; padding:1px 6px; background:#33415530; color:#64748b; border:1px solid #47556950; border-radius:3px; white-space:nowrap;">💤 ${fShop ? 'rien à faire ici' : 'rien à faire côté boutiques'}</span>`;
       // Prix rouge sur RENTRER (one-shot bradé, etc.) → badgePrix
@@ -17847,6 +17933,25 @@ function renderDashboard() {
             <span style="font-size:10px; color:#64748b;">€ HT${_paNormal != null ? ' · normal ' + _paNormal.toFixed(2) + '€' : ''}</span>
           </div>`;
         }
+        // ── 📅 Date « à rentrer » (2026-07-20, demande Fabien) : ordonne la section
+        // À rentrer. Si une OP ouverte est liée, ELLE pilote (info seule, saisie désactivée
+        // — aucune contradiction possible) ; sinon Fabien pose une date libre.
+        let dateRentrerBlock = '';
+        if (typeof isAdmin === 'function' && isAdmin()) {
+          const _dre = dateRentrerEffective(a);
+          if (_dre && _dre.source === 'op') {
+            dateRentrerBlock = `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:10px; color:#64748b;">📅 À rentrer :</span>
+              <span style="font-size:10px; color:#7dd3fc;" title="La date suit l'OP liée — modifie les dates de l'OP pour changer l'ordre">suit l'OP · ${fmtFR(_dre.date)}</span>
+            </div>`;
+          } else {
+            dateRentrerBlock = `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+              <span style="font-size:10px; color:#64748b;">📅 À rentrer pour le :</span>
+              <input type="date" value="${a.dateRentrer || ''}" onchange="setRentrerDate('${a.id}', this.value)" onclick="event.stopPropagation()" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${a.dateRentrer ? '#0ea5e960' : '#475569'}; color:${a.dateRentrer ? '#7dd3fc' : '#cbd5e1'}; border-radius:3px;">
+              ${isLiq ? '<span style="font-size:9px; color:#64748b; font-style:italic;">appliquée à toute la gamme (tous formats & parfums)</span>' : ''}
+            </div>`;
+          }
+        }
         // ── 📦 Réception centralisée (dispatch, 2026-06-12) : la décision se prend ICI, sur
         // le À rentrer. Hub choisi → rétrocessions hub → autres boutiques créées et suivies.
         let dispatchBlock = '';
@@ -17874,7 +17979,7 @@ function renderDashboard() {
         // (qui commande, expédition, réception, prix de saisie, remplace, fanfare, étiquette,
         // prix rouge) deviennent des segments qui PARTAGENT les lignes (flex-wrap).
         return `<div style="display:flex; flex-wrap:wrap; gap:6px 26px; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed #33415580;">`
-          + commandeAdminBlock + paCommandeBlock + dispatchBlock + `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          + commandeAdminBlock + paCommandeBlock + dateRentrerBlock + dispatchBlock + `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${remplBlock}
           <span style="font-size:10px; color:#64748b;">Entrée en fanfare ?</span>
           ${fanfareChips}
@@ -18293,6 +18398,7 @@ function renderDashboard() {
       (_grpRentrer && grp.every(a => a.commandeAdmin === true) ? _badgeCommandeAdmin()
         : (_grpRentrer && grp.some(a => a.commandeAdmin === undefined) ? _badgeQuiCommandeAttente() : ''))
       + ((_grpRentrer && grp.every(a => a.commandeAdmin === true) && _grpExpDates.length > 0) ? _badgeExpeditionDate(_grpExpDates[0]) : '')
+      + (_grpRentrer ? _badgeDateRentrer(dateRentrerGroupe(grp, 'action')) : '') // 📅 2026-07-20
       + ((_grpRentrer && grp[0].dispatchHub && grp.every(a => a.dispatchHub === grp[0].dispatchHub)) ? _badgeHub(grp[0].dispatchHub) : '');
 
     // Teinte « qui commande » du groupe (2026-07-11) : violet = Fabien commande, ambre = à trancher.
@@ -18416,6 +18522,7 @@ function renderDashboard() {
     // Repères À rentrer sur la ligne pliée « gamme entière » (demande Fabien 2026-06-25, ❓ 2026-07-11)
     _glBadges += _badgeQuiCommande(a);
     _glBadges += _badgeExpeditionAction(a); // 🚚 date d'expédition (2026-07-18)
+    _glBadges += _badgeDateRentrerAction(a); // 📅 date à rentrer posée (2026-07-20)
     if (a.type === 'RENTRER' && a.dispatchHub) _glBadges += _badgeHub(a.dispatchHub);
     // 🐌 Écoulement lent (Fabien 2026-07-09) : sur la ligne gamme pliée — les lignes parfum
     // virtuelles de cette action ne portent pas le badge (voir _renderActionCardInner).
@@ -18497,8 +18604,17 @@ function renderDashboard() {
     // immédiat pour les boutiques passent devant celles gérées par Fabien / en attente
     // (tri stable : l'ordre de priorité est conservé à l'intérieur de chaque groupe).
     {
-      const _unitWork = key => groupeEnRetrait(units[key].blocks.reduce((acc, bl) => acc.concat(bl.actions), []), fShop || null) ? 1 : 0;
-      unitOrder.sort((ka, kb) => _unitWork(ka) - _unitWork(kb));
+      const _unitActs = key => units[key].blocks.reduce((acc, bl) => acc.concat(bl.actions), []);
+      const _unitWork = key => groupeEnRetrait(_unitActs(key), fShop || null) ? 1 : 0;
+      // 📅 Ordre par date (2026-07-20, demande Fabien) : dans À rentrer, les gammes datées
+      // (OP liée sinon date posée) passent en chronologique, les sans-date à la suite
+      // (tri stable : l'ordre de priorité est conservé à égalité).
+      const _unitDate = key => dateRentrerGroupe(_unitActs(key).filter(x => x.type === 'RENTRER')) || '9999-99-99';
+      unitOrder.sort((ka, kb) => {
+        const w = _unitWork(ka) - _unitWork(kb);
+        if (w !== 0) return w;
+        return _unitDate(ka).localeCompare(_unitDate(kb));
+      });
     }
 
     let html = '';
@@ -18530,7 +18646,9 @@ function renderDashboard() {
         badgesHtml: `<span style="font-size:8.5px; padding:1px 5px; background:#33415560; color:#94a3b8; border-radius:2px; white-space:nowrap;">${_libelleParfumsParFormat(allActions) || (allActions.length + ' action' + (allActions.length > 1 ? 's' : ''))}</span>`
           + (_allAdmin ? `<span style="font-size:8.5px; padding:1px 5px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; white-space:nowrap;">📦 Commande Fabien</span>` : '')
           // 🚚 date d'expédition (2026-07-18) : la ligne fusionnée porte la plus proche de la série
-          + ((_allAdmin && _fuseExpDates.length > 0) ? _badgeExpeditionDate(_fuseExpDates[0]) : ''),
+          + ((_allAdmin && _fuseExpDates.length > 0) ? _badgeExpeditionDate(_fuseExpDates[0]) : '')
+          // 📅 date à rentrer posée (2026-07-20) : idem, la plus proche de la série
+          + (_rentrers.length > 0 ? _badgeDateRentrer(dateRentrerGroupe(_rentrers, 'action')) : ''),
         profShort: '', profColor: '',
         formatBadge: { bg: '#0ea5e920', text: '#7dd3fc' },
         formatLabel: u.blocks.length + ' formats',
@@ -18569,6 +18687,15 @@ function renderDashboard() {
         const wa = actionEnRetrait(a, fShop || null) ? 1 : 0;
         const wb = actionEnRetrait(b, fShop || null) ? 1 : 0;
         if (wa !== wb) return wa - wb;
+        // 📅 Ordre par date (2026-07-20, demande Fabien) : les À rentrer suivent LA date
+        // canonique (OP liée sinon date posée) — datées d'abord en chronologique, sans
+        // date à la suite (départagées par les critères historiques ci-dessous).
+        if (a.type === 'RENTRER' && b.type === 'RENTRER') {
+          const ea = dateRentrerEffective(a), eb = dateRentrerEffective(b);
+          const da = ea ? ea.date : '9999-99-99';
+          const db = eb ? eb.date : '9999-99-99';
+          if (da !== db) return da.localeCompare(db);
+        }
         // Urgence substitution (uniquement pour RENTRER) — trou dans l'offre en tête
         if (a.type === 'RENTRER' || b.type === 'RENTRER') {
           const sa = typeof _subUrgencyScore === 'function' ? _subUrgencyScore(a) : { rank: 3, urgCount: 0 };
@@ -19383,6 +19510,32 @@ function renderDashboard() {
   const _todayPct = ((_TIMELINE_DAYS_BEFORE + _nowFraction) / _totalSpan) * 100;
   const _todayLine = `<div style="position:absolute; left:${_todayPct.toFixed(2)}%; top:0; bottom:0; width:1.5px; background:#22c55e; opacity:0.7; z-index:2; pointer-events:none;"></div>`;
 
+  // ── 📆 Quadrillage des jours (2026-07-20, demande Fabien : « visualiser les jours de
+  // la semaine — un cadriage avec chaque jour et le dimanche grisé ») ──
+  // Colonnes journalières DERRIÈRE les barres : dimanche = bande grisée, lundi = trait
+  // de début de semaine plus marqué, autres jours = trait fin. Une ligne d'initiales
+  // (L M M J V S D) surplombe la frise ; aujourd'hui est surligné en vert.
+  let _dayGrid = '';
+  const _dayHeaderCells = [];
+  const _DAY_INITIALS = ['D', 'L', 'M', 'M', 'J', 'V', 'S']; // getDay() : 0 = dimanche
+  for (let day = 0; day < _totalSpan; day++) {
+    const d = _mkDate(_windowStart); d.setDate(d.getDate() + day);
+    const dow = d.getDay();
+    const leftPct = (day / _totalSpan) * 100;
+    const wPct = 100 / _totalSpan;
+    const isToday = ymd(d) === _today;
+    if (dow === 0) {
+      // Dimanche : bande grisée sur toute la hauteur (boutiques fermées / jour off)
+      _dayGrid += `<div style="position:absolute; left:${leftPct.toFixed(3)}%; width:${wPct.toFixed(3)}%; top:0; bottom:0; background:#64748b1c; z-index:0; pointer-events:none;"></div>`;
+    }
+    // Trait de séparation : lundi (début de semaine) plus marqué que les autres jours
+    _dayGrid += `<div style="position:absolute; left:${leftPct.toFixed(3)}%; top:0; bottom:0; width:1px; background:${dow === 1 ? '#47556966' : '#33415538'}; z-index:0; pointer-events:none;"></div>`;
+    // Initiale du jour en en-tête (dimanche estompé, aujourd'hui en vert)
+    const _hCol = isToday ? '#22c55e' : dow === 0 ? '#475569' : '#64748b';
+    _dayHeaderCells.push(`<span title="${d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}" style="position:absolute; left:${leftPct.toFixed(3)}%; width:${wPct.toFixed(3)}%; text-align:center; font-size:8px; font-weight:${isToday ? '800' : '600'}; color:${_hCol};${dow === 0 ? ' opacity:0.75;' : ''}${isToday ? ' text-shadow:0 0 6px #22c55e80;' : ''}">${_DAY_INITIALS[dow]}</span>`);
+  }
+  const _dayHeader = `<div style="position:relative; height:11px; margin-bottom:1px;">${_dayHeaderCells.join('')}</div>`;
+
   // 5) Rendu des bandeaux campagne (fond reliant les OPs d'une même campagne éclatée)
   let _campBands = '';
   _campLaneGroups.forEach(cg => {
@@ -19467,12 +19620,12 @@ function renderDashboard() {
     const datesLbl = entry.noEndDate
       ? _fmtDay(entry.dateDebut) + ' → fin indéterminée'
       : entry.dateDebut === entry.dateFin ? _fmtDay(entry.dateDebut) : _fmtDay(entry.dateDebut) + ' → ' + _fmtDay(entry.dateFin);
-    const tipText = (entry.isCamp ? entry.label : shortLbl + ' — ' + entry.label + campTag) + '\\n' + datesLbl + (entry.noEndDate ? '' : ' (' + durDays + 'j)') + '\\n' + pctNum + '% prête';
+    const tipText = (entry.isCamp ? entry.label : shortLbl + ' — ' + entry.label + campTag) + '\\n' + datesLbl + (entry.noEndDate ? '' : ' (' + durDays + 'j)') + '\\n' + pctNum + '% prête' + '\\nclic = réglage rapide (dates & intitulé)';
 
     const doneIcon = isDone ? '<span style="font-size:9px; margin-left:2px; color:#22c55e;">✓</span>' : '';
     const hoverFilter = isDone ? 'brightness(1.2)' : 'brightness(1.3)';
 
-    return `<div onclick="switchTabProgrammatic('ops','${entry.clickId}')"
+    return `<div onclick="${entry.isCamp ? `pvFriseQuickEditCamp('${entry.campId}')` : `pvFriseQuickEdit('${entry.clickId}')`}"
       title="${tipText.replace(/"/g, '&quot;')}"
       style="position:absolute; left:${leftPct.toFixed(2)}%; width:${widthPct.toFixed(2)}%; top:${top}px; height:${_laneH}px;
         ${bg} ${border} border-radius:3px; opacity:${opacity}; cursor:pointer; overflow:${_isWidened ? 'visible' : 'hidden'};
@@ -19512,8 +19665,9 @@ function renderDashboard() {
     : '';
 
   const densityStrip = `<div style="position:relative; margin:2px 0 10px 0;">
+    ${_dayHeader}
     <div style="position:relative; height:${_ganttH}px; background:#0f172a; border:1px solid #33415580; border-radius:3px; overflow:hidden;">
-      ${_campBands}${_todayLine}${_ganttBars}
+      ${_dayGrid}${_campBands}${_todayLine}${_ganttBars}
     </div>
     <div style="position:relative; height:14px; margin-top:1px;">${_weekTicks.join('')}</div>
     ${_legend ? `<div style="margin-top:4px; display:flex; flex-wrap:wrap; align-items:center;">${_legend}${_campLegend}${_doneLegend}${_noEndLegend}</div>` : ''}
@@ -19706,7 +19860,7 @@ function renderDashboard() {
     ${_opsCollapsed ? '' : (_opsInWindow.length === 0
       ? `<div style="padding:14px; text-align:center; font-size:11px; color:#64748b; font-style:italic;">Aucune OP active dans les 6 prochaines semaines${_opsLater.length ? ' — ' + _opsLater.length + ' plus loin' : ''}.</div>`
       : `${densityStrip}
-        <div style="margin-top:4px; font-size:9.5px; color:#64748b; font-style:italic;">1 barre = 1 OP ou campagne · trait vert = aujourd'hui · clic → onglet OP · ⏰ retard · ⚠ imminente pas prête</div>`)}
+        <div style="margin-top:4px; font-size:9.5px; color:#64748b; font-style:italic;">1 barre = 1 OP ou campagne · 1 colonne = 1 jour (dimanche grisé) · trait vert = aujourd'hui · clic = réglage rapide dates &amp; intitulé (la carte OP reste à un bouton) · ⏰ retard · ⚠ imminente pas prête</div>`)}
   </div>`;
 
   // Hiérarchie du Dashboard (pilotage quotidien du point de vente) :
@@ -23397,11 +23551,13 @@ function renderOps() {
     if (opFilterStatus === 'all')    return true;
     return tstatus === opFilterStatus;
   }).sort((a, b) => {
-    // Ordre temporel : IMMINENTE > EN_COURS > A_VENIR > TERMINEE, puis par date de début desc
+    // Ordre temporel : IMMINENTE > EN_COURS > A_VENIR > TERMINEE, puis par date de début ASC
+    // (2026-07-20 : tiebreak aligné sur les tris des vues — chaque catégorie affiche
+    // ses OPs en ordre chronologique de début, les plus proches d'abord).
     const order = { IMMINENTE: 0, EN_COURS: 1, A_VENIR: 2, TERMINEE: 3 };
     const sa = order[opTimeStatus(a)], sb = order[opTimeStatus(b)];
     if (sa !== sb) return sa - sb;
-    return (b.dateDebut || '').localeCompare(a.dateDebut || '');
+    return (a.dateDebut || '').localeCompare(b.dateDebut || '');
   });
 
   // Regroupement PREMIER NIVEAU : par TYPE d'OP (pliable).
@@ -25366,6 +25522,93 @@ async function setOpDateFin(opId, v) {
       }
     }, 200);
   }
+}
+
+// ── ⚡ Réglage rapide depuis la frise (2026-07-20, demande Fabien : « en cliquant sur un
+// bloc de la frise, changer les éléments les plus importants — date & nom — sans aller
+// vers l'onglet OP ») ──
+// Petite modale : intitulé (commentaire) + dates. Les dates passent par les setters
+// canoniques setOpDateDebut/setOpDateFin (règle 8 : log, _dateDebutManuelle, synchro
+// sibling one-shot ↔ PR, save + re-render inclus). Bouton « Ouvrir la carte OP » pour
+// l'ancien comportement. Boutique (non-admin) : clic = onglet OP comme avant.
+function pvFriseQuickEdit(opId) {
+  if (typeof isAdmin !== 'function' || !isAdmin()) { switchTabProgrammatic('ops', opId); return; }
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  const meta = OP_TYPE_META[op.type] || { label: op.type, color: '#94a3b8' };
+  const prodLbl = (typeof getOpProductDisplay === 'function') ? getOpProductDisplay(op).label : '';
+  const campLbl = op.campagneId ? `<div style="font-size:10px; color:#fbbf24; margin-top:2px;">📣 ${getCampagneLabel(op.campagneId)}</div>` : '';
+  const html = `
+    <div style="text-align:left;">
+      <div style="font-size:13px; font-weight:700; color:${meta.color};">${meta.label} <span style="color:#e2e8f0;">— ${prodLbl}</span></div>
+      ${campLbl}
+      <div style="margin-top:14px;">
+        <label style="font-size:10px; color:#94a3b8; display:block; margin-bottom:3px;">Intitulé / commentaire</label>
+        <input id="pvQeNom" type="text" value="${(op.commentaire || '').replace(/"/g, '&quot;')}" placeholder="(optionnel — affiché sur la carte OP)" style="width:100%; box-sizing:border-box; padding:6px 8px; background:#1e293b; border:1px solid #475569; color:#e2e8f0; border-radius:4px; font-size:12px;">
+      </div>
+      <div style="display:flex; gap:10px; margin-top:10px;">
+        <div style="flex:1;">
+          <label style="font-size:10px; color:#94a3b8; display:block; margin-bottom:3px;">Début</label>
+          <input id="pvQeDebut" type="date" value="${op.dateDebut || ''}" style="width:100%; box-sizing:border-box; padding:5px 8px; background:#1e293b; border:1px solid #7c3aed60; color:#c4b5fd; border-radius:4px; font-size:12px;">
+        </div>
+        <div style="flex:1;">
+          <label style="font-size:10px; color:#94a3b8; display:block; margin-bottom:3px;">Fin <span style="color:#64748b;">(vide = ouverte)</span></label>
+          <input id="pvQeFin" type="date" value="${op.dateFin || ''}" style="width:100%; box-sizing:border-box; padding:5px 8px; background:#1e293b; border:1px solid #7c3aed60; color:#c4b5fd; border-radius:4px; font-size:12px;">
+        </div>
+      </div>
+    </div>`;
+  const _ov = _pvModal(html, [
+    { label: '💾 Enregistrer', color: '#22c55e' },
+    { label: '↗ Ouvrir la carte OP' },
+    { label: 'Annuler' }
+  ], async (idx) => {
+    if (idx === 1) { switchTabProgrammatic('ops', op.id); return; }
+    if (idx !== 0) return; // Annuler / Escape / clic fond
+    // Les valeurs sont lues AVANT que la modale disparaisse ? Non : _pvModal retire
+    // l'overlay avant d'appeler onResult → on capture au clic via closure DOM ci-dessous.
+    const vNom = pvFriseQuickEdit._vals ? pvFriseQuickEdit._vals.nom : null;
+    const vDeb = pvFriseQuickEdit._vals ? pvFriseQuickEdit._vals.deb : null;
+    const vFin = pvFriseQuickEdit._vals ? pvFriseQuickEdit._vals.fin : null;
+    pvFriseQuickEdit._vals = null;
+    // Intitulé : champ libre, écrasement direct (comme le champ commentaire du form OP)
+    const nomTrim = (vNom == null ? (op.commentaire || '') : vNom).trim();
+    if (nomTrim !== (op.commentaire || '')) {
+      op.commentaire = nomTrim;
+      op._ts = new Date().toISOString();
+      if (typeof logAction === 'function') logAction('Intitulé OP (frise)', _logOpLabel(op.id) + ' → ' + (nomTrim || '(effacé)'));
+      saveData();
+    }
+    // Dates : setters canoniques, seulement si changement (ils save + re-render)
+    if (vDeb && vDeb !== (op.dateDebut || '')) await setOpDateDebut(op.id, vDeb);
+    if (vFin !== null && vFin !== (op.dateFin || '')) await setOpDateFin(op.id, vFin);
+    try { renderDashboard(); } catch (e) {}
+    try { if (typeof renderOps === 'function') renderOps(); } catch (e) {}
+  });
+  // Capture les valeurs saisies au moment du clic sur « Enregistrer » (l'overlay est
+  // retiré par _pvModal avant onResult — on lit donc les champs sur mousedown).
+  pvFriseQuickEdit._vals = null;
+  if (_ov) {
+    const _grab = () => {
+      const n = _ov.querySelector('#pvQeNom'), d = _ov.querySelector('#pvQeDebut'), f = _ov.querySelector('#pvQeFin');
+      pvFriseQuickEdit._vals = { nom: n ? n.value : null, deb: d ? d.value : null, fin: f ? f.value : null };
+    };
+    _ov.querySelectorAll('button[data-idx]').forEach(b => b.addEventListener('mousedown', _grab));
+    _ov.addEventListener('keydown', _grab, true);
+    // Focus sur l'intitulé plutôt que sur le bouton (saisie immédiate)
+    const _n = _ov.querySelector('#pvQeNom');
+    if (_n) setTimeout(() => { try { _n.focus(); _n.select(); } catch (e) {} }, 50);
+  }
+}
+// Variante campagne : délègue au flux canonique editCampagne (nom + dates + cascade
+// proposée sur les OPs actives de la campagne), puis rafraîchit le dashboard.
+async function pvFriseQuickEditCamp(campId) {
+  if (typeof isAdmin !== 'function' || !isAdmin()) {
+    const _c0 = ops.find(o => o.campagneId === campId);
+    if (_c0) switchTabProgrammatic('ops', _c0.id);
+    return;
+  }
+  await editCampagne(campId);
+  try { renderDashboard(); } catch (e) {}
 }
 
 // Force l'expansion de la section contenant l'OP cible pour que renderOpCardHtml l'inclue.
