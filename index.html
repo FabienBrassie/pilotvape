@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 15:17</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 16:02</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2630,14 +2630,21 @@ function computeOpGlobalStepDefs(op) {
   return defs;
 }
 
-// Retourne les steps PAR SHOP (hors global). Clés stockées dans op.etats[shop].steps.
-// Les steps de pose de pièces n'apparaissent que si la pièce est affectée à CE shop
-// (affectations[shop].emplacement != null).
-function computeOpShopStepDefs(op, shop) {
-  const defs = [];
+// ═══════════════════════════════════════════════════════════════════════════
+// LA CHAÎNE D'ÉTAPES D'OP, DÉCLARÉE EN DONNÉES — étape 4 du chemin structurel (2026-07-21).
+// Avant : computeOpShopStepDefs était une fonction-arbre de ~150 lignes où chaque
+// liaison était codée en dur (AUDIT_LIAISONS §3.1). Désormais la chaîne est une
+// LISTE ORDONNÉE de maillons déclarés (OP_STEP_CHAIN) : { id, when(op), gen(op, shop, defs) }.
+// Chaque maillon est une fonction nommée dont le corps est l'ancien bloc, à l'identique ;
+// l'ordre de la liste EST l'ordre des étapes sur la carte OP.
+// ⚠️ CLÉS D'ÉTAPES STRICTEMENT INCHANGÉES (coches + merge préservés) — vérifié par
+// snapshot avant/après des defs générées sur tous les profils d'OP (journal suite 20).
+// Ajouter une liaison / un type = ajouter ou étendre un MAILLON et sa condition ici,
+// jamais re-coder un cas dans une fonction-arbre.
+
   // ── ÉTAPE 1 : Commander / Recevoir le produit (en PREMIER car c'est le prérequis) ──
   // NOUVEAUTE / EXCLU (fanfare) liée à une RENTRER : steps miroir synchro avec le dashboard.
-  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
+function _maillonFanfareRentrer(op, shop, defs) {
     const aRF = actions.find(x => x.id === op.rentrerActionId);
     if (aRF) {
       // Fix 2026-07-11 : getActionSteps(aRF) au lieu d'ACTION_STEPS.RENTRER brut — la carte OP
@@ -2649,11 +2656,10 @@ function computeOpShopStepDefs(op, shop) {
           nat: s.nat, resp: s.resp, condLabel: s.condLabel, condKey: s.condKey ? 'rentrer_' + s.condKey : undefined });
       });
     }
-  }
-  // COUP : les rentrer_* / sortir_* sont plus bas (avec PR entre les deux)
-  // Non-COUP avec commanderProduits (sans rentrerActionId fanfare) :
-  if (op.prep && op.prep.commanderProduits && op.type !== 'COUP' &&
-      !((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId)) {
+}
+
+// Non-COUP avec commanderProduits (sans rentrerActionId fanfare). COUP : rentrer_*/sortir_* plus bas (avec PR entre les deux).
+function _maillonProdCommande(op, shop, defs) {
     if (op.commandeAdmin === true) {
       // Fix 2026-07-11 : « commande gérée par Fabien » vaut aussi ici — réception d'abord,
       // puis saisie en stock (mêmes clés → coches préservées), jamais « Commandé sur Swappy ».
@@ -2663,13 +2669,19 @@ function computeOpShopStepDefs(op, shop) {
       defs.push({ key: 'prod_commandee', label: 'Commandé sur Swappy', kind: 'prod', nat: 'imm' });
       defs.push({ key: 'prod_recue',     label: 'Reçu en boutique',    kind: 'prod', nat: 'evt', condLabel: 'attend la livraison' });
     }
-  }
-  // ── ÉTAPE 2 : Réceptionner et installer le matériel (pièces PLV) ──
-  (op.pieces || []).forEach(p => {
+}
+
+// ── ÉTAPE 2a : Réceptionner le matériel fourni (pièces PLV) ──
+function _maillonPlvReception(op, shop, defs) {
+    (op.pieces || []).forEach(p => {
     if (p.source !== 'fournie') return;
     if (p.type === 'PRODUIT' && op.prep && op.prep.commanderProduits) return; // géré par prod_recue
     defs.push({ key: 'plv_' + p.id + '_recue', label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id, kind: 'reception', nat: 'evt', condLabel: 'attend la livraison' });
   });
+}
+
+// ── ÉTAPE 2b : Imprimer / poser les pièces affectées à CE shop ──
+function _maillonPlvPose(op, shop, defs) {
   (op.pieces || []).forEach(p => {
     if (!pieceIsPerShop(p)) return;
     const aff = p.affectations && p.affectations[shop];
@@ -2687,8 +2699,10 @@ function computeOpShopStepDefs(op, shop) {
       nat: _poseCondKey ? 'cond' : 'imm', condKey: _poseCondKey || undefined,
       condLabel: _poseCondKey ? (p.source === 'fournie' ? 'après réception' : 'après impression') : undefined });
   });
+}
+
   // ── ÉTAPE 3 : Configuration Swappy (prix, promo) ──
-  if (op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE') {
+function _maillonSwappyMeca(op, shop, defs) {
     const mt = op.mecanique.type;
     const isRegleComplexe = (mt === 'SECOND_REMISE' || mt === 'X_POUR_Y');
     const label = isRegleComplexe ? 'Promo configurée sur Swappy' : 'Prix modifié sur Swappy';
@@ -2696,12 +2710,13 @@ function computeOpShopStepDefs(op, shop) {
     // par FABIEN — l'étape reste visible chez les équipes comme CONFIRMATION (badge 👤,
     // non cliquable côté boutique). Le simple changement de prix reste boutique.
     defs.push({ key: 'swappy', label: label, kind: 'swappy', nat: 'imm', resp: isRegleComplexe ? 'admin' : undefined });
-  }
+}
+
   // OP COUP : les steps par shop sont dérivés des 2 actions liées (RENTRER + SORTIR),
   // pour que les cases vues côté OP et côté Dashboard soient les mêmes (mirror bidirectionnel,
   // cf. syncActionStepsToOp / syncOpStepsToAction). Pas de doublon possible car on est en
   // dehors de prep.commanderProduits (jamais activé sur un COUP).
-  if (op.type === 'COUP') {
+function _maillonCoup(op, shop, defs) {
     const aR = op.rentrerActionId ? actions.find(x => x.id === op.rentrerActionId) : null;
     const aS = op.sortirActionId  ? actions.find(x => x.id === op.sortirActionId)  : null;
     if (aR) {
@@ -2733,7 +2748,8 @@ function computeOpShopStepDefs(op, shop) {
           nat: s.nat, condLabel: s.condLabel, condKey: s.condKey ? 'sortir_' + s.condKey : undefined });
       });
     }
-  }
+}
+
   // Étapes de FIN D'OP : apparaissent dès que l'OP est terminée (dateFin passée).
   // — NOUVEAUTÉ / EXCLU / PRIX_ROUGE (hors destockage) : remplacer l'étiquette spéciale
   //   par l'étiquette FT profil normale → 2 steps (imprimer + poser).
@@ -2745,7 +2761,7 @@ function computeOpShopStepDefs(op, shop) {
   // — "OP désinstallée" (retrait PLV) dès qu'il y a des pièces physiques, hors destockage —
   //   CUMULABLE avec le ré-étiquetage FT (chantier 3 — 2026-07-09).
   // L'archivage est bloqué tant que ces étapes ne sont pas cochées sur toutes les boutiques.
-  if (op.dateFin && op.dateFin <= ymd(new Date())) {
+function _maillonFinOp(op, shop, defs) {
     const _isDestockage = (op.type === 'PRIX_ROUGE' || op.type === 'COUP') && !!op.sortirActionId;
     // Étiquettes FT par profil : UNIQUEMENT pour les kits (seuls produits sur le Freetouch).
     // Les accessoires, liquides et PD ne sont pas sur le Freetouch → pas de ré-étiquetage FT.
@@ -2784,7 +2800,25 @@ function computeOpShopStepDefs(op, shop) {
     if (!_isDestockage && _hasPiecesPhysiques) {
       defs.push({ key: 'desinstallation', label: '🔻 OP désinstallée', kind: 'desinstall' });
     }
-  }
+}
+
+// LA déclaration : l'ordre de cette liste = l'ordre des étapes sur la carte.
+const OP_STEP_CHAIN = [
+  { id: 'fanfare_rentrer', when: op => !!((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId), gen: _maillonFanfareRentrer },
+  { id: 'prod_commande',   when: op => !!(op.prep && op.prep.commanderProduits && op.type !== 'COUP' && !((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId)), gen: _maillonProdCommande },
+  { id: 'plv_reception',   when: op => (op.pieces || []).length > 0, gen: _maillonPlvReception },
+  { id: 'plv_pose',        when: op => (op.pieces || []).length > 0, gen: _maillonPlvPose },
+  { id: 'swappy_meca',     when: op => !!(op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE'), gen: _maillonSwappyMeca },
+  { id: 'coup',            when: op => op.type === 'COUP', gen: _maillonCoup },
+  { id: 'fin_op',          when: op => !!(op.dateFin && op.dateFin <= ymd(new Date())), gen: _maillonFinOp },
+];
+
+// Retourne les steps PAR SHOP (hors global). Clés stockées dans op.etats[shop].steps.
+// Les steps de pose de pièces n'apparaissent que si la pièce est affectée à CE shop
+// (affectations[shop].emplacement != null).
+function computeOpShopStepDefs(op, shop) {
+  const defs = [];
+  OP_STEP_CHAIN.forEach(m => { if (m.when(op)) m.gen(op, shop, defs); });
   return defs;
 }
 
@@ -2834,6 +2868,28 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
   renderDashboard();
   renderOps && renderOps();
 }
+// ═══════════════════════════════════════════════════════════════════════════
+// REGISTRE DES LIAISONS OP ↔ ACTIONS — étape 2 du chemin structurel (2026-07-21).
+// LA liste unique des champs qui relient une OP à ses actions. Avant, cette liste
+// était recopiée à la main à ~12 endroits (archivage, purge, annulation, GC des
+// orphelins, backfill parfum, dédup, merge, duplication, changement de cible…) :
+// une liaison ajoutée = autant de listes à ne pas oublier (AUDIT_LIAISONS §3.3).
+// Désormais : ajouter un champ ICI suffit, tous les mécanismes de ménage et de
+// merge le prennent en compte automatiquement.
+// ⚠️ Un champ ajouté ici entre AUSSI dans le _nullGuard du merge (protection
+// contre l'écrasement par null depuis un poste distant en retard) — c'est voulu :
+// un lien ne doit JAMAIS être perdu par merge.
+const LIAISON_OP_ACTION_FIELDS = ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId'];
+// Champs de liaison en TABLEAU (plusieurs actions liées à une même OP, ex : OP groupée par parfum)
+const LIAISON_OP_ACTION_ARRAYS = ['groupActionIds'];
+// Canonique (règle 8) : tous les ids d'actions liées à une OP (champs simples + tableaux).
+function opLinkedActionIds(op) {
+  const ids = [];
+  LIAISON_OP_ACTION_FIELDS.forEach(f => { if (op[f]) ids.push(op[f]); });
+  LIAISON_OP_ACTION_ARRAYS.forEach(f => { if (Array.isArray(op[f])) op[f].forEach(id => { if (id) ids.push(id); }); });
+  return ids;
+}
+
 let ops = [];               // [{ id, type, produitIds[], dateDebut, dateFin, commentaire, prixActionId, rentrerActionId, sortirActionId, auto, etats, mecanique, pieces, prep, partenaire, challenge, progress, campagneId }]
 let nextOpId = 1;
 
@@ -2900,6 +2956,27 @@ function pushOpTraced(op, source) {
     _opsPendingDateConfirm.push(op.id);
   }
   return op;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FABRIQUE D'OP UNIQUE — étape 3 du chemin structurel (2026-07-21).
+// TOUTE création d'OP passe ici (règle 8). Avant : 9 littéraux assemblés à la
+// main (+ duplicateOp) — un champ ajouté au modèle devait être pensé 9 fois
+// (AUDIT_LIAISONS §3.2). La fabrique garantit les invariants de NAISSANCE :
+// id séquentiel unique (nouvelOpId), pièces par défaut du type (seedOpDefaults,
+// qui passe par ensureOpModel), étapes dérivées (ensureOpSteps), traçage +
+// _ts + file de confirmation de dates (pushOpTraced), etats initialisé.
+// fields = les champs propres au créateur (type, produitIds, liens du registre
+// LIAISON_OP_ACTION_FIELDS, dates…), appliqués PAR-DESSUS les défauts — la
+// fabrique n'invente aucun champ : chaque créateur passe exactement ce qu'il
+// posait dans son littéral.
+// source = étiquette de traçage (quel flux a créé l'OP).
+function nouvelOpId() { return 'OP-' + String(nextOpId++).padStart(4, '0'); }
+function creerOp(fields, source) {
+  const op = Object.assign({ id: nouvelOpId(), etats: {} }, fields || {});
+  seedOpDefaults(op);
+  ensureOpSteps(op);
+  return pushOpTraced(op, source);
 }
 
 // Traite la file : affiche un prompt de dates pour chaque OP en attente (séquentiellement).
@@ -4524,11 +4601,9 @@ function archiveOldData() {
   // Comptage des données purgeable (> 90 jours) — PAS DE SUPPRESSION AUTOMATIQUE.
   // L'utilisateur est notifié et décide via le bandeau.
   const openOpActionIds = new Set();
+  // Registre unique des liaisons (étape 2) : couvre champs simples + groupActionIds.
   ops.filter(o => !o.dateFin).forEach(o => {
-    ['prixActionId','sortirActionId','rentrerActionId','rentrerPrixActionId','mepActionId','returnActionId'].forEach(f => {
-      if (o[f]) openOpActionIds.add(o[f]);
-    });
-    if (o.groupActionIds) o.groupActionIds.forEach(id => openOpActionIds.add(id));
+    opLinkedActionIds(o).forEach(id => openOpActionIds.add(id));
   });
   actions.forEach(a => {
     if (!a._archived) return;
@@ -4562,9 +4637,9 @@ async function purgerDonneesAnciennes() {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const cutoff90 = ymd(new Date(Date.now() - 90 * 86400000));
   const openOpActionIds = new Set();
+  // Registre unique des liaisons (étape 2) : couvre champs simples + groupActionIds.
   ops.filter(o => !o.dateFin).forEach(o => {
-    ['prixActionId','sortirActionId','rentrerActionId','rentrerPrixActionId','mepActionId','returnActionId'].forEach(f => { if (o[f]) openOpActionIds.add(o[f]); });
-    if (o.groupActionIds) o.groupActionIds.forEach(id => openOpActionIds.add(id));
+    opLinkedActionIds(o).forEach(id => openOpActionIds.add(id));
   });
   const actIds = new Set();
   actions.forEach(a => { if (a._archived && a.dateCloture && a.dateCloture <= cutoff90 && !openOpActionIds.has(a.id)) actIds.add(a.id); });
@@ -4682,6 +4757,21 @@ function syncAutoActions() {
       rA.fanfareOpType = op.type;
       rA._ts = new Date().toISOString();
       console.log('[SYNC] Badge fanfare restauré sur action', rA.id, '(', op.type, ')');
+    }
+  });
+
+  // Rétro-remplissage du libellé métier (2026-07-21, retour Fabien « c'est quoi OPGOODS ? ») :
+  // une ligne hors base d'avant la feature horsBaseLabel récupère le libellé de son OP —
+  // plus JAMAIS d'id technique OPGOODS-… à l'écran. Idempotent.
+  actions.forEach(a => {
+    if (a.produitType !== 'op' || a.type !== 'RENTRER' || a.annulee || a.horsBaseLabel) return;
+    if (String(a.produitId).indexOf('OPGOODS-') !== 0) return;
+    const _opBf = ops.find(o => o.id === (a.opId || String(a.produitId).slice(8)));
+    if (_opBf && _opBf.produitLibre && _opBf.produitLibre.libelle) {
+      a.horsBaseLabel = _opBf.produitLibre.libelle;
+      if (!a.opId) a.opId = _opBf.id;
+      a._ts = new Date().toISOString();
+      console.log('[SYNC] horsBaseLabel rétro-rempli sur', a.id, '→', a.horsBaseLabel);
     }
   });
 
@@ -4930,8 +5020,7 @@ function _ensureOneShotOpGeneric(produit, produitType, label) {
   }
   const today = ymd(new Date());
   if (!op) {
-    op = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+    op = creerOp({
       type: 'COUP',
       produitIds: [produit.id],
       produitParfumId: '', // 2026-05-28 audit OP : one-shot pose au niveau produit (gamme), pas de parfum spécifique
@@ -4941,12 +5030,8 @@ function _ensureOneShotOpGeneric(produit, produitType, label) {
       rentrerActionId: aRentrer ? aRentrer.id : null,
       sortirActionId:  aSortir  ? aSortir.id  : null,
       auto: true,
-      etats: {},
       pieces: []
-    };
-    seedOpDefaults(op);
-    ensureOpSteps(op);
-    pushOpTraced(op, '_ensureOneShotOp_' + produitType);
+    }, '_ensureOneShotOp_' + produitType);
     produit.oneShotOpId = op.id;
     if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
     if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
@@ -5034,8 +5119,7 @@ function _ensureOneShotOpParfum(gamme, parfum) {
   const today = ymd(new Date());
   const label = 'One-shot liquide — ' + (gamme.marque || '') + ' ' + (gamme.gamme || '') + ' · ' + (parfum.n || '');
   if (!op) {
-    op = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+    op = creerOp({
       type: 'COUP',
       produitIds: [gamme.id],
       produitParfumId: parfum.id,
@@ -5045,12 +5129,8 @@ function _ensureOneShotOpParfum(gamme, parfum) {
       rentrerActionId: aRentrer ? aRentrer.id : null,
       sortirActionId:  aSortir  ? aSortir.id  : null,
       auto: true,
-      etats: {},
       pieces: []
-    };
-    seedOpDefaults(op);
-    ensureOpSteps(op);
-    pushOpTraced(op, '_ensureOneShotOpParfum');
+    }, '_ensureOneShotOpParfum');
     parfum.oneShotOpId = op.id;
     if (aRentrer && !aRentrer.opId) aRentrer.opId = op.id;
     if (aSortir  && !aSortir.opId)  aSortir.opId  = op.id;
@@ -5687,8 +5767,7 @@ function syncPrixRougeOp(a, opts) {
   const shouldBeActive = !a.annulee && a.decisionChoice === 'rouge';
   if (shouldBeActive) {
     if (!linked) {
-      const op = {
-        id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+      const op = creerOp({
         type: 'PRIX_ROUGE',
         produitIds: [a.produitId],
         produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
@@ -5697,18 +5776,14 @@ function syncPrixRougeOp(a, opts) {
         commentaire: typeof a.prixCible === 'number' ? 'Cible ' + a.prixCible.toFixed(2) + '€' : 'Prix rouge auto',
         prixActionId: a.id,
         source: 'prix_action',
-        auto: true,
-        etats: {}
-      };
-      seedOpDefaults(op);
-      ensureOpSteps(op);
+        auto: true
+      }, 'syncPrixRougeOp');
       // Propager le prix cible sur l'OP — source de vérité = OP
       if (typeof a.prixCible === 'number') {
         op.prixRouge = a.prixCible;
       }
       op.prixAvantRouge = (typeof a.prixAvant === 'number') ? a.prixAvant
         : ((baseKits.find(function(k){return k.id===a.produitId;}) || {}).pv || null);
-      pushOpTraced(op, 'syncPrixRougeOp');
       a.opId = op.id;
       return op;
     }
@@ -5776,8 +5851,7 @@ function setRentrerFanfare(actionId, opType) {
     // Création initiale — demander les dates
     pvPromptDates({ title: 'Dates de l\'OP ' + opType, defaultDebut: today }).then(dates => {
       if (!dates) return; // annulé
-      const newOp = {
-        id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+      const newOp = creerOp({
         type: opType,
         produitIds: [a.produitId],
         produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
@@ -5787,12 +5861,8 @@ function setRentrerFanfare(actionId, opType) {
         commentaire: 'Entrée en fanfare (depuis RENTRER ' + a.id + ')',
         rentrerActionId: a.id,
         auto: false,
-        etats: {},
         pieces: []
-      };
-      seedOpDefaults(newOp);
-      ensureOpSteps(newOp);
-      ops.push(newOp);
+      }, 'setRentrerFanfare');
       a.fanfareOpType = opType;
       a.opId = newOp.id;
       saveData(); renderDashboard(); if (typeof renderOps === 'function') renderOps();
@@ -5918,8 +5988,7 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label, p
     if (!dates) return;
   }
 
-  const newOp = {
-    id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+  const newOp = creerOp({
     type: 'NOUVEAUTE',
     produitIds: [produitId],
     produitParfumId: parfumId || '',
@@ -5929,12 +5998,8 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label, p
     commentaire: 'Créée à la validation de la proposition (' + label + ')',
     rentrerActionId: a.id,
     auto: false,
-    etats: {},
     pieces: []
-  };
-  seedOpDefaults(newOp);
-  ensureOpSteps(newOp);
-  pushOpTraced(newOp, 'proposerOpNouveauteApresCreation');
+  }, 'proposerOpNouveauteApresCreation');
   a.fanfareOpType = 'NOUVEAUTE';
   if (!a.opId) a.opId = newOp.id;
   a._ts = new Date().toISOString();
@@ -6028,8 +6093,7 @@ function promoteActionToOp(actionId, opType, commentaire) {
   // Demander les dates
   return pvPromptDates({ title: 'Dates de l\'OP ' + opType, defaultDebut: today }).then(dates => {
     if (!dates) return null; // annulé
-    const op = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+    const op = creerOp({
       type: opType,
       produitIds: [a.produitId],
       produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
@@ -6038,12 +6102,8 @@ function promoteActionToOp(actionId, opType, commentaire) {
       _dateDebutManuelle: true,
       commentaire: commentaire || ('Déclenchée depuis ' + a.type + ' ' + a.id),
       [linkField]: a.id,
-      auto: false,
-      etats: {}
-    };
-    seedOpDefaults(op);
-    ensureOpSteps(op);
-    pushOpTraced(op, 'promoteActionToOp');
+      auto: false
+    }, 'promoteActionToOp');
     if (!a.opId) a.opId = op.id;
     a._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
     saveData();
@@ -6504,8 +6564,7 @@ function syncRentrerPrixRougeOp(a) {
                  : isPd ? basePD.find(p => p.id === a.produitId)
                  : baseKits.find(k => k.id === a.produitId);
       const label = prod ? (prod.marque + ' ' + (prod.modele || prod.gamme || prod.designation || '')) : '?';
-      const op = {
-        id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+      const op = creerOp({
         type: 'PRIX_ROUGE',
         produitIds: [a.produitId],
         produitParfumId: a.produitParfumId || '', // 2026-05-28 audit OP : mémorise le parfum cible
@@ -6517,12 +6576,8 @@ function syncRentrerPrixRougeOp(a) {
         prixRouge: (typeof a.prixRouge === 'number') ? a.prixRouge : null,
         prixAvantRouge: (typeof a.prixAvantRouge === 'number') ? a.prixAvantRouge
           : ((prod && typeof prod.pv === 'number') ? prod.pv : null),
-        auto: true,
-        etats: {}
-      };
-      seedOpDefaults(op);
-      ensureOpSteps(op);
-      pushOpTraced(op, 'syncRentrerPrixRougeOp');
+        auto: true
+      }, 'syncRentrerPrixRougeOp');
       a.opId = op.id;
       return op;
     }
@@ -6681,8 +6736,7 @@ function setGroupPrixRouge(actionIdsPiped) {
     const groupLabel = multiGamme
       ? `${marqueLabel} — ${gammeIds.length} gammes (${grpActions.length} réf.)`
       : `${marqueLabel} — ${firstG ? firstG.gamme : '?'} ${_firstFmt} · ${_suffix}`;
-    groupOp = {
-      id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+    groupOp = creerOp({
       type: 'PRIX_ROUGE',
       produitIds: allProduitIds,
       produitParfumIds: allProduitParfumIds, // 2026-05-28 audit OP
@@ -6695,12 +6749,8 @@ function setGroupPrixRouge(actionIdsPiped) {
       commentaire: `Prix rouge groupé : ${grpActions.length} produits à ${prixRouge.toFixed(2)}€`,
       prixRouge: prixRouge,
       prixAvantRouge: grpActions[0].prixAvantRouge,
-      auto: false,
-      etats: {}
-    };
-    seedOpDefaults(groupOp);
-    ensureOpSteps(groupOp);
-    pushOpTraced(groupOp, 'setGroupPrixRouge');
+      auto: false
+    }, 'setGroupPrixRouge');
   }
   // Lier toutes les actions à cette OP groupée
   grpActions.forEach(a => { a.opId = groupOp.id; });
@@ -7387,11 +7437,7 @@ async function lancerReprise(produitType, produitId, parfumId) {
     // Détache les liens d'actions vers cette OP + cleanup des champs PR / fanfare résiduels
     // sur les actions liées (symétrique du cleanup fait dans deleteOp). Sinon les badges
     // PR persisteraient sur les fiches des liquides.
-    const _linkedIds = [];
-    if (op.groupActionIds) _linkedIds.push(...op.groupActionIds);
-    ['sortirActionId','prixActionId','rentrerActionId','mepActionId','rentrerPrixActionId','returnActionId'].forEach(f => {
-      if (op[f]) _linkedIds.push(op[f]);
-    });
+    const _linkedIds = opLinkedActionIds(op); // registre unique des liaisons (étape 2)
     _linkedIds.forEach(aid => {
       const _act = actions.find(x => x.id === aid);
       if (!_act) return;
@@ -9285,7 +9331,9 @@ async function loadData() {
     if (typeof isAdmin === 'function' && isAdmin()) {
       const _backfillTs = new Date().toISOString();
       let _bfCount = 0, _bfGroupCount = 0;
-      const _linkFields = ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId'];
+      // Registre unique (étape 2) — returnActionId exclu : comportement historique conservé
+      // (le retour de prix ne sert pas de source au backfill parfum).
+      const _linkFields = LIAISON_OP_ACTION_FIELDS.filter(f => f !== 'returnActionId');
       ops.forEach(op => {
         // Si déjà rempli, ne pas toucher
         if (op.produitParfumId) return;
@@ -9414,7 +9462,7 @@ async function loadData() {
     // ───────────────────────────────────────────────────────────────────────
     if (typeof isAdmin === 'function' && isAdmin()) {
       const _gcNow = new Date().toISOString();
-      const _gcLinkFields = ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId'];
+      const _gcLinkFields = LIAISON_OP_ACTION_FIELDS; // registre unique des liaisons (étape 2)
       let _gcChanged = 0;
       ops.forEach(op => {
         let opTouched = false;
@@ -10665,16 +10713,16 @@ function _mergeEtats(localActions, remoteActions) {
       _semMap[sk] = keepA;
       // Repointer les OPs qui référençaient le doublon vers le gagnant
       ops.forEach(o => {
-        if (o.rentrerActionId === dropA.id) o.rentrerActionId = keepA.id;
-        if (o.sortirActionId === dropA.id) o.sortirActionId = keepA.id;
-        if (o.prixActionId === dropA.id) o.prixActionId = keepA.id;
-        if (o.rentrerPrixActionId === dropA.id) o.rentrerPrixActionId = keepA.id;
-        if (o.mepActionId === dropA.id) o.mepActionId = keepA.id;
-        if (o.returnActionId === dropA.id) o.returnActionId = keepA.id;
-        if (o.groupActionIds && Array.isArray(o.groupActionIds)) {
-          const idx = o.groupActionIds.indexOf(dropA.id);
-          if (idx >= 0) o.groupActionIds[idx] = keepA.id;
-        }
+        // Registre unique des liaisons (étape 2) : tout champ de lien est repointé.
+        LIAISON_OP_ACTION_FIELDS.forEach(f => {
+          if (o[f] === dropA.id) o[f] = keepA.id;
+        });
+        LIAISON_OP_ACTION_ARRAYS.forEach(f => {
+          if (o[f] && Array.isArray(o[f])) {
+            const idx = o[f].indexOf(dropA.id);
+            if (idx >= 0) o[f][idx] = keepA.id;
+          }
+        });
       });
       _dedupCount++;
       if (_dedupCount <= 5) console.log('[DEDUP-ACTION] Doublon ' + dropA.id + ' fusionné dans ' + keepA.id + ' (' + sk + ')');
@@ -10834,9 +10882,8 @@ function _mergeArray(localArr, remoteArr, idField) {
             '_dateFinManuelle', '_dateDebutManuelle', 'motifCloture',  // flags dates manuelles + clôture
             'dateFin', 'dateDebut',                             // dates OP/action — jamais écraser une date existante avec null
             'campagneId',                                       // lien campagne
-            'rentrerActionId', 'sortirActionId',                // liens OP ↔ actions (purge-critical)
-            'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId',
-            'groupActionIds',                                   // actions groupées
+            ...LIAISON_OP_ACTION_FIELDS,                        // liens OP ↔ actions (registre unique étape 2 — purge-critical)
+            ...LIAISON_OP_ACTION_ARRAYS,                        // actions groupées (registre unique)
             'oneShotOpId',                                      // lien produit ↔ OP one-shot
             'decisionChoice',                                   // décision prix (recalibrer/remonter)
             'produitParfumId', 'parfumNom',                     // actions parfum
@@ -15635,7 +15682,9 @@ function renderLiqAll() {
 // Utilisé par le Dashboard pour afficher un chip "OP en cours" sur la ligne action.
 function activeOpForAction(actionId) {
   if (!actionId) return null;
-  const fields = ['prixActionId','sortirActionId','rentrerActionId','rentrerPrixActionId','mepActionId'];
+  // Registre unique (étape 2) — returnActionId exclu : comportement historique conservé
+  // (pas de chip « OP en cours » sur l'action de retour de prix).
+  const fields = LIAISON_OP_ACTION_FIELDS.filter(f => f !== 'returnActionId');
   for (const f of fields) {
     const op = ops.find(o => isOpOuverte(o) && o[f] === actionId);
     if (op) return { op, linkField: f };
@@ -16125,7 +16174,7 @@ function computeBesoins() {
 const _URGENCE_ACTION_TYPES = ['RENTRER', 'PRIX', 'MISE_EN_PLACE']; // SORTIR exclu (exécution, pas anticipation)
 function _findOpForAction(action) {
   if (!action) return null;
-  const _fields = ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId'];
+  const _fields = LIAISON_OP_ACTION_FIELDS; // registre unique des liaisons (étape 2)
   for (let i = 0; i < _fields.length; i++) {
     const f = _fields[i];
     const op = ops.find(o => !o._archived && o[f] === action.id);
@@ -16384,6 +16433,8 @@ function _semaineCollect() {
     if (g.ptype === 'liq' && g.acts.some(a => a.produitParfumId)) g.acts = g.acts.filter(a => a.produitParfumId);
     g.prod = _semProdOf(g.ptype, g.prodId);
     g.label = _semProdLabel(g.prod);
+    // Produit hors base (OPGOODS-…) : libellé métier, jamais l'id technique (2026-07-21)
+    if (g.label === '?' && g.acts[0] && g.acts[0].horsBaseLabel) g.label = g.acts[0].horsBaseLabel;
     g.cnt = g.ptype === 'liq' ? _libelleParfumsParFormat(g.acts) : '';
     g.shops = _semShopsRestants(g);
     g.op = null;
@@ -18131,10 +18182,9 @@ function renderDashboard() {
         const _aPf = a.produitParfumId || ''; // 2026-05-28 audit OP : parfum de l'action
         const _linkedOps = ops.filter(o => {
           if (o._archived || !isOpOuverte(o)) return false;
-          // Lien direct par ID d'action (mepActionId inclus pour MISE_EN_PLACE)
-          if (o.rentrerActionId === a.id || o.sortirActionId === a.id ||
-              o.prixActionId === a.id || o.rentrerPrixActionId === a.id ||
-              o.mepActionId === a.id) return true;
+          // Lien direct par ID d'action — registre unique (étape 2). returnActionId exclu :
+          // comportement historique conservé (pas de miroir OP sur l'action de retour de prix).
+          if (LIAISON_OP_ACTION_FIELDS.some(f => f !== 'returnActionId' && o[f] === a.id)) return true;
           // Lien par produit : OP dont produitIds contient le même produit
           if (_pid && o.produitIds && o.produitIds.includes(_pid)) {
             // 2026-05-28 audit OP : cohérence parfum pour éviter la fuite entre parfums d'une même gamme.
@@ -19943,7 +19993,11 @@ function renderDashboard() {
           if (_pf) _prodLabel += ' · ' + _pf.n;
         }
       } else {
-        _prodLabel = a.produitId || '?';
+        // Produit HORS BASE (déclinaison / produit libre d'une OP) : le libellé métier,
+        // JAMAIS l'id technique OPGOODS-… (retour Fabien 2026-07-21 : « c'est quoi OPGOODS ? »).
+        _prodLabel = a.horsBaseLabel
+          || (op && op.produitLibre && op.produitLibre.libelle)
+          || a.produitId || '?';
       }
       const _opLabel = op ? (' · 📣 ' + ((OP_TYPE_META[op.type] || {}).label || op.type) + (op.dateDebut ? ' le ' + fmtFR(op.dateDebut) : '')) : '';
       // Commande gérée par l'admin (feature 2026-06-18) : message explicite pour que les
@@ -21968,8 +22022,7 @@ function submitNewOp() {
   const _paCmdRaw = parseFloat(String((document.getElementById('opPaCommande') || {}).value || '').replace(',', '.'));
   const paCommande = (isFinite(_paCmdRaw) && _paCmdRaw > 0) ? _paCmdRaw : undefined;
 
-  const newOp = {
-    id: 'OP-' + String(nextOpId++).padStart(4, '0'),
+  const _newOpFields = {
     type, produitIds, produitLibre,
     produitParfumId: '', // 2026-05-28 audit OP : saisie manuelle = pas de parfum spécifique (gamme entière)
     dateDebut, dateFin, commentaire, campagneId,
@@ -21977,18 +22030,17 @@ function submitNewOp() {
     _dateFinManuelle: !!dateFin,
     partenaire,
     mecanique: mecaType ? { type: mecaType, params: {}, description: mecaDescription } : { type: null, params: {}, description: mecaDescription },
-    prixActionId: null, auto: false, etats: {}
+    prixActionId: null, auto: false
   };
   // Décision explicite tracée dans les deux sens : true = Fabien commande, false = les
   // boutiques commandent. Pas de choix (types sans à-rentrer) → champ absent (= à trancher).
-  if (_quiCmd) newOp.commandeAdmin = (_quiCmd === 'admin');
-  if (paCommande !== undefined) newOp.paCommande = paCommande;
+  if (_quiCmd) _newOpFields.commandeAdmin = (_quiCmd === 'admin');
+  if (paCommande !== undefined) _newOpFields.paCommande = paCommande;
   // Déclinaison / produit libre en NOUVEAUTE-EXCLU (2026-07-18) : c'est une marchandise à
   // commander/recevoir → étapes « commandé / reçu » activées d'office (décochable via ✎ Éditer).
-  if ((mode === 'declinaison' || mode === 'libre') && _TYPES_AVEC_COMMANDE.includes(type)) newOp.prep = { commanderProduits: true };
-  seedOpDefaults(newOp);
-  ensureOpSteps(newOp);
-  pushOpTraced(newOp, 'submitNewOp');
+  // (Posé AVANT creerOp : prep.commanderProduits influence les étapes dérivées par ensureOpSteps.)
+  if ((mode === 'declinaison' || mode === 'libre') && _TYPES_AVEC_COMMANDE.includes(type)) _newOpFields.prep = { commanderProduits: true };
+  const newOp = creerOp(_newOpFields, 'submitNewOp');
   logAction('Nouvelle OP', (OP_TYPE_META[type] || {}).label + ' — ' + (produitLibre ? produitLibre.libelle : _logProdName(produitIds[0])));
   // ── Qui réceptionne ? (2026-07-18) : hub choisi à la création → réception centralisée
   // produit + PLV posée d'office (la canonique creerRetrosDispatchOp crée les transferts).
@@ -22189,7 +22241,8 @@ function _pvCheckListUnits(scopeType, scopeId) {
         seenOp.add(op.id);
         units.push({ kind: 'op', op, label: ((getOpProductDisplay(op) || {}).label || op.id), sous: ((OP_TYPE_META[op.type] || {}).label || op.type) + ' · ' + op.id });
       } else {
-        let lbl = a.produitId || '?';
+        // horsBaseLabel d'abord : jamais l'id technique OPGOODS-… à l'écran (2026-07-21)
+        let lbl = a.horsBaseLabel || a.produitId || '?';
         const g = baseLiq.find(x => x.id === a.produitId);
         const k = baseKits.find(x => x.id === a.produitId);
         const pd = basePD.find(x => x.id === a.produitId);
@@ -22984,7 +23037,7 @@ async function changeOpCible(opId) {
         console.log('[CHANGE-CIBLE] Action ' + a.id + ' (' + a.type + ') re-ciblée sur parfum=' + (_newPfId || '(gamme entière)'));
       }
     };
-    ['rentrerActionId', 'sortirActionId', 'prixActionId', 'rentrerPrixActionId', 'mepActionId', 'returnActionId'].forEach(_checkLink);
+    LIAISON_OP_ACTION_FIELDS.forEach(_checkLink); // registre unique des liaisons (étape 2)
     if (typeof logAction === 'function') logAction('OP cible changée', op.id + ' : ' + _curLabel + ' → ' + choice.label);
     saveData();
     if (typeof renderOps === 'function') renderOps();
@@ -23082,11 +23135,10 @@ async function deleteOp(id) {
   if (!await pvConfirm(confirmMsg)) return;
   _deletedIds.add(id);
   // Nettoyer les actions liées (opId, prixRouge)
-  const linkedActionIds = [];
-  if (op.groupActionIds) linkedActionIds.push(...op.groupActionIds);
-  ['sortirActionId','prixActionId','rentrerActionId','mepActionId'].forEach(f => {
-    if (op[f]) linkedActionIds.push(op[f]);
-  });
+  // Registre unique des liaisons (étape 2). Avant : 4 champs sur 6 seulement —
+  // rentrerPrixActionId et returnActionId n'étaient pas détachés à la suppression
+  // (asymétrie avec le cleanup d'annulation, qui les traitait déjà). Corrigé.
+  const linkedActionIds = opLinkedActionIds(op);
   linkedActionIds.forEach(aid => {
     const a = actions.find(x => x.id === aid);
     if (!a) return;
@@ -23141,7 +23193,7 @@ function duplicateOp(id) {
 
   // Nouvel id et re-génération des ids de pièces pour que les clés de steps
   // (plv_<pieceId>_…) soient indépendantes de l'OP source.
-  copy.id = 'OP-' + String(nextOpId++).padStart(4, '0');
+  copy.id = nouvelOpId(); // fabrique d'id unique (étape 3) — duplicateOp garde son clonage profond
   const pieceIdMap = {};
   (copy.pieces || []).forEach(p => {
     const oldId = p.id;
@@ -23156,10 +23208,12 @@ function duplicateOp(id) {
   });
   copy.progress = { global: {} };
 
-  copy.prixActionId = '';
-  copy.rentrerActionId = '';
-  copy.sortirActionId  = '';
-  copy.mepActionId     = '';
+  // Registre unique des liaisons (étape 2) : TOUS les liens vers des actions sont remis
+  // à zéro ('' et non null, pour échapper au _nullGuard du merge — cf. fix 2026-05-20).
+  // Avant : 4 champs sur 6 — une copie héritait des liens rentrerPrixActionId /
+  // returnActionId / groupActionIds de l'OP source (bug latent). Corrigé.
+  LIAISON_OP_ACTION_FIELDS.forEach(f => { copy[f] = ''; });
+  LIAISON_OP_ACTION_ARRAYS.forEach(f => { if (f in copy) delete copy[f]; });
   copy.auto = false;
 
   // Demander les dates à l'utilisateur
