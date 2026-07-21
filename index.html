@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 16:43</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 18:12</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -5116,6 +5116,9 @@ function syncAutoActions() {
   // Répare les sorties où une boutique garde en tiroir mais ses coches n'ont pas été
   // court-circuitées (flag posé via la fenêtre commande client) → l'action peut se terminer.
   try { _courtCircuiterTiroirSortir(); } catch (e) { console.error('[CC-tiroir sync]', e); }
+  // Destockage soldé dans une boutique → ses coches d'OP prix rouge court-circuitées
+  // (« écoulé chez moi = invisible chez moi », retour Fabien 2026-07-21).
+  try { _shunterOpPrEpuisee(); } catch (e) { console.error('[PR-EPUISE sync]', e); }
   // Après toutes les créations auto, demander confirmation des dates (non-bloquant)
   if (_opsPendingDateConfirm.length > 0) {
     setTimeout(() => _flushPendingDateConfirm(), 200);
@@ -24975,6 +24978,46 @@ function _opPrEpuiseePourShop(op, sh) {
   const a = actions.find(x => x.id === op.sortirActionId);
   if (!a || !a.etats || !a.etats[sh]) return false;
   return a.etats[sh].done === true;
+}
+
+// « Écoulé chez moi = invisible chez moi » jusqu'au bout (retour Fabien 2026-07-21) :
+// une boutique qui a TOUT sorti (destockage soldé chez elle) n'a plus RIEN à faire sur
+// l'OP prix rouge liée — ses coches d'OP (étiquette PR à imprimer/poser, Swappy, fins
+// d'OP) sont COURT-CIRCUITÉES, au même modèle que le tiroir (steps posés avec _stepTs,
+// merge-safe, jamais décochés). Sans ça, la carte était masquée chez elle mais ses
+// étapes restaient comptées « en attente » dans les compteurs et la Semaine.
+// Idempotent — appelé par syncAutoActions ; les étapes de FIN d'OP qui apparaissent à
+// la clôture sont shuntées au passage suivant (même mécanique).
+function _shunterOpPrEpuisee() {
+  const _now = new Date().toISOString();
+  let n = 0;
+  ops.forEach(op => {
+    if (op._archived || op.annulee) return;
+    if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return;
+    if (!op.sortirActionId) return; // seulement les destockages (jamais les PR de relevé)
+    // Normaliser AVANT de calculer les étapes : ensureOpModel pose la mécanique par défaut
+    // (ex : swappy sur un PRIX_ROUGE) — sans ça, une étape née après le shunt resterait à faire.
+    ensureOpSteps(op);
+    SHOPS.forEach(sh => {
+      if (!_opPrEpuiseePourShop(op, sh)) return;
+      computeOpShopStepDefs(op, sh).forEach(def => {
+        // Les étapes miroir (coup_*, fanfare_rentrer, prod) vivent sur les ACTIONS —
+        // on ne touche que les étapes portées par l'OP elle-même.
+        if (def.kind === 'coup_rentrer' || def.kind === 'coup_sortir' || def.kind === 'fanfare_rentrer' || def.kind === 'prod') return;
+        if (!op.etats[sh]) op.etats[sh] = { done: false, dateFait: null, responsable: '', commentaire: '', steps: {} };
+        const st = op.etats[sh];
+        if (!st.steps) st.steps = {};
+        if (st.steps[def.key] === true) return;
+        st.steps[def.key] = true;
+        if (!st._stepTs) st._stepTs = {};
+        st._stepTs[def.key] = _now;
+        op._ts = _now;
+        n++;
+      });
+    });
+  });
+  if (n > 0) console.log('[PR-EPUISE] ' + n + ' coche(s) d\'OP court-circuitée(s) — produit écoulé dans la boutique, rien à faire chez elle');
+  return n;
 }
 
 // Blindage (chantier A — 2026-06-10) : une carte OP illisible ne tue plus tout l'onglet,
