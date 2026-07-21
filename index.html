@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-20 19:01</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 15:17</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3519,6 +3519,32 @@ function badgeCommandeClient(prod) {
   const lbl = shops.map(sh => (SHOP_LABELS[sh] || sh).charAt(0)).join('·');
   return `<span style="font-size:9px; padding:1px 6px; border-radius:3px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; white-space:nowrap;" title="Commande client : gardé en tiroir à ${shops.map(sh => SHOP_LABELS[sh] || sh).join(', ')} — hors linéaire, hors grille d'offre">🗄️ CC ${lbl}</span>`;
 }
+// ── La commande client couvre-t-elle TOUT ce que cette boutique devait sortir ? ──
+// (retour Fabien 2026-07-21 : « si Pessac a mis chaque réf en commande client, pourquoi
+// son camembert n'est pas rempli ? ») LA source unique (règle 8) du « rien à sortir ici » :
+//   • action parfum : le parfum est en tiroir chez elle ;
+//   • action kit/PD/gamme : le produit est en tiroir chez elle ;
+//   • action GAMME ENTIÈRE : la gamme est en tiroir OU TOUS les parfums restants
+//     (non sortis) le sont un par un — la gamme entière n'est que la somme de ses
+//     parfums : tout en tiroir = rien à sortir = coches court-circuitées.
+function ccCouvreToutSortir(a, shop) {
+  if (!a || a.type !== 'SORTIR') return false;
+  const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
+    : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
+    : baseKits.find(k => k.id === a.produitId);
+  if (!prod) return false;
+  if (a.produitType === 'liq' && a.produitParfumId && Array.isArray(prod.parfums)) {
+    const pf = prod.parfums.find(p => p.id === a.produitParfumId);
+    return estCommandeClient(pf || prod, shop);
+  }
+  if (estCommandeClient(prod, shop)) return true;
+  if (a.produitType === 'liq' && Array.isArray(prod.parfums)) {
+    const actifs = prod.parfums.filter(p => p.s !== 'SORTI');
+    return actifs.length > 0 && actifs.every(p => estCommandeClient(p, shop));
+  }
+  return false;
+}
+
 // ── Qui peut gérer la commande client d'une boutique ? (règle RÉVISÉE par Fabien 2026-06-12,
 // remplace "la boutique propose, Fabien valide") : chaque boutique gère le tiroir DE SA
 // boutique — c'est elle qui sait quel parfum ne pas désactiver sur une gamme qui sort.
@@ -3676,18 +3702,12 @@ function _courtCircuiterTiroirSortir() {
     if (a.type !== 'SORTIR' || a.annulee || a._archived) return;
     if (a.motifSortie === 'REPRISE') return; // une reprise en tiroir : géré séparément, pas de cascade SORTI
     if (typeof actionGlobalState === 'function' && actionGlobalState(a) === 'FAIT') return;
-    const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
-      : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
-      : baseKits.find(k => k.id === a.produitId);
-    if (!prod) return;
-    let cible = prod;
-    if (a.produitType === 'liq' && a.produitParfumId && Array.isArray(prod.parfums)) {
-      cible = prod.parfums.find(p => p.id === a.produitParfumId) || prod;
-    }
-    const cc = cible.commandeClient;
-    if (!cc) return;
+    // Couverture par boutique via LA source unique ccCouvreToutSortir (2026-07-21) —
+    // inclut le cas gamme entière dont TOUS les parfums restants sont en tiroir un par un
+    // (avant : seul le flag posé sur la cible de l'action comptait → camembert vide à
+    // Pessac alors que ses 4 parfums étaient en commande client).
     SHOPS.forEach(sh => {
-      if (!cc[sh]) return;
+      if (!ccCouvreToutSortir(a, sh)) return;
       const st = a.etats && a.etats[sh];
       if (!st || st.done) return; // déjà fait / court-circuité
       if (!st.steps) st.steps = makeStepMap(a);
@@ -17137,8 +17157,14 @@ function renderDashboard() {
       // en tiroir : rappel AU MOMENT DU GESTE (règle 6) pour qu'elle ne coupe pas ces réfs sur
       // Swappy en cochant "Réappro coupée" / "Désactivé".
       if (a.produitType === 'liq' && !a.produitParfumId && _ccProd && Array.isArray(_ccProd.parfums)) {
-        const _ccKeeps = _ccProd.parfums.filter(p => p.s !== 'SORTI' && estCommandeClient(p, sh));
-        if (_ccKeeps.length > 0) {
+        const _ccActifs = _ccProd.parfums.filter(p => p.s !== 'SORTI');
+        const _ccKeeps = _ccActifs.filter(p => estCommandeClient(p, sh));
+        if (_ccKeeps.length > 0 && _ccKeeps.length === _ccActifs.length) {
+          // 2026-07-21 (retour Fabien) : TOUS les parfums restants en tiroir ici — il n'y a
+          // plus de « reste » à sortir : la boutique est réglée (coches court-circuitées par
+          // ccCouvreToutSortir), on remplace le bandeau SAUF (trompeur) et le bouton tiroir.
+          ccZone = `<div style="margin-top:5px; padding:4px 8px; background:#0e749022; border:1px solid #06b6d450; border-radius:3px; font-size:10px; color:#67e8f9; font-weight:600;">🗄️ TOUS les parfums restants sont en commande client ici — rien à sortir : la ligne est réglée pour cette boutique. Garder ces réfs actives sur Swappy (ne rien désactiver).</div>`;
+        } else if (_ccKeeps.length > 0) {
           const _ccPl = _ccKeeps.length > 1;
           ccZone = `<div style="margin-top:5px; padding:4px 8px; background:#0e749022; border:1px solid #06b6d450; border-radius:3px; font-size:10px; color:#67e8f9; font-weight:600;">🗄️ SAUF ${_ccKeeps.map(p => p.n || '(sans nom)').join(', ')} — commande client ici : garder ce${_ccPl ? 's' : ''} parfum${_ccPl ? 's' : ''} actif${_ccPl ? 's' : ''} sur Swappy, ne sortir que le reste</div>` + ccZone;
         }
