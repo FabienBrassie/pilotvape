@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 16:02</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 16:18</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2645,7 +2645,12 @@ function computeOpGlobalStepDefs(op) {
   // ── ÉTAPE 1 : Commander / Recevoir le produit (en PREMIER car c'est le prérequis) ──
   // NOUVEAUTE / EXCLU (fanfare) liée à une RENTRER : steps miroir synchro avec le dashboard.
 function _maillonFanfareRentrer(op, shop, defs) {
-    const aRF = actions.find(x => x.id === op.rentrerActionId);
+    let aRF = actions.find(x => x.id === op.rentrerActionId);
+    // ÉTAPE 5 : gamme déclinée par parfum — le modèle d'étapes se prend sur une ligne
+    // parfum VIVANTE si le représentant manque ou est annulé (ligne gamme migrée).
+    // Les clés rentrer_* restent inchangées : l'état est lu en AGRÉGAT par
+    // _getOpStepChecked (✓ = tous les parfums), écrit sur toutes les lignes.
+    if (!aRF || aRF.annulee) { const _pfs = opRentrerParfumActions(op); if (_pfs.length) aRF = _pfs[0]; }
     if (aRF) {
       // Fix 2026-07-11 : getActionSteps(aRF) au lieu d'ACTION_STEPS.RENTRER brut — la carte OP
       // affichait « Commandé sur Swappy » aux boutiques MÊME quand « commande gérée par Fabien »
@@ -2804,7 +2809,7 @@ function _maillonFinOp(op, shop, defs) {
 
 // LA déclaration : l'ordre de cette liste = l'ordre des étapes sur la carte.
 const OP_STEP_CHAIN = [
-  { id: 'fanfare_rentrer', when: op => !!((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId), gen: _maillonFanfareRentrer },
+  { id: 'fanfare_rentrer', when: op => !!((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && (op.rentrerActionId || opRentrerParfumActions(op).length)), gen: _maillonFanfareRentrer },
   { id: 'prod_commande',   when: op => !!(op.prep && op.prep.commanderProduits && op.type !== 'COUP' && !((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId)), gen: _maillonProdCommande },
   { id: 'plv_reception',   when: op => (op.pieces || []).length > 0, gen: _maillonPlvReception },
   { id: 'plv_pose',        when: op => (op.pieces || []).length > 0, gen: _maillonPlvPose },
@@ -4447,6 +4452,16 @@ function cleanupActionsForLiq(gamme) {
 
 // --- Actions au niveau PARFUM INDIVIDUEL ---
 
+// ÉTAPE 5 (2026-07-21) — canoniques de couverture : quels parfums d'une gamme À RENTRER
+// reçoivent leur propre ligne À rentrer ? Tous, SAUF ceux qui vivent un autre cycle
+// (sorti, à sortir, reprise). Un parfum sans statut propre suit la gamme.
+function _pfEstCouvertRentrer(p) {
+  return !['SORTI', 'A_SORTIR', 'REPRISE'].includes(p.s || '');
+}
+function _pfsCouvertsRentrer(g) {
+  return (g.parfums || []).filter(_pfEstCouvertRentrer);
+}
+
 function ensureActionForParfum(gamme, parfumId, type) {
   const _pfObj = (gamme.parfums || []).find(p => p.id === parfumId);
   return ensureAction(gamme.id, type, 'liq', {
@@ -4474,9 +4489,13 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
       if (parfumStatus === 'SORTI') _cancelAction(a);
       return;
     }
+    // ÉTAPE 5 : une ligne parfum créée parce que la GAMME est À RENTRER reste valide
+    // tant que la gamme l'est et que le parfum est couvert (pas sorti/à sortir/reprise).
+    const _couvertGamme = a.type === 'RENTRER' && gamme.statutVie === 'A_RENTRER'
+      && _pfEstCouvertRentrer(_pf || { s: parfumStatus === 'OK' ? '' : parfumStatus });
     const stillValid =
       (a.type === 'SORTIR' && (parfumStatus === 'A_SORTIR' || isOneShotActif)) ||
-      (a.type === 'RENTRER' && (parfumStatus === 'A_RENTRER' || isOneShotActif));
+      (a.type === 'RENTRER' && (parfumStatus === 'A_RENTRER' || isOneShotActif || _couvertGamme));
     if (!stillValid) _cancelAction(a);
   });
 }
@@ -4808,7 +4827,12 @@ function syncAutoActions() {
   baseLiq.forEach(g => {
     if (g.statutVie === 'A_SORTIR') ensureActionForLiq(g, 'SORTIR');
     // FIN_DE_VIE : pas d'action SORTIR, le produit s'écoule. Apparaît dans Besoins à combler.
-    if (g.statutVie === 'A_RENTRER') ensureActionForLiq(g, 'RENTRER');
+    // ÉTAPE 5 (2026-07-21, décision Fabien : « la gamme entière = la somme des parfums ») :
+    // une gamme À RENTRER avec parfums crée UNE ligne À rentrer PAR parfum (chacune ses
+    // coches, ouverture individuelle) — la ligne gamme n'est plus qu'un AGRÉGAT de rendu
+    // (_renderGammeParfumGroup). Les lignes parfum sont créées dans la boucle parfums
+    // ci-dessous (_pfCouvertParGammeRentrer). Sans parfum déclaré : ligne gamme (filet).
+    if (g.statutVie === 'A_RENTRER' && _pfsCouvertsRentrer(g).length === 0) ensureActionForLiq(g, 'RENTRER');
     // One-shot liquide : même logique que les kits
     if (g.oneShot === true && ['DANS_OFFRE','A_RENTRER','OK'].includes(g.statutVie)) {
       ensureOneShotOpLiq(g);
@@ -4827,6 +4851,9 @@ function syncAutoActions() {
           if (pStatus === 'A_SORTIR') ensureActionForParfum(g, p.id, 'SORTIR');
           if (pStatus === 'A_RENTRER') ensureActionForParfum(g, p.id, 'RENTRER');
         }
+        // ÉTAPE 5 : gamme À RENTRER → une ligne À rentrer PAR parfum couvert
+        // (la règle « le statut diffère » ne vaut plus pour le RENTRER : chaque parfum a SA ligne).
+        if (g.statutVie === 'A_RENTRER' && _pfEstCouvertRentrer(p)) ensureActionForParfum(g, p.id, 'RENTRER');
         // One-shot au niveau parfum (feature 2026-06-18)
         if (p.oneShot === true && ['DANS_OFFRE','A_RENTRER','OK'].includes(pStatus)) {
           _ensureOneShotOpParfum(g, p);
@@ -4837,6 +4864,71 @@ function syncAutoActions() {
       });
     }
   });
+  // ═══ ÉTAPE 5 — MIGRATION des À rentrer gamme entière → lignes PAR PARFUM (2026-07-21) ═══
+  // Idempotente, côté admin (les boutiques adoptent au poll, comme les autres migrations).
+  // Pour chaque action RENTRER gamme-level (liquide) encore vivante dont la gamme a des
+  // parfums couverts : créer les lignes parfum, recopier les champs partagés (commandeAdmin,
+  // paCommande, expeditionDate, dateRentrer, dispatchHub, opId) et les coches PAR boutique
+  // avec leurs _stepTs (le merge ne régresse pas), repointer l'OP liée et les rétros de
+  // dispatch sur un représentant, puis annuler la ligne gamme (marqueur migreParfums —
+  // jamais recréée : la création gamme est conditionnée à l'absence de parfums couverts).
+  if (typeof isAdmin === 'function' && isAdmin()) {
+    const _migTs = new Date().toISOString();
+    actions.filter(a => a.type === 'RENTRER' && a.produitType === 'liq' && !a.produitParfumId
+      && !a.annulee && !a._archived && !a.migreParfums && !_deletedIds.has(a.id)).forEach(aG => {
+      const g = baseLiq.find(x => x.id === aG.produitId);
+      if (!g || g.statutVie !== 'A_RENTRER') return;
+      const pfs = _pfsCouvertsRentrer(g);
+      if (pfs.length === 0) return;
+      const pfActs = [];
+      pfs.forEach(p => {
+        if (!p.id) return;
+        const pa = ensureActionForParfum(g, p.id, 'RENTRER');
+        if (!pa) return;
+        pfActs.push(pa);
+        // Champs partagés : copiés si absents (ne jamais écraser un choix parfum déjà posé)
+        ['commandeAdmin', 'paCommande', 'expeditionDate', 'dateRentrer', 'dispatchHub'].forEach(f => {
+          if (aG[f] !== undefined && aG[f] !== null && pa[f] === undefined) { pa[f] = aG[f]; pa._ts = _migTs; }
+        });
+        if (aG.opId && !pa.opId) { pa.opId = aG.opId; pa._ts = _migTs; }
+        // Coches par boutique : recopiées avec leur _stepTs (une coche gamme vaut pour chaque parfum)
+        SHOPS.forEach(sh => {
+          const src = aG.etats && aG.etats[sh]; if (!src || !src.steps) return;
+          if (!pa.etats[sh]) pa.etats[sh] = { done: false, dateFait: null, responsable: '', commentaire: '', steps: {} };
+          const dst = pa.etats[sh];
+          Object.keys(src.steps).forEach(k => {
+            if (src.steps[k] === true && dst.steps[k] !== true) {
+              dst.steps[k] = true;
+              if (!dst._stepTs) dst._stepTs = {};
+              dst._stepTs[k] = (src._stepTs && src._stepTs[k]) || _migTs;
+              pa._ts = _migTs;
+            }
+          });
+          if (src.done === true && dst.done !== true) { dst.done = true; dst.dateFait = src.dateFait || ymd(new Date()); pa._ts = _migTs; }
+          if (src.responsable && !dst.responsable) dst.responsable = src.responsable;
+        });
+      });
+      if (pfActs.length === 0) return;
+      // Repointage : OP(s) liées par rentrerActionId → représentant = 1re ligne parfum ;
+      // chaque ligne parfum reçoit opId (badges 🎯, dateRentrerEffective, bandeau anticiper).
+      ops.forEach(o => {
+        if (o.rentrerActionId !== aG.id) return;
+        o.rentrerActionId = pfActs[0].id;
+        o._ts = _migTs;
+        pfActs.forEach(pa => { if (!pa.opId) { pa.opId = o.id; pa._ts = _migTs; } });
+      });
+      // Rétros de dispatch : la rétro GAMME est conservée telle quelle (pas de démultiplication),
+      // repointée sur le représentant pour que le suivi x/y et le retrait continuent de marcher.
+      actions.forEach(x => {
+        if (x.retroRentrerActionId === aG.id) { x.retroRentrerActionId = pfActs[0].id; x._ts = _migTs; }
+      });
+      // La ligne gamme s'efface : annulée + marquée (l'agrégat de rendu prend le relais).
+      aG.migreParfums = true;
+      _cancelAction(aG);
+      console.log('[MIGRATION-PARFUM] ' + aG.id + ' (' + (g.marque || '') + ' ' + (g.gamme || '') + ') → ' + pfActs.length + ' ligne(s) parfum');
+    });
+  }
+
   // Actions auto pour les pièces détachées (même logique que kits)
   basePD.forEach(pd => {
     if (pd.statutVie === 'A_SORTIR') ensureActionForPd(pd, 'SORTIR');
@@ -4978,8 +5070,8 @@ function syncAutoActions() {
     const gammeId = (op.produitIds || [])[0];
     if (!gammeId) return;
     // Y a-t-il des actions parfum individuelles ? Si oui, l'agrégat est fait au rendu.
-    const hasParfumActions = actions.some(a =>
-      a.type === 'RENTRER' && a.produitId === gammeId && a.produitParfumId && !a.annulee && !_deletedIds.has(a.id));
+    // ÉTAPE 5 : périmètre canonique (OP parfum → seulement ses lignes).
+    const hasParfumActions = opRentrerParfumActions(op).length > 0;
     if (!hasParfumActions) {
       // Mode 1:1 classique (pas de parfums individuels)
       const aR = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
@@ -5554,7 +5646,29 @@ function syncOpsFromVerdicts() {
   // RENTRER → OP fanfare liée (rentrerActionId). Exclut les OP COUP (gérées plus bas
   // car elles sont liées aux DEUX actions : entrée + sortie).
   ops.filter(o => o.rentrerActionId && !o.dateFin && o.type !== 'COUP').forEach(op => {
-    const a = actions.find(x => x.id === op.rentrerActionId);
+    let a = actions.find(x => x.id === op.rentrerActionId);
+    // ÉTAPE 5 : gamme déclinée par parfum → l'OP suit la SOMME des lignes parfum couvertes.
+    // Elle ne se clôt que quand TOUTES sont rentrées ; un représentant annulé (ex : ligne
+    // gamme migrée, parfum sorti) est re-pointé sur une ligne parfum vivante au lieu de
+    // déclencher la fermeture orpheline.
+    if (op.type === 'NOUVEAUTE' || op.type === 'EXCLU') {
+      const _pfActs = opRentrerParfumActions(op);
+      if (_pfActs.length > 0) {
+        if (!a || a.annulee) {
+          op.rentrerActionId = _pfActs[0].id;
+          a = _pfActs[0];
+          console.log('[FANFARE-HEAL] Représentant re-pointé sur ' + a.id + ' pour OP ' + op.id);
+        }
+        if (_pfActs.every(x => actionGlobalState(x) === 'FAIT')) {
+          if (op.campagneId) {
+            const cw = getCampagneWindow(op.campagneId);
+            if (cw && cw.dateFin && cw.dateFin > today) return; // campagne encore active
+          }
+          _autoClose(op, 'toutes les lignes parfum rentrées (fanfare)');
+        }
+        return;
+      }
+    }
     if (!a || a.annulee) { _autoCloseOrphan(op, a, 'action RENTRER supprimée/annulée'); return; }
     // Une entrée en fanfare se clôt quand le produit est actif partout
     // SAUF si l'OP fait partie d'une campagne avec une dateFin future → la campagne dicte la durée
@@ -6264,6 +6378,23 @@ function _opMatchesActionParfum(op, action) {
   // OP groupée : action sans parfum ne se lie pas ; sinon match dans la liste
   if (_oPfs.length > 0 && _aPf && _oPfs.includes(_aPf)) return true;
   return false;
+}
+
+// ═══ ÉTAPE 5 du chemin structurel (2026-07-21, décision Fabien : « la gamme entière,
+// c'est la somme des parfums ») — canonique (règle 8) : LES lignes À rentrer parfum
+// couvertes par une OP. OP gamme entière → tous les parfums de la gamme ; OP ciblée
+// parfum (produitParfumId) ou groupée (produitParfumIds) → seulement les siens.
+// Utilisée par : lecture agrégée des coches OP (_getOpStepChecked), cibles d'écriture
+// (_pvCheckListWriteTargets), fermeture auto des fanfares, maillon fanfare_rentrer,
+// saut du sync 1:1. Ne JAMAIS re-filtrer les actions parfum d'une OP à la main.
+function opRentrerParfumActions(op) {
+  const gid = (op.produitIds || [])[0];
+  if (!gid) return [];
+  const pfIds = op.produitParfumId ? [op.produitParfumId]
+    : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+  return actions.filter(a => a.type === 'RENTRER' && a.produitId === gid && a.produitParfumId
+    && !a.annulee && !_deletedIds.has(a.id)
+    && (!pfIds || pfIds.includes(a.produitParfumId)));
 }
 
 // RÉSOLUTION DES LIENS action → OP(s) puis délégation au mécanisme unique _syncCocheBidi
@@ -7732,26 +7863,46 @@ function creerPaireRetro(opts) {
 // setDispatchHub le 2026-07-18, règle 8) : annule les rétros d'un ancien hub, pose le champ,
 // crée les paires de transfert. Partagé par setDispatchHub (avec confirmation) et le flux
 // « OP Nouveauté au Retenu » (où le choix du prompt EST la confirmation).
+// ÉTAPE 5 (2026-07-21) — canonique : la PORTÉE d'un choix de réception centralisée.
+// Sur une ligne parfum d'une gamme déclinée : toutes les lignes parfum vivantes de la
+// gamme (une commande fournisseur = une arrivée = un dispatch). Sinon : la ligne seule.
+function _dispatchPorteeGamme(a) {
+  if (!a) return [];
+  if (a.produitType === 'liq' && a.produitParfumId) {
+    const sib = actions.filter(x => x.type === 'RENTRER' && x.produitId === a.produitId
+      && x.produitParfumId && !x.annulee && !_deletedIds.has(x.id));
+    if (sib.length > 1) return sib;
+  }
+  return [a];
+}
+
 function _appliquerDispatchHubAction(a, hub) {
   if (!a || a.type !== 'RENTRER' || !hub) return;
   const nowIso = new Date().toISOString();
-  actions.filter(x => x.retroRentrerActionId === a.id && !x.annulee).forEach(x => _cancelAction(x));
-  a.dispatchHub = hub;
-  a._ts = nowIso; a._adminTs = nowIso;
+  // ÉTAPE 5 (rétro GROUPÉE — décision Fabien : « regrouper ») : sur une gamme déclinée
+  // par parfum, la réception centralisée vaut pour TOUTE la gamme. Le hub est posé sur
+  // chaque ligne parfum (badges, étapes transport), mais on ne crée qu'UNE rétrocession
+  // par boutique, au niveau GAMME — sinon 8 parfums × 2 boutiques = 16 rétros qui
+  // noieraient la section 🔁.
+  const _portee = _dispatchPorteeGamme(a);
+  const _porteeIds = _portee.map(x => x.id);
+  actions.filter(x => _porteeIds.includes(x.retroRentrerActionId) && !x.annulee).forEach(x => _cancelAction(x));
+  _portee.forEach(x => { x.dispatchHub = hub; x._ts = nowIso; x._adminTs = nowIso; });
   const prod = a.produitType === 'liq' ? baseLiq.find(g => g.id === a.produitId)
     : a.produitType === 'pd' ? basePD.find(p => p.id === a.produitId)
     : baseKits.find(k => k.id === a.produitId);
   const nom = prod ? ((prod.marque || '') + ' ' + (prod.modele || prod.gamme || '')) : (a.horsBaseLabel || a.produitId);
+  const _estGroupeGamme = _portee.length > 1; // rétro GAMME (tous parfums) plutôt que par parfum
   let _pfNom = null;
-  if (a.produitParfumId && prod && Array.isArray(prod.parfums)) {
+  if (!_estGroupeGamme && a.produitParfumId && prod && Array.isArray(prod.parfums)) {
     const pf = prod.parfums.find(x => x.id === a.produitParfumId);
     _pfNom = pf ? (pf.n || null) : (a._parfumNom || null);
   }
   SHOPS.forEach(sh => {
     if (sh === hub) return;
-    creerPaireRetro({ produitType: a.produitType || 'kit', produitId: a.produitId, parfumId: a.produitParfumId || null, parfumNom: _pfNom, from: hub, to: sh, qte: null, date: null, rentrerActionId: a.id, retroLabel: a.horsBaseLabel || undefined });
+    creerPaireRetro({ produitType: a.produitType || 'kit', produitId: a.produitId, parfumId: _estGroupeGamme ? null : (a.produitParfumId || null), parfumNom: _estGroupeGamme ? null : _pfNom, from: hub, to: sh, qte: null, date: null, rentrerActionId: a.id, retroLabel: a.horsBaseLabel || undefined });
   });
-  logAction('Réception centralisée', nom + ' → hub ' + (SHOP_LABELS[hub] || hub) + ', rétrocessions créées vers ' + SHOPS.filter(s => s !== hub).map(s => SHOP_LABELS[s] || s).join(' et '));
+  logAction('Réception centralisée', nom + (_estGroupeGamme ? ' (gamme entière, ' + _portee.length + ' parfums)' : '') + ' → hub ' + (SHOP_LABELS[hub] || hub) + ', rétrocessions créées vers ' + SHOPS.filter(s => s !== hub).map(s => SHOP_LABELS[s] || s).join(' et '));
 }
 
 async function setDispatchHub(actionId, hub) {
@@ -7759,7 +7910,10 @@ async function setDispatchHub(actionId, hub) {
   const a = actions.find(x => x.id === actionId);
   if (!a || a.type !== 'RENTRER') return;
   const nowIso = new Date().toISOString();
-  const _linked = () => actions.filter(x => x.retroRentrerActionId === a.id && !x.annulee);
+  // ÉTAPE 5 : la portée du choix = toute la gamme quand elle est déclinée par parfum
+  const _porteeSDH = _dispatchPorteeGamme(a);
+  const _porteeSDHIds = _porteeSDH.map(x => x.id);
+  const _linked = () => actions.filter(x => _porteeSDHIds.includes(x.retroRentrerActionId) && !x.annulee);
   if (!hub) {
     // Retirer la réception centralisée : annuler les rétros liées (sauf travail déjà commencé)
     const lies = _linked();
@@ -7770,8 +7924,7 @@ async function setDispatchHub(actionId, hub) {
       if (!okAnnule) return;
       lies.forEach(x => _cancelAction(x));
     }
-    a.dispatchHub = null;
-    a._ts = nowIso; a._adminTs = nowIso;
+    _porteeSDH.forEach(x => { x.dispatchHub = null; x._ts = nowIso; x._adminTs = nowIso; });
     logAction('Réception centralisée retirée', _logActionLabel(actionId));
     saveData(); try { renderDashboard(); } catch(e) {}
     return;
@@ -7816,6 +7969,18 @@ function setRentrerCommandeAdmin(actionId, val) {
       if (pa.commandeAdmin !== isAdminCmd) { pa.commandeAdmin = isAdminCmd; pa._ts = new Date().toISOString(); }
     });
   }
+  // ÉTAPE 5 : gamme déclinée par parfum — la décision posée sur UNE ligne parfum vaut
+  // pour ses sœurs (une commande = une décision). Une sœur pilotée par sa propre OP
+  // avec un choix déjà fait n'est pas écrasée (même garde que la descente gamme).
+  if (a.produitParfumId && a.produitType === 'liq') {
+    actions.forEach(pa => {
+      if (pa === a || pa.type !== 'RENTRER' || pa.annulee || pa.produitType !== 'liq') return;
+      if (pa.produitId !== a.produitId || !pa.produitParfumId) return;
+      const _opPf = ops.find(o => o.rentrerActionId === pa.id && o.commandeAdmin !== undefined);
+      if (_opPf) return;
+      if (pa.commandeAdmin !== isAdminCmd) { pa.commandeAdmin = isAdminCmd; pa._ts = new Date().toISOString(); }
+    });
+  }
   logAction('Qui commande', _logActionLabel(actionId) + ' → ' + (isAdminCmd ? 'admin (Fabien)' : 'boutique'));
   saveData(); try { renderDashboard(); } catch(e) {}
 }
@@ -7833,6 +7998,17 @@ function setRentrerPaCommande(actionId, val) {
   a._ts = new Date().toISOString();
   const op = ops.find(o => o.rentrerActionId === a.id);
   if (op) { op.paCommande = (v === null ? null : v); op._ts = new Date().toISOString(); }
+  // ÉTAPE 5 : gamme déclinée par parfum — un prix de saisie posé sur une ligne (gamme
+  // historique OU parfum) vaut pour toutes les lignes parfum de la gamme (une commande).
+  if (a.produitType === 'liq') {
+    const _nowPa = new Date().toISOString();
+    actions.forEach(pa => {
+      if (pa === a || pa.type !== 'RENTRER' || pa.annulee || pa.produitType !== 'liq') return;
+      if (pa.produitId !== a.produitId || !pa.produitParfumId) return;
+      if (v === null) { if (pa.paCommande !== undefined) { delete pa.paCommande; pa._ts = _nowPa; } }
+      else if (pa.paCommande !== v) { pa.paCommande = v; pa._ts = _nowPa; }
+    });
+  }
   saveData(); try { renderDashboard(); } catch(e) {}
 }
 
@@ -18034,7 +18210,10 @@ function renderDashboard() {
         let dispatchBlock = '';
         if (typeof isAdmin === 'function' && isAdmin()) {
           const _dh = a.dispatchHub || '';
-          const _dhLies = actions.filter(x => x.retroRentrerActionId === a.id && !x.annulee);
+          // ÉTAPE 5 : les rétros d'une gamme déclinée sont liées au représentant — la portée
+          // canonique retrouve le suivi x/y depuis n'importe quelle ligne parfum.
+          const _dhPorteeIds = (typeof _dispatchPorteeGamme === 'function' ? _dispatchPorteeGamme(a) : [a]).map(x => x.id);
+          const _dhLies = actions.filter(x => _dhPorteeIds.includes(x.retroRentrerActionId) && !x.annulee);
           let _dhStatus = '';
           if (_dh && _dhLies.length > 0) {
             const _dhDone = _dhLies.filter(x => actionGlobalState(x) === 'FAIT').length;
@@ -22265,8 +22444,8 @@ function _pvCheckListWriteTargets(op, shop, def) {
   const MIROIR = ['fanfare_rentrer', 'coup_rentrer', 'coup_sortir'];
   if (MIROIR.includes(def.kind) && def.actionStep) {
     if (def.kind === 'fanfare_rentrer') {
-      const gammeId = (op.produitIds || [])[0];
-      const pfs = gammeId ? actions.filter(x => x.type === 'RENTRER' && x.produitId === gammeId && x.produitParfumId && !x.annulee) : [];
+      // ÉTAPE 5 : périmètre canonique (OP parfum → seulement ses lignes)
+      const pfs = opRentrerParfumActions(op);
       if (pfs.length > 0) return pfs.map(x => ({ type: 'action', id: x.id, key: def.actionStep }));
     }
     const linkedId = def.kind === 'coup_sortir' ? op.sortirActionId : op.rentrerActionId;
@@ -22275,6 +22454,10 @@ function _pvCheckListWriteTargets(op, shop, def) {
   }
   if (def.kind === 'prod') {
     const _pid = (op.produitIds || [])[0];
+    // ÉTAPE 5 : gamme déclinée par parfum → la coche s'écrit sur TOUTES les lignes parfum
+    const _kProd = def.key === 'prod_commandee' ? 'commande' : def.key === 'prod_recue' ? 'recu' : null;
+    const _pfsProd = opRentrerParfumActions(op);
+    if (_kProd && _pfsProd.length > 0) return _pfsProd.map(x => ({ type: 'action', id: x.id, key: _kProd }));
     const _ra = op.rentrerActionId ? actions.find(x => x.id === op.rentrerActionId && !x.annulee)
       : (_pid ? actions.find(x => x.type === 'RENTRER' && x.produitId === _pid && !x.annulee) : null);
     if (_ra) {
@@ -24604,11 +24787,9 @@ function _getOpStepChecked(op, sh, stepDef) {
   const st = op.etats && op.etats[sh];
   // Steps fanfare_rentrer → lecture dynamique depuis les actions RENTRER
   if (stepDef.kind === 'fanfare_rentrer' && stepDef.actionStep) {
-    const gammeId = (op.produitIds || [])[0];
-    if (!gammeId) return false;
-    // Chercher les actions parfum-level RENTRER pour cette gamme
-    const parfumRentrers = actions.filter(a =>
-      a.type === 'RENTRER' && a.produitId === gammeId && a.produitParfumId && !a.annulee);
+    // ÉTAPE 5 : périmètre canonique — une OP ciblée parfum n'agrège QUE ses parfums
+    // (avant : une OP parfum agrégeait toutes les lignes parfum de la gamme).
+    const parfumRentrers = opRentrerParfumActions(op);
     if (parfumRentrers.length > 0) {
       // Mode agrégat : ✓ si TOUS les parfums ont coché ce step
       return parfumRentrers.every(a => {
@@ -24638,6 +24819,12 @@ function _getOpStepChecked(op, sh, stepDef) {
   // Steps prod (non-COUP avec commanderProduits) → lecture depuis la RENTRER liée
   if (stepDef.kind === 'prod') {
     const _pid = (op.produitIds || [])[0];
+    // ÉTAPE 5 : gamme déclinée par parfum → lecture agrégée (✓ = tous les parfums)
+    const _pfProd = opRentrerParfumActions(op);
+    if (_pfProd.length > 0) {
+      const _k = stepDef.key === 'prod_commandee' ? 'commande' : stepDef.key === 'prod_recue' ? 'recu' : null;
+      if (_k) return _pfProd.every(x => { const ast = x.etats && x.etats[sh]; return ast && ast.steps && ast.steps[_k] === true; });
+    }
     const _ra = op.rentrerActionId
       ? actions.find(a => a.id === op.rentrerActionId && !a.annulee)
       : (_pid ? actions.find(a => a.type === 'RENTRER' && a.produitId === _pid && !a.annulee) : null);
