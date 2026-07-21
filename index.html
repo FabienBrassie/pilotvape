@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 18:12</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 18:26</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -5726,7 +5726,9 @@ function syncOpsFromVerdicts() {
     }
   });
   // SORTIR → OP PRIX_ROUGE destockage liée (sortirActionId). Exclut COUP idem.
-  ops.filter(o => o.sortirActionId && !o.dateFin && o.type !== 'COUP').forEach(op => {
+  // (!dateFin OU fin PRÉVUE future : un destockage soldé se termine maintenant — la fin
+  //  prévue est avancée par _cloreDestockageMaintenant, retour Fabien 2026-07-21)
+  ops.filter(o => o.sortirActionId && (!o.dateFin || o.dateFin > today) && o.type !== 'COUP').forEach(op => {
     let a = actions.find(x => x.id === op.sortirActionId);
     // ÉTAPE 6 : destockage GROUPÉ (gamme déclinée par parfum, ou PR groupé historique) —
     // l'OP suit la SOMME des lignes : clôture quand TOUTES les lignes vivantes sont FAIT,
@@ -5739,22 +5741,24 @@ function syncOpsFromVerdicts() {
           a = _grpActs[0];
           console.log('[DESTOCKAGE-HEAL] Représentant re-pointé sur ' + a.id + ' pour OP ' + op.id);
         }
-        if (_grpActs.every(x => actionGlobalState(x) === 'FAIT')) _autoClose(op, 'toutes les lignes du destockage groupé terminées');
+        if (_grpActs.every(x => actionGlobalState(x) === 'FAIT')) _cloreDestockageMaintenant(op, 'toutes les lignes du destockage groupé terminées');
         return;
       }
     }
     if (!a || a.annulee) { _autoCloseOrphan(op, a, 'action SORTIR supprimée/annulée'); return; }
-    if (actionGlobalState(a) === 'FAIT') _autoClose(op, 'action SORTIR terminée (destockage)');
+    if (actionGlobalState(a) === 'FAIT') _cloreDestockageMaintenant(op, 'action SORTIR terminée (destockage soldé)');
   });
   // COUP → OP commune liée aux 2 actions (entrée + sortie). Clôt uniquement quand
   // les DEUX lignes sont soldées (FAIT ou annulées). Un coup qui n'a "que" rentré
   // ne doit PAS se clore : il reste ouvert jusqu'au destockage final.
-  ops.filter(o => o.type === 'COUP' && !o.dateFin).forEach(op => {
+  ops.filter(o => o.type === 'COUP' && (!o.dateFin || o.dateFin > today)).forEach(op => {
     const aR = op.rentrerActionId ? actions.find(x => x.id === op.rentrerActionId) : null;
     const aS = op.sortirActionId  ? actions.find(x => x.id === op.sortirActionId)  : null;
     const isDone = (a) => !a || a.annulee || actionGlobalState(a) === 'FAIT';
     if (isDone(aR) && isDone(aS) && (aR || aS)) {
-      _autoClose(op, 'COUP : RENTRER+SORTIR terminées');
+      // Coup consommé = terminé MAINTENANT (une fin prévue plus tard est avancée — même règle
+      // que le destockage soldé, retour Fabien 2026-07-21).
+      _cloreDestockageMaintenant(op, 'COUP : RENTRER+SORTIR terminées');
       // Libère le flag oneShot du kit : le coup est consommé.
       if (op.dateFin) {
         const _pid = (op.produitIds || [])[0];
@@ -8436,19 +8440,47 @@ function toggleActionShop(actionId, shop) {
 // - SORTIR ciblant la gamme entière (parfumId vide) → ferme TOUTES les OPs sur ce produit.
 //
 // Ne touche PAS aux SORTIR motif=REPRISE (workflow distinct, OPs déjà annulées au lancement).
+// Un destockage SOLDÉ (tout sorti partout) est terminé MAINTENANT — retour Fabien 2026-07-21 :
+// « les 3 boutiques ont sorti le produit → l'OP ne doit plus être en cours ». Une fin PRÉVUE
+// plus tard est AVANCÉE à aujourd'hui (le stock à zéro commande, pas le calendrier) ; on ne
+// fait que raccourcir — jamais allonger, jamais rouvrir une OP déjà terminée.
+function _cloreDestockageMaintenant(op, raison) {
+  const _t = ymd(new Date());
+  if (op.dateFin && op.dateFin <= _t && op.motifCloture) return false; // déjà terminée
+  const _avance = !!op.dateFin && op.dateFin > _t;
+  if (!op.dateFin || op.dateFin > _t) op.dateFin = _t;
+  // Motif « stock épuisé » : rend la terminaison IMMÉDIATE (opTimeStatus) — sans lui, une
+  // dateFin d'aujourd'hui resterait « en cours » jusqu'à demain (convention calendrier).
+  // Bonus : un motif de clôture empêche toute réouverture automatique (garde D4 existante).
+  if (!op.motifCloture) op.motifCloture = 'stock_epuise';
+  op._ts = new Date().toISOString();
+  console.log('[SYNC-AUTO]', op.id, op.type, _avance ? ('→ fin prévue avancée à ' + op.dateFin) : ('→ dateFin = ' + op.dateFin), '(stock épuisé) —', raison);
+  return true;
+}
+
 function _closeRelatedOpsAfterSorti(produitId, parfumId) {
   if (!produitId) return 0;
   const _today = ymd(new Date());
-  const _nowTs = new Date().toISOString();
   let closed = 0;
   ops.forEach(op => {
-    if (op._archived || op.annulee || op.dateFin) return;
+    if (op._archived || op.annulee) return;
+    if (op.dateFin && op.dateFin <= _today) return; // déjà terminée (une fin FUTURE reste avançable)
     if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return;
     if (!op.produitIds || !op.produitIds.includes(produitId)) return;
     if (parfumId) {
-      // OP groupée multi-parfums
+      // OP groupée multi-parfums : la somme de ses parfums — elle ne se ferme que quand
+      // TOUS sont sortis (avant : le PREMIER parfum sorti fermait toute l'OP groupée,
+      // pendant que les autres se vendaient encore — corrigé 2026-07-21, étape 6).
       if (op.produitParfumIds && op.produitParfumIds.length > 0) {
         if (!op.produitParfumIds.includes(parfumId)) return;
+        const g = baseLiq.find(l => l.id === produitId);
+        if (g) {
+          const _restants = op.produitParfumIds.filter(pid => {
+            const pf = (g.parfums || []).find(p => p.id === pid);
+            return pf && pf.s !== 'SORTI';
+          });
+          if (_restants.length > 0) return;
+        }
       } else if (op.produitParfumId) {
         if (op.produitParfumId !== parfumId) return;
       } else {
@@ -8456,10 +8488,7 @@ function _closeRelatedOpsAfterSorti(produitId, parfumId) {
         return;
       }
     }
-    op.dateFin = _today;
-    op._ts = _nowTs;
-    closed++;
-    console.log('[CASCADE-SORTI] OP ' + op.id + ' (' + op.type + ') fermée → produit ' + produitId + (parfumId ? ' parfum ' + parfumId : ' gamme entière') + ' sorti');
+    if (_cloreDestockageMaintenant(op, 'produit ' + produitId + (parfumId ? ' parfum ' + parfumId : ' gamme entière') + ' sorti (cascade)')) closed++;
   });
   return closed;
 }
@@ -24834,6 +24863,9 @@ function opTimeStatus(op) {
   const debut = op.dateDebut || todayStr;
   const fin   = op.dateFin || null;
   if (fin && fin < todayStr) return 'TERMINEE'; // dateFin = aujourd'hui → encore EN_COURS, terminée à partir de demain
+  // EXCEPTION (retour Fabien 2026-07-21) : clôture pour stock épuisé = terminée IMMÉDIATEMENT
+  // (le destockage est soldé partout, rien ne justifie de l'afficher « en cours » jusqu'au soir).
+  if (fin && fin <= todayStr && op.motifCloture === 'stock_epuise') return 'TERMINEE';
   if (debut > todayStr) {
     // Calcul du nb de jours
     const d = new Date(debut + 'T00:00:00');
