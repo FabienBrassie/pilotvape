@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-27 19:34 — Récap paie : durées en clair partout (« 15min », « 1h15 », « 6h10 travaillées ») — plus jamais de décimales type « 0,17h » ; appliqué aux heures sup au jour, aux fériés travaillés et aux totaux du bilan annuel. -->
 <!-- v 2026-07-18 19:20 — Récap paie : les heures sup s'affichent PAR JOUR (« Le 03/07 : 2h sup ») et plus par semaine — une semaine à cheval sur deux mois créait un écart apparent entre le récap comptable (part du mois seule) et la barre du planning (semaine entière). Au jour, chaque heure appartient à un seul mois. Texte comptable + cartes du panneau paie ; totaux mensuels inchangés. -->
 <!-- v 2026-07-18 18:58 — Journal RH : une entrée peut viser « 🏬 Toute la boutique » (problème global : inventaire, ménage, tenue du magasin…) en plus d'un salarié — saisissable par l'admin et les responsables, filtre dédié, nouveau type « Ménage / tenue ». -->
 <!-- v 2026-07-17 21:45 — Formation, 3 recadrages Fabien : étapes calées sur les semaines (lundi → dimanche sur 2 semaines, la suivante commence le lundi ; décalage proposé en semaines entières) · caps AUTOMATIQUES en fin d'étape (apte comptoir = fin Matériel, 100 % autonome = fin Vente, parfait = fin Perfectionnement — plus aucun sélecteur de date de cap, tout suit les étapes, y compris quand on change la fin d'une étape : toute la suite se décale d'autant) · 3 niveaux de couleur par jour (très délavé avant apte comptoir, mi-délavé jusqu'à 100 % autonome, pleine ensuite). -->
@@ -3183,7 +3184,9 @@ try{const v=JSON.parse(localStorage.getItem('gestionrh-paie-f')||'null');if(v&&v
 function paieSaveF(){try{localStorage.setItem('gestionrh-paie-f',JSON.stringify({b:[...paieSel],e:paieEmp}))}catch(e){}}
 function togPaieB(b){if(paieSel.has(b)){if(paieSel.size>1)paieSel.delete(b)}else paieSel.add(b);paieSaveF();renderPaie();}
 const JOURSFR=['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
-function fmtHdec(min){if(!min)return'0h';const h=Math.round(min/60*100)/100;return String(h).replace('.',',')+'h';}
+// Durées de paie en clair (recadrage Fabien 2026-07-18 : « 0,17h » interdit → « 10min », « 1h15 »).
+// fmtMin fait le travail ; ce petit habillage gère juste le zéro.
+function fmtMin0(min){return min?fmtMin(min):'0h';}
 function isoWeek(iso){const d=new Date(iso+'T12:00:00');const dt=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const dn=(dt.getUTCDay()+6)%7;dt.setUTCDate(dt.getUTCDate()-dn+3);const ft=new Date(Date.UTC(dt.getUTCFullYear(),0,4));return 1+Math.round((dt-ft)/(7*864e5));}
 function frDate(iso){const d=new Date(iso+'T12:00:00');const day=+iso.slice(8,10);const mo=MOISN[+iso.slice(5,7)];return JOURSFR[d.getDay()]+' '+(day===1?'1er':day)+' '+mo.charAt(0).toUpperCase()+mo.slice(1);}
 function dayWorkedMin(e,iso){const pp=presence(e,iso);if(pp.st!=='present')return 0;return blocksMin((pp.blocks||[]).filter(bl=>shopOpen(bl[2],iso)));}
@@ -3293,13 +3296,13 @@ function renderBilan(){
     const avgCon=rows.length?sum('conge')/rows.length:0,maxCon=gMaxCon;
     const avgMal=rows.length?sum('maladie')/rows.length:0,maxMal=gMaxMal;
     h+='<div class="bilbout"><div class="mhead" style="color:'+col+';border-bottom:2px solid '+col+';margin:6px 0 8px">'+b.nom+
-      ' <span class="small" style="color:var(--mut);font-weight:600">— '+fmtHdec(sum('ferMin'))+' fériés · '+fmtHdec(sum('hsMin'))+' HS au total</span></div>';
+      ' <span class="small" style="color:var(--mut);font-weight:600">— '+fmtMin0(sum('ferMin'))+' fériés · '+fmtMin0(sum('hsMin'))+' HS au total</span></div>';
     h+='<table class="biltab"><tr><th></th><th>Heures sup (moy/sem)</th><th>Fériés travaillés</th><th>Dimanches</th><th>Congés (j)</th><th>Maladie (j)</th></tr>';
     for(const r of rows){
       const hsw=r.hsMin/60/weeks;
       h+='<tr><td class="bilnom"><span class="bdot" style="background:'+colOf(emp(r.id))+'"></span>'+esc(r.nom.split(' ')[0])+'</td>'+
-        '<td>'+bilBar(hsw,maxHSw,avgHSw,col,'<b>'+(Math.round(hsw*10)/10+'').replace('.',',')+'</b> h/sem',fmtHdec(r.hsMin)+' total')+'</td>'+
-        '<td>'+bilBar(r.ferMin/60,maxFer,avgFer,col,'<b>'+fmtHdec(r.ferMin)+'</b>')+'</td>'+
+        '<td>'+bilBar(hsw,maxHSw,avgHSw,col,'<b>'+(Math.round(hsw*10)/10+'').replace('.',',')+'</b> h/sem',fmtMin0(r.hsMin)+' total')+'</td>'+
+        '<td>'+bilBar(r.ferMin/60,maxFer,avgFer,col,'<b>'+fmtMin0(r.ferMin)+'</b>')+'</td>'+
         '<td>'+bilBar(r.dim,maxDim,avgDim,col,'<b>'+r.dim+'</b>')+'</td>'+
         '<td>'+bilBar(r.conge,maxCon,avgCon,col,'<b>'+r.conge+'</b> j',r.ecole?('+'+r.ecole+'é école'):'')+'</td>'+
         '<td>'+bilBar(r.maladie,maxMal,avgMal,'#d97706','<b>'+r.maladie+'</b> j')+'</td></tr>';
@@ -3365,13 +3368,13 @@ function paieEvents(e,days){
   const evs=[];
   for(const d of feriesOfMonth(days)){if(!inEmploi(e,d))continue;
     const wm=dayWorkedMin(e,d);
-    evs.push({d,label:frDate(d),txt:wm>0?'🟢 '+fmtHdec(wm)+' travaillées':'🔴 Chômé'});}
+    evs.push({d,label:frDate(d),txt:wm>0?'🟢 '+fmtMin(wm)+' travaillées':'🔴 Chômé'});}
   for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]))
     evs.push({d:c.du,label:'🏖 Congés',txt:c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)});
   for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]))
     evs.push({d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
   const hd=hsByDay(e,days);
-  Object.keys(hd).sort().forEach(d=>{evs.push({d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtHdec(hd[d])+' sup</span>'});});
+  Object.keys(hd).sort().forEach(d=>{evs.push({d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtMin(hd[d])+' sup</span>'});});
   const lwi=lossWeekInfo(e,days);
   Object.keys(lwi).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ S'+k,txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
   const pw=pauseLossByWeek(e,days);
@@ -3412,11 +3415,11 @@ function paieTextStr(){
       // fériés (chômé / travaillé)
       for(const d of fers){if(!inEmploi(e,d))continue;
         const wm=dayWorkedMin(e,d);
-        out+='  '+frDate(d)+' : '+(wm>0?fmtHdec(wm)+' travaillées':'Chômé')+'\n';
+        out+='  '+frDate(d)+' : '+(wm>0?fmtMin(wm)+' travaillées':'Chômé')+'\n';
       }
       // heures sup PAR JOUR (chaque jour appartient à un seul mois — pas d'ambiguïté de semaine à cheval)
       const hd=hsByDay(e,days);
-      Object.keys(hd).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHdec(hd[d])+' sup\n';});
+      Object.keys(hd).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtMin(hd[d])+' sup\n';});
       // heures manquées (retard/départ non rattrapé) — déjà déduites des heures travaillées, non rémunérées
       const lwi=lossWeekInfo(e,days);
       Object.keys(lwi).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' (non rémunéré)\n';});
