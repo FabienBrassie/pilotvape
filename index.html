@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 17:06</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 17:17</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -11217,7 +11217,8 @@ function _mergeArray(localArr, remoteArr, idField) {
             'produitParfumId', 'parfumNom',                     // actions parfum
             'replaceParId',                                     // lien remplacement
             'caseMurOverride',                                    // affectation forcée kit → case mur
-            'produitIds'                                          // lien OP → produits
+            'produitIds',                                         // lien OP → produits
+            'fichiers'                                            // 📎 fichiers joints (OP via _adminTs ; campagnes via ce garde)
           ]);
           if (_nullGuard.has(k)) {
             // Exception (chantier D3) : un réveil volontaire horodaté (_reviveTs) peut remettre
@@ -23405,6 +23406,12 @@ async function deleteCampagne(campagneId) {
     if (!await pvConfirm(msg, { ok: 'Supprimer', okColor: '#ef4444' })) return;
   }
   const _now = new Date().toISOString();
+  // 📎 Effacer les fichiers joints du serveur (best-effort — la campagne disparaît avec sa liste)
+  if (Array.isArray(c.fichiers)) {
+    c.fichiers.forEach(f => {
+      try { fetch(SYNC_WORKER_URL + '/files/' + encodeURIComponent(f.id), { method: 'DELETE', headers: { 'X-API-Key': SYNC_API_KEY } }); } catch (e) {}
+    });
+  }
   attachedAll.forEach(o => { o.campagneId = ''; o._ts = _now; });
   campagnes = campagnes.filter(cc => cc.id !== campagneId);
   if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.add) _deletedIds.add(campagneId);
@@ -24175,7 +24182,7 @@ function renderOps() {
               <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
             </span>
           </div>
-          ${_isCampCol ? '' : `<div style="padding: 4px 0 8px 0; background: #8b5cf610;">${_campContent}</div>`}
+          ${_isCampCol ? '' : `<div style="padding: 4px 0 8px 0; background: #8b5cf610;"><div style="padding: 2px 10px 4px;">${_renderFichiersJoints('camp', c)}</div>${_campContent}</div>`}
         </div>`;
       });
 
@@ -25145,30 +25152,63 @@ function _pvFichierIcone(f) {
   if (t.includes('doc') || t.includes('word')) return '📝';
   return '📎';
 }
-function _renderOpFichiers(op) {
-  const fichiers = Array.isArray(op.fichiers) ? op.fichiers : [];
+// Généralisation campagne (2026-07-27, demande Fabien) : les fichiers se joignent aux OP
+// ET aux CAMPAGNES (partagés entre les vagues). Un seul moteur, un paramètre de portée.
+function _pvPorteurFichiers(scope, id) {
+  return scope === 'camp' ? campagnes.find(c => c.id === id) : ops.find(o => o.id === id);
+}
+function _pvLabelPorteur(scope, id) {
+  if (scope === 'camp') { const c = getCampagne(id); return 'campagne « ' + (c ? c.nom : id) + ' »'; }
+  return _logOpLabel(id);
+}
+function _renderOpFichiers(op) { return _renderFichiersJoints('op', op); }
+function _renderFichiersJoints(scope, obj) {
+  const fichiers = Array.isArray(obj.fichiers) ? obj.fichiers : [];
   const _admin = typeof isAdmin === 'function' && isAdmin();
   if (fichiers.length === 0 && !_admin) return '';
   const lignes = fichiers.map(f => {
     const nomSafe = String(f.nom || f.id).replace(/&/g, '&amp;').replace(/</g, '&lt;');
     return `<span style="display:inline-flex; align-items:center; gap:5px; padding:2px 8px; background:#1e293b; border:1px solid #47556960; border-radius:4px; font-size:10px;">
-      <span onclick="event.stopPropagation(); pvTelechargerFichierOp('${op.id}','${f.id}')" style="cursor:pointer; color:#7dd3fc; font-weight:600;" title="Télécharger ${nomSafe} (${_pvOctetsLisibles(f.taille)})">${_pvFichierIcone(f)} ${nomSafe}</span>
+      <span onclick="event.stopPropagation(); pvTelechargerFichier('${scope}','${obj.id}','${f.id}')" style="cursor:pointer; color:#7dd3fc; font-weight:600;" title="Télécharger ${nomSafe} (${_pvOctetsLisibles(f.taille)})">${_pvFichierIcone(f)} ${nomSafe}</span>
       <span style="color:#475569;">${_pvOctetsLisibles(f.taille)}</span>
-      ${_admin ? `<span onclick="event.stopPropagation(); pvSupprimerFichierOp('${op.id}','${f.id}')" style="cursor:pointer; color:#f87171;" title="Supprimer ce fichier (aussi du serveur)">🗑</span>` : ''}
+      ${_admin ? `<span onclick="event.stopPropagation(); pvSupprimerFichier('${scope}','${obj.id}','${f.id}')" style="cursor:pointer; color:#f87171;" title="Supprimer ce fichier (aussi du serveur)">🗑</span>` : ''}
     </span>`;
   }).join(' ');
-  const btn = _admin ? `<span onclick="event.stopPropagation(); pvJoindreFichierOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#0ea5e915; color:#7dd3fc; border:1px dashed #0ea5e950; border-radius:4px; font-weight:600;" title="Joindre un fichier à cette OP (PDF, PPT, image… — ${PV_FICHIER_MAX_MO} Mo max) : présentation, CGV, conditions négociées. Visible et téléchargeable par les boutiques.">📎 Joindre un fichier</span>` : '';
+  const btn = _admin ? `<span onclick="event.stopPropagation(); pvJoindreFichier('${scope}','${obj.id}')"
+    ondragover="event.preventDefault(); event.stopPropagation(); this.style.background='#0ea5e940'; this.style.borderStyle='solid';"
+    ondragleave="this.style.background='#0ea5e915'; this.style.borderStyle='dashed';"
+    ondrop="event.preventDefault(); event.stopPropagation(); this.style.background='#0ea5e915'; this.style.borderStyle='dashed'; pvDeposerFichiers('${scope}','${obj.id}', event.dataTransfer ? event.dataTransfer.files : null);"
+    style="cursor:pointer; font-size:10px; padding:2px 8px; background:#0ea5e915; color:#7dd3fc; border:1px dashed #0ea5e950; border-radius:4px; font-weight:600;" title="Joindre un fichier à cette OP — clic OU glisser-déposer le fichier ici (PDF, PPT, image… — ${PV_FICHIER_MAX_MO} Mo max) : présentation, CGV, conditions négociées. Visible et téléchargeable par les boutiques.">📎 Joindre un fichier</span>` : '';
   return `<div style="margin-top:6px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${lignes}${btn}</div>`;
 }
-function pvJoindreFichierOp(opId) {
+// Glisser-déposer sur le bouton 📎 (2026-07-27, demande Fabien) : chaque fichier déposé
+// passe par le MÊME chemin que le clic (garde 20 Mo, messages, _adminTs — rien de dupliqué).
+async function pvDeposerFichiers(scope, id, fileList) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const files = Array.from(fileList || []).filter(f => f && f.size >= 0);
+  if (files.length === 0) return;
+  for (const f of files) { await _pvUploadFichier(scope, id, f); }
+}
+function pvDeposerFichiersOp(opId, fileList) { return pvDeposerFichiers('op', opId, fileList); }
+// Filet : un fichier lâché À CÔTÉ du bouton ne doit pas remplacer l'app par le PDF
+// (comportement par défaut du navigateur). On neutralise le drop hors zones prévues.
+document.addEventListener('dragover', e => {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+});
+document.addEventListener('drop', e => {
+  if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) e.preventDefault();
+});
+
+function pvJoindreFichier(scope, id) {
   if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
   const inp = document.createElement('input');
   inp.type = 'file';
-  inp.onchange = () => { if (inp.files && inp.files[0]) _pvUploadFichierOp(opId, inp.files[0]); };
+  inp.onchange = () => { if (inp.files && inp.files[0]) _pvUploadFichier(scope, id, inp.files[0]); };
   inp.click();
 }
-async function _pvUploadFichierOp(opId, file) {
-  const op = ops.find(o => o.id === opId);
+function pvJoindreFichierOp(opId) { return pvJoindreFichier('op', opId); }
+async function _pvUploadFichier(scope, id, file) {
+  const op = _pvPorteurFichiers(scope, id);
   if (!op) return;
   if (file.size > PV_FICHIER_MAX_MO * 1024 * 1024) {
     pvAlert('Fichier trop lourd : ' + _pvOctetsLisibles(file.size) + ' (maximum ' + PV_FICHIER_MAX_MO + ' Mo).\n\nAstuce : compresser le PDF ou exporter le PPT en PDF allégé.');
@@ -25191,13 +25231,15 @@ async function _pvUploadFichierOp(opId, file) {
   const _now = new Date().toISOString();
   if (!Array.isArray(op.fichiers)) op.fichiers = [];
   op.fichiers.push({ id: fid, nom: file.name, type: file.type || '', taille: file.size, ts: _now });
-  op._ts = _now; op._adminTs = _now; // champ racine admin → propagé aux boutiques par _mergeAdminFields
-  if (typeof logAction === 'function') logAction('Fichier joint à l\'OP', _logOpLabel(opId) + ' + « ' + file.name + ' » (' + _pvOctetsLisibles(file.size) + ')');
+  op._ts = _now;
+  if (scope === 'op') op._adminTs = _now; // champ racine admin → propagé aux boutiques par _mergeAdminFields (campagnes : merge par _ts)
+  if (typeof logAction === 'function') logAction('Fichier joint', _pvLabelPorteur(scope, id) + ' + « ' + file.name + ' » (' + _pvOctetsLisibles(file.size) + ')');
   saveData();
   try { if (typeof renderOps === 'function') renderOps(); renderDashboard(); } catch (e) {}
 }
-async function pvTelechargerFichierOp(opId, fileId) {
-  const op = ops.find(o => o.id === opId);
+function _pvUploadFichierOp(opId, file) { return _pvUploadFichier('op', opId, file); }
+async function pvTelechargerFichier(scope, id, fileId) {
+  const op = _pvPorteurFichiers(scope, id);
   const f = op && Array.isArray(op.fichiers) ? op.fichiers.find(x => x.id === fileId) : null;
   try {
     const res = await fetch(SYNC_WORKER_URL + '/files/' + encodeURIComponent(fileId), { headers: { 'X-API-Key': SYNC_API_KEY } });
@@ -25212,9 +25254,10 @@ async function pvTelechargerFichierOp(opId, fileId) {
     pvAlert('Téléchargement impossible : ' + e.message);
   }
 }
-async function pvSupprimerFichierOp(opId, fileId) {
+function pvTelechargerFichierOp(opId, fileId) { return pvTelechargerFichier('op', opId, fileId); }
+async function pvSupprimerFichier(scope, id, fileId) {
   if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
-  const op = ops.find(o => o.id === opId);
+  const op = _pvPorteurFichiers(scope, id);
   if (!op || !Array.isArray(op.fichiers)) return;
   const f = op.fichiers.find(x => x.id === fileId);
   if (!await pvConfirm('Supprimer « ' + ((f && f.nom) || fileId) + ' » de cette OP ?\n\nLe fichier sera aussi effacé du serveur.')) return;
@@ -25223,11 +25266,13 @@ async function pvSupprimerFichierOp(opId, fileId) {
   } catch (e) { /* best-effort : la liste sur l'OP fait foi */ }
   const _now = new Date().toISOString();
   op.fichiers = op.fichiers.filter(x => x.id !== fileId);
-  op._ts = _now; op._adminTs = _now;
-  if (typeof logAction === 'function') logAction('Fichier retiré de l\'OP', _logOpLabel(opId) + ' − « ' + ((f && f.nom) || fileId) + ' »');
+  op._ts = _now;
+  if (scope === 'op') op._adminTs = _now;
+  if (typeof logAction === 'function') logAction('Fichier retiré', _pvLabelPorteur(scope, id) + ' − « ' + ((f && f.nom) || fileId) + ' »');
   saveData();
   try { if (typeof renderOps === 'function') renderOps(); renderDashboard(); } catch (e) {}
 }
+function pvSupprimerFichierOp(opId, fileId) { return pvSupprimerFichier('op', opId, fileId); }
 
 // Blindage (chantier A — 2026-06-10) : une carte OP illisible ne tue plus tout l'onglet,
 // elle est remplacée par une petite carte d'avertissement et le reste s'affiche normalement.
