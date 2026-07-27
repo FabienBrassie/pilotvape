@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 16:52</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 17:06</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2606,7 +2606,7 @@ function seedOpDefaults(op) {
 //   - pour chaque pièce digitale non-perShop : [plv_<id>_diffusee]
 function computeOpGlobalStepDefs(op) {
   const defs = [];
-  const produitDejaGere = op.prep && op.prep.commanderProduits;
+  const produitDejaGere = (op.prep && op.prep.commanderProduits) || !!op.rentrerActionId; // 2026-07-27 : la commande du PRODUIT est déjà portée par prod_commandee ou la ligne À rentrer (①)
   (op.pieces || []).forEach(p => {
     if (p.source === 'fournie') {
       // Si la pièce est de type PRODUIT et que "Produits à commander" est activé,
@@ -2680,7 +2680,7 @@ function _maillonProdCommande(op, shop, defs) {
 function _maillonPlvReception(op, shop, defs) {
     (op.pieces || []).forEach(p => {
     if (p.source !== 'fournie') return;
-    if (p.type === 'PRODUIT' && op.prep && op.prep.commanderProduits) return; // géré par prod_recue
+    if (p.type === 'PRODUIT' && ((op.prep && op.prep.commanderProduits) || op.rentrerActionId)) return; // réception déjà portée par prod_recue ou la ligne À rentrer (①)
     defs.push({ key: 'plv_' + p.id + '_recue', label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id, kind: 'reception', nat: 'evt', condLabel: 'attend la livraison' });
   });
 }
@@ -5699,6 +5699,8 @@ function syncOpsFromVerdicts() {
             const cw = getCampagneWindow(op.campagneId);
             if (cw && cw.dateFin && cw.dateFin > today) return; // campagne encore active
           }
+          // 2026-07-27 : l'OP se clôt à la POSE, pas à la réception (si une pose est définie)
+          if (!_opPoseProduitFaitePartout(op)) return;
           _autoClose(op, 'toutes les lignes parfum rentrées (fanfare)');
         }
         return;
@@ -5712,6 +5714,9 @@ function syncOpsFromVerdicts() {
         const cw = getCampagneWindow(op.campagneId);
         if (cw && cw.dateFin && cw.dateFin > today) return; // campagne encore active, ne pas clôturer
       }
+      // 2026-07-27 (demande Fabien) : l'OP se clôt à la POSE, pas à la réception —
+      // si une étape de pose du produit est définie, elle doit être cochée partout.
+      if (!_opPoseProduitFaitePartout(op)) return;
       _autoClose(op, 'action RENTRER terminée (fanfare)');
     }
   });
@@ -25062,6 +25067,60 @@ function _shunterOpPrEpuisee() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// 📍 POSE DU PRODUIT (2026-07-27, demande Fabien) — « le but de l'OP nouveauté,
+// c'est de poser le produit dans la vitrine ou sur le mur FT — rien ne me le
+// permet ». Le geste : choisir l'emplacement de pose SUR LA CARTE OP → une pièce
+// PRODUIT (référentiel des emplacements existant) → le maillon plv_pose génère
+// l'étape « Poser [produit] → [emplacement] » PAR BOUTIQUE, et l'OP ne se clôt
+// plus à la réception mais à la POSE (trou connu de la matrice, comblé).
+// ═══════════════════════════════════════════════════════════════════════════
+function setOpPoseProduit(opId, emplacement) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  ensureOpModel(op);
+  const _now = new Date().toISOString();
+  let pieceP = opPiecesProduit(op)[0];
+  if (!emplacement) {
+    if (pieceP) {
+      // Retirer la pose : refusé si une boutique a déjà coché (ne jamais jeter du travail fait)
+      const _dejaCoche = SHOPS.some(sh => { const st = op.etats && op.etats[sh]; return st && st.steps && st.steps['plv_' + pieceP.id + '_posee'] === true; });
+      if (_dejaCoche) { pvAlert('Une boutique a déjà coché la pose — retire la pièce via ✎ Éditer si c\'est vraiment voulu.'); return; }
+      op.pieces = op.pieces.filter(p => p !== pieceP);
+    }
+  } else if (pieceP) {
+    // Changer l'emplacement (mode commun : même endroit partout — le détail par boutique reste possible via ✎ Éditer)
+    SHOPS.forEach(sh => {
+      pieceP.affectations[sh] = pieceP.affectations[sh] || { emplacement: null, note: '' };
+      pieceP.affectations[sh].emplacement = emplacement;
+    });
+    pieceP.affMode = 'commun';
+  } else {
+    const _lblPose = (op.produitLibre && op.produitLibre.libelle) ? op.produitLibre.libelle
+      : (typeof _logProdName === 'function' ? (_logProdName((op.produitIds || [])[0]) || 'Produit') : 'Produit');
+    pieceP = makePiece('PRODUIT', 'fournie', emplacement, _lblPose);
+    op.pieces.push(pieceP);
+  }
+  ensureOpSteps(op);
+  op._ts = _now; op._adminTs = _now;
+  if (typeof logAction === 'function') logAction('Pose du produit', _logOpLabel(opId) + ' → ' + (emplacement ? ((EMPLACEMENT_META[emplacement] || {}).label || emplacement) : 'étape de pose retirée'));
+  saveData();
+  try { if (typeof renderOps === 'function') renderOps(); renderDashboard(); } catch (e) {}
+}
+
+// La pose du produit est-elle faite partout où elle est affectée ? (true si aucune étape de pose)
+function _opPoseProduitFaitePartout(op) {
+  const pps = opPiecesProduit(op);
+  if (pps.length === 0) return true;
+  return SHOPS.every(sh => pps.every(p => {
+    const aff = p.affectations && p.affectations[sh];
+    if (!aff || !aff.emplacement) return true; // pas affectée à cette boutique
+    const st = op.etats && op.etats[sh];
+    return st && st.steps && st.steps['plv_' + p.id + '_posee'] === true;
+  }));
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // 📎 FICHIERS JOINTS AUX OP (2026-07-21, demande Fabien) — présentation de l'OP,
 // CGV, conditions négociées… Les fichiers sont stockés SUR LE SERVEUR DE SYNCHRO
 // (une clé KV par fichier, routes /files du Worker) : le JSON synchronisé ne porte
@@ -25611,6 +25670,22 @@ function _renderOpCardHtmlInner(op, options) {
     })()}
     ${op.commentaire ? `<div style="margin-top:6px; font-size:10px; color:#94a3b8; font-style:italic; padding-left:2px;">${op.commentaire}</div>` : ''}
     ${_renderOpFichiers(op)}
+    ${(() => {
+      // 📍 Pose du produit (2026-07-27) : pour les OP qui amènent un produit à mettre en place
+      if (!(typeof isAdmin === 'function' && isAdmin())) return '';
+      const _poseEligible = ['NOUVEAUTE', 'EXCLU', 'LIQUIDE_DU_MOMENT'].includes(op.type) || !!(op.prep && op.prep.commanderProduits);
+      if (!_poseEligible) return '';
+      const _pp = opPiecesProduit(op)[0];
+      const _curPose = _pp ? (((_pp.affectations || {})[SHOPS[0]] || {}).emplacement || '') : '';
+      return `<div style="margin-top:6px; display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        <span style="font-size:10px; color:#64748b;">📍 Poser le produit :</span>
+        <select onclick="event.stopPropagation()" onchange="setOpPoseProduit('${op.id}', this.value || null)" style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${_curPose ? '#f472b660' : '#475569'}; color:${_curPose ? '#f9a8d4' : '#cbd5e1'}; border-radius:3px;" title="Ajoute une étape « Poser le produit → emplacement » par boutique. L'OP ne se clôt qu'une fois la pose faite partout.">
+          <option value="">— pas d'étape de pose —</option>
+          ${EMPLACEMENTS_PHYSIQUES.map(e => `<option value="${e.key}" ${_curPose === e.key ? 'selected' : ''}>${e.label}</option>`).join('')}
+        </select>
+        ${_curPose ? `<span style="font-size:9.5px; color:#64748b;">étape « Poser » par boutique — l'OP se clôt à la POSE</span>` : ''}
+      </div>`;
+    })()}
     ${piecesHtml}
     ${freetouchBtnsHtml}
     ${globalStepsHtml}
