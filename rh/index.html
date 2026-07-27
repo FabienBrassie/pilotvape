@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-27 19:40 — Récap paie : retards / départs anticipés et pauses prolongées aussi PAR JOUR (« Le 06/07 : 5min retard (non rémunéré) ») dans le texte comptable et les cartes — tout le récap est maintenant au jour, plus aucune ligne par semaine. -->
 <!-- v 2026-07-27 19:34 — Récap paie : durées en clair partout (« 15min », « 1h15 », « 6h10 travaillées ») — plus jamais de décimales type « 0,17h » ; appliqué aux heures sup au jour, aux fériés travaillés et aux totaux du bilan annuel. -->
 <!-- v 2026-07-18 19:20 — Récap paie : les heures sup s'affichent PAR JOUR (« Le 03/07 : 2h sup ») et plus par semaine — une semaine à cheval sur deux mois créait un écart apparent entre le récap comptable (part du mois seule) et la barre du planning (semaine entière). Au jour, chaque heure appartient à un seul mois. Texte comptable + cartes du panneau paie ; totaux mensuels inchangés. -->
 <!-- v 2026-07-18 18:58 — Journal RH : une entrée peut viser « 🏬 Toute la boutique » (problème global : inventaire, ménage, tenue du magasin…) en plus d'un salarié — saisissable par l'admin et les responsables, filtre dédié, nouveau type « Ménage / tenue ». -->
@@ -3206,9 +3207,11 @@ function fmtHfrac(min){const h=Math.floor(min/60),m=min%60;const F={15:'1/4',30:
   if(m===0)return h+'h';
   return F?h+'h'+F:h+'h'+String(m).padStart(2,'0');}
 // Retards/départs validés par semaine ISO : {min, label} — label correct (retard / départ anticipé / les deux).
-function lossWeekInfo(e,days){const w={};const ds=new Set(days);
+// Retards / départs anticipés PAR JOUR pour le récap comptable (Fabien 2026-07-27 : au jour,
+// comme les heures sup — plus d'ambiguïté de semaine à cheval, lecture directe pour la comptable).
+function lossDayInfo(e,days){const w={};const ds=new Set(days);
   for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;
-    const k=isoWeek(r.date);const o=(w[k]=w[k]||{min:0,deb:0,fin:0});o.min+=r.min;o[sn==='debut'?'deb':'fin']+=r.min;}
+    const o=(w[r.date]=w[r.date]||{min:0,deb:0,fin:0});o.min+=r.min;o[sn==='debut'?'deb':'fin']+=r.min;}
   Object.keys(w).forEach(k=>{const o=w[k];o.label=(o.deb&&o.fin)?'retard/départ':(o.fin?'départ anticipé':'retard');});
   return w;}
 function lossMonthLabel(e,days){let deb=0,fin=0;const ds=new Set(days);
@@ -3375,10 +3378,10 @@ function paieEvents(e,days){
     evs.push({d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
   const hd=hsByDay(e,days);
   Object.keys(hd).sort().forEach(d=>{evs.push({d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtMin(hd[d])+' sup</span>'});});
-  const lwi=lossWeekInfo(e,days);
-  Object.keys(lwi).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ S'+k,txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
-  const pw=pauseLossByWeek(e,days);
-  Object.keys(pw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'🍽 S'+k,txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[k])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
+  const lwi=lossDayInfo(e,days);
+  Object.keys(lwi).sort().forEach(d=>{evs.push({d,label:'⏰ '+fmtCourt(d),txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
+  const pw=pauseLossByDay(e,days);
+  Object.keys(pw).sort().forEach(d=>{evs.push({d,label:'🍽 '+fmtCourt(d),txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[d])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
   if(e.dateIn&&e.dateIn>=days[0]&&e.dateIn<=days[days.length-1])evs.push({d:e.dateIn,label:'📄 Début de contrat',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
   if(e.dateOut&&e.dateOut>=days[0]&&e.dateOut<=days[days.length-1])evs.push({d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
   evs.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
@@ -3420,12 +3423,12 @@ function paieTextStr(){
       // heures sup PAR JOUR (chaque jour appartient à un seul mois — pas d'ambiguïté de semaine à cheval)
       const hd=hsByDay(e,days);
       Object.keys(hd).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtMin(hd[d])+' sup\n';});
-      // heures manquées (retard/départ non rattrapé) — déjà déduites des heures travaillées, non rémunérées
-      const lwi=lossWeekInfo(e,days);
-      Object.keys(lwi).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' (non rémunéré)\n';});
-      // pauses prolongées pointées — déjà déduites des heures travaillées, non rémunérées
-      const pw=pauseLossByWeek(e,days);
-      Object.keys(pw).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHfrac(pw[k])+' pause prolongée (non rémunéré)\n';});
+      // heures manquées (retard/départ non rattrapé) PAR JOUR — déjà déduites des heures travaillées, non rémunérées
+      const lwi=lossDayInfo(e,days);
+      Object.keys(lwi).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' (non rémunéré)\n';});
+      // pauses prolongées pointées PAR JOUR — déjà déduites des heures travaillées, non rémunérées
+      const pw=pauseLossByDay(e,days);
+      Object.keys(pw).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(pw[d])+' pause prolongée (non rémunéré)\n';});
       // congés acceptés du mois
       for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
         out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du)+'.':'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)+'.')+'\n';
@@ -3776,11 +3779,11 @@ function addPauseManual(){
   save();_pauseRefresh();
 }
 // Dépassements de pause par semaine ISO (pour la paie) — en minutes
-function pauseLossByWeek(e,days){const w={};const ds=new Set(days);
+function pauseLossByDay(e,days){const w={};const ds=new Set(days);
   for(const r of (S.pauses||[])){if(r.empId!==e.id||!r.ret||!ds.has(r.date))continue;
-    const dm=pauseDepassMin(r);if(dm<=0)continue;const k=isoWeek(r.date);w[k]=(w[k]||0)+dm;}
+    const dm=pauseDepassMin(r);if(dm<=0)continue;w[r.date]=(w[r.date]||0)+dm;}
   return w;}
-function pauseLossMin(e,days){const w=pauseLossByWeek(e,days);return Object.keys(w).reduce((t,k)=>t+w[k],0);}
+function pauseLossMin(e,days){const w=pauseLossByDay(e,days);return Object.keys(w).reduce((t,k)=>t+w[k],0);}
 // --- Bouton rapide (header salarié + pastille mobile) : pointer MA pause d'aujourd'hui ---
 function pfabClick(){
   if(!ROLE||ROLE.type!=='salarie')return;
