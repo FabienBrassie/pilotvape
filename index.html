@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 17:17</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 17:25</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -18506,6 +18506,19 @@ function renderDashboard() {
           <option value="BASSE" ${a.priorite==='BASSE'?'selected':''}>Basse</option>
         </select>
       </div>
+      ${(() => {
+        // 📎 (2026-07-27) : les fichiers de l'OP liée (présentation, CGV…) lisibles depuis
+        // la ligne du dashboard (À rentrer/À sortir associé) — téléchargement seul, la
+        // gestion reste sur la carte OP. Fichiers de la campagne inclus (partagés).
+        const _flLink = typeof activeOpForAction === 'function' ? activeOpForAction(a.id) : null;
+        const _flOp = (_flLink && _flLink.op) ? _flLink.op : (a.opId ? ops.find(o => o.id === a.opId && !o._archived) : null);
+        if (!_flOp) return '';
+        const _flCamp = _flOp.campagneId ? getCampagne(_flOp.campagneId) : null;
+        const _fOp = (Array.isArray(_flOp.fichiers) && _flOp.fichiers.length) ? _renderFichiersJoints('op', _flOp, { lecture: true }) : '';
+        const _fCamp = (_flCamp && Array.isArray(_flCamp.fichiers) && _flCamp.fichiers.length) ? _renderFichiersJoints('camp', _flCamp, { lecture: true }) : '';
+        if (!_fOp && !_fCamp) return '';
+        return `<div style="display:flex; gap:6px 10px; align-items:center; flex-wrap:wrap; margin-bottom:6px;"><span style="font-size:9.5px; color:#64748b;">📎 Fichiers de l'OP :</span>${_fOp}${_fCamp}</div>`;
+      })()}
       <div style="font-size:10px; color:#64748b; margin:2px 0 4px; text-transform:uppercase; letter-spacing:0.4px;">Avancement par boutique</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:6px; margin-bottom:8px;">
         ${SHOPS.filter(sh => !fShop || sh === fShop).map(sh => renderShopSteps(a, sh)).join('')}
@@ -25162,9 +25175,10 @@ function _pvLabelPorteur(scope, id) {
   return _logOpLabel(id);
 }
 function _renderOpFichiers(op) { return _renderFichiersJoints('op', op); }
-function _renderFichiersJoints(scope, obj) {
+function _renderFichiersJoints(scope, obj, opts) {
+  const _lecture = !!(opts && opts.lecture); // chips de téléchargement seules (ni joindre ni 🗑)
   const fichiers = Array.isArray(obj.fichiers) ? obj.fichiers : [];
-  const _admin = typeof isAdmin === 'function' && isAdmin();
+  const _admin = !_lecture && typeof isAdmin === 'function' && isAdmin();
   if (fichiers.length === 0 && !_admin) return '';
   const lignes = fichiers.map(f => {
     const nomSafe = String(f.nom || f.id).replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -26247,6 +26261,15 @@ function pvFriseQuickEdit(opId) {
     <div style="text-align:left;">
       <div style="font-size:13px; font-weight:700; color:${meta.color};">${meta.label} <span style="color:#e2e8f0;">— ${prodLbl}</span></div>
       ${campLbl}
+      ${(() => {
+        // 📎 (2026-07-27, demande Fabien) : les fichiers de l'OP — et ceux de sa campagne —
+        // accessibles directement depuis la frise, sans ouvrir la carte.
+        const _fOp = _renderFichiersJoints('op', op);
+        const _c = op.campagneId ? getCampagne(op.campagneId) : null;
+        const _fCamp = (_c && Array.isArray(_c.fichiers) && _c.fichiers.length) ? _renderFichiersJoints('camp', _c, { lecture: true }) : '';
+        if (!_fOp && !_fCamp) return '';
+        return _fOp + (_fCamp ? `<div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;"><span style="font-size:9.5px; color:#64748b;">📣 de la campagne :</span>${_fCamp}</div>` : '');
+      })()}
       <div style="margin-top:14px;">
         <label style="font-size:10px; color:#94a3b8; display:block; margin-bottom:3px;">Intitulé / commentaire</label>
         <input id="pvQeNom" type="text" value="${(op.commentaire || '').replace(/"/g, '&quot;')}" placeholder="(optionnel — affiché sur la carte OP)" style="width:100%; box-sizing:border-box; padding:6px 8px; background:#1e293b; border:1px solid #475569; color:#e2e8f0; border-radius:4px; font-size:12px;">
