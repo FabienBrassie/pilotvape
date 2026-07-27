@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-18 19:20 — Récap paie : les heures sup s'affichent PAR JOUR (« Le 03/07 : 2h sup ») et plus par semaine — une semaine à cheval sur deux mois créait un écart apparent entre le récap comptable (part du mois seule) et la barre du planning (semaine entière). Au jour, chaque heure appartient à un seul mois. Texte comptable + cartes du panneau paie ; totaux mensuels inchangés. -->
 <!-- v 2026-07-18 18:58 — Journal RH : une entrée peut viser « 🏬 Toute la boutique » (problème global : inventaire, ménage, tenue du magasin…) en plus d'un salarié — saisissable par l'admin et les responsables, filtre dédié, nouveau type « Ménage / tenue ». -->
 <!-- v 2026-07-17 21:45 — Formation, 3 recadrages Fabien : étapes calées sur les semaines (lundi → dimanche sur 2 semaines, la suivante commence le lundi ; décalage proposé en semaines entières) · caps AUTOMATIQUES en fin d'étape (apte comptoir = fin Matériel, 100 % autonome = fin Vente, parfait = fin Perfectionnement — plus aucun sélecteur de date de cap, tout suit les étapes, y compris quand on change la fin d'une étape : toute la suite se décale d'autant) · 3 niveaux de couleur par jour (très délavé avant apte comptoir, mi-délavé jusqu'à 100 % autonome, pleine ensuite). -->
 <!-- v 2026-07-17 21:15 — Formation : l'étape affichée sur un bloc est celle DU JOUR du bloc — réel figé par les validations pour le passé (le 1er juillet reste « 1/4 » même si l'étape 3 est finie depuis), prévu (dates du/au) pour le futur. -->
@@ -3186,7 +3187,11 @@ function fmtHdec(min){if(!min)return'0h';const h=Math.round(min/60*100)/100;retu
 function isoWeek(iso){const d=new Date(iso+'T12:00:00');const dt=new Date(Date.UTC(d.getFullYear(),d.getMonth(),d.getDate()));const dn=(dt.getUTCDay()+6)%7;dt.setUTCDate(dt.getUTCDate()-dn+3);const ft=new Date(Date.UTC(dt.getUTCFullYear(),0,4));return 1+Math.round((dt-ft)/(7*864e5));}
 function frDate(iso){const d=new Date(iso+'T12:00:00');const day=+iso.slice(8,10);const mo=MOISN[+iso.slice(5,7)];return JOURSFR[d.getDay()]+' '+(day===1?'1er':day)+' '+mo.charAt(0).toUpperCase()+mo.slice(1);}
 function dayWorkedMin(e,iso){const pp=presence(e,iso);if(pp.st!=='present')return 0;return blocksMin((pp.blocks||[]).filter(bl=>shopOpen(bl[2],iso)));}
-function hsByWeek(e,days){const w={};for(const d of days){const pp=presence(e,d);if(pp.st!=='present')continue;for(const bl of (pp.blocks||[]))if(bl[3]){const k=isoWeek(d);w[k]=(w[k]||0)+durMin(bl[0],bl[1]);}}return w;}
+// Heures sup PAR JOUR pour le récap comptable (décision Fabien 2026-07-18 : plus de regroupement
+// par semaine — une semaine à cheval sur deux mois affichait « S27 : 7,75h » côté paie de juillet
+// alors que la barre du planning montrait la semaine entière à 8h15 ; au jour, chaque heure
+// appartient à un seul mois et les totaux mensuels collent d'eux-mêmes).
+function hsByDay(e,days){const w={};for(const d of days){const pp=presence(e,d);if(pp.st!=='present')continue;for(const bl of (pp.blocks||[]))if(bl[3])w[d]=(w[d]||0)+durMin(bl[0],bl[1]);}return w;}
 // Heures MANQUÉES non rattrapées (retards + départs anticipés acceptés), par semaine ISO. Déjà retirées des heures normales (blocs rouges exclus du décompte) — le symétrique des HS, pour NE PAS les payer.
 function lossByWeek(e,days){const w={};const ds=new Set(days);
   for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;const k=isoWeek(r.date);w[k]=(w[k]||0)+r.min;}
@@ -3365,8 +3370,8 @@ function paieEvents(e,days){
     evs.push({d:c.du,label:'🏖 Congés',txt:c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)});
   for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]))
     evs.push({d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
-  const hw=hsByWeek(e,days);
-  Object.keys(hw).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏱ Semaine '+k,txt:'<span style="color:#0891b2;font-weight:700">'+fmtHdec(hw[k])+' sup</span>'});});
+  const hd=hsByDay(e,days);
+  Object.keys(hd).sort().forEach(d=>{evs.push({d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtHdec(hd[d])+' sup</span>'});});
   const lwi=lossWeekInfo(e,days);
   Object.keys(lwi).forEach(k=>{const mon=days.find(d=>isoWeek(d)==k)||days[0];evs.push({d:mon,label:'⏰ S'+k,txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
   const pw=pauseLossByWeek(e,days);
@@ -3409,9 +3414,9 @@ function paieTextStr(){
         const wm=dayWorkedMin(e,d);
         out+='  '+frDate(d)+' : '+(wm>0?fmtHdec(wm)+' travaillées':'Chômé')+'\n';
       }
-      // heures sup par semaine ISO
-      const hw=hsByWeek(e,days);
-      Object.keys(hw).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHdec(hw[k])+' sup\n';});
+      // heures sup PAR JOUR (chaque jour appartient à un seul mois — pas d'ambiguïté de semaine à cheval)
+      const hd=hsByDay(e,days);
+      Object.keys(hd).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHdec(hd[d])+' sup\n';});
       // heures manquées (retard/départ non rattrapé) — déjà déduites des heures travaillées, non rémunérées
       const lwi=lossWeekInfo(e,days);
       Object.keys(lwi).sort((a,b2)=>+a-+b2).forEach(k=>{out+='  S'+k+' : '+fmtHfrac(lwi[k].min)+' '+lwi[k].label+' (non rémunéré)\n';});
