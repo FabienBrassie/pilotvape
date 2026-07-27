@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-21 18:26</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 16:52</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -23467,6 +23467,12 @@ async function deleteOp(id) {
     : 'Supprimer cette OP ?';
   if (!await pvConfirm(confirmMsg)) return;
   _deletedIds.add(id);
+  // 📎 Effacer les fichiers joints du serveur (best-effort — l'OP disparaît avec sa liste)
+  if (Array.isArray(op.fichiers)) {
+    op.fichiers.forEach(f => {
+      try { fetch(SYNC_WORKER_URL + '/files/' + encodeURIComponent(f.id), { method: 'DELETE', headers: { 'X-API-Key': SYNC_API_KEY } }); } catch (e) {}
+    });
+  }
   // Nettoyer les actions liées (opId, prixRouge)
   // Registre unique des liaisons (étape 2). Avant : 4 champs sur 6 seulement —
   // rentrerPrixActionId et returnActionId n'étaient pas détachés à la suppression
@@ -23547,6 +23553,9 @@ function duplicateOp(id) {
   // returnActionId / groupActionIds de l'OP source (bug latent). Corrigé.
   LIAISON_OP_ACTION_FIELDS.forEach(f => { copy[f] = ''; });
   LIAISON_OP_ACTION_ARRAYS.forEach(f => { if (f in copy) delete copy[f]; });
+  // 📎 Les fichiers joints restent à l'OP SOURCE (sinon supprimer un fichier de la
+  // copie effacerait le fichier serveur encore utilisé par l'original).
+  delete copy.fichiers;
   copy.auto = false;
 
   // Demander les dates à l'utilisateur
@@ -25052,6 +25061,115 @@ function _shunterOpPrEpuisee() {
   return n;
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// 📎 FICHIERS JOINTS AUX OP (2026-07-21, demande Fabien) — présentation de l'OP,
+// CGV, conditions négociées… Les fichiers sont stockés SUR LE SERVEUR DE SYNCHRO
+// (une clé KV par fichier, routes /files du Worker) : le JSON synchronisé ne porte
+// que la liste {id, nom, type, taille, ts} sur l'OP (champ additif op.fichiers,
+// écrit par l'admin seul → propagé aux boutiques par _adminTs, merge non touché).
+// Ajout/suppression : admin. Téléchargement : tout le monde.
+// ⚠️ Nécessite le Worker redéployé une fois (routes /files) — message clair sinon.
+// ═══════════════════════════════════════════════════════════════════════════
+const PV_FICHIER_MAX_MO = 20;
+function _pvOctetsLisibles(n) {
+  if (typeof n !== 'number') return '';
+  if (n < 1024) return n + ' o';
+  if (n < 1048576) return Math.round(n / 1024) + ' Ko';
+  return (n / 1048576).toFixed(1) + ' Mo';
+}
+function _pvFichierIcone(f) {
+  const t = ((f.type || '') + ' ' + (f.nom || '')).toLowerCase();
+  if (t.includes('pdf')) return '📄';
+  if (t.includes('ppt') || t.includes('presentation')) return '📽️';
+  if (t.includes('xls') || t.includes('sheet') || t.includes('csv')) return '📊';
+  if (t.includes('png') || t.includes('jpg') || t.includes('jpeg') || t.includes('gif') || t.includes('webp') || t.includes('image')) return '🖼️';
+  if (t.includes('doc') || t.includes('word')) return '📝';
+  return '📎';
+}
+function _renderOpFichiers(op) {
+  const fichiers = Array.isArray(op.fichiers) ? op.fichiers : [];
+  const _admin = typeof isAdmin === 'function' && isAdmin();
+  if (fichiers.length === 0 && !_admin) return '';
+  const lignes = fichiers.map(f => {
+    const nomSafe = String(f.nom || f.id).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    return `<span style="display:inline-flex; align-items:center; gap:5px; padding:2px 8px; background:#1e293b; border:1px solid #47556960; border-radius:4px; font-size:10px;">
+      <span onclick="event.stopPropagation(); pvTelechargerFichierOp('${op.id}','${f.id}')" style="cursor:pointer; color:#7dd3fc; font-weight:600;" title="Télécharger ${nomSafe} (${_pvOctetsLisibles(f.taille)})">${_pvFichierIcone(f)} ${nomSafe}</span>
+      <span style="color:#475569;">${_pvOctetsLisibles(f.taille)}</span>
+      ${_admin ? `<span onclick="event.stopPropagation(); pvSupprimerFichierOp('${op.id}','${f.id}')" style="cursor:pointer; color:#f87171;" title="Supprimer ce fichier (aussi du serveur)">🗑</span>` : ''}
+    </span>`;
+  }).join(' ');
+  const btn = _admin ? `<span onclick="event.stopPropagation(); pvJoindreFichierOp('${op.id}')" style="cursor:pointer; font-size:10px; padding:2px 8px; background:#0ea5e915; color:#7dd3fc; border:1px dashed #0ea5e950; border-radius:4px; font-weight:600;" title="Joindre un fichier à cette OP (PDF, PPT, image… — ${PV_FICHIER_MAX_MO} Mo max) : présentation, CGV, conditions négociées. Visible et téléchargeable par les boutiques.">📎 Joindre un fichier</span>` : '';
+  return `<div style="margin-top:6px; display:flex; gap:6px; align-items:center; flex-wrap:wrap;">${lignes}${btn}</div>`;
+}
+function pvJoindreFichierOp(opId) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.onchange = () => { if (inp.files && inp.files[0]) _pvUploadFichierOp(opId, inp.files[0]); };
+  inp.click();
+}
+async function _pvUploadFichierOp(opId, file) {
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  if (file.size > PV_FICHIER_MAX_MO * 1024 * 1024) {
+    pvAlert('Fichier trop lourd : ' + _pvOctetsLisibles(file.size) + ' (maximum ' + PV_FICHIER_MAX_MO + ' Mo).\n\nAstuce : compresser le PDF ou exporter le PPT en PDF allégé.');
+    return;
+  }
+  const fid = 'F-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+  try {
+    const res = await fetch(SYNC_WORKER_URL + '/files/' + encodeURIComponent(fid), {
+      method: 'PUT',
+      headers: { 'X-API-Key': SYNC_API_KEY, 'X-File-Name': encodeURIComponent(file.name), 'Content-Type': file.type || 'application/octet-stream' },
+      body: file
+    });
+    if (res.status === 404) { pvAlert('Le serveur de synchro ne connaît pas encore les fichiers joints.\n\nIl faut le redéployer UNE fois (guide DEPLOIEMENT_WORKER.md) :\ncd cloudflare-worker && npx wrangler deploy'); return; }
+    if (res.status === 413) { pvAlert('Fichier refusé par le serveur : trop lourd (maximum ' + PV_FICHIER_MAX_MO + ' Mo).'); return; }
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+  } catch (e) {
+    pvAlert('Envoi impossible : ' + e.message + '\n(connexion ? serveur pas encore redéployé ?)');
+    return;
+  }
+  const _now = new Date().toISOString();
+  if (!Array.isArray(op.fichiers)) op.fichiers = [];
+  op.fichiers.push({ id: fid, nom: file.name, type: file.type || '', taille: file.size, ts: _now });
+  op._ts = _now; op._adminTs = _now; // champ racine admin → propagé aux boutiques par _mergeAdminFields
+  if (typeof logAction === 'function') logAction('Fichier joint à l\'OP', _logOpLabel(opId) + ' + « ' + file.name + ' » (' + _pvOctetsLisibles(file.size) + ')');
+  saveData();
+  try { if (typeof renderOps === 'function') renderOps(); renderDashboard(); } catch (e) {}
+}
+async function pvTelechargerFichierOp(opId, fileId) {
+  const op = ops.find(o => o.id === opId);
+  const f = op && Array.isArray(op.fichiers) ? op.fichiers.find(x => x.id === fileId) : null;
+  try {
+    const res = await fetch(SYNC_WORKER_URL + '/files/' + encodeURIComponent(fileId), { headers: { 'X-API-Key': SYNC_API_KEY } });
+    if (!res.ok) throw new Error(res.status === 404 ? 'fichier introuvable sur le serveur (Worker redéployé ?)' : 'HTTP ' + res.status);
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = (f && f.nom) || fileId;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  } catch (e) {
+    pvAlert('Téléchargement impossible : ' + e.message);
+  }
+}
+async function pvSupprimerFichierOp(opId, fileId) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const op = ops.find(o => o.id === opId);
+  if (!op || !Array.isArray(op.fichiers)) return;
+  const f = op.fichiers.find(x => x.id === fileId);
+  if (!await pvConfirm('Supprimer « ' + ((f && f.nom) || fileId) + ' » de cette OP ?\n\nLe fichier sera aussi effacé du serveur.')) return;
+  try {
+    await fetch(SYNC_WORKER_URL + '/files/' + encodeURIComponent(fileId), { method: 'DELETE', headers: { 'X-API-Key': SYNC_API_KEY } });
+  } catch (e) { /* best-effort : la liste sur l'OP fait foi */ }
+  const _now = new Date().toISOString();
+  op.fichiers = op.fichiers.filter(x => x.id !== fileId);
+  op._ts = _now; op._adminTs = _now;
+  if (typeof logAction === 'function') logAction('Fichier retiré de l\'OP', _logOpLabel(opId) + ' − « ' + ((f && f.nom) || fileId) + ' »');
+  saveData();
+  try { if (typeof renderOps === 'function') renderOps(); renderDashboard(); } catch (e) {}
+}
+
 // Blindage (chantier A — 2026-06-10) : une carte OP illisible ne tue plus tout l'onglet,
 // elle est remplacée par une petite carte d'avertissement et le reste s'affiche normalement.
 function renderOpCardHtml(op, options) {
@@ -25492,6 +25610,7 @@ function _renderOpCardHtmlInner(op, options) {
         + html + '</div>' : '';
     })()}
     ${op.commentaire ? `<div style="margin-top:6px; font-size:10px; color:#94a3b8; font-style:italic; padding-left:2px;">${op.commentaire}</div>` : ''}
+    ${_renderOpFichiers(op)}
     ${piecesHtml}
     ${freetouchBtnsHtml}
     ${globalStepsHtml}
