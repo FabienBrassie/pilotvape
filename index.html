@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 19:13</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 19:32</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2299,7 +2299,15 @@ function getOpProductDisplay(op) {
     if (!_opParfumId) {
       const _srcAId = op.sortirActionId || op.prixActionId || op.rentrerActionId || op.rentrerPrixActionId;
       const _srcA = _srcAId ? actions.find(x => x.id === _srcAId) : null;
-      if (_srcA && _srcA.produitParfumId) _opParfumId = _srcA.produitParfumId;
+      if (_srcA && _srcA.produitParfumId) {
+        // Depuis l'À rentrer PAR PARFUM (2026-07-21), rentrerActionId peut pointer un simple
+        // REPRÉSENTANT d'une famille de lignes parfum : si l'OP couvre en réalité plusieurs
+        // lignes, elle reste « Gamme entière » — on n'affiche pas le nom du représentant
+        // (retour Fabien 2026-07-28 : « Press Start 50mL · Sword » pour une OP de toute la gamme).
+        const _viaRentrer = _srcAId === op.rentrerActionId && _srcA.type === 'RENTRER';
+        const _soeurs = (_viaRentrer && typeof opRentrerParfumActions === 'function') ? opRentrerParfumActions(op) : [];
+        if (_soeurs.length <= 1) _opParfumId = _srcA.produitParfumId;
+      }
     }
     let _scope = '';
     if (_opParfumId && liq.parfums) {
@@ -19418,21 +19426,13 @@ function renderDashboard() {
     const isCandidate = (ts === 'TERMINEE' && !isOpFullyDesinstalled(op))
                      || (op.dateFin === _todayInstall && ts === 'EN_COURS');
     if (!isCandidate) return false;
-    // Vérifier qu'il y a des steps de kind 'desinstall' (matériel à retirer)
-    return SHOPS.some(sh => {
-      const defs = computeOpShopStepDefs(op, sh);
-      return defs.some(d => d.kind === 'desinstall');
-    });
+    // Au moins UNE boutique qui a réellement du matériel à retirer (étape non cochée, pas
+    // écoulée chez elle) — même verdict que le badge des cartes (retour Fabien 2026-07-28 :
+    // des PR soldés partout, étapes shuntées, restaient listés ici sans rien à faire).
+    return _opShopsADesinstaller(op).length > 0;
   });
   const opsDesinstVisibles = fShop
-    ? opsADesinstaller.filter(op => {
-        const defs = computeOpShopStepDefs(op, fShop);
-        const desinstDefs = defs.filter(d => d.kind === 'desinstall');
-        if (desinstDefs.length === 0) return false; // pas de step desinstall pour ce shop
-        const st = op.etats && op.etats[fShop];
-        if (!st || !st.steps) return true; // steps pas initialisés → à faire
-        return desinstDefs.some(d => !st.steps[d.key]); // au moins un step non coché
-      })
+    ? opsADesinstaller.filter(op => _opShopsADesinstaller(op).includes(fShop))
     : opsADesinstaller;
   const desinstBlockInner = opsDesinstVisibles.length === 0
     ? ''
@@ -24095,10 +24095,9 @@ function renderOps() {
     const pct    = Math.round(_opOverallPct(op) * 100);
     // Dots boutiques aux COULEURS DE BOUTIQUE : rempli = prête, camembert = partiel, vide = rien
     // Grisé si produit hors stock
-    const _ovPid = op.produitIds && op.produitIds[0];
-    const _ovProd = _ovPid ? (baseKits.find(k => k.id === _ovPid) || baseLiq.find(l => l.id === _ovPid) || basePD.find(p => p.id === _ovPid)) : null;
     const shopDots = SHOPS.map(sh => {
-      const _abs = _ovProd && isProductGoneFromShop(_ovProd, sh);
+      // 2026-07-28 : verdict au PÉRIMÈTRE de l'OP (parfum soldé ≠ gamme entière hors stock)
+      const _abs = _opProduitEcouleChezShop(op, sh);
       const col = _abs ? '#64748b' : SHOP_COLORS[sh];
       const init = SHOP_LABELS[sh][0];
       const defs = computeOpShopStepDefs(op, sh).filter(d => !_POST_OP_KINDS.has(d.kind));
@@ -25288,6 +25287,33 @@ function _opProduitEcouleChezShop(op, sh) {
   return prod ? isProductGoneFromShop(prod, sh) : false;
 }
 
+// Les boutiques qui ont ENCORE du matériel à retirer sur cette OP : au moins une étape de
+// désinstallation non cochée ET pas écoulées chez elles (retour Fabien 2026-07-28 : des PR
+// de parfums soldés partout squattaient le bloc « À désinstaller » sans rien à y faire).
+// C'est LA liste commune du badge des cartes ET du bloc dashboard — même verdict partout.
+function _opShopsADesinstaller(op) {
+  if (!op) return [];
+  return SHOPS.filter(sh => {
+    const ddefs = computeOpShopStepDefs(op, sh).filter(d => d.kind === 'desinstall');
+    if (ddefs.length === 0) return false;
+    if (_opProduitEcouleChezShop(op, sh)) return false;
+    const st = op.etats && op.etats[sh];
+    if (!st || !st.steps) return true;
+    return ddefs.some(d => !st.steps[d.key]);
+  });
+}
+
+// PR/COUP « épuisée partout » : plus une seule boutique avec du stock — le MÊME double
+// verdict que le bilan de campagne (_opProduitEcouleChezShop ou destockage soldé). La ligne
+// se grise et s'annonce « Épuisée » sans attendre sa date de fin (retour Fabien 2026-07-28 :
+// « les camemberts sont grisés mais pas les lignes ? »).
+function _opEpuiseePartout(op) {
+  if (!op) return false;
+  if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return false;
+  if (!(op.produitIds || [])[0]) return false;
+  return SHOPS.every(sh => _opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh));
+}
+
 // « Écoulé chez moi = invisible chez moi » jusqu'au bout (retour Fabien 2026-07-21) :
 // une boutique qui a TOUT sorti (destockage soldé chez elle) n'a plus RIEN à faire sur
 // l'OP prix rouge liée — ses coches d'OP (étiquette PR à imprimer/poser, Swappy, fins
@@ -25645,7 +25671,9 @@ function _renderOpCardHtmlInner(op, options) {
 
   const timeMeta   = OP_TIME_STATUS[timeStatus];
   const timePhrase = opTimePhrase(op);
-  const timeBadge  = `<span style="font-size:9.5px; padding:2px 7px; background:${timeMeta.color}25; color:${timeMeta.color}; border:1px solid ${timeMeta.color}60; border-radius:3px; font-weight:700; letter-spacing:0.3px;">${timeMeta.label}</span>`;
+  const timeBadge  = (timeStatus !== 'TERMINEE' && _opEpuiseePartout(op))
+    ? `<span title="Plus de stock nulle part — l'OP ira à sa date de fin puis s'archivera toute seule, rien à faire pour personne" style="font-size:9.5px; padding:2px 7px; background:#64748b25; color:#94a3b8; border:1px solid #64748b60; border-radius:3px; font-weight:700; letter-spacing:0.3px;">Épuisée</span>`
+    : `<span style="font-size:9.5px; padding:2px 7px; background:${timeMeta.color}25; color:${timeMeta.color}; border:1px solid ${timeMeta.color}60; border-radius:3px; font-weight:700; letter-spacing:0.3px;">${timeMeta.label}</span>`;
   const dateLine   = `<span style="font-size:10px; color:${timeMeta.color};">${timePhrase}</span>`;
 
   // Dots par shop — progression combinée : shop steps + quote-part proportionnelle des globals
@@ -26184,7 +26212,10 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   const timeStatus = opTimeStatus(op);
   const timeMeta   = OP_TIME_STATUS[timeStatus];
   const timePhrase = opTimePhrase(op);
-  const timeBadge  = `<span style="font-size:9px; padding:1px 6px; background:${timeMeta.color}25; color:${timeMeta.color}; border:1px solid ${timeMeta.color}60; border-radius:3px; font-weight:700;">${timeMeta.label}</span>`;
+  const _compactEpuisee = timeStatus !== 'TERMINEE' && _opEpuiseePartout(op);
+  const timeBadge  = _compactEpuisee
+    ? `<span title="Plus de stock nulle part — l'OP ira à sa date de fin puis s'archivera toute seule, rien à faire pour personne" style="font-size:9px; padding:1px 6px; background:#64748b25; color:#94a3b8; border:1px solid #64748b60; border-radius:3px; font-weight:700;">Épuisée</span>`
+    : `<span style="font-size:9px; padding:1px 6px; background:${timeMeta.color}25; color:${timeMeta.color}; border:1px solid ${timeMeta.color}60; border-radius:3px; font-weight:700;">${timeMeta.label}</span>`;
 
   // Alerte désinstallation : OP terminée OU dernier jour (dateFin = aujourd'hui)
   // Uniquement si l'OP a du matériel physique (steps de kind 'desinstall')
@@ -26203,12 +26234,16 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   const _needsInstall = _hasPhysicalInstall && op.dateDebut && timeStatus !== 'TERMINEE' && (op.dateDebut === _todayYmd || op.dateDebut === _tomorrowYmd);
   // (badges installation/désinstallation rendus séparément hors du filtre grisé)
 
-  // Opacité : terminée = grisé, à venir = légèrement transparent
+  // Opacité : terminée = grisé, à venir = légèrement transparent.
+  // Épuisée partout (PR/COUP, plus de stock nulle part) = grisée AUSSI sans attendre la fin
+  // (retour Fabien 2026-07-28 : camemberts gris mais ligne « vivante », incohérent à l'œil).
   let opacity = 1;
   const _compactIsTerminee = timeStatus === 'TERMINEE';
   if (_compactIsTerminee) opacity = _needsDesinstall ? 0.5 : 0.35;
+  else if (_compactEpuisee) opacity = 0.5;
   else if (timeStatus === 'A_VENIR') opacity = 0.75;
-  const _compactGreyStyle = _compactIsTerminee ? 'opacity:' + opacity + '; filter:saturate(0.3);' : 'opacity:' + opacity + ';';
+  const _compactGrise = _compactIsTerminee || _compactEpuisee;
+  const _compactGreyStyle = _compactGrise ? 'opacity:' + opacity + '; filter:saturate(0.3);' : 'opacity:' + opacity + ';';
 
   const campagneHtml = (() => { const nom = getCampagneLabel(op.campagneId); if (!nom) return ''; const w = getCampagneWindow(op.campagneId); const out = isOpOutsideCampagne(op); const wLbl = w ? ` (${fmtFR(w.dateDebut) || '?'} → ${fmtFR(w.dateFin) || '?'})` : ''; const warn = out.outside ? `<span style="font-size:9px; padding:1px 5px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-weight:700;" title="Hors fenêtre : ${out.reason}">⚠</span>` : ''; return `<span style="font-size:9px; padding:1px 6px; background:#f59e0b20; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; font-weight:600;" title="Campagne${wLbl}">📣 ${nom}</span>${warn}`; })();
   const productHtml = (() => { const d = getOpProductDisplay(op); const famBadge = (!d.isKit && d.famille) ? `<span style="font-size:9px; padding:1px 5px; background:${d.famille.color}20; color:${d.famille.color}; border:1px solid ${d.famille.color}50; border-radius:3px; font-weight:600;" title="${d.famille.label}">${d.famille.icon}</span>` : ''; const pdBadge = d.isPd ? `<span style="font-size:9px; padding:1px 6px; background:#06b6d422; color:#22d3ee; border:1px solid #06b6d450; border-radius:3px; font-weight:600;">🔩 PD</span>` : ''; return `${famBadge}${pdBadge}<span style="font-size:11.5px; color:${d.color}; font-weight:700;">${d.label}</span>`; })();
@@ -26216,17 +26251,9 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   // Badge désinstallation séparé (hors du filtre grisé, sur la même ligne)
   let _desinstBadgeHtml = '';
   if (_needsDesinstall) {
-    const _dShops = SHOPS.filter(sh => {
-      const defs = computeOpShopStepDefs(op, sh);
-      const ddefs = defs.filter(d => d.kind === 'desinstall');
-      if (ddefs.length === 0) return false;
-      const st = op.etats && op.etats[sh];
-      if (!st || !st.steps) return true;
-      return ddefs.some(d => !st.steps[d.key]);
-    });
-    // 2026-07-28 : ne jamais réclamer une désinstallation à une boutique où le produit est
-    // écoulé (le shunt a coché ses étapes) — badge seulement s'il reste de vraies boutiques.
-    const _dShopsReels = _dShops.filter(sh => !_opProduitEcouleChezShop(op, sh));
+    // 2026-07-28 : verdict canonique _opShopsADesinstaller — étape non cochée ET pas écoulée
+    // chez elle. Même liste que le bloc « À désinstaller » du dashboard, jamais contradictoire.
+    const _dShopsReels = _opShopsADesinstaller(op);
     if (_dShopsReels.length > 0) {
       const _dLabel = _dShopsReels.map(sh => SHOP_LABELS[sh]).join(', ');
       const _dTiming = _isLastDay ? ' ce soir' : '';
@@ -26241,8 +26268,8 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   }
 
   return `<div id="opCard-${op.id}" onclick="toggleOpExpand('${op.id}')" title="Cliquer pour voir le détail / cocher les étapes"
-    style="background:${_compactIsTerminee ? '#151c2a' : '#1e293b'}; border:1px solid ${meta.color}30; border-radius:4px; padding:6px 10px; margin-bottom:4px; cursor:pointer; display:flex; align-items:center; gap:6px;">
-    <div style="flex:1; min-width:0; display:grid; grid-template-columns:14px 90px minmax(0,1fr) minmax(0,1.2fr) 140px 80px 66px; align-items:center; gap:6px; ${_compactIsTerminee ? 'opacity:' + opacity + '; filter:saturate(0.3);' : (opacity < 1 ? 'opacity:' + opacity + ';' : '')}">
+    style="background:${_compactGrise ? '#151c2a' : '#1e293b'}; border:1px solid ${meta.color}30; border-radius:4px; padding:6px 10px; margin-bottom:4px; cursor:pointer; display:flex; align-items:center; gap:6px;">
+    <div style="flex:1; min-width:0; display:grid; grid-template-columns:14px 90px minmax(0,1fr) minmax(0,1.2fr) 140px 80px 66px; align-items:center; gap:6px; ${_compactGrise ? 'opacity:' + opacity + '; filter:saturate(0.3);' : (opacity < 1 ? 'opacity:' + opacity + ';' : '')}">
       <span style="color:${meta.color}; font-size:11px; font-weight:700;">▸</span>
       <span style="font-size:9.5px; padding:1px 6px; background:${meta.color}25; color:${meta.color}; border-radius:3px; font-weight:700; letter-spacing:0.3px; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${meta.label}</span>
       <span style="display:flex; align-items:center; gap:4px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;">${productHtml}</span>
