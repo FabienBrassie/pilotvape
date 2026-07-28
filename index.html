@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 19:32</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 19:34</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -1213,7 +1213,10 @@ const PROFILS = ["RECREATIF", "PRUDENT", "DECIDE"];
 // ═══════════════════════════════════════════════════════════════════════
 // MODALES DARK — remplacent alert() et confirm() natifs
 // ═══════════════════════════════════════════════════════════════════════
-function _pvModal(html, buttons, onResult) {
+function _pvModal(html, buttons, onResult, opts) {
+  // opts.maxWidth (px) : élargir la boîte pour les contenus tabulaires (ex. bilan de
+  // campagne — retour Fabien 2026-07-28 : « trop étroit, je n'arrive pas à lire »).
+  const _mw = (opts && opts.maxWidth) ? opts.maxWidth : 520;
   const overlay = document.createElement('div');
   overlay.className = 'pv-modal-overlay';
   overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; display:flex; align-items:center; justify-content:center; animation:pvModalFadeIn 0.15s ease-out;';
@@ -1224,7 +1227,7 @@ function _pvModal(html, buttons, onResult) {
       : `background:transparent; color:#94a3b8; border:1px solid #475569;`;
     return `<button data-idx="${i}" style="padding:8px 20px; font-size:12px; border-radius:5px; cursor:pointer; ${style} transition:filter 0.15s;" onmouseenter="this.style.filter='brightness(1.2)'" onmouseleave="this.style.filter=''">${b.label}</button>`;
   }).join('');
-  overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:24px; max-width:520px; width:90%; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.5); animation:pvModalSlideIn 0.15s ease-out;">
+  overlay.innerHTML = `<div style="background:#0f172a; border:1px solid #334155; border-radius:10px; padding:24px; max-width:${_mw}px; width:90%; max-height:90vh; display:flex; flex-direction:column; box-shadow:0 20px 60px rgba(0,0,0,0.5); animation:pvModalSlideIn 0.15s ease-out;">
     <div style="color:#e2e8f0; font-size:13px; line-height:1.6; white-space:pre-line; margin-bottom:18px; overflow-y:auto; flex:1 1 auto; min-height:0;">${html}</div>
     <div style="display:flex; gap:8px; justify-content:flex-end; flex-shrink:0;">${btnsHtml}</div>
   </div>`;
@@ -23520,7 +23523,7 @@ function _renderBilanLignes(lignes, interactif) {
       : `<span style="font-size:11px; color:#94a3b8;"><span style="text-decoration:line-through;">${_fmtP(l.prixAvant)}</span> → <span style="color:#fca5a5; font-weight:700;">${_fmtP(l.prixRouge)}</span></span>`;
     return `<div style="display:flex; gap:8px; align-items:center; padding:5px 8px; background:${l.statut === 'ECOULE' ? '#0f172a' : '#1e293b'}; border:1px solid ${m.color}30; border-left:3px solid ${m.color}; border-radius:4px; margin-bottom:4px; ${l.statut === 'ECOULE' ? 'opacity:0.65;' : ''}">
       <span style="flex-shrink:0;">${m.icon}</span>
-      <span style="flex:1; min-width:0; font-size:11.5px; color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.label}</span>
+      <span title="${l.label}" style="flex:1; min-width:0; font-size:11.5px; color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.label}</span>
       <span style="flex-shrink:0; font-size:10px; color:${m.color};">${detail}</span>
       <span style="flex-shrink:0;">${prixZone}</span>
     </div>`;
@@ -23544,7 +23547,7 @@ function pvBilanCampagnePR(campagneId) {
   ], (idx) => {
     if (idx !== 0) return;
     pvArchiverBilanCampagne(campagneId);
-  });
+  }, { maxWidth: 940 });
 }
 
 function pvArchiverBilanCampagne(campagneId) {
@@ -23575,7 +23578,7 @@ function pvVoirBilanArchive(bilanId) {
     <div style="font-size:10px; color:#64748b; margin-bottom:10px;">Photographie du ${fmtFR(b.dateBilan)} (figée — les prix affichés sont ceux de ce jour-là).</div>
     ${_renderBilanLignes(b.lignes || [], false)}
   </div>`;
-  _pvModal(html, [{ label: 'Fermer' }], () => {});
+  _pvModal(html, [{ label: 'Fermer' }], () => {}, { maxWidth: 940 });
 }
 
 async function pvSupprimerBilan(bilanId) {
