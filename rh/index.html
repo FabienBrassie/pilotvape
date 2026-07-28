@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-28 18:31 — 📚 Formation : barre fine « attendu » sous chaque frise (Liquides 2 sem ½ → Matériel 2 sem ½ → Vente 1 sem ½ → Perf. 1 sem ½ depuis le début du parcours) pour comparer d'un coup d'œil le réel et le normal attendu — panneau ET Mon espace, légende sous la frise, dates au survol. -->
+<!-- v 2026-07-28 15:50 — 🍽️ Écarts de pause : chaque salarié est replié sur UNE ligne de synthèse (nb de pointages, en-pause-depuis, cumuls semaine/mois) ; le détail jour par jour ne s'ouvre qu'au clic (▸/▾) — fini l'empilement d'une ligne par jour et par salarié. -->
 <!-- v 2026-07-28 10:40 — Repères d'OP PilotVape : pour une campagne nommée (ex. Soldes), la FIN du repère prend la plus tardive entre la fin de campagne et les fins de ses OP — rallonger une OP dans PilotVape repousse maintenant le repère rouge côté RH. Le début reste strictement celui de la campagne. -->
 <!-- v 2026-07-27 19:53 — Récap paie : dates de contrat rappelées chaque mois, version minimaliste (« Entré le 22/06/2026. », « Fin de contrat le … » si renseignée) dans le texte comptable et les cartes — avant, la mention n'apparaissait que le mois exact du début/de la fin et passait inaperçue. -->
 <!-- v 2026-07-27 19:40 — Récap paie : retards / départs anticipés et pauses prolongées aussi PAR JOUR (« Le 06/07 : 5min retard (non rémunéré) ») dans le texte comptable et les cartes — tout le récap est maintenant au jour, plus aucune ligne par semaine. -->
@@ -3819,6 +3821,11 @@ let pauseAnchor=todayISO().slice(0,7)+'-15';
 function pauseNav(n){const y=+pauseAnchor.slice(0,4),m=+pauseAnchor.slice(5,7);let ny=y,nm=m+n;
   if(nm<1){nm=12;ny--}if(nm>12){nm=1;ny++}pauseAnchor=ny+'-'+String(nm).padStart(2,'0')+'-15';renderPausePanel();}
 function togPauses(){if(!(isAdmin()||isResp()))return;const el=$('pausepanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderPausePanel();}
+// Détail des pointages REPLIÉ par salarié (Fabien 2026-07-28 : « une ligne de plus par jour et par
+// salarié, ingérable au bout d'un mois ») : par défaut une ligne de synthèse avec les cumuls,
+// le jour-par-jour ne s'ouvre qu'au clic.
+const _pzOpen=new Set();
+function pzToggle(id){id=String(id);if(_pzOpen.has(id))_pzOpen.delete(id);else _pzOpen.add(id);renderPausePanel();}
 function renderPausePanel(){
   if(!(isAdmin()||isResp()))return;
   const days=monthDays(pauseAnchor);
@@ -3845,13 +3852,17 @@ function renderPausePanel(){
       const moisDep=recs.reduce((t,x)=>t+pauseDepassMin(x),0);
       let wkDep=0;for(let i=0;i<7;i++){const pz=pauseOf(e.id,addD(wk0,i));if(pz&&pz.ret)wkDep+=pauseDepassMin(pz);}
       const enCours=recs.find(x=>!x.ret);
+      const open=_pzOpen.has(String(e.id));
       rows+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:3px">';
-      rows+='<div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
+      rows+='<div class="brow" style="cursor:pointer" onclick="pzToggle(\''+e.id+'\')" title="'+(open?'Replier':'Déplier')+' le détail jour par jour">'+
+        '<span style="width:13px;color:var(--mut);font-size:11px">'+(open?'▾':'▸')+'</span>'+
+        '<span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
+        '<span class="small" style="color:var(--mut)">'+recs.length+' pointage'+(recs.length>1?'s':'')+'</span>'+
         (enCours?'<span class="small" style="color:#d97706;font-weight:700">🟠 en pause depuis '+fmtH(enCours.dep)+'</span>':'')+
         '<span class="small" style="margin-left:auto">'+
         (wkDep>0?'semaine en cours : <b style="color:#dc2626">+'+fmtDur(wkDep)+'</b> · ':'')+
         'dépassements du mois : '+(moisDep>0?'<b style="color:#dc2626">+'+fmtDur(moisDep)+'</b>':'<b style="color:var(--green)">0 ✓</b>')+'</span></div>';
-      for(const x of recs){
+      if(open)for(const x of recs){
         const dm=pauseDepassMin(x);
         rows+='<div class="brow" style="padding-left:16px;font-size:12px;flex-wrap:wrap">'+
           '<span style="width:88px;color:var(--mut);white-space:nowrap">'+fmtFR(x.date)+'</span>'+
@@ -4034,20 +4045,35 @@ function formToggleDates(fid){if(_formDatesOpen.has(fid))_formDatesOpen.delete(f
 // ── Frise chronologique d'un parcours (le visuel principal, panneau ET Mon espace) ──
 // Barres d'étapes colorées par état, drapeaux 🎯 des caps, pastilles d'évaluations, trait « aujourd'hui ».
 // avecComs=false pour le salarié : les commentaires d'éval ne sortent pas dans les info-bulles.
+// Parcours ATTENDU (le « normal » redéfini par Fabien le 2026-07-28) : 2 sem ½ Liquides,
+// 2 sem ½ Résistances/matos, 1 sem ½ Plan de vente, 1 sem ½ Perfectionnement — affiché en barre
+// fine sous la frise pour COMPARER d'un coup d'œil le réel (barres du haut, dates tenues à jour)
+// et l'attendu (référence fixe posée sur la date de début). Purement visuel, rien à saisir.
+const FORM_ATTENDU=[{k:'liquides',j:17.5,txt:'2 sem ½'},{k:'materiel',j:17.5,txt:'2 sem ½'},{k:'vente',j:10.5,txt:'1 sem ½'},{k:'perf',j:10.5,txt:'1 sem ½'}];
 function _formFriseHtml(f,avecComs){
   const t=todayISO(),start=f.debut;
   let end=f.etapes[f.etapes.length-1].au;
   for(const c of f.caps){const cd=c.fait||formCapDate(f,c.k);if(cd>end)end=cd;}
   if(t>end)end=t;
+  const attTot=FORM_ATTENDU.reduce((a,x)=>a+x.j,0);
+  const endAtt=addD(start,Math.ceil(attTot));
+  if(endAtt>end)end=endAtt; // la frise couvre le réel ET l'attendu
   end=addD(end,2);
   const total=Math.max(1,_fDays(end,start));
   const pos=d=>Math.max(0,Math.min(100,_fDays(d,start)*100/total));
-  let h='<div style="position:relative;height:96px;margin:6px 4px 2px">';
+  const posJ=j=>Math.max(0,Math.min(100,j*100/total)); // position d'un nombre de jours (fractions ok)
+  let h='<div style="position:relative;height:106px;margin:6px 4px 2px">';
   // lundis : repère vertical + date
   for(let d=addD(monday(start),7);d<end;d=addD(d,7)){
-    h+='<div style="position:absolute;left:'+pos(d)+'%;top:14px;bottom:22px;width:1px;background:var(--line)"></div>'+
+    h+='<div style="position:absolute;left:'+pos(d)+'%;top:14px;bottom:32px;width:1px;background:var(--line)"></div>'+
        '<div style="position:absolute;left:'+pos(d)+'%;top:0;font-size:9px;color:var(--mut);transform:translateX(-50%)">'+(+d.slice(8,10))+'/'+(+d.slice(5,7))+'</div>';
   }
+  // barre fine de l'ATTENDU (référence fixe depuis le début du parcours)
+  {let cum=0;
+   FORM_ATTENDU.forEach((a,i)=>{
+     const l=posJ(cum),w=Math.max(1.5,posJ(cum+a.j)-l);
+     h+='<div title="'+esc('Attendu : '+formEtapeLabel(a.k)+' — '+a.txt+' (du '+fmtFR(addD(start,Math.round(cum)))+' au '+fmtFR(addD(start,Math.round(cum+a.j)-1))+')')+'" style="position:absolute;left:'+l+'%;width:'+w+'%;top:50px;height:7px;background:'+(i%2?'#64748b':'#94a3b8')+';opacity:.75;border-radius:3px;border:1px solid var(--card)"></div>';
+     cum+=a.j;});}
   // barres d'étapes
   for(const s of f.etapes){
     const late=!s.valide&&t>s.au,encours=!s.valide&&!late&&t>=s.du;
@@ -4057,19 +4083,20 @@ function _formFriseHtml(f,avecComs){
   }
   // pastilles d'évaluations (sous les barres)
   for(const ev of (f.evals||[])){const v=FORM_VERD[ev.verdict]||FORM_VERD.encours;
-    h+='<div title="'+esc(fmtFR(ev.date)+' — '+formEtapeLabel(ev.etape)+' : '+v.t+(avecComs&&ev.comment?' — « '+ev.comment+' »':'')+(ev.par?' ('+ev.par+')':''))+'" style="position:absolute;left:'+pos(ev.date)+'%;top:51px;width:10px;height:10px;border-radius:50%;background:'+v.c+';border:1.5px solid var(--card);transform:translateX(-50%)"></div>';
+    h+='<div title="'+esc(fmtFR(ev.date)+' — '+formEtapeLabel(ev.etape)+' : '+v.t+(avecComs&&ev.comment?' — « '+ev.comment+' »':'')+(ev.par?' ('+ev.par+')':''))+'" style="position:absolute;left:'+pos(ev.date)+'%;top:61px;width:10px;height:10px;border-radius:50%;background:'+v.c+';border:1.5px solid var(--card);transform:translateX(-50%)"></div>';
   }
   // caps : trait + drapeau 🎯 étiqueté en bas
   for(const c of f.caps){
     const cd=formCapDate(f,c.k),late=!c.fait&&t>cd,d=c.fait||cd;
     const col=c.fait?'#16a34a':late?'#dc2626':'#94a3b8';
-    h+='<div style="position:absolute;left:'+pos(d)+'%;top:16px;bottom:22px;width:2px;background:'+col+';opacity:.75;transform:translateX(-50%)"></div>'+
-       '<div title="'+esc(c.label+' — fin de l\'étape '+formEtapeCourt(FORM_CAP_LINK[c.k])+', le '+fmtFR(cd)+' (automatique)'+(c.fait?' — atteint le '+fmtFR(c.fait)+' ✓'+(c.par?' par '+c.par:''):late?' — en retard de '+_fDays(t,cd)+' j':''))+'" style="position:absolute;left:'+pos(d)+'%;top:66px;transform:translateX(-50%);text-align:center;font-size:9.5px;font-weight:700;color:'+col+';white-space:nowrap;line-height:1.3">🎯<br>'+FORM_CAP_COURT[c.k]+(c.fait?' ✓':late?' ⚠':'')+'</div>';
+    h+='<div style="position:absolute;left:'+pos(d)+'%;top:16px;bottom:32px;width:2px;background:'+col+';opacity:.75;transform:translateX(-50%)"></div>'+
+       '<div title="'+esc(c.label+' — fin de l\'étape '+formEtapeCourt(FORM_CAP_LINK[c.k])+', le '+fmtFR(cd)+' (automatique)'+(c.fait?' — atteint le '+fmtFR(c.fait)+' ✓'+(c.par?' par '+c.par:''):late?' — en retard de '+_fDays(t,cd)+' j':''))+'" style="position:absolute;left:'+pos(d)+'%;top:76px;transform:translateX(-50%);text-align:center;font-size:9.5px;font-weight:700;color:'+col+';white-space:nowrap;line-height:1.3">🎯<br>'+FORM_CAP_COURT[c.k]+(c.fait?' ✓':late?' ⚠':'')+'</div>';
   }
   // aujourd'hui
-  if(t>=start){h+='<div style="position:absolute;left:'+pos(t)+'%;top:12px;bottom:22px;width:2px;background:var(--blue)"></div>'+
+  if(t>=start){h+='<div style="position:absolute;left:'+pos(t)+'%;top:12px;bottom:32px;width:2px;background:var(--blue)"></div>'+
     '<div style="position:absolute;left:'+pos(t)+'%;top:2px;transform:translateX(-50%);font-size:9px;font-weight:800;color:var(--blue);background:var(--card);padding:0 3px;border-radius:4px">auj.</div>';}
   h+='</div>';
+  h+='<div class="small" style="color:var(--mut);margin:0 4px 2px;font-size:10.5px">barres du haut = réel (tes dates, tenues à jour) · <span style="display:inline-block;width:22px;height:6px;background:#94a3b8;opacity:.75;border-radius:3px;vertical-align:middle"></span> barre fine = attendu depuis le début : Liquides 2 sem ½ → Matériel 2 sem ½ → Vente 1 sem ½ → Perf. 1 sem ½ (survole pour les dates)</div>';
   return h;
 }
 function togForm(){if(!(isAdmin()||isResp()))return;const el=$('formpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderFormPanel();}
