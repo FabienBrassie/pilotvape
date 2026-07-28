@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-28 19:36 — 🏖 Absences : onglets Historique et Heures sup repliés par salarié (une ligne de synthèse — totaux annuels, nb d'absences/demandes, « X en attente » — détail au clic ▸/▾, comme les Écarts de pause). L'onglet « À valider » reste déplié : c'est de l'action, pas de l'archive. -->
 <!-- v 2026-07-28 18:47 — 📚 Formation : « ⏳ +X j vs attendu » affiché sur les blocs du planning (Semaine + Mon planning), dans le récap du panneau, sur la carte et dans Mon espace du salarié — fin réelle de l'étape en cours comparée à la fin attendue de cette même étape. Visible seulement s'il y a du retard. -->
 <!-- v 2026-07-28 18:31 — 📚 Formation : barre fine « attendu » sous chaque frise (Liquides 2 sem ½ → Matériel 2 sem ½ → Vente 1 sem ½ → Perf. 1 sem ½ depuis le début du parcours) pour comparer d'un coup d'œil le réel et le normal attendu — panneau ET Mon espace, légende sous la frise, dates au survol. -->
 <!-- v 2026-07-28 15:50 — 🍽️ Écarts de pause : chaque salarié est replié sur UNE ligne de synthèse (nb de pointages, en-pause-depuis, cumuls semaine/mois) ; le détail jour par jour ne s'ouvre qu'au clic (▸/▾) — fini l'empilement d'une ligne par jour et par salarié. -->
@@ -2425,6 +2426,11 @@ function jumpAbs(t,id,empId){
       setTimeout(()=>{row.style.background=''},1400);}},60);
 }
 function togAbs(){if(!isAdmin())return;const el=$('abspanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderAbs();saveUI()}
+// Détail REPLIÉ par salarié dans les onglets Historique et Heures sup (Fabien 2026-07-28 : même
+// principe que les Écarts de pause — une ligne de synthèse, le détail au clic). « À valider » reste
+// déplié : c'est de l'action en attente, pas de l'archive.
+const _absOpen=new Set();
+function absToggleEmp(id){id=String(id);if(_absOpen.has(id))_absOpen.delete(id);else _absOpen.add(id);renderAbs();}
 // Impact si ce congé était accepté : NOUVEAUX trous de couverture + congés acceptés qui se chevauchent
 function congeImpact(c){
   const e=emp(c.empId);if(!e)return{weeks:[],simul:[],joint:null};
@@ -2605,9 +2611,15 @@ function renderAbs(){
     for(const e of S.employees.filter(x=>x.actif&&absSel.has(x.b))){
       const mine=hsList.filter(x=>x.empId===e.id).sort((a,b)=>a.date<b.date?1:-1);
       if(!mine.length)continue;
+      const open=_absOpen.has(String(e.id));
+      const nbAtt=mine.filter(x=>(x.statut||'attente')==='attente').length;
       h+='<div class="ecard" style="flex-direction:column;align-items:stretch">';
-      h+='<div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+');font-weight:700">'+bout(e.b).nom+'</span><span class="small" style="margin-left:auto">'+mine.length+' demande'+(mine.length>1?'s':'')+'</span></div>';
-      for(const x of mine){
+      h+='<div class="brow" style="cursor:pointer" onclick="absToggleEmp(\''+e.id+'\')" title="'+(open?'Replier':'Déplier')+' le détail">'+
+        '<span style="width:13px;color:var(--mut);font-size:11px">'+(open?'▾':'▸')+'</span>'+
+        '<span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+');font-weight:700">'+bout(e.b).nom+'</span>'+
+        (nbAtt?'<span class="small" style="color:#d97706;font-weight:700">'+nbAtt+' en attente</span>':'')+
+        '<span class="small" style="margin-left:auto">'+mine.length+' demande'+(mine.length>1?'s':'')+'</span></div>';
+      if(open)for(const x of mine){
         const st=x.statut||'attente';
         const stBadge=st==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':st==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé ✗</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>';
         h+='<div class="brow" style="padding-left:18px"><span>'+DAYJ[wdOf(x.date)]+' '+fmtFR(x.date)+'</span>'+hsBadge(x)+(x.note?'<span class="small">« '+esc(x.note)+' »</span>':'')+(x.parResp&&emp(x.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ '+esc(emp(x.parResp).nom)+'</span>':'')+stBadge+'<span style="margin-left:auto;white-space:nowrap">'+(st!=='accepte'?'<button class="mini" onclick="acceptHS('+x.id+')" title="Accepter">✓</button> ':'')+(st!=='refuse'?'<button class="mini" onclick="refuseHS('+x.id+')" title="Refuser">✗</button> ':'')+'<button class="mini ghost" onclick="delHS('+x.id+')">🗑</button></span></div>';
@@ -2634,11 +2646,15 @@ function renderAbs(){
     const totAn=cgs.filter(c=>c.statut==='accepte'&&c.du.startsWith(an)).reduce((t,c)=>t+nbJours(c.du,c.au),0);
     const mlAn=mls.filter(m=>m.du.startsWith(an)).reduce((t,m)=>t+nbJours(m.du,m.au),0);
     const ecAn=ecs.filter(x=>x.du.startsWith(an)).reduce((t,x)=>t+nbJours(x.du,x.au),0);
+    const open=_absOpen.has(String(e.id));
     h+='<div class="ecard" style="flex-direction:column;align-items:stretch">';
-    h+='<div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+');font-weight:700">'+bout(e.b).nom+'</span>'+
+    h+='<div class="brow" style="cursor:pointer" onclick="absToggleEmp(\''+e.id+'\')" title="'+(open?'Replier':'Déplier')+' le détail des absences">'+
+      '<span style="width:13px;color:var(--mut);font-size:11px">'+(open?'▾':'▸')+'</span>'+
+      '<span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+');font-weight:700">'+bout(e.b).nom+'</span>'+
+      '<span class="small" style="color:var(--mut)">'+rows.length+' absence'+(rows.length>1?'s':'')+'</span>'+
       '<span class="small" style="margin-left:auto"><b>'+totAn+' j</b> de congés acceptés en '+an+(mlAn?' · '+mlAn+' j maladie':'')+(ecAn?' · '+ecAn+' j école':'')+' · '+badgeEstival(e.id,an)+'</span></div>';
-    if(!rows.length)h+='<div class="small" style="padding:2px 0 2px 18px">Aucune absence enregistrée.</div>';
-    for(const x of rows){
+    if(open&&!rows.length)h+='<div class="small" style="padding:2px 0 2px 18px">Aucune absence enregistrée.</div>';
+    if(open)for(const x of rows){
       const r=x.r;const past=r.au<todayISO();
       h+='<div class="brow absrow" id="absrow-'+x.t+'-'+r.id+'" style="padding-left:18px;border-radius:8px'+(past?';opacity:.5':'')+'">'+
         '<span>'+(x.t==='conge'?'🏖':x.t==='ecole'?'🎓':x.t==='ent'?'🏭':'🤒')+'</span>'+
