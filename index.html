@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-27 17:25</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 18:42</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -5975,7 +5975,9 @@ function syncPrixRougeOp(a, opts) {
     }
     if (typeof a.prixCible === 'number') {
       linked.commentaire = 'Cible ' + a.prixCible.toFixed(2) + '€';
-      linked.prixRouge = a.prixCible;
+      { const _oldLk = (typeof linked.prixRouge === 'number' && linked.prixRouge > 0) ? linked.prixRouge : null;
+        linked.prixRouge = a.prixCible;
+        _reproposerEtapesEtiquettePR(linked, _oldLk, a.prixCible); }
     }
     if (typeof linked.prixAvantRouge !== 'number') {
       linked.prixAvantRouge = (typeof a.prixAvant === 'number') ? a.prixAvant
@@ -6683,11 +6685,55 @@ function toggleOpStep(opId, shop, stepKey, checked) {
 // - opType différent → clôt l'ancienne et crée la nouvelle (via promoteActionToOp)
 // L'OP PRIX_ROUGE (auto) et la fanfare RENTRER sont gérées par leurs propres helpers.
 // Met à jour le prix rouge d'une action SORTIR ou RENTRER (+ OP liée si existante)
+// ═══ PRIX ROUGE MODIFIÉ → ÉTAPES ÉTIQUETTE RE-PROPOSÉES (2026-07-27, demande Fabien) ═══
+// Une étiquette imprimée/posée pour l'ANCIEN prix ne vaut plus rien, et le prix en caisse
+// (Swappy) doit être repassé. Quand le prix rouge d'une OP CHANGE (un nombre → un autre),
+// les coches d'étiquette et de Swappy déjà faites sont DÉCOCHÉES avec un _stepTs frais —
+// le merge et _syncCocheBidi propagent la décoche aux autres postes et aux actions miroir
+// (mécanisme canonique, rien recopié à la main). Retourne le nombre de coches re-proposées.
+function _reproposerEtapesEtiquettePR(op, ancienPrix, nouveauPrix) {
+  if (!op) return 0;
+  if (typeof ancienPrix !== 'number' || typeof nouveauPrix !== 'number') return 0;
+  if (!(ancienPrix > 0) || !(nouveauPrix > 0) || ancienPrix === nouveauPrix) return 0;
+  const _keys = [];
+  (op.pieces || []).forEach(p => {
+    if (p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH') {
+      _keys.push('plv_' + p.id + '_imprimee', 'plv_' + p.id + '_posee');
+    }
+  });
+  _keys.push('swappy', 'pr_etiquette', 'pr_posee', 'pr_swappy'); // étapes PR d'OP + COUP
+  const _now = new Date().toISOString();
+  let n = 0;
+  SHOPS.forEach(sh => {
+    const st = op.etats && op.etats[sh];
+    if (!st || !st.steps) return;
+    _keys.forEach(k => {
+      if (st.steps[k] === true) {
+        st.steps[k] = false;
+        if (!st._stepTs) st._stepTs = {};
+        st._stepTs[k] = _now;
+        n++;
+      }
+    });
+  });
+  if (n > 0) {
+    op._ts = _now;
+    if (typeof logAction === 'function') logAction('Prix rouge modifié → étiquettes à refaire', _logOpLabel(op.id) + ' : ' + ancienPrix.toFixed(2) + '€ → ' + nouveauPrix.toFixed(2) + '€ · ' + n + ' coche(s) re-proposée(s) (étiquette + Swappy)');
+    try { syncOpStepsToAction(op); } catch (e) {} // décoche miroir immédiate côté dashboard
+  }
+  return n;
+}
+function _alerteEtiquettesReproposees(n) {
+  if (n > 0) pvAlert('Prix rouge modifié : ' + n + ' coche(s) d\'étiquette / Swappy re-proposée(s) aux boutiques.\n\nLes étiquettes déjà posées sont à refaire au NOUVEAU prix — les étapes réapparaissent à cocher.');
+}
+
 function updateActionPrixRouge(actionId, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const a = actions.find(x => x.id === actionId);
   if (!a) return;
   const prix = parseFloat(String(val).replace(',', '.'));
+  const _ancienPrixA = (typeof a.prixRouge === 'number' && a.prixRouge > 0) ? a.prixRouge : null; // pour re-proposer les étiquettes
+  let _nRepro = 0;
   if (isNaN(prix) || prix <= 0) {
     a.prixRouge = 0;
     a.prixAvantRouge = '';
@@ -6716,6 +6762,7 @@ function updateActionPrixRouge(actionId, val) {
     }
     coupOp._ts = new Date().toISOString(); // Protéger contre merge sync
     ensureOpSteps(coupOp); // Recalculer steps PR
+    _nRepro += _reproposerEtapesEtiquettePR(coupOp, _ancienPrixA, a.prixRouge);
     // Clore l'ancienne OP PRIX_ROUGE séparée si elle existe encore
     const oldPrOp = ops.find(o => o.rentrerPrixActionId === a.id && o.type === 'PRIX_ROUGE' && !o.dateFin);
     if (oldPrOp) { oldPrOp.dateFin = ymd(new Date()); _deletedIds.add(oldPrOp.id); }
@@ -6731,6 +6778,7 @@ function updateActionPrixRouge(actionId, val) {
       if (typeof newPrix === 'number') {
         op.prixRouge = newPrix;
         if (typeof newAvant === 'number') op.prixAvantRouge = newAvant;
+        _nRepro += _reproposerEtapesEtiquettePR(op, _ancienPrixA, newPrix);
       } else {
         op.prixRouge = 0;
       }
@@ -6754,12 +6802,14 @@ function updateActionPrixRouge(actionId, val) {
       if (typeof a.prixRouge === 'number' && a.prixRouge > 0) {
         _gop.prixRouge = a.prixRouge;
         if (typeof a.prixAvantRouge === 'number') _gop.prixAvantRouge = a.prixAvantRouge;
+        _nRepro += _reproposerEtapesEtiquettePR(_gop, _ancienPrixA, a.prixRouge);
       } else {
         _gop.prixRouge = 0;
       }
       _gop._ts = _nowPr;
     }
   }
+  _alerteEtiquettesReproposees(_nRepro);
   saveData();
   renderDashboard();
   if (typeof renderOps === 'function') renderOps();
@@ -6936,7 +6986,9 @@ function setGroupPrixRouge(actionIdsPiped) {
       console.log('[GROUPE-PR] OP', groupOp.id, 'réveillée');
     }
     groupOp._ts = _grpTs; // fix 2026-05-20 phase 2
+    const _oldGrpPrix = (typeof groupOp.prixRouge === 'number' && groupOp.prixRouge > 0) ? groupOp.prixRouge : null;
     groupOp.prixRouge = prixRouge;
+    _alerteEtiquettesReproposees(_reproposerEtapesEtiquettePR(groupOp, _oldGrpPrix, prixRouge));
     groupOp.prixAvantRouge = grpActions[0].prixAvantRouge;
     groupOp.dateDebut = dateDebut;
     groupOp.produitIds = allProduitIds;
@@ -26370,6 +26422,7 @@ function updateOpPrixRouge(opId, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
   const prix = parseFloat(String(val).replace(',', '.'));
+  const _ancienPrixOp = (typeof op.prixRouge === 'number' && op.prixRouge > 0) ? op.prixRouge : null;
   if (isNaN(prix) || prix <= 0) {
     op.prixRouge = 0; op.prixAvantRouge = '';
   } else {
@@ -26384,6 +26437,7 @@ function updateOpPrixRouge(opId, val) {
   }
   op._ts = new Date().toISOString(); // Protéger contre écrasement merge sync
   ensureOpSteps(op); // Recalculer les steps (ajout/retrait des étapes PR)
+  if (!isNaN(prix) && prix > 0) _alerteEtiquettesReproposees(_reproposerEtapesEtiquettePR(op, _ancienPrixOp, prix));
   // Propager sur les actions liées (sortirActionId, prixActionId, rentrerActionId, groupActionIds)
   const linkedIds = [];
   if (op.sortirActionId) linkedIds.push(op.sortirActionId);
