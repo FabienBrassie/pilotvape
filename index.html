@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 18:56</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 19:13</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2906,6 +2906,12 @@ let nextOpId = 1;
 // ---------------------------------------------------------------------------
 let campagnes = []; // [{ id, nom, dateDebut, dateFin, commentaire }]
 let nextCampagneId = 1;
+
+// 📊 Bilans de campagne PR (2026-07-28, demande Fabien) : photographies « fin de campagne »
+// (ce qui était en OP · écoulé · restant par boutique), archivées jusqu'à suppression par
+// l'admin. Synchronisées comme les campagnes (_mergeArray par id, tombstones _deletedIds).
+let bilans = []; // [{ id, campagneId, campagneNom, dateBilan, lignes: [{opId, label, type, prixAvant, prixRouge, statut, boutiquesEcoulees, boutiquesRestantes}], _ts }]
+let nextBilanId = 1;
 
 function ensureCampagneModel(c) {
   if (!c) return;
@@ -9338,6 +9344,7 @@ async function loadData() {
     if (localData.propositionsLiq || remoteData.propositionsLiq) remoteData.propositionsLiq = _mergeArray(localData.propositionsLiq || [], remoteData.propositionsLiq || [], 'id');
     if (localData.propositionsPD || remoteData.propositionsPD) remoteData.propositionsPD = _mergeArray(localData.propositionsPD || [], remoteData.propositionsPD || [], 'id');
     if (localData.campagnes || remoteData.campagnes) remoteData.campagnes = _mergeArray(localData.campagnes || [], remoteData.campagnes || [], 'id');
+    if (localData.bilans || remoteData.bilans) remoteData.bilans = _mergeArray(localData.bilans || [], remoteData.bilans || [], 'id');
     // Compteurs : max des deux
     if (typeof localData.nextActionId === 'number') remoteData.nextActionId = Math.max(remoteData.nextActionId || 0, localData.nextActionId);
     if (typeof localData.nextOpId === 'number') remoteData.nextOpId = Math.max(remoteData.nextOpId || 0, localData.nextOpId);
@@ -9521,6 +9528,10 @@ async function loadData() {
     campagnes.forEach(c => ensureCampagneModel(c));
     nextCampagneId = typeof data.nextCampagneId === 'number' ? data.nextCampagneId
       : (campagnes.length ? Math.max(...campagnes.map(c => parseInt(String(c.id).replace('CAMP-',''))||0)) + 1 : 1);
+    // 📊 Bilans de campagne PR (2026-07-28) : chargés + tombstones filtrées
+    bilans = (Array.isArray(data.bilans) ? data.bilans : []).filter(b => b && b.id && !_deletedIds.has(b.id));
+    nextBilanId = typeof data.nextBilanId === 'number' ? data.nextBilanId
+      : (bilans.length ? Math.max(...bilans.map(b => parseInt(String(b.id).replace('BILAN-','')) || 0)) + 1 : 1);
     // Journal d'activité : fusionner les logs distants avec les logs locaux (dédoublonnage par ts+action+detail)
     if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {
       const existingKeys = new Set(auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -10694,7 +10705,7 @@ async function forcerVersionAdminPartout() {
 // ailleurs = perte silencieuse de données. Désormais, UNE source de vérité.
 // Tout nouveau champ de données se déclare ICI et nulle part ailleurs.
 function buildPayload() {
-  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
+  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
 }
 
 function saveData() {
@@ -11510,6 +11521,7 @@ async function _saveToSupabase(payload, _retryCount) {
       if (payload.propositionsLiq) payload.propositionsLiq = _mergeArray(payload.propositionsLiq, remote.propositionsLiq, 'id');
       if (payload.propositionsPD) payload.propositionsPD = _mergeArray(payload.propositionsPD, remote.propositionsPD, 'id');
       if (payload.campagnes) payload.campagnes = _mergeArray(payload.campagnes, remote.campagnes, 'id');
+      if (payload.bilans || remote.bilans) payload.bilans = _mergeArray(payload.bilans || [], remote.bilans || [], 'id');
       // 4. Fusionner l'auditLog distant (dédoublonnage par ts+action+detail)
       if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
         const _logKeys = new Set(payload.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -23450,6 +23462,134 @@ async function changeOpCible(opId) {
 }
 
 // Supprime une campagne. Refuse si OPs actives encore rattachées (propose de détacher d'abord).
+// ═══════════════════════════════════════════════════════════════════════════
+// 📊 BILAN DE CAMPAGNE PR (2026-07-28, demande Fabien) — « à la fin d'une campagne
+// de PR, un récap : ce qui était en OP, ce qui est devenu hors stock, ce qu'il reste —
+// archivé jusqu'à ce que je décide de l'effacer — et pouvoir changer les prix des
+// restants ». Le bilan est INTERACTIF (prix modifiables en direct via la canonique
+// updateOpPrixRouge → le réflexe « étiquettes re-proposées » s'applique) et
+// ARCHIVABLE (photographie figée dans `bilans`, synchronisée, tombstonée à la
+// suppression). Le jugement écoulé/restant = _opProduitEcouleChezShop (périmètre OP).
+// ═══════════════════════════════════════════════════════════════════════════
+function _computeBilanCampagnePR(campagneId) {
+  const lignes = [];
+  ops.filter(o => o.campagneId === campagneId && !o.annulee && !_deletedIds.has(o.id)).forEach(op => {
+    if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return;
+    const d = (typeof getOpProductDisplay === 'function') ? getOpProductDisplay(op) : { label: op.id };
+    const ecoulees = SHOPS.filter(sh => _opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh));
+    const restantes = SHOPS.filter(sh => !ecoulees.includes(sh));
+    lignes.push({
+      opId: op.id, label: d.label || op.id, type: op.type,
+      prixAvant: (typeof op.prixAvantRouge === 'number') ? op.prixAvantRouge : null,
+      prixRouge: (typeof op.prixRouge === 'number') ? op.prixRouge : null,
+      statut: restantes.length === 0 ? 'ECOULE' : (ecoulees.length > 0 ? 'PARTIEL' : 'RESTANT'),
+      boutiquesEcoulees: ecoulees.slice(), boutiquesRestantes: restantes.slice()
+    });
+  });
+  // Écoulés en premier (le « bravo »), puis partiels, puis restants (le travail)
+  const _rang = { ECOULE: 0, PARTIEL: 1, RESTANT: 2 };
+  lignes.sort((a, b) => (_rang[a.statut] - _rang[b.statut]) || a.label.localeCompare(b.label));
+  return lignes;
+}
+
+function _renderBilanLignes(lignes, interactif) {
+  const _fmtP = v => (typeof v === 'number' ? v.toFixed(2) + '€' : '—');
+  const STATUT_META = {
+    ECOULE:  { icon: '✅', label: 'Écoulé partout', color: '#22c55e' },
+    PARTIEL: { icon: '🟠', label: 'Partiel', color: '#f59e0b' },
+    RESTANT: { icon: '📦', label: 'Restant', color: '#60a5fa' }
+  };
+  const _cnt = { ECOULE: 0, PARTIEL: 0, RESTANT: 0 };
+  lignes.forEach(l => { _cnt[l.statut] = (_cnt[l.statut] || 0) + 1; });
+  const head = `<div style="display:flex; gap:12px; margin-bottom:10px; font-size:11px;">
+    <span style="color:#86efac; font-weight:700;">✅ ${_cnt.ECOULE} écoulé${_cnt.ECOULE > 1 ? 's' : ''}</span>
+    <span style="color:#fbbf24; font-weight:700;">🟠 ${_cnt.PARTIEL} partiel${_cnt.PARTIEL > 1 ? 's' : ''}</span>
+    <span style="color:#93c5fd; font-weight:700;">📦 ${_cnt.RESTANT} restant${_cnt.RESTANT > 1 ? 's' : ''} sur les bras</span>
+  </div>`;
+  const rows = lignes.map(l => {
+    const m = STATUT_META[l.statut];
+    const detail = l.statut === 'ECOULE' ? m.label
+      : l.statut === 'PARTIEL' ? ('écoulé à ' + l.boutiquesEcoulees.map(sh => SHOP_LABELS[sh]).join(', ') + ' · reste à ' + l.boutiquesRestantes.map(sh => SHOP_LABELS[sh]).join(', '))
+      : ('reste partout (' + l.boutiquesRestantes.map(sh => SHOP_LABELS[sh]).join(', ') + ')');
+    const prixZone = (interactif && l.statut !== 'ECOULE')
+      ? `<span style="display:inline-flex; gap:4px; align-items:center;"><span style="font-size:10px; color:#94a3b8; text-decoration:line-through;">${_fmtP(l.prixAvant)}</span><span style="color:#94a3b8;">→</span>
+         <input type="number" step="0.01" min="0" value="${typeof l.prixRouge === 'number' ? l.prixRouge.toFixed(2) : ''}" placeholder="PR"
+           onchange="updateOpPrixRouge('${l.opId}', this.value)" onclick="event.stopPropagation()"
+           style="width:66px; padding:2px 5px; font-size:11px; background:#1e293b; border:1px solid #ef444460; color:#fca5a5; border-radius:3px; font-weight:700; text-align:right;" title="Changer le prix rouge — les étiquettes déjà posées seront re-proposées aux boutiques">€
+         <span onclick="event.stopPropagation(); switchTabProgrammatic('ops','${l.opId}')" style="cursor:pointer; font-size:10px; color:#64748b;" title="Ouvrir la carte OP">↗</span></span>`
+      : `<span style="font-size:11px; color:#94a3b8;"><span style="text-decoration:line-through;">${_fmtP(l.prixAvant)}</span> → <span style="color:#fca5a5; font-weight:700;">${_fmtP(l.prixRouge)}</span></span>`;
+    return `<div style="display:flex; gap:8px; align-items:center; padding:5px 8px; background:${l.statut === 'ECOULE' ? '#0f172a' : '#1e293b'}; border:1px solid ${m.color}30; border-left:3px solid ${m.color}; border-radius:4px; margin-bottom:4px; ${l.statut === 'ECOULE' ? 'opacity:0.65;' : ''}">
+      <span style="flex-shrink:0;">${m.icon}</span>
+      <span style="flex:1; min-width:0; font-size:11.5px; color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.label}</span>
+      <span style="flex-shrink:0; font-size:10px; color:${m.color};">${detail}</span>
+      <span style="flex-shrink:0;">${prixZone}</span>
+    </div>`;
+  }).join('');
+  return head + (rows || '<div style="color:#64748b; font-size:11px; padding:10px;">Aucune OP prix rouge dans cette campagne.</div>');
+}
+
+function pvBilanCampagnePR(campagneId) {
+  if (!isAdmin()) { pvAlert('Le bilan de campagne est un outil de pilotage — réservé à l\'admin.'); return; }
+  const c = getCampagne(campagneId);
+  if (!c) return;
+  const lignes = _computeBilanCampagnePR(campagneId);
+  const html = `<div style="text-align:left; max-height:60vh; overflow-y:auto;">
+    <div style="font-size:13px; font-weight:700; color:#c4b5fd; margin-bottom:2px;">📊 Bilan — ${c.nom}</div>
+    <div style="font-size:10px; color:#64748b; margin-bottom:10px;">État à l'instant T · les prix des restants se changent ICI (étiquettes re-proposées automatiquement) · « Archiver » fige une photographie consultable plus tard.</div>
+    ${_renderBilanLignes(lignes, true)}
+  </div>`;
+  _pvModal(html, [
+    { label: '🗄️ Archiver ce bilan', color: '#22d3ee' },
+    { label: 'Fermer' }
+  ], (idx) => {
+    if (idx !== 0) return;
+    pvArchiverBilanCampagne(campagneId);
+  });
+}
+
+function pvArchiverBilanCampagne(campagneId) {
+  if (!isAdmin()) return;
+  const c = getCampagne(campagneId);
+  if (!c) return;
+  const _now = new Date().toISOString();
+  const b = {
+    id: 'BILAN-' + String(nextBilanId++).padStart(4, '0'),
+    campagneId: campagneId,
+    campagneNom: c.nom,
+    dateBilan: ymd(new Date()),
+    lignes: JSON.parse(JSON.stringify(_computeBilanCampagnePR(campagneId))),
+    _ts: _now
+  };
+  bilans.push(b);
+  if (typeof logAction === 'function') logAction('Bilan de campagne archivé', '📊 ' + c.nom + ' — ' + b.lignes.length + ' ligne(s), ' + b.lignes.filter(l => l.statut !== 'ECOULE').length + ' restante(s)');
+  saveData();
+  if (typeof renderOps === 'function') renderOps();
+  pvAlert('Bilan « ' + c.nom + ' » archivé (' + fmtFR(b.dateBilan) + ').\nConsultable dans « 📊 Bilans archivés » sous les campagnes, jusqu\'à ce que tu le supprimes.');
+}
+
+function pvVoirBilanArchive(bilanId) {
+  const b = bilans.find(x => x.id === bilanId);
+  if (!b) return;
+  const html = `<div style="text-align:left; max-height:60vh; overflow-y:auto;">
+    <div style="font-size:13px; font-weight:700; color:#c4b5fd; margin-bottom:2px;">📊 Bilan archivé — ${b.campagneNom}</div>
+    <div style="font-size:10px; color:#64748b; margin-bottom:10px;">Photographie du ${fmtFR(b.dateBilan)} (figée — les prix affichés sont ceux de ce jour-là).</div>
+    ${_renderBilanLignes(b.lignes || [], false)}
+  </div>`;
+  _pvModal(html, [{ label: 'Fermer' }], () => {});
+}
+
+async function pvSupprimerBilan(bilanId) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const b = bilans.find(x => x.id === bilanId);
+  if (!b) return;
+  if (!await pvConfirm('Supprimer le bilan « ' + b.campagneNom + ' » du ' + fmtFR(b.dateBilan) + ' ?', { ok: 'Supprimer', okColor: '#ef4444' })) return;
+  _deletedIds.add(bilanId); // tombstone : anti-résurrection au merge
+  bilans = bilans.filter(x => x.id !== bilanId);
+  if (typeof logAction === 'function') logAction('Bilan supprimé', '🗑 ' + b.campagneNom + ' (' + fmtFR(b.dateBilan) + ')');
+  saveData();
+  if (typeof renderOps === 'function') renderOps();
+}
+
 async function deleteCampagne(campagneId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const c = getCampagne(campagneId);
@@ -24210,6 +24350,7 @@ function renderOps() {
           : '';
         const _campDots = renderAveragedShopDots(opsInC, opShopFilter);
         const _hasPR = (_byTypeInCamp['PRIX_ROUGE'] || []).length > 0;
+        const _campHasPRBilan = _hasPR || (_byTypeInCamp['COUP'] || []).length > 0; // 📊 bilan PR (2026-07-28)
 
         // Contenu déplié : sous-section par type d'OP
         let _campContent = '';
@@ -24242,6 +24383,7 @@ function renderOps() {
               <span onclick="event.stopPropagation(); openCampagneEtiquettesDialog('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Générer étiquettes pour tous les produits">🏷️</span>
               ${_hasPR ? `<span onclick="event.stopPropagation(); generateAffichePrixRouge('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Affiche PDF Prix Rouge">📄</span>` : ''}
               <span onclick="event.stopPropagation(); pvOpenCheckList('campagne','${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#fbbf2415; color:#fcd34d; border:1px solid #fbbf2440; border-radius:3px; font-weight:600; white-space:nowrap;" title="La check-list boutique : toutes les étapes de tous les produits de la campagne, à cocher au même endroit">✅ Check-list</span>
+              ${_campHasPRBilan ? `<span onclick="event.stopPropagation(); pvBilanCampagnePR('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Bilan des prix rouges : écoulé / partiel / restant par boutique — prix des restants modifiables, photographie archivable">📊 Bilan</span>` : ''}
               <span onclick="event.stopPropagation(); openCampagneFormulaire('${cid}', [])" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Ajouter ou retirer des OPs de cette campagne">📋 Gérer</span>
               <span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#8b5cf61a; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Modifier le nom et les dates">✎</span>
               <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
@@ -24267,6 +24409,29 @@ function renderOps() {
           <span></span>
         </div>
         ${_isBlocCampagnesColl ? '' : `<div style="padding: 6px 2px;">${_campagnesInner}</div>`}
+      </div>`;
+    }
+
+    // ── 📊 Bilans archivés (2026-07-28, demande Fabien) : photographies de fin de campagne PR,
+    // gardées jusqu'à suppression par l'admin. Bloc replié par défaut, admin seulement. ──
+    if (typeof isAdmin === 'function' && isAdmin() && bilans.length > 0) {
+      const _isBilansColl = opTypeCollapsed.has('_BILANS_');
+      const _bilansRows = bilans.slice().sort((a, b) => (b.dateBilan || '').localeCompare(a.dateBilan || '')).map(b => {
+        const _nbRest = (b.lignes || []).filter(l => l.statut !== 'ECOULE').length;
+        return `<div onclick="pvVoirBilanArchive('${b.id}')" style="display:flex; gap:8px; align-items:center; padding:5px 10px; margin:0 6px 4px; background:#0f172a; border:1px solid #22d3ee30; border-left:3px solid #22d3ee; border-radius:4px; cursor:pointer;">
+          <span>📊</span>
+          <span style="flex:1; font-size:11px; color:#e2e8f0; font-weight:600;">${b.campagneNom}</span>
+          <span style="font-size:10px; color:#64748b;">${fmtFR(b.dateBilan)} · ${(b.lignes || []).length} ligne${(b.lignes || []).length > 1 ? 's' : ''}${_nbRest ? ` · <span style=\"color:#93c5fd; font-weight:700;\">${_nbRest} restante${_nbRest > 1 ? 's' : ''}</span>` : ' · tout écoulé ✅'}</span>
+          <span onclick="event.stopPropagation(); pvSupprimerBilan('${b.id}')" style="cursor:pointer; font-size:10px; color:#f87171;" title="Supprimer ce bilan (définitif)">🗑</span>
+        </div>`;
+      }).join('');
+      opsHtml += `<div style="margin-bottom: 10px; background: ${_isBilansColl ? '#0f172a' : '#0c1a24'}; border: 1px solid #22d3ee40; border-left: 3px solid #22d3ee; border-radius: 6px; overflow: hidden;">
+        <div onclick="toggleOpTypeCollapse('_BILANS_')" style="padding: 6px 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; background: #22d3ee1a;">
+          <span style="color: #67e8f9; font-size: 12px; font-weight: 700;">${_isBilansColl ? '▸' : '▾'}</span>
+          <span style="font-size: 11px; color: #67e8f9; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;">📊 Bilans archivés</span>
+          <span style="font-size: 10px; color: #64748b;">${bilans.length} bilan${bilans.length > 1 ? 's' : ''} · cliquer pour consulter · 🗑 pour effacer</span>
+        </div>
+        ${_isBilansColl ? '' : `<div style="padding: 6px 0;">${_bilansRows}</div>`}
       </div>`;
     }
 
