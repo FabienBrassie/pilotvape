@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 18:42</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 18:56</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -25098,6 +25098,31 @@ function _opPrEpuiseePourShop(op, sh) {
   return a.etats[sh].done === true;
 }
 
+// « Écoulé chez moi = invisible chez moi » AU PÉRIMÈTRE DE L'OP (2026-07-28, retour Fabien :
+// des PR de parfums soldés affichés « à désinstaller » alors qu'il n'y a plus rien).
+// Une OP ciblée PARFUM se juge sur SON parfum (situationParfumChezShop — sortie faite chez
+// cette boutique ou parfum sorti), pas sur la gamme entière ; une OP produit entier garde
+// isProductGoneFromShop. C'est LE prédicat commun des camemberts grisés, des étapes
+// auto-complétées ET du shunt des coches — plus jamais deux jugements qui se contredisent.
+function _opProduitEcouleChezShop(op, sh) {
+  if (!op || !sh) return false;
+  const pid = (op.produitIds || [])[0];
+  if (!pid) return false;
+  const g = baseLiq.find(l => l.id === pid);
+  const pfIds = op.produitParfumId ? [op.produitParfumId]
+    : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+  if (g && pfIds) {
+    // OP ciblée parfum(s) : écoulée chez cette boutique si TOUS ses parfums y sont sortis
+    return pfIds.every(pfId => {
+      const p = (g.parfums || []).find(x => x.id === pfId);
+      if (!p) return false;
+      return situationParfumChezShop(g, p, sh) === 'SORTIE_FAITE';
+    });
+  }
+  const prod = g || baseKits.find(k => k.id === pid) || basePD.find(x => x.id === pid);
+  return prod ? isProductGoneFromShop(prod, sh) : false;
+}
+
 // « Écoulé chez moi = invisible chez moi » jusqu'au bout (retour Fabien 2026-07-21) :
 // une boutique qui a TOUT sorti (destockage soldé chez elle) n'a plus RIEN à faire sur
 // l'OP prix rouge liée — ses coches d'OP (étiquette PR à imprimer/poser, Swappy, fins
@@ -25112,12 +25137,13 @@ function _shunterOpPrEpuisee() {
   ops.forEach(op => {
     if (op._archived || op.annulee) return;
     if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return;
-    if (!op.sortirActionId) return; // seulement les destockages (jamais les PR de relevé)
     // Normaliser AVANT de calculer les étapes : ensureOpModel pose la mécanique par défaut
     // (ex : swappy sur un PRIX_ROUGE) — sans ça, une étape née après le shunt resterait à faire.
     ensureOpSteps(op);
     SHOPS.forEach(sh => {
-      if (!_opPrEpuiseePourShop(op, sh)) return;
+      // Épuisé chez cette boutique : destockage soldé (lignes SORTIR faites) OU produit/parfum
+      // écoulé au périmètre de l'OP (2026-07-28 — couvre les PR de soldes sans lien de sortie).
+      if (!_opPrEpuiseePourShop(op, sh) && !_opProduitEcouleChezShop(op, sh)) return;
       computeOpShopStepDefs(op, sh).forEach(def => {
         // Les étapes miroir (coup_*, fanfare_rentrer, prod) vivent sur les ACTIONS —
         // on ne touche que les étapes portées par l'OP elle-même.
@@ -25464,7 +25490,7 @@ function _renderOpCardHtmlInner(op, options) {
   const _cardProd = _cardPid ? (baseKits.find(k => k.id === _cardPid) || baseLiq.find(l => l.id === _cardPid) || basePD.find(p => p.id === _cardPid)) : null;
   const shopDots = SHOPS.map(sh => {
     if (shopFilter && sh !== shopFilter) return '';
-    const _abs = _cardProd && isProductGoneFromShop(_cardProd, sh);
+    const _abs = _opProduitEcouleChezShop(op, sh); // périmètre OP (parfum compris) — 2026-07-28
     const col = _abs ? '#64748b' : SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
     const shopDefsAll = computeOpShopStepDefs(op, sh);
@@ -25636,7 +25662,7 @@ function _renderOpCardHtmlInner(op, options) {
     const col = SHOP_COLORS[sh];
     const label = SHOP_LABELS[sh];
     // Produit absent de cette boutique → section grisée, steps auto-cochés
-    const _absentShop = _detailProd && isProductGoneFromShop(_detailProd, sh);
+    const _absentShop = _opProduitEcouleChezShop(op, sh); // périmètre OP (parfum compris) — 2026-07-28
     const nbDone = defs.filter(d => _getOpStepChecked(op, sh, d)).length;
     const allDone = defs.length > 0 && nbDone === defs.length;
     const _absentBadge = _absentShop
@@ -25890,7 +25916,7 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
   const _cProd = _cPid ? (baseKits.find(k => k.id === _cPid) || baseLiq.find(l => l.id === _cPid) || basePD.find(p => p.id === _cPid)) : null;
   const shopDots = SHOPS.map(sh => {
     if (shopFilter && sh !== shopFilter) return '';
-    const _absent = _cProd && isProductGoneFromShop(_cProd, sh);
+    const _absent = _opProduitEcouleChezShop(op, sh); // périmètre OP (parfum compris) — 2026-07-28
     const col = _absent ? '#64748b' : SHOP_COLORS[sh];
     const init = SHOP_LABELS[sh][0];
     // Audit 2026-07-09 : compteur canonique (hors admin + hors fin d'OP), même règle
@@ -26033,9 +26059,14 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
       if (!st || !st.steps) return true;
       return ddefs.some(d => !st.steps[d.key]);
     });
-    const _dLabel = _dShops.map(sh => SHOP_LABELS[sh]).join(', ');
-    const _dTiming = _isLastDay ? ' ce soir' : '';
-    _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#f9731630; color:#fdba74; border:1px solid #f9731680; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller' + _dTiming + ' — ' + _dLabel + '</span>';
+    // 2026-07-28 : ne jamais réclamer une désinstallation à une boutique où le produit est
+    // écoulé (le shunt a coché ses étapes) — badge seulement s'il reste de vraies boutiques.
+    const _dShopsReels = _dShops.filter(sh => !_opProduitEcouleChezShop(op, sh));
+    if (_dShopsReels.length > 0) {
+      const _dLabel = _dShopsReels.map(sh => SHOP_LABELS[sh]).join(', ');
+      const _dTiming = _isLastDay ? ' ce soir' : '';
+      _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#f9731630; color:#fdba74; border:1px solid #f9731680; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller' + _dTiming + ' — ' + _dLabel + '</span>';
+    }
   }
   // Badge installation (aujourd'hui ou demain)
   let _installBadgeHtml = '';
