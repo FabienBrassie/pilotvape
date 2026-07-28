@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-07-28 10:40 — Repères d'OP PilotVape : pour une campagne nommée (ex. Soldes), la FIN du repère prend la plus tardive entre la fin de campagne et les fins de ses OP — rallonger une OP dans PilotVape repousse maintenant le repère rouge côté RH. Le début reste strictement celui de la campagne. -->
+<!-- v 2026-07-27 19:53 — Récap paie : dates de contrat rappelées chaque mois, version minimaliste (« Entré le 22/06/2026. », « Fin de contrat le … » si renseignée) dans le texte comptable et les cartes — avant, la mention n'apparaissait que le mois exact du début/de la fin et passait inaperçue. -->
 <!-- v 2026-07-27 19:40 — Récap paie : retards / départs anticipés et pauses prolongées aussi PAR JOUR (« Le 06/07 : 5min retard (non rémunéré) ») dans le texte comptable et les cartes — tout le récap est maintenant au jour, plus aucune ligne par semaine. -->
 <!-- v 2026-07-27 19:34 — Récap paie : durées en clair partout (« 15min », « 1h15 », « 6h10 travaillées ») — plus jamais de décimales type « 0,17h » ; appliqué aux heures sup au jour, aux fériés travaillés et aux totaux du bilan annuel. -->
 <!-- v 2026-07-18 19:20 — Récap paie : les heures sup s'affichent PAR JOUR (« Le 03/07 : 2h sup ») et plus par semaine — une semaine à cheval sur deux mois créait un écart apparent entre le récap comptable (part du mois seule) et la barre du planning (semaine entière). Au jour, chaque heure appartient à un seul mois. Texte comptable + cartes du panneau paie ; totaux mensuels inchangés. -->
@@ -812,9 +814,15 @@ async function fetchPvOps(){
       if(c&&c.nom){
         if(seenCamp.has(op.campagneId))continue;
         seenCamp.add(op.campagneId);
-        const du=c.dateDebut||null, fin=c.dateFin||null;
-        if(!du&&!fin)continue; // campagne sans aucune date → rien à placer
+        const du=c.dateDebut||null;
+        let fin=c.dateFin||null;
         const sibs=D.ops.filter(o=>o&&!o._archived&&!o.annulee&&o.campagneId===op.campagneId);
+        // FIN du repère = la plus TARDIVE entre la fin de campagne et les fins de ses OP (Fabien
+        // 2026-07-27 : soldes rallongées d'une semaine sur l'OP dans PilotVape → le repère RH ne
+        // bougeait pas, car on ne lisait que c.dateFin). Le DÉBUT reste STRICTEMENT celui de la
+        // campagne : les dates de ligne des OP peuvent être anciennes (bug des nouveautés en retard).
+        for(const o of sibs){if(o.dateFin&&(!fin||o.dateFin>fin))fin=o.dateFin;}
+        if(!du&&!fin)continue; // campagne sans aucune date → rien à placer
         out.push({du:du||fin,au:fin||du,startReal:!!du,hasFin:!!fin,label:'Campagne '+c.nom,full:'Campagne « '+c.nom+' » ('+sibs.length+' OP'+(sibs.length>1?'s':'')+')'});
         continue;
       }
@@ -3382,8 +3390,9 @@ function paieEvents(e,days){
   Object.keys(lwi).sort().forEach(d=>{evs.push({d,label:'⏰ '+fmtCourt(d),txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
   const pw=pauseLossByDay(e,days);
   Object.keys(pw).sort().forEach(d=>{evs.push({d,label:'🍽 '+fmtCourt(d),txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[d])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
-  if(e.dateIn&&e.dateIn>=days[0]&&e.dateIn<=days[days.length-1])evs.push({d:e.dateIn,label:'📄 Début de contrat',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
-  if(e.dateOut&&e.dateOut>=days[0]&&e.dateOut<=days[days.length-1])evs.push({d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
+  // dates de contrat rappelées CHAQUE mois (minimaliste — une date antérieure au mois se classe en tête)
+  if(e.dateIn)evs.push({d:e.dateIn,label:'📄 Entré',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
+  if(e.dateOut)evs.push({d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
   evs.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
   if(!evs.length)evs.push({d:'',label:'',txt:'<span class="small">Aucun événement ce mois.</span>'});
   return evs;
@@ -3413,8 +3422,9 @@ function paieTextStr(){
     out+='\n• '+b.nom+' :\n';
     for(const e of emps){
       out+='- '+e.nom+' :\n';
-      if(e.dateIn&&e.dateIn>=days[0]&&e.dateIn<=days[days.length-1])out+='  Début de contrat le '+fmtFR(e.dateIn)+'.\n';
-      if(e.dateOut&&e.dateOut>=days[0]&&e.dateOut<=days[days.length-1])out+='  Fin de contrat le '+fmtFR(e.dateOut)+'.\n';
+      // dates de contrat rappelées CHAQUE mois, version minimaliste (choix Fabien 2026-07-27 : juste la date)
+      if(e.dateIn)out+='  Entré le '+fmtFR(e.dateIn)+'.\n';
+      if(e.dateOut)out+='  Fin de contrat le '+fmtFR(e.dateOut)+'.\n';
       // fériés (chômé / travaillé)
       for(const d of fers){if(!inEmploi(e,d))continue;
         const wm=dayWorkedMin(e,d);
