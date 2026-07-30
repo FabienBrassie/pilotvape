@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-28 19:34</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-30 17:03</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -609,6 +609,7 @@ window.addEventListener('DOMContentLoaded', function() {
         <option value="">Toutes boutiques</option><option value="pessac">🏪 Pessac</option><option value="merignac">🏪 Mérignac</option><option value="langon">🏪 Langon</option>
       </select>
       <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
+      <button onclick="pvOuvrirPointageEtageres()" title="Pointer, gamme par gamme et par boutique, si chaque liquide est posé sur les étagères : détecte les « à sortir » encore posés et les emplacements manquants." style="padding:6px 12px; font-size:11px; font-weight:700; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; cursor:pointer; white-space:nowrap;">📋 Pointage étagères</button>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Par marque</option><option value="gamme">Tri: Par gamme (tous formats)</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
       </select>
@@ -2923,6 +2924,13 @@ let nextCampagneId = 1;
 // l'admin. Synchronisées comme les campagnes (_mergeArray par id, tombstones _deletedIds).
 let bilans = []; // [{ id, campagneId, campagneNom, dateBilan, lignes: [{opId, label, type, prixAvant, prixRouge, statut, boutiquesEcoulees, boutiquesRestantes}], _ts }]
 let nextBilanId = 1;
+// 📋 Pointage étagères liquides (2026-07-30, demande Fabien) : par boutique et par gamme,
+// « ce parfum est-il posé sur l'étagère ? » — poses: { pfId: true|false } (true = posé).
+// ⚠ le champ s'appelle poses et PAS parfums : _mergeArray refuse d'écraser un champ « parfums »
+// (réservé au merge des gammes) — un pointage nommé ainsi ne se propagerait jamais entre postes.
+// aRevoir = relance de vérification (réponses gardées en pré-rempli). Merge par id, le
+// plus récent gagne (motif bilans/campagnes).
+let pointagesEtagere = []; // [{ id:'PTG-<shop>-<gammeId>', shop, gammeId, poses:{}, aRevoir, datePointage, _ts }]
 
 function ensureCampagneModel(c) {
   if (!c) return;
@@ -6708,10 +6716,9 @@ function toggleOpStep(opId, shop, stepKey, checked) {
 // les coches d'étiquette et de Swappy déjà faites sont DÉCOCHÉES avec un _stepTs frais —
 // le merge et _syncCocheBidi propagent la décoche aux autres postes et aux actions miroir
 // (mécanisme canonique, rien recopié à la main). Retourne le nombre de coches re-proposées.
-function _reproposerEtapesEtiquettePR(op, ancienPrix, nouveauPrix) {
-  if (!op) return 0;
-  if (typeof ancienPrix !== 'number' || typeof nouveauPrix !== 'number') return 0;
-  if (!(ancienPrix > 0) || !(nouveauPrix > 0) || ancienPrix === nouveauPrix) return 0;
+// Les clés d'étapes « étiquette / prix » d'une OP PR — partagées entre le réflexe
+// « prix changé → étiquettes re-proposées » et la clôture de campagne (2026-07-30).
+function _clesEtapesEtiquettePR(op) {
   const _keys = [];
   (op.pieces || []).forEach(p => {
     if (p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH') {
@@ -6719,6 +6726,13 @@ function _reproposerEtapesEtiquettePR(op, ancienPrix, nouveauPrix) {
     }
   });
   _keys.push('swappy', 'pr_etiquette', 'pr_posee', 'pr_swappy'); // étapes PR d'OP + COUP
+  return _keys;
+}
+function _reproposerEtapesEtiquettePR(op, ancienPrix, nouveauPrix) {
+  if (!op) return 0;
+  if (typeof ancienPrix !== 'number' || typeof nouveauPrix !== 'number') return 0;
+  if (!(ancienPrix > 0) || !(nouveauPrix > 0) || ancienPrix === nouveauPrix) return 0;
+  const _keys = _clesEtapesEtiquettePR(op);
   const _now = new Date().toISOString();
   let n = 0;
   SHOPS.forEach(sh => {
@@ -9356,6 +9370,7 @@ async function loadData() {
     if (localData.propositionsPD || remoteData.propositionsPD) remoteData.propositionsPD = _mergeArray(localData.propositionsPD || [], remoteData.propositionsPD || [], 'id');
     if (localData.campagnes || remoteData.campagnes) remoteData.campagnes = _mergeArray(localData.campagnes || [], remoteData.campagnes || [], 'id');
     if (localData.bilans || remoteData.bilans) remoteData.bilans = _mergeArray(localData.bilans || [], remoteData.bilans || [], 'id');
+    if (localData.pointagesEtagere || remoteData.pointagesEtagere) remoteData.pointagesEtagere = _mergeArray(localData.pointagesEtagere || [], remoteData.pointagesEtagere || [], 'id');
     // Compteurs : max des deux
     if (typeof localData.nextActionId === 'number') remoteData.nextActionId = Math.max(remoteData.nextActionId || 0, localData.nextActionId);
     if (typeof localData.nextOpId === 'number') remoteData.nextOpId = Math.max(remoteData.nextOpId || 0, localData.nextOpId);
@@ -9543,6 +9558,8 @@ async function loadData() {
     bilans = (Array.isArray(data.bilans) ? data.bilans : []).filter(b => b && b.id && !_deletedIds.has(b.id));
     nextBilanId = typeof data.nextBilanId === 'number' ? data.nextBilanId
       : (bilans.length ? Math.max(...bilans.map(b => parseInt(String(b.id).replace('BILAN-','')) || 0)) + 1 : 1);
+    // 📋 Pointage étagères liquides (2026-07-30) : chargé + tombstones filtrées
+    pointagesEtagere = (Array.isArray(data.pointagesEtagere) ? data.pointagesEtagere : []).filter(x => x && x.id && !_deletedIds.has(x.id));
     // Journal d'activité : fusionner les logs distants avec les logs locaux (dédoublonnage par ts+action+detail)
     if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {
       const existingKeys = new Set(auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -10716,7 +10733,7 @@ async function forcerVersionAdminPartout() {
 // ailleurs = perte silencieuse de données. Désormais, UNE source de vérité.
 // Tout nouveau champ de données se déclare ICI et nulle part ailleurs.
 function buildPayload() {
-  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
+  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, pointagesEtagere, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
 }
 
 function saveData() {
@@ -11533,6 +11550,7 @@ async function _saveToSupabase(payload, _retryCount) {
       if (payload.propositionsPD) payload.propositionsPD = _mergeArray(payload.propositionsPD, remote.propositionsPD, 'id');
       if (payload.campagnes) payload.campagnes = _mergeArray(payload.campagnes, remote.campagnes, 'id');
       if (payload.bilans || remote.bilans) payload.bilans = _mergeArray(payload.bilans || [], remote.bilans || [], 'id');
+      if (payload.pointagesEtagere || remote.pointagesEtagere) payload.pointagesEtagere = _mergeArray(payload.pointagesEtagere || [], remote.pointagesEtagere || [], 'id');
       // 4. Fusionner l'auditLog distant (dédoublonnage par ts+action+detail)
       if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
         const _logKeys = new Set(payload.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -12698,6 +12716,10 @@ document.getElementById('importFile').addEventListener('change', async (e) => {
         nextCampagneId = typeof data.nextCampagneId === 'number' ? data.nextCampagneId
           : (campagnes.length ? Math.max(...campagnes.map(c => parseInt(String(c.id).replace('CAMP-',''))||0)) + 1 : 1);
       }
+      // Bilans + pointage étagères (import fichier)
+      if (Array.isArray(data.bilans)) bilans = data.bilans;
+      if (typeof data.nextBilanId === 'number') nextBilanId = data.nextBilanId;
+      if (Array.isArray(data.pointagesEtagere)) pointagesEtagere = data.pointagesEtagere;
       // Tombstones
       if (Array.isArray(data._deletedIds)) data._deletedIds.forEach(id => _deletedIds.add(id));
       if (Array.isArray(data._deletedParfumIds)) data._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
@@ -23541,16 +23563,18 @@ function pvBilanCampagnePR(campagneId) {
     <div style="font-size:10px; color:#64748b; margin-bottom:10px;">État à l'instant T · les prix des restants se changent ICI (étiquettes re-proposées automatiquement) · « Archiver » fige une photographie consultable plus tard.</div>
     ${_renderBilanLignes(lignes, true)}
   </div>`;
-  _pvModal(html, [
-    { label: '🗄️ Archiver ce bilan', color: '#22d3ee' },
-    { label: 'Fermer' }
-  ], (idx) => {
-    if (idx !== 0) return;
-    pvArchiverBilanCampagne(campagneId);
+  const _dejaCloturee = !!c._archived;
+  const _btns = _dejaCloturee
+    ? [{ label: '🗄️ Archiver ce bilan', color: '#22d3ee' }, { label: 'Fermer' }]
+    : [{ label: '🏁 Archiver + clôturer la campagne', color: '#22d3ee' }, { label: '🗄️ Archiver le bilan seulement' }, { label: 'Fermer' }];
+  _pvModal(html, _btns, (idx) => {
+    if (_dejaCloturee) { if (idx === 0) pvArchiverBilanCampagne(campagneId); return; }
+    if (idx === 0) pvArchiverEtCloturerCampagne(campagneId);
+    else if (idx === 1) pvArchiverBilanCampagne(campagneId);
   }, { maxWidth: 940 });
 }
 
-function pvArchiverBilanCampagne(campagneId) {
+function pvArchiverBilanCampagne(campagneId, opts) {
   if (!isAdmin()) return;
   const c = getCampagne(campagneId);
   if (!c) return;
@@ -23567,7 +23591,78 @@ function pvArchiverBilanCampagne(campagneId) {
   if (typeof logAction === 'function') logAction('Bilan de campagne archivé', '📊 ' + c.nom + ' — ' + b.lignes.length + ' ligne(s), ' + b.lignes.filter(l => l.statut !== 'ECOULE').length + ' restante(s)');
   saveData();
   if (typeof renderOps === 'function') renderOps();
-  pvAlert('Bilan « ' + c.nom + ' » archivé (' + fmtFR(b.dateBilan) + ').\nConsultable dans « 📊 Bilans archivés » sous les campagnes, jusqu\'à ce que tu le supprimes.');
+  if (!(opts && opts.silencieux)) pvAlert('Bilan « ' + c.nom + ' » archivé (' + fmtFR(b.dateBilan) + ').\nConsultable dans « 📊 Bilans de campagne », jusqu\'à ce que tu le supprimes.');
+}
+
+// ═══ 🏁 CLÔTURE DE CAMPAGNE PR (2026-07-30, retour Fabien : « la campagne est toujours là,
+// les produits toujours dedans ») — le geste de FIN qui manquait au bilan. Pour chaque
+// OP PR/COUP de la campagne :
+//   • écoulée PARTOUT → elle part en « sortie » : terminée (motif stock épuisé) + archivée
+//     sur-le-champ, elle disparaît des vues (le bilan archivé garde sa trace) ;
+//   • du stock RESTE quelque part → DÉTACHÉE de la campagne (rattachable à une nouvelle),
+//     réouverte sans date de fin, PRIX GARDÉS, coches d'étiquette/Swappy LIBÉRÉES chez les
+//     boutiques qui ont encore du stock — et CONSERVÉES chez celles qui ont tout écoulé
+//     (le shunt les maintient cochées/grisées : le travail de gestion de stock n'est pas perdu).
+// La campagne elle-même est archivée : elle disparaît des vues, son bilan archivé reste.
+async function _cloturerCampagnePR(campagneId) {
+  const c = getCampagne(campagneId);
+  if (!c) return null;
+  const _tj = ymd(new Date());
+  const _now = new Date().toISOString();
+  const opsC = ops.filter(o => o.campagneId === campagneId && !o.annulee && !_deletedIds.has(o.id)
+    && (o.type === 'PRIX_ROUGE' || o.type === 'COUP'));
+  let nEcoulees = 0, nDetachees = 0, nCochesLib = 0;
+  opsC.forEach(op => {
+    ensureOpSteps(op);
+    if (_opEpuiseePartout(op)) {
+      if (!op.dateFin || op.dateFin > _tj) { op.dateFin = _tj; op._dateFinManuelle = true; }
+      op.motifCloture = 'stock_epuise';
+      op._archived = true;
+      op._ts = _now; op._adminTs = _now;
+      nEcoulees++;
+    } else {
+      op.campagneId = '';
+      op.dateFin = null; op._dateFinManuelle = false; op.motifCloture = '';
+      const _cles = _clesEtapesEtiquettePR(op);
+      SHOPS.forEach(sh => {
+        if (_opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh)) return; // écoulée : coches conservées
+        const st = op.etats && op.etats[sh];
+        if (!st || !st.steps) return;
+        _cles.forEach(k => {
+          if (st.steps[k] === true) {
+            st.steps[k] = false;
+            if (!st._stepTs) st._stepTs = {};
+            st._stepTs[k] = _now;
+            nCochesLib++;
+          }
+        });
+      });
+      op._ts = _now; op._adminTs = _now;
+      try { syncOpStepsToAction(op); } catch (e) {}
+      nDetachees++;
+    }
+  });
+  c._archived = true;
+  c._ts = _now;
+  if (typeof logAction === 'function') logAction('Campagne clôturée', '🏁 ' + c.nom + ' — ' + nEcoulees + ' OP écoulée(s) archivée(s), ' + nDetachees + ' détachée(s)/réouverte(s), ' + nCochesLib + ' coche(s) re-proposée(s)');
+  if (typeof syncAutoActions === 'function') syncAutoActions(); // le shunt re-coche aussitôt les boutiques écoulées
+  saveData();
+  if (typeof renderOps === 'function') renderOps();
+  if (typeof renderDashboard === 'function') renderDashboard();
+  return { nEcoulees, nDetachees, nCochesLib };
+}
+async function pvArchiverEtCloturerCampagne(campagneId) {
+  if (!isAdmin()) { pvAlert('Réservé à l\'admin.'); return; }
+  const c = getCampagne(campagneId);
+  if (!c) return;
+  const lignes = _computeBilanCampagnePR(campagneId);
+  const nRest = lignes.filter(l => l.statut !== 'ECOULE').length;
+  const nEcoul = lignes.length - nRest;
+  if (!await pvConfirm('Clôturer « ' + c.nom + ' » ?\n\n• le bilan du jour est archivé (photographie)\n• ' + nEcoul + ' OP écoulée(s) partout partent aux archives (« sorties »)\n• ' + nRest + ' restante(s) sont DÉTACHÉES de la campagne et réouvertes : prix gardés, étiquettes re-proposées aux boutiques qui ont encore du stock, coches conservées chez celles qui ont tout écoulé\n• la campagne disparaît des vues — son bilan archivé reste consultable', { ok: '🏁 Clôturer', okColor: '#22d3ee', title: 'Fin de campagne' })) return;
+  pvArchiverBilanCampagne(campagneId, { silencieux: true });
+  const r = await _cloturerCampagnePR(campagneId);
+  if (!r) return;
+  pvAlert('Campagne « ' + c.nom + ' » clôturée. 🏁\n\n• Bilan archivé (consultable dans « 📊 Bilans de campagne »)\n• ' + r.nEcoulees + ' OP écoulée(s) → archivées\n• ' + r.nDetachees + ' OP restante(s) → détachées et réouvertes, prix gardés' + (r.nCochesLib ? ', ' + r.nCochesLib + ' coche(s) re-proposée(s) là où il reste du stock' : '') + '\n\nTu peux rattacher les restantes à une nouvelle campagne (Destockage…) via 📣 sur leur carte.');
 }
 
 function pvVoirBilanArchive(bilanId) {
@@ -23591,6 +23686,378 @@ async function pvSupprimerBilan(bilanId) {
   if (typeof logAction === 'function') logAction('Bilan supprimé', '🗑 ' + b.campagneNom + ' (' + fmtFR(b.dateBilan) + ')');
   saveData();
   if (typeof renderOps === 'function') renderOps();
+}
+
+// ── 📊 Bloc « Bilans de campagne » (2026-07-28/30, demande Fabien) : le bilan VIVANT des
+// campagnes FINIES reste accessible ici — le filtre « Actives » fait disparaître le bloc
+// campagne (et son bouton 📊) dès que la campagne est terminée, or c'est PRÉCISÉMENT le
+// moment du bilan (« je suis après la date de fin, le bilan n'est plus dispo »).
+// + les photographies archivées, gardées jusqu'à suppression. Admin seulement.
+// Factorisé (2026-07-30, « en vue timeline ») : rendu dans la vue LISTE et en tête de la
+// vue TIMELINE de l'onglet OP — même bloc, même verdict, indépendant de tous les filtres.
+function _renderBlocBilansCampagne() {
+  if (typeof isAdmin !== 'function' || !isAdmin()) return '';
+  const _campsFiniesPR = campagnes.filter(c => c && !_deletedIds.has(c.id) && !c._archived && isCampagneTerminee(c)
+      && ops.some(o => o.campagneId === c.id && !o.annulee && !_deletedIds.has(o.id)
+        && (o.type === 'PRIX_ROUGE' || o.type === 'COUP')))
+    .sort((a, b) => (b.dateFin || '').localeCompare(a.dateFin || ''));
+  if (bilans.length === 0 && _campsFiniesPR.length === 0) return '';
+  const _isBilansColl = opTypeCollapsed.has('_BILANS_');
+  const _campsFiniesRows = _campsFiniesPR.map(c => {
+    const _lg = _computeBilanCampagnePR(c.id);
+    const _nbR = _lg.filter(l => l.statut !== 'ECOULE').length;
+    return `<div onclick="pvBilanCampagnePR('${c.id}')" style="display:flex; gap:8px; align-items:center; padding:5px 10px; margin:0 6px 4px; background:#1a1030; border:1px solid #8b5cf640; border-left:3px solid #8b5cf6; border-radius:4px; cursor:pointer;" title="Ouvrir le bilan vivant : état actuel, prix des restants modifiables, archivable">
+      <span>📣</span>
+      <span style="flex:1; font-size:11px; color:#e2e8f0; font-weight:600;">${c.nom}</span>
+      <span style="font-size:10px; color:#94a3b8;">finie le ${fmtFR(c.dateFin) || '?'} · ${_lg.length} OP${_lg.length > 1 ? 's' : ''}${_nbR ? ` · <span style="color:#93c5fd; font-weight:700;">${_nbR} restante${_nbR > 1 ? 's' : ''} sur les bras</span>` : ' · tout écoulé ✅'}</span>
+      <span style="font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;">📊 Voir le bilan</span>
+    </div>`;
+  }).join('');
+  const _bilansRows = bilans.slice().sort((a, b) => (b.dateBilan || '').localeCompare(a.dateBilan || '')).map(b => {
+    const _nbRest = (b.lignes || []).filter(l => l.statut !== 'ECOULE').length;
+    return `<div onclick="pvVoirBilanArchive('${b.id}')" style="display:flex; gap:8px; align-items:center; padding:5px 10px; margin:0 6px 4px; background:#0f172a; border:1px solid #22d3ee30; border-left:3px solid #22d3ee; border-radius:4px; cursor:pointer;">
+      <span>📊</span>
+      <span style="flex:1; font-size:11px; color:#e2e8f0; font-weight:600;">${b.campagneNom}</span>
+      <span style="font-size:10px; color:#64748b;">${fmtFR(b.dateBilan)} · ${(b.lignes || []).length} ligne${(b.lignes || []).length > 1 ? 's' : ''}${_nbRest ? ` · <span style=\"color:#93c5fd; font-weight:700;\">${_nbRest} restante${_nbRest > 1 ? 's' : ''}</span>` : ' · tout écoulé ✅'}</span>
+      <span onclick="event.stopPropagation(); pvSupprimerBilan('${b.id}')" style="cursor:pointer; font-size:10px; color:#f87171;" title="Supprimer ce bilan (définitif)">🗑</span>
+    </div>`;
+  }).join('');
+  return `<div style="margin-bottom: 10px; background: ${_isBilansColl ? '#0f172a' : '#0c1a24'}; border: 1px solid #22d3ee40; border-left: 3px solid #22d3ee; border-radius: 6px; overflow: hidden;">
+    <div onclick="toggleOpTypeCollapse('_BILANS_')" style="padding: 6px 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; background: #22d3ee1a;">
+      <span style="color: #67e8f9; font-size: 12px; font-weight: 700;">${_isBilansColl ? '▸' : '▾'}</span>
+      <span style="font-size: 11px; color: #67e8f9; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;">📊 Bilans de campagne</span>
+      <span style="font-size: 10px; color: #64748b;">${_campsFiniesPR.length ? `${_campsFiniesPR.length} campagne${_campsFiniesPR.length > 1 ? 's' : ''} finie${_campsFiniesPR.length > 1 ? 's' : ''} à regarder` : ''}${_campsFiniesPR.length && bilans.length ? ' · ' : ''}${bilans.length ? `${bilans.length} archivé${bilans.length > 1 ? 's' : ''}` : ''}</span>
+    </div>
+    ${_isBilansColl ? '' : `<div style="padding: 6px 0;">${_campsFiniesRows}${_campsFiniesRows && _bilansRows ? '<div style="font-size:9px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; padding:6px 12px 3px;">Photographies archivées</div>' : ''}${_bilansRows}</div>`}
+  </div>`;
+}
+
+// ═══════════════ 📋 POINTAGE ÉTAGÈRES LIQUIDES (2026-07-30, demande Fabien) ═══════════════
+// Chaque boutique pointe, gamme par gamme, si chaque parfum est POSÉ sur ses étagères.
+// Objectifs : « à sortir encore posés à tort », « en offre sans place », et pour l'admin
+// le compte d'emplacements manquants par boutique. Réponses stockées par parfum
+// (true = posé sur l'étagère) ; relance de vérification qui garde tout en pré-rempli.
+const PTG_STATUTS_PLACE = ['DANS_OFFRE', 'A_RENTRER', 'EN_ATTENTE', 'A_REMPLACER', 'FIN_DE_VIE'];
+function _ptgStatutEffectif(g, p) {
+  const s = (p && p.s && p.s !== 'OK') ? p.s : (g.statutVie || 'DANS_OFFRE');
+  return PTG_STATUTS_PLACE.includes(s) || s === 'A_SORTIR' || s === 'SORTI' || s === 'REPRISE' ? s : 'DANS_OFFRE';
+}
+// Les deux familles de parfums d'une gamme dans le pointage :
+// aPlacer → question « a sa place sur l'étagère ? » ; aVerifSortie → « encore posé ? » (à sortir).
+// SORTI et REPRISE sont hors pointage (déjà hors circuit).
+function _ptgParfumsDeGamme(g) {
+  const aPlacer = [], aVerifSortie = [];
+  (g.parfums || []).forEach(p => {
+    const s = _ptgStatutEffectif(g, p);
+    if (PTG_STATUTS_PLACE.includes(s)) aPlacer.push(p);
+    else if (s === 'A_SORTIR') aVerifSortie.push(p);
+  });
+  return { aPlacer, aVerifSortie };
+}
+function _ptgGammes() {
+  return baseLiq.filter(g => !_deletedIds.has(g.id))
+    .filter(g => { const f = _ptgParfumsDeGamme(g); return f.aPlacer.length + f.aVerifSortie.length > 0; })
+    .sort((a, b) => (a.marque + a.gamme + a.format).localeCompare(b.marque + b.gamme + b.format));
+}
+function _ptgRec(shop, gid, create) {
+  let r = pointagesEtagere.find(x => x && x.shop === shop && x.gammeId === gid);
+  if (!r && create) {
+    r = { id: 'PTG-' + shop + '-' + gid, shop, gammeId: gid, poses: {}, aRevoir: false, datePointage: '', _ts: new Date().toISOString() };
+    pointagesEtagere.push(r);
+  }
+  if (r && !r.poses) r.poses = {};
+  return r;
+}
+function _ptgGammeComplete(shop, g) {
+  const r = _ptgRec(shop, g.id);
+  if (!r) return false;
+  const f = _ptgParfumsDeGamme(g);
+  return f.aPlacer.concat(f.aVerifSortie).every(p => typeof r.poses[p.id] === 'boolean');
+}
+function _ptgGammePointee(shop, g) {
+  const r = _ptgRec(shop, g.id);
+  return !!r && !r.aRevoir && _ptgGammeComplete(shop, g);
+}
+// Récap d'une boutique : manquants (place attendue, pas posé), encore posés (à sortir posé),
+// gammes non pointées. C'est LA source du « combien d'emplacements il manque ».
+function _ptgRecapShopData(sh) {
+  const manquants = [], encorePoses = [], nonPointees = [];
+  _ptgGammes().forEach(g => {
+    const r = _ptgRec(sh, g.id);
+    const f = _ptgParfumsDeGamme(g);
+    if (!_ptgGammePointee(sh, g)) nonPointees.push(g);
+    if (!r) return;
+    f.aPlacer.forEach(p => { if (r.poses[p.id] === false) manquants.push({ g, p, statut: _ptgStatutEffectif(g, p) }); });
+    f.aVerifSortie.forEach(p => { if (r.poses[p.id] === true) encorePoses.push({ g, p }); });
+  });
+  return { manquants, encorePoses, nonPointees };
+}
+function _ptgPeutPointer() {
+  return isAdmin() || (typeof currentShop !== 'undefined' && currentShop && currentShop === _ptgShop);
+}
+
+let _ptgShop = '';
+const _ptgExpanded = new Set();
+function pvOuvrirPointageEtageres() {
+  if (!isAdmin() && !(typeof currentShop !== 'undefined' && currentShop)) {
+    pvAlert('Connecte-toi en boutique (ou en admin) pour pointer les étagères.'); return;
+  }
+  _ptgShop = isAdmin() ? (_ptgShop || SHOPS[0]) : currentShop;
+  let ov = document.getElementById('ptgOverlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'ptgOverlay';
+    ov.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.75); z-index:9500; display:flex; align-items:center; justify-content:center; animation:pvModalFadeIn 0.15s ease-out;';
+    ov.addEventListener('click', e => { if (e.target === ov) pvFermerPointage(); });
+    document.body.appendChild(ov);
+  }
+  _ptgRender();
+}
+function pvFermerPointage() {
+  const ov = document.getElementById('ptgOverlay');
+  if (ov) ov.remove();
+}
+function pvPtgChoisirShop(sh) {
+  if (!isAdmin()) return;
+  _ptgShop = sh;
+  _ptgRender();
+}
+function pvPtgToggleGamme(gid) {
+  if (_ptgExpanded.has(gid)) _ptgExpanded.delete(gid); else _ptgExpanded.add(gid);
+  _ptgRender();
+}
+function pvPtgSet(gid, pfId, val) {
+  if (!_ptgPeutPointer()) { pvAlert('Le pointage de ' + (SHOP_LABELS[_ptgShop] || _ptgShop) + ' est réservé à cette boutique (ou à l\'admin).'); return; }
+  const r = _ptgRec(_ptgShop, gid, true);
+  r.poses[pfId] = val;
+  r._ts = new Date().toISOString();
+  const g = baseLiq.find(x => x.id === gid);
+  if (g && !r.aRevoir && _ptgGammeComplete(_ptgShop, g)) r.datePointage = ymd(new Date());
+  saveData();
+  _ptgRender();
+}
+function pvPtgTout(gid, val) {
+  if (!_ptgPeutPointer()) return;
+  const g = baseLiq.find(x => x.id === gid);
+  if (!g) return;
+  const r = _ptgRec(_ptgShop, gid, true);
+  _ptgParfumsDeGamme(g).aPlacer.forEach(p => { r.poses[p.id] = val; });
+  r._ts = new Date().toISOString();
+  if (!r.aRevoir && _ptgGammeComplete(_ptgShop, g)) r.datePointage = ymd(new Date());
+  saveData();
+  _ptgRender();
+}
+function pvPtgToutSortiOk(gid) {
+  if (!_ptgPeutPointer()) return;
+  const g = baseLiq.find(x => x.id === gid);
+  if (!g) return;
+  const r = _ptgRec(_ptgShop, gid, true);
+  _ptgParfumsDeGamme(g).aVerifSortie.forEach(p => { r.poses[p.id] = false; });
+  r._ts = new Date().toISOString();
+  if (!r.aRevoir && _ptgGammeComplete(_ptgShop, g)) r.datePointage = ymd(new Date());
+  saveData();
+  _ptgRender();
+}
+function pvPtgConfirmerGamme(gid) {
+  if (!_ptgPeutPointer()) return;
+  const g = baseLiq.find(x => x.id === gid);
+  const r = _ptgRec(_ptgShop, gid, true);
+  if (!g || !_ptgGammeComplete(_ptgShop, g)) { pvAlert('Réponds d\'abord pour chaque parfum de la gamme.'); return; }
+  r.aRevoir = false;
+  r.datePointage = ymd(new Date());
+  r._ts = new Date().toISOString();
+  saveData();
+  _ptgRender();
+}
+async function pvPtgRelancer() {
+  if (!isAdmin()) { pvAlert('La relance du pointage est réservée à l\'admin.'); return; }
+  const lbl = SHOP_LABELS[_ptgShop] || _ptgShop;
+  if (!await pvConfirm('Relancer le pointage de ' + lbl + ' ?\nToutes ses gammes repassent « à vérifier » — les dernières réponses restent pré-remplies, l\'équipe confirme ou corrige.', { ok: 'Relancer', okColor: '#f59e0b' })) return;
+  const _now = new Date().toISOString();
+  pointagesEtagere.filter(x => x && x.shop === _ptgShop).forEach(r => { r.aRevoir = true; r._ts = _now; });
+  logAction('Pointage étagères relancé', '📋 ' + lbl);
+  saveData();
+  _ptgRender();
+}
+
+function _ptgRender() {
+  const ov = document.getElementById('ptgOverlay');
+  if (!ov) return;
+  const sh = _ptgShop;
+  const gammes = _ptgGammes();
+  const aPointer = gammes.filter(g => !_ptgGammePointee(sh, g));
+  const pointees = gammes.filter(g => _ptgGammePointee(sh, g));
+  const recap = _ptgRecapShopData(sh);
+  const peut = _ptgPeutPointer();
+  const shopChips = isAdmin()
+    ? SHOPS.map(s => `<span onclick="pvPtgChoisirShop('${s}')" style="cursor:pointer; padding:3px 10px; border-radius:3px; font-size:10px; font-weight:700; background:${s === sh ? SHOP_COLORS[s] : 'transparent'}; color:${s === sh ? '#0f172a' : SHOP_COLORS[s]}; border:1px solid ${SHOP_COLORS[s]}60;">${SHOP_LABELS[s]}</span>`).join('')
+    : `<span style="padding:3px 10px; border-radius:3px; font-size:10px; font-weight:700; background:${SHOP_COLORS[sh]}30; color:${SHOP_COLORS[sh]}; border:1px solid ${SHOP_COLORS[sh]}60;">${SHOP_LABELS[sh]}</span>`;
+
+  const _gammeHtml = (g) => {
+    const r = _ptgRec(sh, g.id);
+    const f = _ptgParfumsDeGamme(g);
+    const tous = f.aPlacer.concat(f.aVerifSortie);
+    const nbRep = tous.filter(p => r && typeof r.poses[p.id] === 'boolean').length;
+    const pointee = _ptgGammePointee(sh, g);
+    const openG = _ptgExpanded.has(g.id);
+    const svLbl = (g.statutVie && g.statutVie !== 'DANS_OFFRE') ? `<span style="font-size:9px; padding:1px 5px; background:#f59e0b20; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px;">${LIQ_GAMME_STATUT_LABELS[g.statutVie] || g.statutVie}</span>` : '';
+    const revoirLbl = r && r.aRevoir ? `<span style="font-size:9px; padding:1px 6px; background:#f59e0b25; color:#fbbf24; border:1px solid #f59e0b60; border-radius:3px; font-weight:700;">⟳ à re-vérifier</span>` : '';
+    const etatLbl = pointee
+      ? `<span style="font-size:9.5px; color:#4ade80; font-weight:700;">✓ pointée${r && r.datePointage ? ' le ' + fmtFR(r.datePointage) : ''}</span>`
+      : `<span style="font-size:9.5px; color:${nbRep > 0 ? '#fbbf24' : '#64748b'};">${nbRep}/${tous.length} parfum${tous.length > 1 ? 's' : ''}</span>`;
+    let inner = '';
+    if (openG) {
+      const btnsGamme = peut ? `<div style="display:flex; gap:6px; flex-wrap:wrap; padding:4px 0 6px;">
+        ${f.aPlacer.length ? `<span onclick="pvPtgTout('${g.id}', true)" style="cursor:pointer; font-size:9.5px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600;">✔ tout a sa place</span>
+        <span onclick="pvPtgTout('${g.id}', false)" style="cursor:pointer; font-size:9.5px; padding:2px 8px; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b40; border-radius:3px; font-weight:600;">✘ rien n'a sa place</span>` : ''}
+        ${f.aVerifSortie.length ? `<span onclick="pvPtgToutSortiOk('${g.id}')" style="cursor:pointer; font-size:9.5px; padding:2px 8px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600;">✔ plus aucun « à sortir » posé</span>` : ''}
+      </div>` : '';
+      const rowsPlace = f.aPlacer.map(p => {
+        const v = r ? r.poses[p.id] : undefined;
+        const s = _ptgStatutEffectif(g, p);
+        const sChip = s !== 'DANS_OFFRE' ? `<span style="font-size:8.5px; padding:1px 4px; background:#3b82f620; color:#93c5fd; border-radius:3px;">${STATUT_LABELS[s] || s}</span>` : '';
+        return `<div style="display:flex; align-items:center; gap:8px; padding:3px 6px; border-bottom:1px solid #1e293b;">
+          <span style="flex:1; font-size:11px; color:#e2e8f0;">${p.n} ${sChip}</span>
+          <span onclick="pvPtgSet('${g.id}','${p.id}', true)" style="cursor:pointer; font-size:10px; padding:3px 10px; border-radius:3px; font-weight:700; ${v === true ? 'background:#22c55e; color:#0f172a;' : 'background:transparent; color:#86efac; border:1px solid #22c55e50;'}">✔ posé</span>
+          <span onclick="pvPtgSet('${g.id}','${p.id}', false)" style="cursor:pointer; font-size:10px; padding:3px 10px; border-radius:3px; font-weight:700; ${v === false ? 'background:#f59e0b; color:#0f172a;' : 'background:transparent; color:#fbbf24; border:1px solid #f59e0b50;'}">✘ pas de place</span>
+        </div>`;
+      }).join('');
+      const rowsSortie = f.aVerifSortie.map(p => {
+        const v = r ? r.poses[p.id] : undefined;
+        return `<div style="display:flex; align-items:center; gap:8px; padding:3px 6px; border-bottom:1px solid #1e293b; background:#f9731608;">
+          <span style="flex:1; font-size:11px; color:#fdba74;">${p.n} <span style="font-size:8.5px; padding:1px 4px; background:#f9731620; color:#fdba74; border-radius:3px;">À sortir</span></span>
+          <span onclick="pvPtgSet('${g.id}','${p.id}', false)" style="cursor:pointer; font-size:10px; padding:3px 10px; border-radius:3px; font-weight:700; ${v === false ? 'background:#22c55e; color:#0f172a;' : 'background:transparent; color:#86efac; border:1px solid #22c55e50;'}">✔ plus sur l'étagère</span>
+          <span onclick="pvPtgSet('${g.id}','${p.id}', true)" style="cursor:pointer; font-size:10px; padding:3px 10px; border-radius:3px; font-weight:700; ${v === true ? 'background:#ef4444; color:#0f172a;' : 'background:transparent; color:#fca5a5; border:1px solid #ef444450;'}">⚠ encore posé</span>
+        </div>`;
+      }).join('');
+      const btnConfirme = (peut && r && r.aRevoir)
+        ? `<div style="padding:6px 0 2px;"><span onclick="pvPtgConfirmerGamme('${g.id}')" style="cursor:pointer; font-size:10px; padding:4px 12px; background:${_ptgGammeComplete(sh, g) ? '#22c55e' : '#334155'}; color:${_ptgGammeComplete(sh, g) ? '#0f172a' : '#94a3b8'}; border-radius:4px; font-weight:700;">✅ Vérifié, c'est juste</span></div>`
+        : '';
+      inner = `<div style="padding:2px 10px 8px 26px;">${btnsGamme}${rowsPlace}${rowsSortie}${btnConfirme}</div>`;
+    }
+    return `<div style="margin:0 0 4px; background:${pointee ? '#0f172a' : '#1e293b'}; border:1px solid ${pointee ? '#33415560' : '#475569'}; border-left:3px solid ${pointee ? '#22c55e' : (r && r.aRevoir ? '#f59e0b' : '#3b82f6')}; border-radius:4px; ${pointee && !openG ? 'opacity:0.65;' : ''}">
+      <div onclick="pvPtgToggleGamme('${g.id}')" style="display:flex; align-items:center; gap:8px; padding:5px 10px; cursor:pointer;">
+        <span style="color:#94a3b8; font-size:10px;">${openG ? '▾' : '▸'}</span>
+        <span style="flex:1; font-size:11px; color:#e2e8f0; font-weight:600;">${g.marque} — ${g.gamme} ${g.format || ''}</span>
+        ${svLbl}${revoirLbl}${etatLbl}
+      </div>
+      ${inner}
+    </div>`;
+  };
+
+  ov.innerHTML = `<div style="width:min(960px, 94vw); max-height:92vh; display:flex; flex-direction:column; background:#0f172a; border:1px solid #334155; border-radius:10px; padding:16px 18px; box-shadow:0 20px 60px rgba(0,0,0,0.5);" onclick="event.stopPropagation()">
+    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
+      <span style="font-size:14px; font-weight:700; color:#c4b5fd;">📋 Pointage étagères liquides</span>
+      <span style="display:inline-flex; gap:4px;">${shopChips}</span>
+      <span style="margin-left:auto; display:inline-flex; gap:6px; flex-wrap:wrap;">
+        ${peut ? `<span onclick="pvPtgAjouterTrouve()" style="cursor:pointer; font-size:10px; padding:4px 10px; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; font-weight:600;" title="Un liquide est posé sur l'étagère mais n'est pas dans la liste ? Déclare-le ici — il sera intégré à la base en « À sortir ».">➕ Trouvé sur l'étagère</span>` : ''}
+        <span onclick="pvPtgRecap()" style="cursor:pointer; font-size:10px; padding:4px 10px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:4px; font-weight:600;">📊 Récap</span>
+        ${isAdmin() ? `<span onclick="pvPtgRelancer()" style="cursor:pointer; font-size:10px; padding:4px 10px; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b40; border-radius:4px; font-weight:600;" title="Toutes les gammes de cette boutique repassent « à vérifier », réponses pré-remplies">⟳ Relancer</span>` : ''}
+        <span onclick="pvFermerPointage()" style="cursor:pointer; font-size:10px; padding:4px 10px; background:transparent; color:#94a3b8; border:1px solid #475569; border-radius:4px; font-weight:600;">✕ Fermer</span>
+      </span>
+    </div>
+    <div style="display:flex; gap:14px; flex-wrap:wrap; font-size:10.5px; margin-bottom:10px; color:#94a3b8;">
+      <span><b style="color:#4ade80;">${pointees.length}</b>/${gammes.length} gammes pointées</span>
+      <span>📥 <b style="color:#93c5fd;">${recap.manquants.length}</b> emplacement${recap.manquants.length > 1 ? 's' : ''} manquant${recap.manquants.length > 1 ? 's' : ''}</span>
+      <span>🔻 <b style="color:#fca5a5;">${recap.encorePoses.length}</b> « à sortir » encore posé${recap.encorePoses.length > 1 ? 's' : ''}</span>
+      ${peut ? '' : `<span style="color:#f59e0b;">👁 lecture seule — le pointage de ${SHOP_LABELS[sh]} se fait sur son poste (ou en admin)</span>`}
+    </div>
+    <div style="overflow-y:auto; flex:1 1 auto; min-height:0; padding-right:4px;">
+      ${aPointer.length ? `<div style="font-size:9.5px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.4px; padding:2px 0 6px;">À pointer (${aPointer.length})</div>` + aPointer.map(_gammeHtml).join('') : `<div style="color:#4ade80; font-size:11px; padding:8px 0;">🎉 Tout est pointé pour ${SHOP_LABELS[sh]}.</div>`}
+      ${pointees.length ? `<div style="font-size:9.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; padding:10px 0 6px;">Pointées (${pointees.length}) — clique pour corriger</div>` + pointees.map(_gammeHtml).join('') : ''}
+    </div>
+  </div>`;
+}
+
+function pvPtgRecap() {
+  const shopsARendre = isAdmin() ? SHOPS : [_ptgShop];
+  const sections = shopsARendre.map(sh => {
+    const d = _ptgRecapShopData(sh);
+    const _ligne = (x, extra) => `<div style="display:flex; gap:8px; align-items:center; padding:2px 8px; font-size:10.5px; color:#e2e8f0;">
+      <span style="flex:1;">${x.g.marque} — ${x.g.gamme} ${x.g.format || ''} · <b>${x.p.n}</b></span>${extra || ''}
+    </div>`;
+    const manqOffre = d.manquants.filter(m => !['A_RENTRER', 'EN_ATTENTE'].includes(m.statut));
+    const manqAVenir = d.manquants.filter(m => ['A_RENTRER', 'EN_ATTENTE'].includes(m.statut));
+    return `<div style="margin-bottom:14px; padding:10px 12px; background:#1e293b; border:1px solid ${SHOP_COLORS[sh]}40; border-left:3px solid ${SHOP_COLORS[sh]}; border-radius:6px;">
+      <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom:6px;">
+        <span style="font-size:12px; font-weight:700; color:${SHOP_COLORS[sh]};">${SHOP_LABELS[sh]}</span>
+        <span style="font-size:10.5px; color:#93c5fd; font-weight:700;">📥 ${d.manquants.length} emplacement${d.manquants.length > 1 ? 's' : ''} manquant${d.manquants.length > 1 ? 's' : ''}</span>
+        <span style="font-size:10.5px; color:#fca5a5; font-weight:700;">🔻 ${d.encorePoses.length} « à sortir » encore posé${d.encorePoses.length > 1 ? 's' : ''}</span>
+        <span style="font-size:10.5px; color:#94a3b8;">⏳ ${d.nonPointees.length} gamme${d.nonPointees.length > 1 ? 's' : ''} non pointée${d.nonPointees.length > 1 ? 's' : ''}</span>
+      </div>
+      ${d.encorePoses.length ? `<div style="font-size:9.5px; color:#fca5a5; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:4px 0 2px;">🔻 À sortir, encore sur l'étagère (à retirer)</div>` + d.encorePoses.map(x => _ligne(x)).join('') : ''}
+      ${manqOffre.length ? `<div style="font-size:9.5px; color:#93c5fd; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 0 2px;">📥 En offre mais pas sur l'étagère (à poser — ou place à trouver)</div>` + manqOffre.map(x => _ligne(x, `<span style="font-size:8.5px; padding:1px 4px; background:#3b82f620; color:#93c5fd; border-radius:3px;">${STATUT_LABELS[x.statut] || x.statut}</span>`)).join('') : ''}
+      ${manqAVenir.length ? `<div style="font-size:9.5px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 0 2px;">📦 Pas encore reçus, sans place prévue (emplacements à prévoir)</div>` + manqAVenir.map(x => _ligne(x, `<span style="font-size:8.5px; padding:1px 4px; background:#64748b20; color:#94a3b8; border-radius:3px;">${STATUT_LABELS[x.statut] || x.statut}</span>`)).join('') : ''}
+      ${!d.manquants.length && !d.encorePoses.length ? `<div style="font-size:10.5px; color:#4ade80; padding:2px 0;">✅ Rien à signaler${d.nonPointees.length ? ' (sur ce qui est pointé)' : ''}.</div>` : ''}
+    </div>`;
+  }).join('');
+  const html = `<div style="text-align:left; max-height:65vh; overflow-y:auto;">
+    <div style="font-size:13px; font-weight:700; color:#c4b5fd; margin-bottom:2px;">📊 Récap du pointage étagères</div>
+    <div style="font-size:10px; color:#64748b; margin-bottom:10px;">📥 = il manque un emplacement (le liquide devrait être posé, il ne l'est pas) · 🔻 = posé à tort (il est à sortir).</div>
+    ${sections}
+  </div>`;
+  _pvModal(html, [{ label: 'Fermer' }], () => {}, { maxWidth: 940 });
+}
+
+// ➕ « Trouvé sur l'étagère » : un liquide posé en boutique qui n'est pas dans la liste.
+// Décision Fabien (2026-07-30) : on l'INTÈGRE à la base en statut À SORTIR — il entre ainsi
+// dans le circuit normal (lignes à sortir par boutique) au lieu de rester un fantôme.
+function pvPtgAjouterTrouve() {
+  if (!_ptgPeutPointer()) return;
+  const html = `<div style="color:#c4b5fd; font-weight:700; font-size:13px; margin-bottom:4px;">➕ Liquide trouvé sur l'étagère — ${SHOP_LABELS[_ptgShop]}</div>
+    <div style="font-size:10px; color:#64748b; margin-bottom:10px;">Il n'est pas dans l'offre : il sera ajouté à la base en <b style="color:#fbbf24;">À sortir</b> (et pointé « encore posé » chez toi). Si la gamme existe déjà, seul le parfum est ajouté.</div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <label style="color:#94a3b8; font-size:11px;">Marque *<input id="_ptgMarque" type="text" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;"></label>
+      <label style="color:#94a3b8; font-size:11px;">Gamme *<input id="_ptgGamme" type="text" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;"></label>
+      <label style="color:#94a3b8; font-size:11px;">Format *
+        <select id="_ptgFormat" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;">
+          <option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option>
+        </select></label>
+      <label style="color:#94a3b8; font-size:11px;">Parfum *<input id="_ptgParfum" type="text" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;"></label>
+    </div>`;
+  const overlayM = _pvModal(html, [{ label: 'Ajouter en À sortir', color: '#f59e0b' }, { label: 'Annuler' }], (idx) => {
+    if (idx !== 0) return;
+    const marque = (overlayM.querySelector('#_ptgMarque').value || '').trim();
+    const gamme = (overlayM.querySelector('#_ptgGamme').value || '').trim();
+    const format = overlayM.querySelector('#_ptgFormat').value;
+    const parfum = (overlayM.querySelector('#_ptgParfum').value || '').trim();
+    if (!marque || !gamme || !parfum) { pvAlert('Marque, gamme et parfum sont obligatoires.'); return; }
+    const _norm = (s) => String(s || '').trim().toLowerCase();
+    let g = baseLiq.find(x => !_deletedIds.has(x.id) && _norm(x.marque) === _norm(marque) && _norm(x.gamme) === _norm(gamme) && _norm(x.format) === _norm(format));
+    let p = g ? (g.parfums || []).find(x => _norm(x.n) === _norm(parfum)) : null;
+    if (p && PTG_STATUTS_PLACE.includes(_ptgStatutEffectif(g, p))) {
+      // Il est en fait DANS l'offre : rien à créer, on le pointe simplement « posé ».
+      const r0 = _ptgRec(_ptgShop, g.id, true);
+      r0.poses[p.id] = true;
+      r0._ts = new Date().toISOString();
+      saveData(); _ptgRender();
+      pvAlert('« ' + parfum + ' » est déjà dans l\'offre (' + g.marque + ' — ' + g.gamme + ' ' + g.format + ').\nIl est pointé « posé » chez ' + SHOP_LABELS[_ptgShop] + ' — rien d\'autre à faire.');
+      return;
+    }
+    if (!g) {
+      g = { id: 'LIQ-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+        marque, gamme, format, pa: 0, pv: 0, marge: 0, nbRefs: 1, rp: '', profilChoisi: '', ct: '', roleChoisi: '',
+        statutVie: 'A_SORTIR', note: '', commentaire: 'Trouvé sur l\'étagère (' + SHOP_LABELS[_ptgShop] + ') au pointage du ' + fmtFR(ymd(new Date())), parfums: [] };
+      baseLiq.push(g);
+    }
+    if (!p) {
+      p = { id: g.id + '_pf' + Math.random().toString(36).slice(2, 7), n: parfum, ct: g.ct || '', s: 'A_SORTIR' };
+      g.parfums.push(p);
+    } else if (p.s !== 'A_SORTIR') {
+      p.s = 'A_SORTIR';
+    }
+    if (typeof ensureLiqModel === 'function') ensureLiqModel(g);
+    const r = _ptgRec(_ptgShop, g.id, true);
+    r.poses[p.id] = true; // encore posé — c'est la raison de la déclaration
+    r._ts = new Date().toISOString();
+    logAction('Liquide trouvé sur l\'étagère', '📋 ' + g.marque + ' — ' + g.gamme + ' ' + g.format + ' · ' + parfum + ' → intégré en À sortir (' + SHOP_LABELS[_ptgShop] + ')');
+    if (typeof syncAutoActions === 'function') syncAutoActions(); // crée les lignes À sortir par boutique
+    saveData();
+    if (typeof renderLiqAll === 'function') try { renderLiqAll(); } catch (e) {}
+    if (typeof renderDashboard === 'function') try { renderDashboard(); } catch (e) {}
+    _ptgRender();
+    pvAlert('« ' + g.marque + ' — ' + g.gamme + ' ' + g.format + ' · ' + parfum + ' » intégré à la base en À SORTIR.\nSes lignes « à sortir » par boutique sont créées — il est pointé « encore posé » chez ' + SHOP_LABELS[_ptgShop] + '.');
+  });
 }
 
 async function deleteCampagne(campagneId) {
@@ -24213,9 +24680,13 @@ function renderOps() {
 
   let opsHtml = '';
   if (filtered.length === 0) {
-    opsHtml = `<div style="padding:20px; text-align:center; color:#64748b; font-style:italic; background:#1e293b; border-radius:6px;">Aucune OP ne correspond au filtre</div>`;
+    // Même à liste vide (tout est terminé/filtré), les bilans de campagne restent accessibles.
+    opsHtml = _renderBlocBilansCampagne() + `<div style="padding:20px; text-align:center; color:#64748b; font-style:italic; background:#1e293b; border-radius:6px;">Aucune OP ne correspond au filtre</div>`;
   } else if (opViewMode === 'timeline') {
     // -------- VUE TIMELINE : Passé / En ce moment / Futur --------
+    // 📊 Bilans de campagne EN TÊTE de la frise aussi (retour Fabien 2026-07-30 « en vue
+    // timeline ») : la fin de campagne se constate souvent ici, le bilan doit y être.
+    opsHtml += _renderBlocBilansCampagne();
     const _tlBuckets = { TERMINEE: [], EN_COURS: [], IMMINENTE: [], A_VENIR: [] };
     filtered.forEach(op => {
       const ts = opTimeStatus(op);
@@ -24352,7 +24823,9 @@ function renderOps() {
           : '';
         const _campDots = renderAveragedShopDots(opsInC, opShopFilter);
         const _hasPR = (_byTypeInCamp['PRIX_ROUGE'] || []).length > 0;
-        const _campHasPRBilan = _hasPR || (_byTypeInCamp['COUP'] || []).length > 0; // 📊 bilan PR (2026-07-28)
+        // 📊 bilan PR (2026-07-28) : jugé sur TOUTES les OPs de la campagne (pas les filtrées) —
+        // le bouton reste là même quand un filtre de statut cache les PR terminées de la vue.
+        const _campHasPRBilan = ops.some(o => o.campagneId === cid && !o.annulee && !_deletedIds.has(o.id) && (o.type === 'PRIX_ROUGE' || o.type === 'COUP'));
 
         // Contenu déplié : sous-section par type d'OP
         let _campContent = '';
@@ -24414,28 +24887,8 @@ function renderOps() {
       </div>`;
     }
 
-    // ── 📊 Bilans archivés (2026-07-28, demande Fabien) : photographies de fin de campagne PR,
-    // gardées jusqu'à suppression par l'admin. Bloc replié par défaut, admin seulement. ──
-    if (typeof isAdmin === 'function' && isAdmin() && bilans.length > 0) {
-      const _isBilansColl = opTypeCollapsed.has('_BILANS_');
-      const _bilansRows = bilans.slice().sort((a, b) => (b.dateBilan || '').localeCompare(a.dateBilan || '')).map(b => {
-        const _nbRest = (b.lignes || []).filter(l => l.statut !== 'ECOULE').length;
-        return `<div onclick="pvVoirBilanArchive('${b.id}')" style="display:flex; gap:8px; align-items:center; padding:5px 10px; margin:0 6px 4px; background:#0f172a; border:1px solid #22d3ee30; border-left:3px solid #22d3ee; border-radius:4px; cursor:pointer;">
-          <span>📊</span>
-          <span style="flex:1; font-size:11px; color:#e2e8f0; font-weight:600;">${b.campagneNom}</span>
-          <span style="font-size:10px; color:#64748b;">${fmtFR(b.dateBilan)} · ${(b.lignes || []).length} ligne${(b.lignes || []).length > 1 ? 's' : ''}${_nbRest ? ` · <span style=\"color:#93c5fd; font-weight:700;\">${_nbRest} restante${_nbRest > 1 ? 's' : ''}</span>` : ' · tout écoulé ✅'}</span>
-          <span onclick="event.stopPropagation(); pvSupprimerBilan('${b.id}')" style="cursor:pointer; font-size:10px; color:#f87171;" title="Supprimer ce bilan (définitif)">🗑</span>
-        </div>`;
-      }).join('');
-      opsHtml += `<div style="margin-bottom: 10px; background: ${_isBilansColl ? '#0f172a' : '#0c1a24'}; border: 1px solid #22d3ee40; border-left: 3px solid #22d3ee; border-radius: 6px; overflow: hidden;">
-        <div onclick="toggleOpTypeCollapse('_BILANS_')" style="padding: 6px 10px; cursor: pointer; display: flex; align-items: center; gap: 8px; background: #22d3ee1a;">
-          <span style="color: #67e8f9; font-size: 12px; font-weight: 700;">${_isBilansColl ? '▸' : '▾'}</span>
-          <span style="font-size: 11px; color: #67e8f9; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase;">📊 Bilans archivés</span>
-          <span style="font-size: 10px; color: #64748b;">${bilans.length} bilan${bilans.length > 1 ? 's' : ''} · cliquer pour consulter · 🗑 pour effacer</span>
-        </div>
-        ${_isBilansColl ? '' : `<div style="padding: 6px 0;">${_bilansRows}</div>`}
-      </div>`;
-    }
+    // ── 📊 Bilans de campagne : bloc factorisé, partagé avec la vue timeline ──
+    opsHtml += _renderBlocBilansCampagne();
 
     // ─── Blocs par type : SEULEMENT les OPs sans campagne, à plat ───
     const _displayOrder = ['LIQUIDE_DU_MOMENT', 'NATIONALE', 'PRIX_ROUGE', 'NOUVEAUTE', 'COUP'];
