@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-30 17:03</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-31 19:52</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -23604,7 +23604,7 @@ function pvArchiverBilanCampagne(campagneId, opts) {
 //     boutiques qui ont encore du stock — et CONSERVÉES chez celles qui ont tout écoulé
 //     (le shunt les maintient cochées/grisées : le travail de gestion de stock n'est pas perdu).
 // La campagne elle-même est archivée : elle disparaît des vues, son bilan archivé reste.
-async function _cloturerCampagnePR(campagneId) {
+async function _cloturerCampagnePR(campagneId, destCampagneId) {
   const c = getCampagne(campagneId);
   if (!c) return null;
   const _tj = ymd(new Date());
@@ -23621,7 +23621,8 @@ async function _cloturerCampagnePR(campagneId) {
       op._ts = _now; op._adminTs = _now;
       nEcoulees++;
     } else {
-      op.campagneId = '';
+      // Destination choisie à la clôture (2026-07-31) : une autre campagne, ou libre.
+      op.campagneId = destCampagneId || '';
       op.dateFin = null; op._dateFinManuelle = false; op.motifCloture = '';
       const _cles = _clesEtapesEtiquettePR(op);
       SHOPS.forEach(sh => {
@@ -23644,7 +23645,8 @@ async function _cloturerCampagnePR(campagneId) {
   });
   c._archived = true;
   c._ts = _now;
-  if (typeof logAction === 'function') logAction('Campagne clôturée', '🏁 ' + c.nom + ' — ' + nEcoulees + ' OP écoulée(s) archivée(s), ' + nDetachees + ' détachée(s)/réouverte(s), ' + nCochesLib + ' coche(s) re-proposée(s)');
+  const _destC = destCampagneId ? getCampagne(destCampagneId) : null;
+  if (typeof logAction === 'function') logAction('Campagne clôturée', '🏁 ' + c.nom + ' — ' + nEcoulees + ' OP écoulée(s) archivée(s), ' + nDetachees + (_destC ? ' envoyée(s) dans « ' + _destC.nom + ' »' : ' détachée(s)/réouverte(s)') + ', ' + nCochesLib + ' coche(s) re-proposée(s)');
   if (typeof syncAutoActions === 'function') syncAutoActions(); // le shunt re-coche aussitôt les boutiques écoulées
   saveData();
   if (typeof renderOps === 'function') renderOps();
@@ -23658,11 +23660,49 @@ async function pvArchiverEtCloturerCampagne(campagneId) {
   const lignes = _computeBilanCampagnePR(campagneId);
   const nRest = lignes.filter(l => l.statut !== 'ECOULE').length;
   const nEcoul = lignes.length - nRest;
-  if (!await pvConfirm('Clôturer « ' + c.nom + ' » ?\n\n• le bilan du jour est archivé (photographie)\n• ' + nEcoul + ' OP écoulée(s) partout partent aux archives (« sorties »)\n• ' + nRest + ' restante(s) sont DÉTACHÉES de la campagne et réouvertes : prix gardés, étiquettes re-proposées aux boutiques qui ont encore du stock, coches conservées chez celles qui ont tout écoulé\n• la campagne disparaît des vues — son bilan archivé reste consultable', { ok: '🏁 Clôturer', okColor: '#22d3ee', title: 'Fin de campagne' })) return;
-  pvArchiverBilanCampagne(campagneId, { silencieux: true });
-  const r = await _cloturerCampagnePR(campagneId);
-  if (!r) return;
-  pvAlert('Campagne « ' + c.nom + ' » clôturée. 🏁\n\n• Bilan archivé (consultable dans « 📊 Bilans de campagne »)\n• ' + r.nEcoulees + ' OP écoulée(s) → archivées\n• ' + r.nDetachees + ' OP restante(s) → détachées et réouvertes, prix gardés' + (r.nCochesLib ? ', ' + r.nCochesLib + ' coche(s) re-proposée(s) là où il reste du stock' : '') + '\n\nTu peux rattacher les restantes à une nouvelle campagne (Destockage…) via 📣 sur leur carte.');
+  // Campagnes candidates pour accueillir les restantes : actives, pas celle qu'on ferme
+  const _campsCibles = campagnes.filter(x => x && x.id !== campagneId && !x._archived && !_deletedIds.has(x.id) && !isCampagneTerminee(x))
+    .sort((a, b) => (a.nom || '').localeCompare(b.nom || ''));
+  const _destSelect = nRest > 0 ? `<div style="margin-top:12px; padding:10px 12px; background:#1e293b; border:1px solid #8b5cf640; border-radius:6px;">
+      <div style="font-size:11px; color:#c4b5fd; font-weight:700; margin-bottom:6px;">📣 Où envoyer les ${nRest} restante${nRest > 1 ? 's' : ''} (aux nouveaux prix) ?</div>
+      <select id="_cloDest" onchange="var f=this.parentElement.querySelector('#_cloNewFields'); if (f) f.style.display = this.value === '_new' ? '' : 'none';" style="width:100%; padding:6px 10px; font-size:12px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:5px;">
+        <option value="">Nulle part — détachées, libres (rattachables plus tard via 📣)</option>
+        ${_campsCibles.map(x => `<option value="${x.id}">📣 ${x.nom}${x.dateDebut ? ' (' + fmtFR(x.dateDebut) + (x.dateFin ? ' → ' + fmtFR(x.dateFin) : '') + ')' : ''}</option>`).join('')}
+        <option value="_new">➕ Nouvelle campagne…</option>
+      </select>
+      <div id="_cloNewFields" style="display:none; margin-top:8px;">
+        <input id="_cloNewNom" type="text" placeholder="Nom de la nouvelle campagne (ex : Destockage été)" style="width:100%; padding:6px 10px; font-size:12px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:5px;">
+        <div style="font-size:9.5px; color:#64748b; margin-top:4px;">Créée sans dates — tu les règles ensuite via ✎ sur la campagne.</div>
+      </div>
+    </div>` : '';
+  const html = `<div style="text-align:left;">
+    <div style="color:#22d3ee; font-weight:700; font-size:14px; margin-bottom:8px;">🏁 Fin de campagne — ${c.nom}</div>
+    <div style="font-size:12px; color:#e2e8f0; line-height:1.6;">• le bilan du jour est archivé (photographie)<br>
+    • ${nEcoul} OP écoulée${nEcoul > 1 ? 's' : ''} partout part${nEcoul > 1 ? 'ent' : ''} aux archives (« sorties »)<br>
+    • ${nRest} restante${nRest > 1 ? 's' : ''} : réouverte${nRest > 1 ? 's' : ''}, prix gardés, étiquettes re-proposées aux boutiques qui ont encore du stock, coches conservées chez celles qui ont tout écoulé<br>
+    • la campagne disparaît des vues — son bilan archivé reste consultable</div>
+    ${_destSelect}
+  </div>`;
+  const _ov = _pvModal(html, [{ label: '🏁 Clôturer', color: '#22d3ee' }, { label: 'Annuler' }], async (idx) => {
+    if (idx !== 0) return;
+    let dest = '';
+    const _sel = _ov && _ov.querySelector ? _ov.querySelector('#_cloDest') : null;
+    if (_sel) dest = _sel.value || '';
+    if (dest === '_new') {
+      const _nomEl = _ov.querySelector('#_cloNewNom');
+      const _nom = ((_nomEl && _nomEl.value) || '').trim();
+      if (!_nom) { pvAlert('Donne un nom à la nouvelle campagne (ou choisis « Nulle part »).'); return; }
+      const _nc = { id: 'CAMP-' + String(nextCampagneId++).padStart(4, '0'), nom: _nom, dateDebut: '', dateFin: '', commentaire: 'Créée à la clôture de « ' + c.nom + ' »', _ts: new Date().toISOString() };
+      if (typeof ensureCampagneModel === 'function') ensureCampagneModel(_nc);
+      campagnes.push(_nc);
+      dest = _nc.id;
+    }
+    pvArchiverBilanCampagne(campagneId, { silencieux: true });
+    const r = await _cloturerCampagnePR(campagneId, dest);
+    if (!r) return;
+    const _destC = dest ? getCampagne(dest) : null;
+    pvAlert('Campagne « ' + c.nom + ' » clôturée. 🏁\n\n• Bilan archivé (consultable dans « 📊 Bilans de campagne »)\n• ' + r.nEcoulees + ' OP écoulée(s) → archivées\n• ' + r.nDetachees + ' OP restante(s) → ' + (_destC ? 'envoyées dans « ' + _destC.nom + ' », prix gardés' : 'détachées et réouvertes, prix gardés') + (r.nCochesLib ? ', ' + r.nCochesLib + ' coche(s) re-proposée(s) là où il reste du stock' : '') + (_destC ? '\n\nRègle les dates de « ' + _destC.nom + ' » via ✎ sur son en-tête.' : '\n\nTu peux rattacher les restantes à une campagne via 📣 sur leur carte.'));
+  }, { maxWidth: 640 });
 }
 
 function pvVoirBilanArchive(bilanId) {
