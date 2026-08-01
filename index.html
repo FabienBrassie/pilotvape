@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-07-31 20:09</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 16:34</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -23517,6 +23517,57 @@ function _computeBilanCampagnePR(campagneId) {
   return lignes;
 }
 
+// ── Bilan GÉNÉRIQUE (2026-08-01, retour Fabien : « la campagne lancement n'a pas de
+// bilan ? ») : pour les OP NON prix-rouge d'une campagne, l'avancement par boutique —
+// FAIT partout / PARTIEL (fait à X · reste à Y) / À FAIRE. Même verdict que les cartes
+// (opAllStepsDone), même mécanique d'archivage que le bilan PR.
+function _computeBilanCampagneGenerique(campagneId) {
+  const lignes = [];
+  ops.filter(o => o.campagneId === campagneId && !o.annulee && !_deletedIds.has(o.id)).forEach(op => {
+    if (op.type === 'PRIX_ROUGE' || op.type === 'COUP') return; // couverts par le bilan PR
+    ensureOpSteps(op);
+    const d = (typeof getOpProductDisplay === 'function') ? getOpProductDisplay(op) : { label: op.id };
+    const faites = SHOPS.filter(sh => opAllStepsDone(op, sh));
+    const restantes = SHOPS.filter(sh => !faites.includes(sh));
+    const tMeta = (typeof OP_TYPES !== 'undefined' && OP_TYPES.find(t => t.key === op.type)) || { label: op.type };
+    lignes.push({
+      opId: op.id, label: d.label || op.id, type: op.type, typeLabel: tMeta.label,
+      statut: restantes.length === 0 ? 'FAIT' : (faites.length > 0 ? 'PARTIEL' : 'A_FAIRE'),
+      boutiquesFaites: faites.slice(), boutiquesRestantes: restantes.slice()
+    });
+  });
+  const _rang = { FAIT: 0, PARTIEL: 1, A_FAIRE: 2 };
+  lignes.sort((a, b) => (_rang[a.statut] - _rang[b.statut]) || a.label.localeCompare(b.label));
+  return lignes;
+}
+function _renderBilanLignesGen(lignes) {
+  const META = {
+    FAIT:    { icon: '✅', label: 'Fait partout', color: '#22c55e' },
+    PARTIEL: { icon: '🟠', label: 'Partiel', color: '#f59e0b' },
+    A_FAIRE: { icon: '📦', label: 'À faire', color: '#60a5fa' }
+  };
+  const _cnt = { FAIT: 0, PARTIEL: 0, A_FAIRE: 0 };
+  lignes.forEach(l => { _cnt[l.statut] = (_cnt[l.statut] || 0) + 1; });
+  const head = `<div style="display:flex; gap:12px; margin-bottom:10px; font-size:11px;">
+    <span style="color:#86efac; font-weight:700;">✅ ${_cnt.FAIT} faite${_cnt.FAIT > 1 ? 's' : ''} partout</span>
+    <span style="color:#fbbf24; font-weight:700;">🟠 ${_cnt.PARTIEL} partielle${_cnt.PARTIEL > 1 ? 's' : ''}</span>
+    <span style="color:#93c5fd; font-weight:700;">📦 ${_cnt.A_FAIRE} à faire</span>
+  </div>`;
+  const rows = lignes.map(l => {
+    const m = META[l.statut];
+    const detail = l.statut === 'FAIT' ? m.label
+      : l.statut === 'PARTIEL' ? ('fait à ' + l.boutiquesFaites.map(sh => SHOP_LABELS[sh]).join(', ') + ' · reste à ' + l.boutiquesRestantes.map(sh => SHOP_LABELS[sh]).join(', '))
+      : ('reste partout (' + l.boutiquesRestantes.map(sh => SHOP_LABELS[sh]).join(', ') + ')');
+    return `<div style="display:flex; gap:8px; align-items:center; padding:5px 8px; background:${l.statut === 'FAIT' ? '#0f172a' : '#1e293b'}; border:1px solid ${m.color}30; border-left:3px solid ${m.color}; border-radius:4px; margin-bottom:4px; ${l.statut === 'FAIT' ? 'opacity:0.65;' : ''}">
+      <span style="flex-shrink:0;">${m.icon}</span>
+      <span style="flex-shrink:0; font-size:8.5px; padding:1px 5px; background:#8b5cf620; color:#c4b5fd; border-radius:3px; font-weight:700; text-transform:uppercase;">${l.typeLabel || l.type}</span>
+      <span title="${l.label}" style="flex:1; min-width:0; font-size:11.5px; color:#e2e8f0; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${l.label}</span>
+      <span style="flex-shrink:0; font-size:10px; color:${m.color};">${detail}</span>
+      <span onclick="event.stopPropagation(); switchTabProgrammatic('ops','${l.opId}')" style="flex-shrink:0; cursor:pointer; font-size:10px; color:#64748b;" title="Ouvrir la carte OP">↗</span>
+    </div>`;
+  }).join('');
+  return head + (rows || '<div style="color:#64748b; font-size:11px; padding:10px;">Aucune OP dans cette campagne.</div>');
+}
 function _renderBilanLignes(lignes, interactif) {
   const _fmtP = v => (typeof v === 'number' ? v.toFixed(2) + '€' : '—');
   const STATUT_META = {
@@ -23558,10 +23609,12 @@ function pvBilanCampagnePR(campagneId) {
   const c = getCampagne(campagneId);
   if (!c) return;
   const lignes = _computeBilanCampagnePR(campagneId);
+  const lignesGen = _computeBilanCampagneGenerique(campagneId); // campagne mixte : les autres OP aussi
   const html = `<div style="text-align:left; max-height:60vh; overflow-y:auto;">
     <div style="font-size:13px; font-weight:700; color:#c4b5fd; margin-bottom:2px;">📊 Bilan — ${c.nom}</div>
     <div style="font-size:10px; color:#64748b; margin-bottom:10px;">État à l'instant T · les prix des restants se changent ICI (étiquettes re-proposées automatiquement) · « Archiver » fige une photographie consultable plus tard.</div>
     ${_renderBilanLignes(lignes, true)}
+    ${lignesGen.length ? `<div style="font-size:9.5px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:10px 0 6px;">Autres OP de la campagne (avancement)</div>${_renderBilanLignesGen(lignesGen)}` : ''}
   </div>`;
   const _dejaCloturee = !!c._archived;
   const _btns = _dejaCloturee
@@ -23579,16 +23632,21 @@ function pvArchiverBilanCampagne(campagneId, opts) {
   const c = getCampagne(campagneId);
   if (!c) return;
   const _now = new Date().toISOString();
+  const _aPR = ops.some(o => o.campagneId === campagneId && !o.annulee && !_deletedIds.has(o.id) && (o.type === 'PRIX_ROUGE' || o.type === 'COUP'));
+  const _lGen = JSON.parse(JSON.stringify(_computeBilanCampagneGenerique(campagneId)));
   const b = {
     id: 'BILAN-' + String(nextBilanId++).padStart(4, '0'),
     campagneId: campagneId,
     campagneNom: c.nom,
     dateBilan: ymd(new Date()),
-    lignes: JSON.parse(JSON.stringify(_computeBilanCampagnePR(campagneId))),
+    genre: _aPR ? 'PR' : 'GEN',
+    lignes: _aPR ? JSON.parse(JSON.stringify(_computeBilanCampagnePR(campagneId))) : _lGen,
+    lignesGen: _aPR && _lGen.length ? _lGen : undefined,
     _ts: _now
   };
   bilans.push(b);
-  if (typeof logAction === 'function') logAction('Bilan de campagne archivé', '📊 ' + c.nom + ' — ' + b.lignes.length + ' ligne(s), ' + b.lignes.filter(l => l.statut !== 'ECOULE').length + ' restante(s)');
+  const _nSuivre = b.lignes.filter(l => l.statut !== 'ECOULE' && l.statut !== 'FAIT').length;
+  if (typeof logAction === 'function') logAction('Bilan de campagne archivé', '📊 ' + c.nom + ' — ' + b.lignes.length + ' ligne(s), ' + _nSuivre + ' à suivre');
   saveData();
   if (typeof renderOps === 'function') renderOps();
   if (!(opts && opts.silencieux)) pvAlert('Bilan « ' + c.nom + ' » archivé (' + fmtFR(b.dateBilan) + ').\nConsultable dans « 📊 Bilans de campagne », jusqu\'à ce que tu le supprimes.');
@@ -23796,9 +23854,35 @@ function pvVoirBilanArchive(bilanId) {
   const html = `<div style="text-align:left; max-height:60vh; overflow-y:auto;">
     <div style="font-size:13px; font-weight:700; color:#c4b5fd; margin-bottom:2px;">📊 Bilan archivé — ${b.campagneNom}</div>
     <div style="font-size:10px; color:#64748b; margin-bottom:10px;">Photographie du ${fmtFR(b.dateBilan)} (figée — les prix affichés sont ceux de ce jour-là).</div>
-    ${_renderBilanLignes(b.lignes || [], false)}
+    ${b.genre === 'GEN' ? _renderBilanLignesGen(b.lignes || []) : _renderBilanLignes(b.lignes || [], false)}
+    ${(b.lignesGen && b.lignesGen.length) ? `<div style="font-size:9.5px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:10px 0 6px;">Autres OP de la campagne (avancement du jour-là)</div>${_renderBilanLignesGen(b.lignesGen)}` : ''}
   </div>`;
   _pvModal(html, [{ label: 'Fermer' }], () => {}, { maxWidth: 940 });
+}
+
+// 📊 Entrée unique du bilan (2026-08-01) : campagne avec prix rouges → bilan PR (interactif) ;
+// sans → bilan générique (avancement par boutique), archivable et suivi de la clôture.
+function pvBilanCampagne(campagneId) {
+  const _aPR = ops.some(o => o.campagneId === campagneId && !o.annulee && !_deletedIds.has(o.id) && (o.type === 'PRIX_ROUGE' || o.type === 'COUP'));
+  if (_aPR) { pvBilanCampagnePR(campagneId); return; }
+  if (!isAdmin()) { pvAlert('Le bilan de campagne est un outil de pilotage — réservé à l\'admin.'); return; }
+  const c = getCampagne(campagneId);
+  if (!c) return;
+  const lignes = _computeBilanCampagneGenerique(campagneId);
+  const html = `<div style="text-align:left; max-height:60vh; overflow-y:auto;">
+    <div style="font-size:13px; font-weight:700; color:#c4b5fd; margin-bottom:2px;">📊 Bilan — ${c.nom}</div>
+    <div style="font-size:10px; color:#64748b; margin-bottom:10px;">Avancement par boutique à l'instant T · ↗ ouvre la carte OP · « Archiver » fige une photographie consultable plus tard.</div>
+    ${_renderBilanLignesGen(lignes)}
+  </div>`;
+  const _dejaCloturee = !!c._archived;
+  const _btns = _dejaCloturee
+    ? [{ label: '🗄️ Archiver ce bilan', color: '#22d3ee' }, { label: 'Fermer' }]
+    : [{ label: '🏁 Archiver + clôturer la campagne', color: '#22d3ee' }, { label: '🗄️ Archiver le bilan seulement' }, { label: 'Fermer' }];
+  _pvModal(html, _btns, (idx) => {
+    if (_dejaCloturee) { if (idx === 0) pvArchiverBilanCampagne(campagneId); return; }
+    if (idx === 0) { pvArchiverBilanCampagne(campagneId, { silencieux: true }); pvCloturerCampagne(campagneId); }
+    else if (idx === 1) pvArchiverBilanCampagne(campagneId);
+  }, { maxWidth: 940 });
 }
 
 async function pvSupprimerBilan(bilanId) {
@@ -23839,17 +23923,19 @@ function _renderBlocBilansCampagne() {
       <span style="font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;">📊 Voir le bilan</span>
     </div>`;
     }
-    // Campagne finie SANS prix rouge (lancement kits, exclus…) : clôture directe (2026-07-31)
-    const _opsNb = ops.filter(o => o.campagneId === c.id && !o.annulee && !_deletedIds.has(o.id)).length;
-    return `<div onclick="pvCloturerCampagne('${c.id}')" style="display:flex; gap:8px; align-items:center; padding:5px 10px; margin:0 6px 4px; background:#1a1030; border:1px solid #8b5cf640; border-left:3px solid #8b5cf6; border-radius:4px; cursor:pointer;" title="Clôturer : les OP réglées partent aux archives, les pas-finies repartent en individuel (ou dans une autre campagne)">
+    // Campagne finie SANS prix rouge (lancement kits, exclus…) : bilan générique (2026-08-01),
+    // qui porte lui-même « 🏁 Archiver + clôturer ».
+    const _lg2 = _computeBilanCampagneGenerique(c.id);
+    const _nbAF = _lg2.filter(l => l.statut !== 'FAIT').length;
+    return `<div onclick="pvBilanCampagne('${c.id}')" style="display:flex; gap:8px; align-items:center; padding:5px 10px; margin:0 6px 4px; background:#1a1030; border:1px solid #8b5cf640; border-left:3px solid #8b5cf6; border-radius:4px; cursor:pointer;" title="Ouvrir le bilan : avancement par boutique — archivable, clôture au bout">
       <span>📣</span>
       <span style="flex:1; font-size:11px; color:#e2e8f0; font-weight:600;">${c.nom}</span>
-      <span style="font-size:10px; color:#94a3b8;">finie le ${fmtFR(c.dateFin) || '?'} · ${_opsNb} OP${_opsNb > 1 ? 's' : ''}</span>
-      <span style="font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:700; white-space:nowrap;">🏁 Clôturer</span>
+      <span style="font-size:10px; color:#94a3b8;">finie le ${fmtFR(c.dateFin) || '?'} · ${_lg2.length} OP${_lg2.length > 1 ? 's' : ''}${_nbAF ? ` · <span style="color:#fbbf24; font-weight:700;">${_nbAF} pas finie${_nbAF > 1 ? 's' : ''}</span>` : ' · tout est fait ✅'}</span>
+      <span style="font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;">📊 Voir le bilan</span>
     </div>`;
   }).join('');
   const _bilansRows = bilans.slice().sort((a, b) => (b.dateBilan || '').localeCompare(a.dateBilan || '')).map(b => {
-    const _nbRest = (b.lignes || []).filter(l => l.statut !== 'ECOULE').length;
+    const _nbRest = (b.lignes || []).filter(l => l.statut !== 'ECOULE' && l.statut !== 'FAIT').length;
     return `<div onclick="pvVoirBilanArchive('${b.id}')" style="display:flex; gap:8px; align-items:center; padding:5px 10px; margin:0 6px 4px; background:#0f172a; border:1px solid #22d3ee30; border-left:3px solid #22d3ee; border-radius:4px; cursor:pointer;">
       <span>📊</span>
       <span style="flex:1; font-size:11px; color:#e2e8f0; font-weight:600;">${b.campagneNom}</span>
@@ -24958,9 +25044,9 @@ function renderOps() {
           : '';
         const _campDots = renderAveragedShopDots(opsInC, opShopFilter);
         const _hasPR = (_byTypeInCamp['PRIX_ROUGE'] || []).length > 0;
-        // 📊 bilan PR (2026-07-28) : jugé sur TOUTES les OPs de la campagne (pas les filtrées) —
-        // le bouton reste là même quand un filtre de statut cache les PR terminées de la vue.
-        const _campHasPRBilan = ops.some(o => o.campagneId === cid && !o.annulee && !_deletedIds.has(o.id) && (o.type === 'PRIX_ROUGE' || o.type === 'COUP'));
+        // 📊 bilan (2026-08-01 : pour TOUTES les campagnes, pas que les PR) : jugé sur toutes
+        // les OPs de la campagne (pas les filtrées) — le bouton survit aux filtres de statut.
+        const _campHasBilan = ops.some(o => o.campagneId === cid && !o.annulee && !_deletedIds.has(o.id));
 
         // Contenu déplié : sous-section par type d'OP
         let _campContent = '';
@@ -24993,7 +25079,7 @@ function renderOps() {
               <span onclick="event.stopPropagation(); openCampagneEtiquettesDialog('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#3b82f615; color:#60a5fa; border:1px solid #3b82f640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Générer étiquettes pour tous les produits">🏷️</span>
               ${_hasPR ? `<span onclick="event.stopPropagation(); generateAffichePrixRouge('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Affiche PDF Prix Rouge">📄</span>` : ''}
               <span onclick="event.stopPropagation(); pvOpenCheckList('campagne','${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#fbbf2415; color:#fcd34d; border:1px solid #fbbf2440; border-radius:3px; font-weight:600; white-space:nowrap;" title="La check-list boutique : toutes les étapes de tous les produits de la campagne, à cocher au même endroit">✅ Check-list</span>
-              ${_campHasPRBilan ? `<span onclick="event.stopPropagation(); pvBilanCampagnePR('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Bilan des prix rouges : écoulé / partiel / restant par boutique — prix des restants modifiables, photographie archivable">📊 Bilan</span>` : ''}
+              ${_campHasBilan ? `<span onclick="event.stopPropagation(); pvBilanCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Bilan de la campagne : prix rouges (écoulé/partiel/restant, prix modifiables) ou avancement par boutique — photographie archivable, clôture au bout">📊 Bilan</span>` : ''}
               <span onclick="event.stopPropagation(); openCampagneFormulaire('${cid}', [])" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:3px; font-weight:600; white-space:nowrap;" title="Ajouter ou retirer des OPs de cette campagne">📋 Gérer</span>
               ${isCampagneTerminee(c) && !c._archived ? `<span onclick="event.stopPropagation(); pvCloturerCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#22d3ee15; color:#67e8f9; border:1px solid #22d3ee40; border-radius:3px; font-weight:700; white-space:nowrap;" title="Clôturer : les OP réglées partent aux archives, les pas-finies repartent en individuel (ou dans une autre campagne), la campagne disparaît">🏁 Clôturer</span>` : ''}<span onclick="event.stopPropagation(); editCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#8b5cf61a; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:3px; font-weight:600; white-space:nowrap;" title="Modifier le nom et les dates">✎</span>
               <span onclick="event.stopPropagation(); deleteCampagne('${cid}')" style="cursor:pointer; font-size:9px; padding:2px 7px; background:#ef444415; color:#fca5a5; border:1px solid #ef444440; border-radius:3px; font-weight:600; white-space:nowrap;" title="Supprimer la campagne (refus si OPs actives)">🗑</span>
