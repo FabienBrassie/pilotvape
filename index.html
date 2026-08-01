@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 16:34</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 16:51</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -23616,7 +23616,10 @@ function pvBilanCampagnePR(campagneId) {
     ${_renderBilanLignes(lignes, true)}
     ${lignesGen.length ? `<div style="font-size:9.5px; color:#94a3b8; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:10px 0 6px;">Autres OP de la campagne (avancement)</div>${_renderBilanLignesGen(lignesGen)}` : ''}
   </div>`;
-  const _dejaCloturee = !!c._archived;
+  // 2026-08-01 : « déjà clôturée » = plus une seule OP rattachée non archivée — le drapeau
+  // _archived seul mentait quand l'auto-archivage 30 j avait avalé la campagne avec du
+  // travail encore dedans (cas du lancement kits de Fabien).
+  const _dejaCloturee = !ops.some(o => o.campagneId === campagneId && !o.annulee && !_deletedIds.has(o.id) && !o._archived);
   const _btns = _dejaCloturee
     ? [{ label: '🗄️ Archiver ce bilan', color: '#22d3ee' }, { label: 'Fermer' }]
     : [{ label: '🏁 Archiver + clôturer la campagne', color: '#22d3ee' }, { label: '🗄️ Archiver le bilan seulement' }, { label: 'Fermer' }];
@@ -23874,7 +23877,10 @@ function pvBilanCampagne(campagneId) {
     <div style="font-size:10px; color:#64748b; margin-bottom:10px;">Avancement par boutique à l'instant T · ↗ ouvre la carte OP · « Archiver » fige une photographie consultable plus tard.</div>
     ${_renderBilanLignesGen(lignes)}
   </div>`;
-  const _dejaCloturee = !!c._archived;
+  // 2026-08-01 : « déjà clôturée » = plus une seule OP rattachée non archivée — le drapeau
+  // _archived seul mentait quand l'auto-archivage 30 j avait avalé la campagne avec du
+  // travail encore dedans (cas du lancement kits de Fabien).
+  const _dejaCloturee = !ops.some(o => o.campagneId === campagneId && !o.annulee && !_deletedIds.has(o.id) && !o._archived);
   const _btns = _dejaCloturee
     ? [{ label: '🗄️ Archiver ce bilan', color: '#22d3ee' }, { label: 'Fermer' }]
     : [{ label: '🏁 Archiver + clôturer la campagne', color: '#22d3ee' }, { label: '🗄️ Archiver le bilan seulement' }, { label: 'Fermer' }];
@@ -24318,21 +24324,39 @@ async function deleteCampagne(campagneId) {
 
 // Marque comme archivées les campagnes terminées depuis > 30 jours et sans OP active.
 // Tourne uniquement côté admin (pour ne pas dériver côté boutique).
+// 2026-08-01 (retour Fabien, lancement kits avalé en silence) : « terminée par la date »
+// ne suffit PAS — une OP dont une boutique n'a pas fini son travail (installation pas faite,
+// coches restantes) garde sa campagne VIVANTE, pour que le geste de clôture (bilan → 🏁,
+// qui décide du sort des pas-finies) reste disponible. Et on GUÉRIT les campagnes déjà
+// avalées à tort : dés-archivées tant qu'il reste du travail rattaché.
+function _campATravailRestant(campagneId) {
+  return ops.some(o => o.campagneId === campagneId && !o._archived && !o.annulee && !_deletedIds.has(o.id)
+    && (opTimeStatus(o) !== 'TERMINEE' || SHOPS.some(sh => !opAllStepsDone(o, sh))));
+}
 function _autoArchiveCampagnesFinies() {
   if (typeof isAdmin !== 'function' || !isAdmin()) return 0;
   const cutoff = ymd(new Date(Date.now() - 30 * 86400000));
   let changed = 0;
   campagnes.forEach(c => {
-    if (c._archived) return;
+    if (c._archived) {
+      // Guérison : auto-archivée alors qu'il reste du travail → on la ressort
+      // (une clôture EXPLICITE détache les pas-finies avant d'archiver, elle, ne re-déclenche pas ça).
+      if (_campATravailRestant(c.id)) {
+        c._archived = false;
+        c._ts = new Date().toISOString();
+        console.log('[CAMPAGNES] ' + c.nom + ' dés-archivée : du travail reste rattaché (clôture à faire)');
+        changed++;
+      }
+      return;
+    }
     if (!c.dateFin) return;
     if (c.dateFin >= cutoff) return;
-    const hasActive = ops.some(o => o.campagneId === c.id && !o._archived && opTimeStatus(o) !== 'TERMINEE');
-    if (hasActive) return;
+    if (_campATravailRestant(c.id)) return;
     c._archived = true;
     c._ts = new Date().toISOString();
     changed++;
   });
-  if (changed > 0) console.log('[CAMPAGNES] ' + changed + ' campagne(s) auto-archivée(s) (terminée depuis > 30j, plus aucune OP active)');
+  if (changed > 0) console.log('[CAMPAGNES] ' + changed + ' campagne(s) auto-archivée(s)/dés-archivée(s)');
   return changed;
 }
 
