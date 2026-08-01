@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 18:15</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 18:25</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -24350,6 +24350,11 @@ function _ptgRender() {
     </div>`;
   };
 
+  // 2026-08-01 (retour Fabien : « l'affichage revient en haut de page, insupportable ») :
+  // chaque re-rendu reconstruit l'overlay — on mémorise la position de défilement de la
+  // liste et on la restaure juste après.
+  const _elListeAvant = document.getElementById('ptgListe');
+  const _scrollAvant = _elListeAvant ? _elListeAvant.scrollTop : 0;
   ov.innerHTML = `<div style="width:min(960px, 94vw); max-height:92vh; display:flex; flex-direction:column; background:#0f172a; border:1px solid #334155; border-radius:10px; padding:16px 18px; box-shadow:0 20px 60px rgba(0,0,0,0.5);" onclick="event.stopPropagation()">
     <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:8px;">
       <span style="font-size:14px; font-weight:700; color:#c4b5fd;">📋 Pointage étagères liquides</span>
@@ -24367,11 +24372,13 @@ function _ptgRender() {
       <span>🔻 <b style="color:#fca5a5;">${recap.encorePoses.length}</b> « à sortir » encore posé${recap.encorePoses.length > 1 ? 's' : ''}</span>
       ${peut ? '' : `<span style="color:#f59e0b;">👁 lecture seule — le pointage de ${SHOP_LABELS[sh]} se fait sur son poste (ou en admin)</span>`}
     </div>
-    <div style="overflow-y:auto; flex:1 1 auto; min-height:0; padding-right:4px;">
+    <div id="ptgListe" style="overflow-y:auto; flex:1 1 auto; min-height:0; padding-right:4px;">
       ${aPointer.length ? `<div style="font-size:9.5px; color:#94a3b8; text-transform:uppercase; letter-spacing:0.4px; padding:2px 0 6px;">À pointer (${aPointer.length})</div>` + aPointer.map(_gammeHtml).join('') : `<div style="color:#4ade80; font-size:11px; padding:8px 0;">🎉 Tout est pointé pour ${SHOP_LABELS[sh]}.</div>`}
       ${pointees.length ? `<div style="font-size:9.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; padding:10px 0 6px;">Pointées (${pointees.length}) — clique pour corriger</div>` + pointees.map(_gammeHtml).join('') : ''}
     </div>
   </div>`;
+  const _elListeApres = document.getElementById('ptgListe');
+  if (_elListeApres && _scrollAvant) _elListeApres.scrollTop = _scrollAvant;
 }
 
 function pvPtgRecap() {
