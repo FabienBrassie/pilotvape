@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 16:51</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:29</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2656,6 +2656,15 @@ function computeOpGlobalStepDefs(op) {
 
   // ── ÉTAPE 1 : Commander / Recevoir le produit (en PREMIER car c'est le prérequis) ──
   // NOUVEAUTE / EXCLU (fanfare) liée à une RENTRER : steps miroir synchro avec le dashboard.
+// La pose 📍 du produit fait-elle office d'« Installé en rayon » pour cette boutique ?
+// (fanfare à ligne À rentrer UNIQUE + pièce PRODUIT affectée à la boutique — 2026-08-01).
+// Dans ce cas : l'étape pose de l'OP et l'étape installe de la ligne sont le MÊME
+// interrupteur (paire _opActionStepMirror), et le miroir ① installe est masqué (pas de doublon).
+function _opPoseCrossActive(op, shop) {
+  if (!op || (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU')) return false;
+  if (typeof opRentrerParfumActions === 'function' && opRentrerParfumActions(op).length > 1) return false;
+  return opPiecesProduit(op).some(pp => pp.affectations && pp.affectations[shop] && pp.affectations[shop].emplacement);
+}
 function _maillonFanfareRentrer(op, shop, defs) {
     let aRF = actions.find(x => x.id === op.rentrerActionId);
     // ÉTAPE 5 : gamme déclinée par parfum — le modèle d'étapes se prend sur une ligne
@@ -2668,7 +2677,11 @@ function _maillonFanfareRentrer(op, shop, defs) {
       // affichait « Commandé sur Swappy » aux boutiques MÊME quand « commande gérée par Fabien »
       // était coché (incident nouveauté liquide). Le mute commandeAdmin/❓ s'applique désormais
       // partout (resp est transmis → lecture seule côté boutique via _adminStepReadOnly).
+      const _poseCross = _opPoseCrossActive(op, shop);
       getActionSteps(aRF).forEach(s => {
+        // 2026-08-01 : la pose 📍 (étape « Poser → Vitrine… ») EST l'installation pour cette
+        // boutique — on ne double pas avec le miroir « ① Installé en rayon ».
+        if (s.key === 'installe' && _poseCross) return;
         defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key,
           nat: s.nat, resp: s.resp, condLabel: s.condLabel, condKey: s.condKey ? 'rentrer_' + s.condKey : undefined });
       });
@@ -3572,7 +3585,11 @@ const ACTION_STEPS = {
   SORTIR:        [{ key: 'vendu',     label: 'Réappro coupée sur Swappy', nat: 'imm' },
                   { key: 'swappyOff', label: 'Désactivé sur Swappy', nat: 'cond', condLabel: 'quand le stock atteint 0' }],
   RENTRER:       [{ key: 'commande',  label: 'Commandé sur Swappy', nat: 'imm' },
-                  { key: 'recu',      label: 'Reçu en boutique', nat: 'evt', condLabel: 'attend la livraison' }],
+                  { key: 'recu',      label: 'Reçu en boutique', nat: 'evt', condLabel: 'attend la livraison' },
+                  // 2026-08-01 (demande Fabien) : reçu ≠ installé — une boutique peut attendre la
+                  // sortie d'un autre produit avant de poser celui-ci. Tant que « installé » n'est
+                  // pas coché, la ligne reste sur les radars (et apparaît dans « À installer »).
+                  { key: 'installe',  label: 'Installé en rayon', nat: 'cond', condKey: 'recu', condLabel: 'après réception' }],
   MISE_EN_PLACE: [{ key: 'monte',     label: 'Monté sur le mur', nat: 'imm' }],
   PRIX:          [{ key: 'etiquette', label: 'Étiquette faite', nat: 'imm' },
                   { key: 'rayon',     label: 'Changée en rayon', nat: 'imm' },
@@ -4077,7 +4094,10 @@ function getActionSteps(typeOrAction) {
       cmd.label = 'Commande saisie en stock Swappy';
       cmd.nat = 'cond'; cmd.condKey = 'recu'; cmd.condLabel = 'après réception';
     }
-    if (cmd && recu) return [recu, cmd];
+    if (cmd && recu) {
+      const inst = base.find(s => s.key === 'installe');
+      return inst ? [recu, cmd, inst] : [recu, cmd];
+    }
   }
   // « Qui commande ? » PAS ENCORE TRANCHÉ (incident 2026-07-11 : boutiques ont commandé en
   // direct une nouveauté gérée par Fabien). Tant que la décision n'est pas prise, commander
@@ -4133,6 +4153,14 @@ function ensureActionSteps(a) {
       // Migration : ancien key 'etiquetteRouge' → fusionné dans 'etiquette'
       if (typeof st.steps.etiquetteRouge === 'boolean' && typeof st.steps.etiquette !== 'boolean') {
         st.steps.etiquette = st.steps.etiquetteRouge;
+      }
+      // 2026-08-01 : arrivée de l'étape « Installé en rayon » — une boutique dont la ligne
+      // était DÉJÀ réglée (done) est réputée installée, avec un _stepTs frais (merge-safe).
+      // Sans ça, TOUT l'historique des rentrées rouvrirait d'un coup.
+      if (a.type === 'RENTRER' && typeof st.steps.installe !== 'boolean' && st.done === true) {
+        st.steps.installe = true;
+        if (!st._stepTs) st._stepTs = {};
+        st._stepTs.installe = new Date().toISOString();
       }
       // S'assurer que toutes les sous-étapes connues existent (ajout futur de step)
       defs.forEach(d => { if (typeof st.steps[d.key] !== 'boolean') st.steps[d.key] = false; });
@@ -6353,8 +6381,18 @@ function _opActionStepMirror(a, op) {
   }
   // Cas NOUVEAUTE / EXCLU (fanfare) : RENTRER ↔ OP.rentrer_* (même mapping que COUP)
   if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && a.type === 'RENTRER' && op.rentrerActionId === a.id) {
+    // 2026-08-01 : SEULE paire fanfare = pose 📍 croisée (installe ↔ plv_<pièce>_posee),
+    // car ce sont les seules clés STOCKÉES des deux côtés. Les rentrer_* restent des
+    // miroirs DYNAMIQUES (lus au rendu, jamais écrits sur l'OP) — une paire dessus
+    // déclencherait le OU-logique sur des caches sans timestamp.
     var a_to_oF = {};
-    (ACTION_STEPS.RENTRER || []).forEach(function(s) { a_to_oF[s.key] = 'rentrer_' + s.key; });
+    if (opRentrerParfumActions(op).length <= 1) {
+      var _ppCross = opPiecesProduit(op).find(function(pp) {
+        return pp.affectations && SHOPS.some(function(sh) { return pp.affectations[sh] && pp.affectations[sh].emplacement; });
+      });
+      if (_ppCross) a_to_oF.installe = 'plv_' + _ppCross.id + '_posee';
+    }
+    if (Object.keys(a_to_oF).length === 0) return null;
     var o_to_aF = {};
     Object.keys(a_to_oF).forEach(function(k) { o_to_aF[a_to_oF[k]] = k; });
     return { a_to_o: a_to_oF, o_to_a: o_to_aF };
@@ -6553,6 +6591,11 @@ function syncActionStepsToOp(a) {
     // ── NOUVEAUTE/EXCLU : les steps rentrer_* sont calculés dynamiquement au rendu ──
     // Pas d'écriture dans op.etats[sh].steps pour ces steps. On recalcule ost.done quand même.
     if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId) {
+      // 2026-08-01 : exception pose 📍 croisée — la paire installe ↔ plv_<pièce>_posee
+      // se propage (la table fanfare ne contient QUE cette paire, cf. _opActionStepMirror).
+      if (opPiecesProduit(op).length > 0 && opRentrerParfumActions(op).length <= 1) {
+        _syncCocheBidi(a, op);
+      }
       SHOPS.forEach(sh => {
         const ost = op.etats && op.etats[sh];
         if (!ost) return;
@@ -6560,7 +6603,7 @@ function syncActionStepsToOp(a) {
         if (ost.done && !ost.dateFait) ost.dateFait = ymd(new Date());
         if (!ost.done) ost.dateFait = null;
       });
-      return; // pas de miroir 1:1 pour les fanfares
+      return; // pas d'autre miroir 1:1 pour les fanfares (rentrer_* dynamiques)
     }
     // ── Cas normal : miroir via LE mécanisme unique (chantier 2026-07-18) ──
     // Avant : recopie écrasante action→OP qui pouvait effacer une coche OP plus récente.
@@ -6608,6 +6651,13 @@ function syncOpStepsToAction(op) {
   // → pas de propagation OP→action pour ces steps (c'est le dashboard qui fait foi).
   // On garde quand même le lien vers la RENTRER gamme pour les steps NON-miroir éventuels.
   // (Actuellement il n'y en a pas, mais c'est prêt pour l'avenir.)
+  // Fanfare avec pose 📍 active (2026-08-01) : la pose OP ↔ installe action doit se
+  // propager dans les DEUX sens — on ajoute la RENTRER liée aux cibles (bidi horodaté).
+  if ((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId
+      && opPiecesProduit(op).length > 0 && opRentrerParfumActions(op).length <= 1) {
+    var _aPose = actions.find(function(x) { return x.id === op.rentrerActionId && !x.annulee; });
+    if (_aPose) targets.push(_aPose);
+  }
   // Non-COUP avec commanderProduits → miroir vers RENTRER du même produit
   if (op.type !== 'COUP' && op.prep && op.prep.commanderProduits) {
     var _pid = (op.produitIds || [])[0];
@@ -19437,11 +19487,25 @@ function renderDashboard() {
   const opsInstallVisibles = fShop
     ? opsAInstaller.filter(op => !opAllStepsDone(op, fShop))
     : opsAInstaller;
-  const installBlockInner = opsInstallVisibles.length === 0
+  // 2026-08-01 (demande Fabien) : les produits REÇUS mais PAS INSTALLÉS rejoignent la card —
+  // le cas « on attend qu'un autre produit sorte pour pouvoir le poser ». Une ligne À rentrer
+  // avec « Reçu » coché et « Installé en rayon » pas coché (chez la boutique filtrée, ou
+  // n'importe laquelle en vue admin) est du travail d'installation en attente.
+  const actionsAInstaller = actions.filter(a => {
+    if (a.type !== 'RENTRER' || a.annulee || a._archived || a.dateCloture || _deletedIds.has(a.id)) return false;
+    const _shs = fShop ? [fShop] : SHOPS;
+    return _shs.some(sh => {
+      const st = a.etats && a.etats[sh];
+      return st && st.steps && st.steps.recu === true && st.steps.installe === false;
+    });
+  });
+  const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length;
+  const installBlockInner = _nbInstallTotal === 0
     ? ''
-    : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('');
-  const installBlock = opsInstallVisibles.length === 0 ? '' : block('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, installBlockInner,
-    'OPs dont l\'installation commence aujourd\'hui ou demain.');
+    : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')
+      + (actionsAInstaller.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Reçus, pas encore installés</div>` + renderGroupedActionCards(actionsAInstaller) : '');
+  const installBlock = _nbInstallTotal === 0 ? '' : block('install', '📦 À installer', '#f472b6', _nbInstallTotal, installBlockInner,
+    'OPs dont l\'installation commence aujourd\'hui ou demain · produits reçus en boutique mais pas encore posés en rayon.');
 
   // --- OPs terminées à désinstaller (inclut dernier jour = dateFin aujourd'hui) ---
   // Uniquement les OPs qui ont effectivement des étapes de désinstallation (matériel physique).
@@ -20593,9 +20657,9 @@ function renderDashboard() {
       })();
 
       const _cards = [];
-      if (opsInstallVisibles && opsInstallVisibles.length > 0) {
+      if (_nbInstallTotal > 0) {
         const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInstallVisibles, fShop) : '';
-        _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', opsInstallVisibles.length, _dotsHtml, _installCtx));
+        _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', _nbInstallTotal, _dotsHtml, _installCtx));
       }
       if (opsDesinstVisibles && opsDesinstVisibles.length > 0) {
         const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsDesinstVisibles, fShop) : '';
@@ -20655,7 +20719,7 @@ function renderDashboard() {
       onmouseover="this.style.background='${color}22'"
       onmouseout="this.style.background='transparent'">${label}</span>`;
   const summaryParts = [];
-  if (opsInstallVisibles.length) summaryParts.push(chip('#f472b6', `${opsInstallVisibles.length} à installer`, 'install'));
+  if (_nbInstallTotal) summaryParts.push(chip('#f472b6', `${_nbInstallTotal} à installer`, 'install'));
   if (opsDesinstVisibles.length) summaryParts.push(chip('#f97316', `${opsDesinstVisibles.length} à désinstaller`, 'desinstall'));
   if (sortirAffich.length) summaryParts.push(chip('#ef4444', `${sortirAffich.length} à sortir`, 'sortir'));
   if (retrosAffich.length) summaryParts.push(chip('#06b6d4', `${retrosAffich.length} rétrocession${retrosAffich.length > 1 ? 's' : ''}`, 'retros'));
