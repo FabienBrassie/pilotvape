@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:40</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:49</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -6713,7 +6713,24 @@ function toggleOpStep(opId, shop, stepKey, checked) {
   const _defs = computeOpShopStepDefs(op, shop);
   const _def = _defs.find(d => d.key === stepKey);
   const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
-  if (_def && _DASHBOARD_KINDS.includes(_def.kind) && (_def.kind !== 'prod' || _opProductInBase(op))) return; // lecture seule
+  if (_def && _DASHBOARD_KINDS.includes(_def.kind) && (_def.kind !== 'prod' || _opProductInBase(op))) {
+    // 2026-08-01 (retour Fabien : « installé » coché à tort, la ligne a disparu du dashboard,
+    // impossible de corriger) : les coches miroir ne sont PLUS en lecture seule — le clic
+    // s'écrit à sa SOURCE (la/les lignes du dashboard) via la même table de routage que la
+    // check-list. Décocher ici fait RÉAPPARAÎTRE la ligne au dashboard. La garde resp:'admin'
+    // de toggleActionStep continue de bloquer les étapes de Fabien côté boutique.
+    const _cible = !!checked;
+    const _cts = _pvCheckListWriteTargets(op, shop, _def);
+    if (_cts) {
+      _cts.filter(t => t.type === 'action').forEach(t => {
+        const x = actions.find(z => z.id === t.id);
+        const xs = x && x.etats && x.etats[shop];
+        const cur = !!(xs && xs.steps && xs.steps[t.key] === true);
+        if (cur !== _cible) toggleActionStep(t.id, shop, t.key);
+      });
+    }
+    return;
+  }
   op._ts = new Date().toISOString(); // timestamp pour sync multi-ordi
   ensureOpSteps(op);
   const st = op.etats[shop];
@@ -26690,10 +26707,13 @@ function _renderOpCardHtmlInner(op, options) {
         const _stepHub = opDispatchHubForStep(op, d);
         const _dispatchLocked = !!(_stepHub && sh !== _stepHub && !checked
           && !_getOpStepChecked(op, _stepHub, d));
-        const clickAttr = (_absentShop || isDashboardStep || _adminStepReadOnly || _dispatchLocked)
-          ? `title="${isDashboardStep ? 'Géré dans le dashboard — coche côté action' : _adminStepReadOnly ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : _dispatchLocked ? 'Verrouillé : ' + (SHOP_LABELS[_stepHub] || _stepHub) + ' doit déclarer sa réception en premier, puis Fabien dispatche' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
-          : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})"`;
-        const _isClickable = !_absentShop && !isDashboardStep && !_adminStepReadOnly && !_dispatchLocked;
+        // 2026-08-01 : les miroirs « ← dashboard » sont désormais CLIQUABLES — la coche
+        // s'écrit sur la ligne du dashboard (coche croisée, retour Fabien : pouvoir corriger
+        // un « installé » coché à tort même quand la ligne a disparu du dashboard).
+        const clickAttr = (_absentShop || _adminStepReadOnly || _dispatchLocked)
+          ? `title="${_adminStepReadOnly ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : _dispatchLocked ? 'Verrouillé : ' + (SHOP_LABELS[_stepHub] || _stepHub) + ' doit déclarer sa réception en premier, puis Fabien dispatche' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
+          : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})" ${isDashboardStep ? 'title="Coche croisée — s\'écrit sur la ligne du dashboard (la fait réapparaître si besoin)"' : ''}`;
+        const _isClickable = !_absentShop && !_adminStepReadOnly && !_dispatchLocked;
         const _dashLabel = isDashboardStep ? ` <span onclick="event.stopPropagation(); goToActionFromOp('${op.id}','${d.kind}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à l'action dans le dashboard">← dashboard</span>` : '';
         return `<div class="pv-step-row" ${clickAttr}
           style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_dispatchLocked ? 'opacity:0.45;' : ''} ${_stepGrey} ${_stepHighlight}"
