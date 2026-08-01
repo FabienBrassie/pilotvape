@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:49</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:57</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -7401,8 +7401,13 @@ function _applyActionShopChange(a, shop) {
       // et pouvait être archivée côté admin alors qu'elle était rouverte en boutique).
       a.dateCloture = null;
       a._reviveTs = new Date().toISOString();
+      // 2026-08-01 (retour Fabien : « installé » décoché mais la ligne n'apparaît nulle part) :
+      // une ligne réglée depuis > 15 j est _archived — la réouverture doit la DÉSARCHIVER,
+      // sinon elle reste invisible dans À rentrer ET À installer malgré le décochage.
+      if (a._archived) a._archived = false;
     } else if (!isFaitNow) {
       a.dateCloture = null;
+      if (a._archived && a._reviveTs) a._archived = false;
     }
   }
   // fix 2026-05-20 phase 1 : timestamp partagé pour cette cascade. Posé sur l'action
@@ -19544,8 +19549,17 @@ function renderDashboard() {
   // …et les OP nouveauté/exclu dont le PRODUIT est reçu mais l'installation pas finie
   // (cas Kit Force : ligne réglée depuis longtemps, le travail restant est côté OP).
   const _shsInstall = fShop ? [fShop] : SHOPS;
-  const opsRecuesNonInstallees = ops.filter(op =>
-    !opsInstallVisibles.includes(op) && _shsInstall.some(sh => _opRecueNonInstalleePourShop(op, sh)));
+  // Anti-doublon global (retour Fabien 2026-08-01) : la ligne et l'OP peuvent se qualifier
+  // chacune par une boutique DIFFÉRENTE — on ne montre jamais les deux pour le même produit,
+  // la LIGNE (qui porte la coche « installé ») a priorité.
+  const _idsLignesInstall = new Set(actionsAInstaller.map(a => a.id));
+  const opsRecuesNonInstallees = ops.filter(op => {
+    if (opsInstallVisibles.includes(op)) return false;
+    const _pfL = opRentrerParfumActions(op);
+    const _lignesOp = _pfL.length ? _pfL : (op.rentrerActionId ? actions.filter(x => x.id === op.rentrerActionId) : []);
+    if (_lignesOp.some(x => _idsLignesInstall.has(x.id))) return false;
+    return _shsInstall.some(sh => _opRecueNonInstalleePourShop(op, sh));
+  });
   const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length + opsRecuesNonInstallees.length;
   const installBlockInner = _nbInstallTotal === 0
     ? ''
