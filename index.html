@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 18:07</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 18:15</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -18813,7 +18813,17 @@ function renderDashboard() {
                   const _box = _checked
                     ? '<span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; background:#64748b; color:#0f172a; border:1px solid #64748b; border-radius:2px; font-size:9px; font-weight:700;">✓</span>'
                     : '<span style="display:inline-block; width:13px; height:13px; background:transparent; border:1px solid #475569; border-radius:2px;"></span>';
-                  return '<div style="display:flex; align-items:center; gap:5px; padding:2px 3px; font-size:10px; color:' + (_checked ? '#64748b' : '#94a3b8') + '; opacity:0.7;">' + _box + '<span style="' + (_checked ? 'text-decoration:line-through; color:#475569;' : '') + '">' + d.label + '</span> <span style="font-size:8px; color:#475569;">← OP</span></div>';
+                  // 2026-08-01 (retour Fabien) : les coches « ← OP » sont CLIQUABLES depuis la
+                  // ligne À rentrer — même triangle que côté OP (l'écriture va sur l'OP, source
+                  // de ces étapes). Gardes conservées : étape de Fabien côté boutique et verrou
+                  // de dispatch restent en lecture seule.
+                  const _admRO = d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin();
+                  const _hub = (typeof opDispatchHubForStep === 'function') ? opDispatchHubForStep(_op, d) : null;
+                  const _lock = !!(_hub && sh !== _hub && !_checked && !_getOpStepChecked(_op, _hub, d));
+                  const _click = (_admRO || _lock)
+                    ? ' title="' + (_admRO ? 'Géré par Fabien' : 'Verrouillé : ' + (SHOP_LABELS[_hub] || _hub) + ' doit déclarer sa réception d\'abord') + '"'
+                    : ' onclick="event.stopPropagation(); toggleOpStep(\'' + _op.id + '\',\'' + sh + '\',\'' + d.key + '\', ' + (!_checked) + ')" title="Coche croisée — s\'écrit sur l\'OP"';
+                  return '<div' + _click + ' style="display:flex; align-items:center; gap:5px; padding:2px 3px; font-size:10px; color:' + (_checked ? '#64748b' : '#94a3b8') + '; opacity:0.7;' + (_admRO || _lock ? '' : ' cursor:pointer;') + '">' + _box + '<span style="' + (_checked ? 'text-decoration:line-through; color:#475569;' : '') + '">' + d.label + '</span> <span style="font-size:8px; color:#475569;">← OP</span></div>';
                 }).join('');
                 return '<div style="padding:3px 5px; border-left:2px solid ' + _col + '30; border-radius:2px;"><div style="font-size:9px; color:' + _col + '; font-weight:600; margin-bottom:2px;">' + (SHOP_LABELS[sh] || sh) + '</div>' + _rows + '</div>';
               }).join('')}
