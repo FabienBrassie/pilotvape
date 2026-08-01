@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:29</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:40</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2656,6 +2656,31 @@ function computeOpGlobalStepDefs(op) {
 
   // ── ÉTAPE 1 : Commander / Recevoir le produit (en PREMIER car c'est le prérequis) ──
   // NOUVEAUTE / EXCLU (fanfare) liée à une RENTRER : steps miroir synchro avec le dashboard.
+// OP nouveauté/exclu OUVERTE dont le produit est REÇU chez une boutique mais dont
+// l'installation n'est pas finie chez elle (2026-08-01, cas Kit Force / Drag 6 : la ligne
+// À rentrer était déjà réglée — réputée installée par le grand-père — mais le travail
+// d'installation restant vit côté OP : PLV à poser, étapes de mise en place…).
+// Si la LIGNE porte encore son « Installé en rayon » à faire, c'est ELLE qui apparaît
+// dans la card (pas l'OP) — jamais les deux (anti-doublon).
+function _opRecueNonInstalleePourShop(op, sh) {
+  if (!op || op._archived || op.annulee) return false;
+  if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return false;
+  const _ts = opTimeStatus(op);
+  if (_ts === 'TERMINEE' || _ts === 'A_VENIR') return false;
+  const _pfs = opRentrerParfumActions(op);
+  const _lines = _pfs.length ? _pfs
+    : (op.rentrerActionId ? actions.filter(a => a.id === op.rentrerActionId && !a.annulee) : []);
+  if (!_lines.length) return false;
+  let _recu = true, _ligneEnCharge = false;
+  _lines.forEach(a => {
+    const st = a.etats && a.etats[sh];
+    if (!st || !st.steps || st.steps.recu !== true) _recu = false;
+    else if (st.steps.installe === false) _ligneEnCharge = true; // la ligne est déjà dans la card
+  });
+  if (!_recu || _ligneEnCharge) return false;
+  return !opAllStepsDone(op, sh);
+}
+
 // La pose 📍 du produit fait-elle office d'« Installé en rayon » pour cette boutique ?
 // (fanfare à ligne À rentrer UNIQUE + pièce PRODUIT affectée à la boutique — 2026-08-01).
 // Dans ce cas : l'étape pose de l'OP et l'étape installe de la ligne sont le MÊME
@@ -19499,11 +19524,17 @@ function renderDashboard() {
       return st && st.steps && st.steps.recu === true && st.steps.installe === false;
     });
   });
-  const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length;
+  // …et les OP nouveauté/exclu dont le PRODUIT est reçu mais l'installation pas finie
+  // (cas Kit Force : ligne réglée depuis longtemps, le travail restant est côté OP).
+  const _shsInstall = fShop ? [fShop] : SHOPS;
+  const opsRecuesNonInstallees = ops.filter(op =>
+    !opsInstallVisibles.includes(op) && _shsInstall.some(sh => _opRecueNonInstalleePourShop(op, sh)));
+  const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length + opsRecuesNonInstallees.length;
   const installBlockInner = _nbInstallTotal === 0
     ? ''
     : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')
-      + (actionsAInstaller.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Reçus, pas encore installés</div>` + renderGroupedActionCards(actionsAInstaller) : '');
+      + (actionsAInstaller.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Reçus, pas encore installés</div>` + renderGroupedActionCards(actionsAInstaller) : '')
+      + (opsRecuesNonInstallees.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Produits reçus — installation à finir (OP)</div>` + opsRecuesNonInstallees.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : '');
   const installBlock = _nbInstallTotal === 0 ? '' : block('install', '📦 À installer', '#f472b6', _nbInstallTotal, installBlockInner,
     'OPs dont l\'installation commence aujourd\'hui ou demain · produits reçus en boutique mais pas encore posés en rayon.');
 
