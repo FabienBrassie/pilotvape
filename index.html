@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 17:57</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 18:07</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2666,7 +2666,10 @@ function _opRecueNonInstalleePourShop(op, sh) {
   if (!op || op._archived || op.annulee) return false;
   if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return false;
   const _ts = opTimeStatus(op);
-  if (_ts === 'TERMINEE' || _ts === 'A_VENIR') return false;
+  // 2026-08-01 (retour Fabien : Kit Force/Drag 6 TERMINÉES, jamais réouvertes) : une OP
+  // terminée par la date compte AUSSI — le travail d'installation résiduel ne s'évapore
+  // pas à la date de fin. Seul le futur (A_VENIR) est exclu.
+  if (_ts === 'A_VENIR') return false;
   const _pfs = opRentrerParfumActions(op);
   const _lines = _pfs.length ? _pfs
     : (op.rentrerActionId ? actions.filter(a => a.id === op.rentrerActionId && !a.annulee) : []);
@@ -2678,7 +2681,9 @@ function _opRecueNonInstalleePourShop(op, sh) {
     else if (st.steps.installe === false) _ligneEnCharge = true; // la ligne est déjà dans la card
   });
   if (!_recu || _ligneEnCharge) return false;
-  return !opAllStepsDone(op, sh);
+  // Du travail restant HORS désinstallation (une OP finie qui n'attend plus que le retrait
+  // de PLV relève du bloc « À désinstaller », pas d'« À installer »).
+  return computeOpShopStepDefs(op, sh).some(d => d.kind !== 'desinstall' && !_getOpStepChecked(op, sh, d));
 }
 
 // La pose 📍 du produit fait-elle office d'« Installé en rayon » pour cette boutique ?
@@ -4479,6 +4484,19 @@ function _reveillerObjet(obj) {
   if (typeof _deletedIds !== 'undefined' && obj.id) _deletedIds.delete(obj.id);
 }
 
+// 2026-08-01 (cas Kit Force) : une ligne À rentrer ROUVERTE pour installation (reçu ✓,
+// installé ✗ quelque part) reste VIVANTE même si le produit est déjà « dans l'offre » —
+// la cascade a déjà passé le statut quand la ligne était réglée, mais le travail physique
+// de pose reste. Sans cette garde, le ménage par statut re-annulait la ligne à chaque
+// synchro (produit pas A_RENTRER → _cancelAction) et elle redisparaissait des radars.
+function _ligneEnInstallation(a) {
+  if (!a || a.type !== 'RENTRER' || a.annulee) return false;
+  return SHOPS.some(sh => {
+    const st = a.etats && a.etats[sh];
+    return st && st.steps && st.steps.recu === true && st.steps.installe === false;
+  });
+}
+
 // Clôture auto les actions d'un kit si son statut ne nécessite plus l'action
 function cleanupActionsForKit(kit) {
   actions.forEach(a => {
@@ -4495,6 +4513,7 @@ function cleanupActionsForKit(kit) {
     // Pour un kit "one-shot" actif (DANS_OFFRE/A_RENTRER), on maintient à la fois
     // la RENTRER (poser le kit) et la SORTIR (prix rouge + retirer en fin de coup).
     const isOneShotActif = kit.oneShot === true && ['DANS_OFFRE','A_RENTRER'].includes(kit.statutVie);
+    if (_ligneEnInstallation(a)) return; // installation en cours : la ligne vit (2026-08-01)
     const stillValid =
       (a.type === 'SORTIR' && (kit.statutVie === 'A_SORTIR' || isOneShotActif)) ||
       (a.type === 'RENTRER' && (kit.statutVie === 'A_RENTRER' || isOneShotActif));
@@ -4521,6 +4540,7 @@ function cleanupActionsForLiq(gamme) {
       if (gamme.statutVie === 'SORTI') _cancelAction(a);
       return;
     }
+    if (_ligneEnInstallation(a)) return; // installation en cours : la ligne vit (2026-08-01)
     const stillValid =
       (a.type === 'SORTIR' && (gamme.statutVie === 'A_SORTIR' || isOneShotActif)) ||
       (a.type === 'RENTRER' && (gamme.statutVie === 'A_RENTRER' || isOneShotActif));
@@ -4580,6 +4600,7 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
     const _pfEff = _pf || { s: parfumStatus === 'OK' ? '' : parfumStatus };
     const _couvertGamme = a.type === 'RENTRER' && gamme.statutVie === 'A_RENTRER' && _pfEstCouvertRentrer(_pfEff);
     const _couvertGammeSortir = a.type === 'SORTIR' && !a.motifSortie && gamme.statutVie === 'A_SORTIR' && _pfEstCouvertSortir(_pfEff);
+    if (_ligneEnInstallation(a)) return; // installation en cours : la ligne vit (2026-08-01)
     const stillValid =
       (a.type === 'SORTIR' && (parfumStatus === 'A_SORTIR' || isOneShotActif || _couvertGammeSortir)) ||
       (a.type === 'RENTRER' && (parfumStatus === 'A_RENTRER' || isOneShotActif || _couvertGamme));
@@ -4608,6 +4629,7 @@ function cleanupActionsForPd(pd) {
       if (pd.statutVie === 'SORTI') _cancelAction(a);
       return;
     }
+    if (_ligneEnInstallation(a)) return; // installation en cours : la ligne vit (2026-08-01)
     const stillValid =
       (a.type === 'SORTIR' && (pd.statutVie === 'A_SORTIR' || isOneShotActif)) ||
       (a.type === 'RENTRER' && (pd.statutVie === 'A_RENTRER' || isOneShotActif));
@@ -4773,6 +4795,26 @@ async function purgerDonneesAnciennes() {
 }
 
 function syncAutoActions() {
+  // Guérison (2026-08-01, cas Kit Force) : une ligne rouverte par décochage a pu, sur les
+  // versions précédentes, rester ARCHIVÉE ou même être RE-ANNULÉE par le ménage par statut
+  // (avec done forcé). Signature de l'accident : travail d'installation en attente
+  // (reçu ✓ installé ✗) + passeport _reviveTs. On la ressuscite proprement.
+  actions.forEach(a => {
+    if (a.type !== 'RENTRER') return;
+    const _instPend = SHOPS.some(sh => {
+      const st = a.etats && a.etats[sh];
+      return st && st.steps && st.steps.recu === true && st.steps.installe === false;
+    });
+    if (!_instPend) return;
+    if (a.annulee && a._reviveTs) {
+      _reveillerObjet(a); // annulee/dateCloture/_archived nettoyés, nouveau passeport
+      ensureActionSteps(a); // re-synchro done ↔ steps (le done forcé par _cancelAction saute)
+      console.log('[HEAL] ligne', a.id, 'ressuscitée (annulée à tort pendant son installation)');
+    } else if (a._archived && !a.annulee && !a.dateCloture && actionGlobalState(a) !== 'FAIT') {
+      a._archived = false;
+      console.log('[HEAL] ligne', a.id, 'désarchivée (rouverte par décochage, jamais désarchivée)');
+    }
+  });
   // Nettoyage : supprimer les actions parfum orphelines (parfum introuvable dans la gamme)
   const _orphanIds = new Set();
   actions.forEach(a => {
