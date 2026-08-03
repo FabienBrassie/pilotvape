@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 19:50</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 20:02</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4747,19 +4747,35 @@ function ensureAction(produitId, type, produitType, opts) {
     const _attenduC = type === 'RENTRER' ? 'A_RENTRER' : type === 'SORTIR' ? 'A_SORTIR' : null;
     let _cibleStatutC = null, _cibleTsC = '';
     if (_attenduC) {
+      // 2026-08-03 (cas Twenty) : la preuve d'un nouveau cycle est le changement de STATUT
+      // manuel (_sTs, posé par les setters) — jamais le _ts global, qui bouge à chaque
+      // édition et fabriquait des lignes fantômes pour de vieux produits simplement édités.
       if (produitType === 'liq') {
         const _gC = baseLiq.find(x => x.id === produitId);
-        if (_gC && opts.parfumId) { const _pC = (_gC.parfums || []).find(x => x.id === opts.parfumId); if (_pC) { _cibleStatutC = _pC.s; _cibleTsC = _pC._ts || ''; } }
-        else if (_gC) { _cibleStatutC = _gC.statutVie; _cibleTsC = _gC._ts || ''; }
+        if (_gC && opts.parfumId) { const _pC = (_gC.parfums || []).find(x => x.id === opts.parfumId); if (_pC) { _cibleStatutC = _pC.s; _cibleTsC = _pC._sTs || ''; } }
+        else if (_gC) { _cibleStatutC = _gC.statutVie; _cibleTsC = _gC._sTs || ''; }
       } else {
         const _bC = produitType === 'pd' ? basePD : baseKits;
         const _prodC = _bC.find(x => x.id === produitId);
-        if (_prodC) { _cibleStatutC = _prodC.statutVie; _cibleTsC = _prodC._ts || ''; }
+        if (_prodC) { _cibleStatutC = _prodC.statutVie; _cibleTsC = _prodC._sTs || ''; }
       }
+    }
+    // ⚡ one-shot : JAMAIS de nouveau cycle (réappro coupée d'office) — sa rentrée FAIT est
+    // définitive, la guérison one-shot bascule le statut vers « à sortir » (cas Japura).
+    let _cibleOneShotC = false;
+    if (produitType === 'liq') {
+      const _gOS = baseLiq.find(x => x.id === produitId);
+      if (_gOS && opts.parfumId) { const _pOS = (_gOS.parfums || []).find(x => x.id === opts.parfumId); _cibleOneShotC = !!(_pOS && _pOS.oneShot === true); }
+      else if (_gOS) { _cibleOneShotC = _gOS.oneShot === true; }
+    } else {
+      const _bOS = produitType === 'pd' ? basePD : baseKits;
+      const _prodOS = _bOS.find(x => x.id === produitId);
+      _cibleOneShotC = !!(_prodOS && _prodOS.oneShot === true);
     }
     const _finieC = actionGlobalState(existingDone) === 'FAIT' || !!existingDone.dateCloture;
     const _nouveauCycle = _attenduC && _finieC && _cibleStatutC === _attenduC
       && _cibleTsC && existingDone._ts && _cibleTsC > existingDone._ts
+      && !_cibleOneShotC
       && !existingDone.motifSortie; // reprises : jamais de cycle auto
     if (_nouveauCycle) {
       const _nbCycles = actions.filter(a => a.produitId === produitId && a.type === type
@@ -5257,34 +5273,54 @@ function syncAutoActions() {
   // activité de l'action (_ts cible > _ts action), c'est un choix manuel plus récent
   // (ex : Fabien repasse un parfum « à rentrer » pour un nouveau cycle) → on ne touche pas.
   actions.forEach(a => {
-    if (a.annulee || a._archived) return;
+    if (a.annulee) return;
     if (a.type !== 'RENTRER' && a.type !== 'SORTIR') return;
     if (a.motifSortie === 'REPRISE') return; // reprise : clôture manuelle 🏁, jamais de cascade auto
     if (actionGlobalState(a) !== 'FAIT') return;
     const _attendu = a.type === 'RENTRER' ? 'A_RENTRER' : 'A_SORTIR';
-    let _cibleEnAttente = false, _cibleTs = '';
+    // 2026-08-03 (cas Twenty, 3e fantôme du jour) : le garde-fou comparait le _ts GLOBAL de
+    // la cible — qui bouge à CHAQUE édition (goût, prix, testeur…) — et excluait les actions
+    // archivées. Résultat : tout produit édité ou rentré depuis > 15 j devenait inguérissable.
+    // Désormais : ① la preuve d'un choix de statut manuel est l'horodatage DÉDIÉ `_sTs`
+    // (posé par les 4 setters de statut) — pas d'`_sTs` plus récent = pas de choix manuel ;
+    // ② les actions archivées sont éligibles ; ③ si un NOUVEAU CYCLE est en cours (ligne
+    // vivante du même type avec du travail COMMENCÉ), on ne touche à rien.
+    let _cibleEnAttente = false, _cibleSTs = '', _cibleOneShot = false;
     if (a.produitType === 'liq') {
       const g = baseLiq.find(x => x.id === a.produitId);
       if (!g) return;
       if (a.produitParfumId) {
         const p = (g.parfums || []).find(x => x.id === a.produitParfumId);
         if (!p) return;
-        _cibleEnAttente = (p.s === _attendu); _cibleTs = p._ts || '';
+        _cibleEnAttente = (p.s === _attendu); _cibleSTs = p._sTs || ''; _cibleOneShot = p.oneShot === true;
       } else {
         // Gamme-level : statut gamme en attente OU parfums « à rentrer » résiduels
-        // (gamme déjà dans l'offre par la règle de priorité — cas PuffX).
-        const _pfResiduels = a.type === 'RENTRER' && (g.parfums || []).some(x => x.s === 'A_RENTRER');
-        _cibleEnAttente = (g.statutVie === _attendu || _pfResiduels); _cibleTs = g._ts || '';
+        // (gamme déjà dans l'offre par la règle de priorité — cas PuffX). Un parfum dont le
+        // statut a été choisi À LA MAIN après la fin de l'action ne compte pas comme résiduel.
+        const _pfResiduels = a.type === 'RENTRER' && (g.parfums || []).some(x => x.s === 'A_RENTRER' && !(x._sTs && a._ts && x._sTs > a._ts));
+        _cibleEnAttente = (g.statutVie === _attendu || _pfResiduels); _cibleSTs = g._sTs || ''; _cibleOneShot = g.oneShot === true;
       }
     } else {
       const _base = a.produitType === 'pd' ? basePD : baseKits;
       const prod = _base.find(x => x.id === a.produitId);
       if (!prod) return;
-      _cibleEnAttente = (prod.statutVie === _attendu); _cibleTs = prod._ts || '';
+      _cibleEnAttente = (prod.statutVie === _attendu); _cibleSTs = prod._sTs || ''; _cibleOneShot = prod.oneShot === true;
     }
     if (!_cibleEnAttente) return;
-    if (_cibleTs && a._ts && _cibleTs > a._ts) return; // édition manuelle plus récente → on respecte
-    console.log('[GUERISON-CASCADE]', a.id, a.type, '→ cascade rejouée (action FAIT partout, statut resté en attente)');
+    // ③ nouveau cycle en cours : ligne vivante du même type avec au moins UNE coche posée
+    // (une ligne totalement vierge n'est pas une preuve de travail — si la guérison bascule
+    // le statut, le ménage par statut l'annulera proprement).
+    const _cycleEnCours = actions.some(x => x !== a && x.type === a.type && x.produitId === a.produitId
+      && (a.produitParfumId ? x.produitParfumId === a.produitParfumId : !x.produitParfumId)
+      && !x.annulee && actionGlobalState(x) !== 'FAIT'
+      && SHOPS.some(sh => { const st = x.etats && x.etats[sh]; return st && st.steps && Object.keys(st.steps).some(k => st.steps[k] === true); }));
+    if (_cycleEnCours) return;
+    // ⚡ ONE-SHOT rentré (cas Japura) : même le choix de statut manuel ne compte pas — un
+    // one-shot n'a qu'UN cycle par définition (réappro coupée d'office), sa rentrée FAITE
+    // est LA rentrée.
+    const _garde = !(_cibleOneShot && a.type === 'RENTRER');
+    if (_garde && _cibleSTs && a._ts && _cibleSTs > a._ts) return; // choix de STATUT manuel plus récent → respecté
+    console.log('[GUERISON-CASCADE]', a.id, a.type, '→ cascade rejouée (action FAIT partout, statut resté en attente' + (_garde ? '' : ', one-shot') + ')');
     _applyActionShopChange(a, SHOPS[0]);
   });
   // Nettoyage : supprimer les actions parfum orphelines (parfum introuvable dans la gamme)
@@ -8076,7 +8112,7 @@ function _applyActionShopChange(a, shop) {
             // Rentrée de la GAMME ENTIÈRE validée → les parfums encore "à rentrer" passent dans
             // l'offre (ou « à sortir » pour un parfum ⚡). Sans ça, ils restaient "à rentrer" en
             // base et regénéraient des lignes fantômes (incohérence signalée Fabien 2026-06-18).
-            (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = _apresRentree(p); p._ts = _nowTs; } });
+            (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER' && !(p._sTs && a._ts && p._sTs > a._ts)) { p.s = _apresRentree(p); p._ts = _nowTs; } });
             syncLiqToPropLiq(liq);
           }
           // PD : statutVie mis à jour directement via prod.statutVie
@@ -8088,7 +8124,7 @@ function _applyActionShopChange(a, shop) {
         // rentrée gamme validée partout = ces parfums passent dans l'offre (ou « à sortir »
         // pour un ⚡), même quand le statut de la gamme, lui, n'a pas à bouger.
         let _swept = false;
-        (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = _apresRentree(p); p._ts = _nowTs; _swept = true; } });
+        (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER' && !(p._sTs && a._ts && p._sTs > a._ts)) { p.s = _apresRentree(p); p._ts = _nowTs; _swept = true; } });
         if (_swept) { liq._ts = _nowTs; syncLiqToPropLiq(liq); }
       }
     } else if (a.type === 'PRIX' && typeof a.prixCible === 'number') {
@@ -14429,6 +14465,7 @@ async function updateKitField(id, field, val) {
       recalcCaseTech(kit);
     } else {
       kit[field] = val;
+      if (field === 'statutVie') kit._sTs = new Date().toISOString(); // 2026-08-03 (cas Twenty) : horodatage DÉDIÉ au changement de statut — le _ts global bouge à chaque édition, il ne peut pas servir de preuve de « choix de statut manuel » (guérison-cascade + nouveaux cycles raisonnent sur _sTs)
     }
     syncKitToProp(kit);
     // Si le PV/PA/profil/rôle change → resynchroniser les actions auto (verdict, auto-remplace, etc.)
@@ -15683,6 +15720,7 @@ async function updateLiqField(id, field, val) {
       }
     }
     g[field] = val;
+    if (field === 'statutVie') g._sTs = _now; // 2026-08-03 (cas Twenty) : horodatage DÉDIÉ au changement de statut — le _ts global bouge à chaque édition, il ne peut pas servir de preuve de « choix de statut manuel » (guérison-cascade + nouveaux cycles raisonnent sur _sTs)
     // Si on change le rôle manuellement, s'assurer que roleCalc est à jour pour la détection d'override
     if (field === 'roleChoisi' && !g.roleCalc) {
       g.roleCalc = calcLiqRole(g.format, g.pa, g.pv);
@@ -15776,6 +15814,7 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
       }
     }
     p[field] = val;
+    if (field === 's') p._sTs = _now; // 2026-08-03 (cas Twenty) : horodatage DÉDIÉ au changement de statut — le _ts global bouge à chaque édition, il ne peut pas servir de preuve de « choix de statut manuel » (guérison-cascade + nouveaux cycles raisonnent sur _sTs)
   }
   // Mise à jour nbRefs
   g.nbRefs = g.parfums.filter(pf => pf.s !== 'SORTI').length;
@@ -30463,6 +30502,7 @@ async function updatePdField(id, field, val) {
     }
   } else {
     pd[field] = val;
+    if (field === 'statutVie') pd._sTs = new Date().toISOString(); // 2026-08-03 (cas Twenty) : horodatage DÉDIÉ au changement de statut — le _ts global bouge à chaque édition, il ne peut pas servir de preuve de « choix de statut manuel » (guérison-cascade + nouveaux cycles raisonnent sur _sTs)
   }
   if (field === 'caseTech') pd.categorie = pdCategoryFromCase(val);
   // Auto-calcul du rôle d'après le barème PD → synchronise roleChoisi
