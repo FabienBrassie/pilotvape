@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 22:02</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 23:47</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -589,6 +589,7 @@ window.addEventListener('DOMContentLoaded', function() {
         <option value="case">Puis: Case</option><option value="pv">Puis: PV</option><option value="marge">Puis: Marge</option><option value="modele">Puis: Modèle</option><option value="w">Puis: W</option>
       </select>
       <button onclick="openEtiquettesDialog()" title="Générer des étiquettes PDF pour les produits filtrés ci-dessus" style="padding:6px 12px; font-size:11px; background:#f59e0b; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-weight:700;">🏷️ Étiquettes…</button>
+      <button onclick="openVitrineDialogFromKits()" title="Planche d'étiquettes vitrine CIGUSTO (48 par feuille A4, déjà réduites à 50 % — imprimer à 100 %) pour les produits filtrés ci-dessus" style="padding:6px 12px; font-size:11px; background:#38bdf8; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-weight:700;">🪟 Vitrine…</button>
     </div>
     <div id="kitsDisplay"></div>
   </div>
@@ -645,6 +646,7 @@ window.addEventListener('DOMContentLoaded', function() {
       <select id="pdSort" onchange="renderBasePD();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="case">⭐ Tri: Case technique</option><option value="grille">Vue: Grille PA / MM</option><option value="marque">Tri: Marque</option><option value="marge">Tri: Marge €</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="statut">Tri: Statut</option>
       </select>
+      <button onclick="openVitrineDialogFromPd()" title="Planche d'étiquettes vitrine CIGUSTO (48 par feuille A4, déjà réduites à 50 % — imprimer à 100 %) pour les pièces détachées filtrées ci-dessus" style="padding:6px 12px; font-size:11px; background:#38bdf8; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-weight:700;">🪟 Vitrine…</button>
       <button onclick="showAddPdForm()" style="background:#06b6d4; padding:6px 14px; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-size:12px; font-weight:700;">+ Ajouter PD</button>
     </div>
     <div id="pdDisplay"></div>
@@ -19630,10 +19632,13 @@ function renderDashboard() {
             opTrigger = `<span style="font-size:10px; padding:2px 8px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:3px; font-weight:700;">🏷️ OP ${linkedOp.id}${opClosed}</span>`;
           }
         }
-        const etiqBtns = SHOPS.map(sh => {
+        // Étiquettes FT : kits uniquement (seuls produits sur le Freetouch — pour un PD
+        // le bouton générait silencieusement rien). 🪟 Vitrine : kits ET PD.
+        const etiqBtns = (kit ? SHOPS.map(sh => {
           const col = SHOP_COLORS[sh];
           return `<button onclick="event.stopPropagation(); generateEtiquetteFromPrixAction('${a.id}','${sh}')" title="Générer une étiquette PDF pour ${SHOP_LABELS[sh]} (prix cible ${cible})" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:transparent; color:${col}; border:1px solid ${col}; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">🏷️ ${SHOP_LABELS[sh]}</button>`;
-        }).join(' ');
+        }).join(' ') + ' ' : '')
+          + `<button onclick="event.stopPropagation(); openVitrineDialogFromPrixAction('${a.id}')" title="Planche d'étiquette vitrine CIGUSTO (48 par feuille A4)${cible !== '—' ? ' — prix cible ' + cible : ''}" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:transparent; color:#38bdf8; border:1px solid #38bdf8; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">🪟 Vitrine</button>`;
         const noteBlock = a.note
           ? `<span style="flex-basis:100%; height:0;"></span><span style="font-size:10.5px; color:#fbbf24; background:#fbbf2418; border-left:2px solid #fbbf24; padding:2px 8px; border-radius:2px; font-style:italic;">💬 ${a.note.replace(/</g,'&lt;')}</span>`
           : '';
@@ -28020,30 +28025,34 @@ function _renderOpCardHtmlInner(op, options) {
        </div>`
     : `<div style="margin-top:8px; padding:6px 8px; background:#0f172a; border:1px dashed #334155; border-radius:4px; font-size:10px; color:#64748b; font-style:italic;">Aucune pièce · Clique "Éditer" pour en ajouter</div>`;
 
-  // Boutons "Étiquette Freetouch" : accès direct depuis la carte OP.
-  // Affiché si le type est supporté par generateEtiquetteFromOp ET que le produit est un kit
-  // (seuls les kits sont sur le Freetouch → seuls à avoir des étiquettes FT).
+  // Boutons "Étiquette" : accès direct depuis la carte OP.
+  // FT : type supporté par generateEtiquetteFromOp ET produit = kit (seuls les kits
+  // sont sur le Freetouch). 🪟 Vitrine : tout produit résolvable (kit, PD, liquide,
+  // hors base) — planche commune aux 3 boutiques, pas de bouton par boutique.
   const ETIQ_OP_TYPES = ['PRIX_ROUGE','NOUVEAUTE','EXCLU','COUP'];
   const _etiqPid = (op.produitIds || [])[0];
   const _etiqIsKit = _etiqPid && baseKits.some(k => k.id === _etiqPid);
   const canGenerateEtiq = ETIQ_OP_TYPES.includes(op.type) && _etiqIsKit;
-  const freetouchBtnsHtml = (canGenerateEtiq && !shopFilter)
+  const canVitrineOp = ETIQ_OP_TYPES.includes(op.type) && _vitrineItemsPourOp(op).length > 0;
+  const _vitrineOpBtn = canVitrineOp
+    ? `<button onclick="event.stopPropagation(); openVitrineDialogFromOp('${op.id}')" title="Planche d'étiquette vitrine CIGUSTO (48 par feuille A4), commune aux 3 boutiques" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:transparent; color:#38bdf8; border:1px solid #38bdf8; border-radius:3px; cursor:pointer;">🪟 Vitrine</button>`
+    : '';
+  const _ftOpBtns = !canGenerateEtiq ? '' : (shopFilter
+    ? (() => {
+        const col = SHOP_COLORS[shopFilter];
+        return `<button onclick="event.stopPropagation(); generateEtiquetteFromOp('${op.id}','${shopFilter}')" title="Générer le PDF étiquette Freetouch pour ${SHOP_LABELS[shopFilter]}" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:transparent; color:${col}; border:1px solid ${col}; border-radius:3px; cursor:pointer;">🏷️ ${SHOP_LABELS[shopFilter]}</button>`;
+      })()
+    : SHOPS.map(sh => {
+        const col = SHOP_COLORS[sh];
+        return `<button onclick="event.stopPropagation(); generateEtiquetteFromOp('${op.id}','${sh}')" title="Générer le PDF étiquette Freetouch pour ${SHOP_LABELS[sh]}" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:transparent; color:${col}; border:1px solid ${col}; border-radius:3px; cursor:pointer;">🏷️ ${SHOP_LABELS[sh]}</button>`;
+      }).join(' '));
+  const freetouchBtnsHtml = (canGenerateEtiq || canVitrineOp)
     ? `<div style="margin-top:6px; padding:6px 8px; background:#0f172a; border:1px solid #22d3ee30; border-radius:4px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
          <span style="font-size:9.5px; color:#22d3ee; text-transform:uppercase; letter-spacing:0.4px; font-weight:700;">🏷️ Générer étiquette</span>
-         ${SHOPS.map(sh => {
-           const col = SHOP_COLORS[sh];
-           return `<button onclick="event.stopPropagation(); generateEtiquetteFromOp('${op.id}','${sh}')" title="Générer le PDF étiquette Freetouch pour ${SHOP_LABELS[sh]}" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:transparent; color:${col}; border:1px solid ${col}; border-radius:3px; cursor:pointer;">🏷️ ${SHOP_LABELS[sh]}</button>`;
-         }).join(' ')}
+         ${_ftOpBtns}
+         ${_vitrineOpBtn}
        </div>`
-    : (canGenerateEtiq && shopFilter)
-      ? (() => {
-          const col = SHOP_COLORS[shopFilter];
-          return `<div style="margin-top:6px; padding:6px 8px; background:#0f172a; border:1px solid #22d3ee30; border-radius:4px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-            <span style="font-size:9.5px; color:#22d3ee; text-transform:uppercase; letter-spacing:0.4px; font-weight:700;">🏷️ Générer étiquette</span>
-            <button onclick="event.stopPropagation(); generateEtiquetteFromOp('${op.id}','${shopFilter}')" title="Générer le PDF étiquette Freetouch pour ${SHOP_LABELS[shopFilter]}" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:transparent; color:${col}; border:1px solid ${col}; border-radius:3px; cursor:pointer;">🏷️ ${SHOP_LABELS[shopFilter]}</button>
-          </div>`;
-        })()
-      : '';
+    : '';
 
   // Steps globaux (amont) — rendu aussi quand il n'y a QUE des étapes admin par boutique
   // (ex. PR avec promo Swappy sans pièce PLV) : le bloc Amont les porte désormais.
@@ -29309,8 +29318,10 @@ async function getTemplateBytes(filename) {
     }
   } catch (e) { console.warn('etiq IDB get failed', e); }
   try {
-    const subfolder = filename.startsWith('Mur complet') ? 'Pessac Etiquettes Freetouch ' : 'Mérignac - Langon Etiquettes Freetouch ';
-    const url = 'Etiquette template/' + subfolder + '/' + filename;
+    // Planche vitrine : à la RACINE d'Etiquette template/ (pas de variante par boutique).
+    const url = filename.startsWith('Planche vitrine')
+      ? 'Etiquette template/' + filename
+      : 'Etiquette template/' + (filename.startsWith('Mur complet') ? 'Pessac Etiquettes Freetouch ' : 'Mérignac - Langon Etiquettes Freetouch ') + '/' + filename;
     const r = await fetch(encodeURI(url));
     if (r.ok) {
       const buf = await r.arrayBuffer();
@@ -29884,9 +29895,12 @@ function openBulkPrixEtiquetteDialog() {
     +   '<button id="bulkPrixSelectNone" style="padding:2px 8px;font-size:10px;background:#33415550;color:#94a3b8;border:1px solid #47556960;border-radius:3px;cursor:pointer;">Tout décocher</button>'
     + '</div>'
     + '<div id="bulkPrixList" style="flex:1;overflow-y:auto;border:1px solid #33415550;border-radius:4px;margin-bottom:12px;">' + listHtml + '</div>'
-    + '<div style="display:flex;gap:8px;justify-content:flex-end;">'
+    + '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">'
+    + '<button id="bulkPrixVitrine" title="Planche d\'étiquettes vitrine CIGUSTO (48 par feuille A4) pour les kits cochés, aux mêmes prix" style="padding:6px 14px;background:#38bdf815;border:1px solid #38bdf860;color:#38bdf8;border-radius:4px;cursor:pointer;font-weight:700;">🪟 Planche vitrine</button>'
+    + '<div style="display:flex;gap:8px;">'
     +   '<button id="bulkPrixCancel" style="padding:6px 14px;background:#334155;border:none;color:#e2e8f0;border-radius:4px;cursor:pointer;">Annuler</button>'
     +   '<button id="bulkPrixGo" style="padding:6px 14px;background:#f59e0b;border:none;color:#0f172a;border-radius:4px;cursor:pointer;font-weight:700;">Générer le PDF</button>'
+    + '</div>'
     + '</div>'
     + '</div>';
 
@@ -29900,6 +29914,17 @@ function openBulkPrixEtiquetteDialog() {
   }
 
   overlay.querySelector('#bulkPrixCancel').onclick = close;
+  overlay.querySelector('#bulkPrixVitrine').onclick = function() {
+    var checked = overlay.querySelectorAll('#bulkPrixList input[type=checkbox]:checked');
+    if (checked.length === 0) { pvAlert('Aucun kit sélectionné'); return; }
+    var items = [];
+    checked.forEach(function(cb) {
+      var kit = baseKits.find(function(k) { return k.id === cb.dataset.kitId; });
+      if (kit) items.push(_vitrineItemFromKit(kit, parseFloat(cb.dataset.price)));
+    });
+    close();
+    openVitrineDialog(items);
+  };
   overlay.querySelector('#bulkPrixSelectAll').onclick = function() {
     overlay.querySelectorAll('#bulkPrixList input[type=checkbox]').forEach(function(cb) { cb.checked = true; });
   };
@@ -29962,14 +29987,18 @@ function openKitEtiquetteDialog(kitId) {
         '<label style="font-size:12px;color:#cbd5e1;display:flex;flex-direction:column;gap:4px;">Boutique: <select id="kitEtiqShop" style="padding:6px 8px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + shopOpts + '</select></label>' +
         '<label style="font-size:12px;color:#cbd5e1;display:flex;flex-direction:column;gap:4px;">Type d\'étiquette: <select id="kitEtiqOp" style="padding:6px 8px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + opOpts + '</select></label>' +
       '</div>' +
-      '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
-        '<button id="kitEtiqCancel" style="padding:6px 14px;background:#334155;border:none;color:#e2e8f0;border-radius:4px;cursor:pointer;">Annuler</button>' +
-        '<button id="kitEtiqGo" style="padding:6px 14px;background:#f59e0b;border:none;color:#0f172a;border-radius:4px;cursor:pointer;font-weight:700;">Générer</button>' +
+      '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">' +
+        '<button id="kitEtiqVitrine" title="Planche d\'étiquette vitrine CIGUSTO (48 par feuille A4)" style="padding:6px 14px;background:#38bdf815;border:1px solid #38bdf860;color:#38bdf8;border-radius:4px;cursor:pointer;font-weight:700;">🪟 Vitrine</button>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button id="kitEtiqCancel" style="padding:6px 14px;background:#334155;border:none;color:#e2e8f0;border-radius:4px;cursor:pointer;">Annuler</button>' +
+          '<button id="kitEtiqGo" style="padding:6px 14px;background:#f59e0b;border:none;color:#0f172a;border-radius:4px;cursor:pointer;font-weight:700;">Générer</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   overlay.querySelector('#kitEtiqCancel').onclick = close;
+  overlay.querySelector('#kitEtiqVitrine').onclick = () => { close(); openVitrineDialog([_vitrineItemFromKit(kit)]); };
   overlay.querySelector('#kitEtiqGo').onclick = async () => {
     const shop = overlay.querySelector('#kitEtiqShop').value;
     const op = overlay.querySelector('#kitEtiqOp').value || null;
@@ -30024,14 +30053,18 @@ function openCampagneEtiquettesDialog(campagneId) {
         '<label style="font-size:12px;color:#cbd5e1;display:flex;flex-direction:column;gap:4px;">Boutique: <select id="campEtiqShop" style="padding:6px 8px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + shopOpts + '</select></label>' +
         '<label style="font-size:12px;color:#cbd5e1;display:flex;flex-direction:column;gap:4px;">Type d\'étiquette: <select id="campEtiqOp" style="padding:6px 8px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + opOpts + '</select></label>' +
       '</div>' +
-      '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
-        '<button id="campEtiqCancel" style="padding:6px 14px;background:#334155;border:none;color:#e2e8f0;border-radius:4px;cursor:pointer;">Annuler</button>' +
-        '<button id="campEtiqGo" style="padding:6px 14px;background:#f59e0b;border:none;color:#0f172a;border-radius:4px;cursor:pointer;font-weight:700;">Générer</button>' +
+      '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;">' +
+        '<button id="campEtiqVitrine" title="Planche d\'étiquettes vitrine CIGUSTO (48 par feuille A4) pour tous les produits de la campagne (kits, PD, liquides, hors base), au prix du moment" style="padding:6px 14px;background:#38bdf815;border:1px solid #38bdf860;color:#38bdf8;border-radius:4px;cursor:pointer;font-weight:700;">🪟 Planche vitrine</button>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button id="campEtiqCancel" style="padding:6px 14px;background:#334155;border:none;color:#e2e8f0;border-radius:4px;cursor:pointer;">Annuler</button>' +
+          '<button id="campEtiqGo" style="padding:6px 14px;background:#f59e0b;border:none;color:#0f172a;border-radius:4px;cursor:pointer;font-weight:700;">Générer</button>' +
+        '</div>' +
       '</div>' +
     '</div>';
   document.body.appendChild(overlay);
   const close = () => overlay.remove();
   overlay.querySelector('#campEtiqCancel').onclick = close;
+  overlay.querySelector('#campEtiqVitrine').onclick = () => { close(); openVitrineDialogFromCampagne(campagneId); };
   overlay.querySelector('#campEtiqGo').onclick = async () => {
     const shop = overlay.querySelector('#campEtiqShop').value;
     const op = overlay.querySelector('#campEtiqOp').value || null;
@@ -30432,7 +30465,7 @@ function openEtiquettesDialog() {
 }
 
 async function clearEtiquetteCache() {
-  const needed = listAllExpectedFiles();
+  const needed = listAllExpectedFiles().concat([VITRINE_TEMPLATE_FILE]);
   for (const f of needed) {
     delete etiqCache[f];
     try {
@@ -30445,6 +30478,386 @@ async function clearEtiquetteCache() {
     } catch (e) {}
   }
   pvAlert('Cache templates vidé. Au prochain clic sur « Générer étiquettes », tu pourras les réimporter.');
+}
+
+// ============================================================================
+// 🪟 ÉTIQUETTES VITRINE — planche A4 CIGUSTO à 50 % (2026-08-03, demande Fabien)
+// ============================================================================
+// Le template d'origine (« Planche etiquettes prix modifiable ») fait 12 étiquettes
+// par A4, trop grandes : les boutiques imprimaient la feuille à 50 %. Le template
+// `Etiquette template/Planche vitrine.pdf` contient déjà le dessin réduit à 50 %
+// et tuilé 2×2 → 48 étiquettes par feuille A4, à imprimer à 100 % (échelle réelle).
+// Une étiquette = nom (le MODÈLE seul — décision Fabien 2026-08-03, usage principal :
+// accessoires et pièces détachées) + prix. Pas de variante par boutique ni de profil :
+// la planche est identique partout.
+// LE générateur canonique (règle 8) : generateEtiquettesVitrine(items) —
+// items = [{ nom, prix }] déjà résolus ; TOUTE surface passe par lui.
+// Étiquette vitrine PRIX ROUGE : template dédié à venir (Fabien le fournira).
+
+const VITRINE_TEMPLATE_FILE = 'Planche vitrine.pdf';
+const VITRINE_SLOTS = (() => {
+  // Géométrie dérivée des champs titreN/prixN du template d'origine, × 0.5, tuilé 2×2.
+  const W = 595.28, H = 841.89;
+  const titreX = [26.8, 220.9, 414.6], titreY = [768.5, 565.2, 362.7, 160.1];
+  const prixX  = [27.2, 221.2, 415.0], prixY  = [680.8, 477.5, 275.0, 72.4];
+  const out = [];
+  [H / 2, 0].forEach(ty => {                 // demi-planche haute puis basse
+    for (let row = 0; row < 4; row++) {      // lignes de haut en bas
+      [0, W / 2].forEach(tx => {             // demi-planche gauche puis droite
+        for (let col = 0; col < 3; col++) {
+          out.push({
+            nom:  { x: titreX[col] * 0.5 + tx, y: titreY[row] * 0.5 + ty, w: 77.0,  h: 19.35 },
+            prix: { x: prixX[col]  * 0.5 + tx, y: prixY[row]  * 0.5 + ty, w: 76.95, h: 37.35 }
+          });
+        }
+      });
+    }
+  });
+  return out;
+})();
+
+// Prix au style du template d'origine : « 79.90€ » (point, pas d'espace).
+function formatPrixVitrine(p) {
+  if (typeof p === 'number' && isFinite(p)) return p.toFixed(2) + '€';
+  return (p === null || p === undefined) ? '' : String(p).trim();
+}
+
+async function ensureVitrineTemplateLoaded() {
+  const b = await getTemplateBytes(VITRINE_TEMPLATE_FILE);
+  if (b) return true;
+  return showTemplatePicker([VITRINE_TEMPLATE_FILE]);
+}
+
+// La plus grande taille de police (bornée) qui tient dans le cadre.
+function _vitrineFitSize(font, str, boxW, boxH, maxSize, minSize) {
+  for (let s = maxSize; s >= minSize; s -= 0.5) {
+    if (font.widthOfTextAtSize(str, s) <= boxW && s * 0.72 <= boxH) return s;
+  }
+  return minSize;
+}
+
+// Tronque avec « … » si le texte ne tient toujours pas à la taille donnée
+// (filet de sécurité : ne JAMAIS déborder sur l'étiquette voisine).
+function _vitrineTrunc(font, str, size, maxW) {
+  if (font.widthOfTextAtSize(str, size) <= maxW) return str;
+  let s = str;
+  while (s.length > 1 && font.widthOfTextAtSize(s + '…', size) > maxW) s = s.slice(0, -1);
+  return s + '…';
+}
+
+function _vitrineDrawCentered(page, font, str, box, maxSize, minSize) {
+  if (!str) return;
+  const pad = 3;
+  const maxW = box.w - pad * 2;
+  const size = _vitrineFitSize(font, str, maxW, box.h - 2, maxSize, minSize);
+  const txt = _vitrineTrunc(font, str, size, maxW);
+  const tw = font.widthOfTextAtSize(txt, size);
+  const th = size * 0.72;
+  page.drawText(txt, {
+    x: box.x + (box.w - tw) / 2,
+    y: box.y + (box.h - th) / 2,
+    size: size, font: font, color: PDFLib.rgb(0, 0, 0)
+  });
+}
+
+// Le NOM : une ligne tant que ça reste lisible (≥ 6.5), sinon 2 lignes équilibrées
+// (coupure au meilleur espace), toujours tronquées si un mot-fleuve dépasse encore.
+function _vitrineDrawNom(page, font, str, box) {
+  if (!str) return;
+  const pad = 3;
+  const maxW = box.w - pad * 2;
+  const oneSize = _vitrineFitSize(font, str, maxW, box.h - 2, 11, 6.5);
+  const words = str.split(/\s+/).filter(Boolean);
+  if (font.widthOfTextAtSize(str, oneSize) <= maxW || words.length < 2) {
+    _vitrineDrawCentered(page, font, str, box, 11, 6.5);
+    return;
+  }
+  // Coupure la plus équilibrée (largeur max des 2 lignes minimale)
+  let best = null;
+  for (let i = 1; i < words.length; i++) {
+    const l1 = words.slice(0, i).join(' ');
+    const l2 = words.slice(i).join(' ');
+    const w = Math.max(font.widthOfTextAtSize(l1, 10), font.widthOfTextAtSize(l2, 10));
+    if (!best || w < best.w) best = { l1: l1, l2: l2, w: w };
+  }
+  const lineH = (box.h - 2) / 2;
+  let size = 4.5;
+  for (let s = 8; s >= 4.5; s -= 0.5) {
+    if (font.widthOfTextAtSize(best.l1, s) <= maxW && font.widthOfTextAtSize(best.l2, s) <= maxW && s * 0.72 <= lineH - 0.5) { size = s; break; }
+  }
+  const draw = (txt, cy) => {
+    const t = _vitrineTrunc(font, txt, size, maxW);
+    const tw = font.widthOfTextAtSize(t, size);
+    page.drawText(t, { x: box.x + (box.w - tw) / 2, y: cy - (size * 0.72) / 2, size: size, font: font, color: PDFLib.rgb(0, 0, 0) });
+  };
+  draw(best.l1, box.y + box.h * 0.72);
+  draw(best.l2, box.y + box.h * 0.28);
+}
+
+// LE générateur canonique de planches vitrine (règle 8).
+// items = [{ nom, prix }] — nom déjà résolu (modèle seul, mis en MAJUSCULES au dessin),
+// prix nombre ou string ('' = case prix laissée vide). Retourne les bytes (pour les tests)
+// via l'option { returnBytes: true }, sinon télécharge le PDF.
+async function generateEtiquettesVitrine(items, outputFilename, opts) {
+  const clean = (items || []).filter(it => it && String(it.nom || '').trim());
+  if (!clean.length) { pvAlert('Aucune étiquette à générer.'); return false; }
+  if (!window.PDFLib) { pvAlert('pdf-lib non chargé — recharge la page et réessaie.'); return false; }
+  const ok = await ensureVitrineTemplateLoaded();
+  if (!ok) return false;
+  const bytes = await getTemplateBytes(VITRINE_TEMPLATE_FILE);
+  if (!bytes) { pvAlert('Template « ' + VITRINE_TEMPLATE_FILE + ' » introuvable.'); return false; }
+  const { PDFDocument, StandardFonts } = PDFLib;
+  const master = await PDFDocument.create();
+  const pages = chunkArr(clean, VITRINE_SLOTS.length);
+  for (const pageItems of pages) {
+    const pdf = await PDFDocument.load(bytes);
+    const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const page = pdf.getPages()[0];
+    pageItems.forEach((it, idx) => {
+      const slot = VITRINE_SLOTS[idx];
+      _vitrineDrawNom(page, bold, String(it.nom || '').trim().toUpperCase(), slot.nom);
+      _vitrineDrawCentered(page, bold, formatPrixVitrine(it.prix), slot.prix, 24, 8);
+    });
+    const [copied] = await master.copyPages(pdf, [0]);
+    master.addPage(copied);
+  }
+  const finalBytes = await master.save();
+  if (opts && opts.returnBytes) return finalBytes;
+  const blob = new Blob([finalBytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = outputFilename || ('etiquettes_vitrine_' + new Date().toISOString().slice(0, 10) + '.pdf');
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  if (typeof logAction === 'function') logAction('Planche vitrine générée', clean.length + ' étiquette(s), ' + pages.length + ' page(s)');
+  return true;
+}
+
+// --- Fabrique d'items par type de produit -----------------------------------
+function _vitrineItemFromKit(k, priceOverride) {
+  return { nom: k.modele || k.marque || '', prix: (typeof priceOverride === 'number') ? priceOverride : k.pv };
+}
+function _vitrineItemFromPd(pd, priceOverride) {
+  return { nom: pd.modele || pd.marque || '', prix: (typeof priceOverride === 'number') ? priceOverride : pd.pv };
+}
+function _vitrineItemFromLiq(g, priceOverride) {
+  const nom = (g.gamme || g.marque || '') + (g.format ? ' ' + g.format : '');
+  return { nom: nom, prix: (typeof priceOverride === 'number') ? priceOverride : g.pv };
+}
+
+// Le prix « du moment » d'une OP pour une étiquette (même cascade que generateEtiquetteFromOp).
+function _vitrinePrixPourOp(op, fallbackPv) {
+  if (typeof op.prixRouge === 'number') return op.prixRouge;
+  if (op.prixActionId) {
+    const pa = actions.find(a => a.id === op.prixActionId);
+    if (pa && typeof pa.prixRouge === 'number') return pa.prixRouge;
+    if (pa && typeof pa.prixCible === 'number') return pa.prixCible;
+  }
+  if (op.sortirActionId) {
+    const sa = actions.find(a => a.id === op.sortirActionId);
+    if (sa && typeof sa.prixRouge === 'number') return sa.prixRouge;
+  }
+  return fallbackPv;
+}
+
+// Tous les items vitrine d'une OP : kits, PD, liquides, et hors base (ligne libre pré-remplie).
+function _vitrineItemsPourOp(op) {
+  const items = [];
+  (op.produitIds || []).forEach(pid => {
+    const k = baseKits.find(x => x.id === pid);
+    const p = k ? null : basePD.find(x => x.id === pid);
+    const l = (k || p) ? null : baseLiq.find(x => x.id === pid);
+    if (k) items.push(_vitrineItemFromKit(k, _vitrinePrixPourOp(op, k.pv)));
+    else if (p) items.push(_vitrineItemFromPd(p, _vitrinePrixPourOp(op, p.pv)));
+    else if (l) items.push(_vitrineItemFromLiq(l, _vitrinePrixPourOp(op, l.pv)));
+  });
+  const libre = (op.produitLibre && op.produitLibre.libelle) || op.horsBaseLabel;
+  if (!items.length && libre) {
+    const px = _vitrinePrixPourOp(op, undefined);
+    items.push({ nom: libre, prix: (typeof px === 'number') ? px : '' });
+  }
+  return items;
+}
+
+// --- LE dialogue unique -----------------------------------------------------
+// prefill = [{nom, prix}] ; toutes les lignes sont éditables, lignes libres pour
+// le hors base, recherche dans les 3 bases (kits, PD, liquides).
+function _vitrineCandidats() {
+  const out = [];
+  baseKits.forEach(k => { if (k.statutVie !== 'SORTI') out.push({ label: '🔧 ' + (k.marque || '') + ' — ' + (k.modele || ''), item: _vitrineItemFromKit(k) }); });
+  basePD.forEach(p => { if (p.statutVie !== 'SORTI') out.push({ label: (p.categorie === 'BOX' ? '🔋 ' : '💨 ') + (p.marque || '') + ' — ' + (p.modele || ''), item: _vitrineItemFromPd(p) }); });
+  baseLiq.forEach(g => { if (g.statutVie !== 'SORTI') out.push({ label: '💧 ' + (g.marque || '') + ' — ' + (g.gamme || '') + (g.format ? ' ' + g.format : ''), item: _vitrineItemFromLiq(g) }); });
+  return out;
+}
+
+function openVitrineDialog(prefill) {
+  const rows = (prefill || []).map(it => ({
+    nom: String(it.nom || ''),
+    prix: (typeof it.prix === 'number' && isFinite(it.prix)) ? it.prix.toFixed(2) : String(it.prix || '')
+  }));
+  if (!rows.length) rows.push({ nom: '', prix: '' });
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:#0f172ad8;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+  overlay.innerHTML =
+    '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:22px;max-width:560px;width:100%;color:#e2e8f0;max-height:90vh;display:flex;flex-direction:column;">' +
+      '<h3 style="margin:0 0 4px;font-size:16px;">🪟 Étiquettes vitrine</h3>' +
+      '<p style="font-size:11px;color:#94a3b8;margin:0 0 10px;">Planche CIGUSTO de <b>48 étiquettes par feuille A4</b> (déjà réduites à 50 % — <b>imprimer à 100 %</b>). Nom et prix modifiables ligne par ligne ; ligne libre pour un produit hors base.</p>' +
+      '<input id="vitSearch" type="text" placeholder="🔎 Ajouter un produit des bases (kits, PD, liquides)…" style="padding:6px 10px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:4px;margin-bottom:4px;">' +
+      '<div id="vitSearchRes" style="display:none;max-height:140px;overflow-y:auto;background:#0f172a;border:1px solid #334155;border-radius:4px;margin-bottom:6px;"></div>' +
+      '<div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;margin:6px 0 4px;display:flex;justify-content:space-between;align-items:center;">' +
+        '<span>Étiquettes à imprimer</span>' +
+        '<button id="vitAddLibre" style="padding:2px 8px;background:transparent;border:1px solid #64748b60;color:#94a3b8;border-radius:3px;font-size:9px;cursor:pointer;">+ Ligne libre (hors base)</button>' +
+      '</div>' +
+      '<div id="vitList" style="flex:1;overflow-y:auto;border:1px solid #33415550;border-radius:4px;padding:4px 6px;background:#0f172a;min-height:60px;"></div>' +
+      '<div id="vitCount" style="font-size:10.5px;color:#94a3b8;margin:8px 0 0;"></div>' +
+      '<div style="margin-top:10px;display:flex;gap:8px;justify-content:space-between;align-items:center;">' +
+        '<button id="vitReload" style="padding:0;background:none;border:none;color:#64748b;cursor:pointer;font-size:10px;">🔄 Recharger templates</button>' +
+        '<div style="display:flex;gap:8px;">' +
+          '<button id="vitCancel" style="padding:6px 14px;background:#334155;border:none;color:#e2e8f0;border-radius:4px;cursor:pointer;">Annuler</button>' +
+          '<button id="vitGo" style="padding:6px 14px;background:#38bdf8;border:none;color:#0f172a;border-radius:4px;cursor:pointer;font-weight:700;">Générer la planche</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  const list = overlay.querySelector('#vitList');
+  const count = overlay.querySelector('#vitCount');
+
+  const refreshCount = () => {
+    const n = rows.filter(r => r.nom.trim()).length;
+    const p = Math.max(1, Math.ceil(n / VITRINE_SLOTS.length));
+    count.textContent = n + ' étiquette' + (n > 1 ? 's' : '') + ' → ' + p + ' page' + (p > 1 ? 's' : '') + ' A4 (48 par page)';
+  };
+  const renderRows = () => {
+    list.innerHTML = rows.map((r, i) =>
+      '<div style="display:flex;gap:6px;align-items:center;padding:2px 0;">' +
+        '<input data-vit-nom="' + i + '" value="' + r.nom.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '" placeholder="Nom (modèle)" style="flex:1;padding:4px 8px;font-size:11px;background:#1e293b;border:1px solid #47556960;color:#e2e8f0;border-radius:3px;">' +
+        '<input data-vit-prix="' + i + '" value="' + r.prix.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;') + '" placeholder="Prix €" style="width:70px;padding:4px 8px;font-size:11px;background:#1e293b;border:1px solid #47556960;color:#f59e0b;border-radius:3px;text-align:right;font-weight:600;">' +
+        '<button data-vit-del="' + i + '" title="Retirer cette ligne" style="padding:2px 7px;background:transparent;border:1px solid #ef444450;color:#f87171;border-radius:3px;cursor:pointer;font-size:10px;">✕</button>' +
+      '</div>'
+    ).join('');
+    list.querySelectorAll('input[data-vit-nom]').forEach(inp => { inp.oninput = () => { rows[parseInt(inp.dataset.vitNom, 10)].nom = inp.value; refreshCount(); }; });
+    list.querySelectorAll('input[data-vit-prix]').forEach(inp => { inp.oninput = () => { rows[parseInt(inp.dataset.vitPrix, 10)].prix = inp.value; }; });
+    list.querySelectorAll('button[data-vit-del]').forEach(btn => { btn.onclick = () => { rows.splice(parseInt(btn.dataset.vitDel, 10), 1); renderRows(); }; });
+    refreshCount();
+  };
+  renderRows();
+
+  // Recherche dans les bases
+  const searchEl = overlay.querySelector('#vitSearch');
+  const resEl = overlay.querySelector('#vitSearchRes');
+  let candidats = null;
+  searchEl.oninput = () => {
+    const q = searchEl.value.trim().toLowerCase();
+    if (q.length < 2) { resEl.style.display = 'none'; resEl.innerHTML = ''; return; }
+    if (!candidats) candidats = _vitrineCandidats();
+    const hits = candidats.filter(c => c.label.toLowerCase().includes(q)).slice(0, 12);
+    resEl.innerHTML = hits.length
+      ? hits.map((h, i) => '<div data-vit-hit="' + i + '" style="padding:4px 8px;font-size:11px;color:#cbd5e1;cursor:pointer;border-bottom:1px solid #1e293b;" onmouseover="this.style.background=\'#1e293b\'" onmouseout="this.style.background=\'transparent\'">' + h.label + ' <span style="color:#64748b;">' + (typeof h.item.prix === 'number' ? h.item.prix.toFixed(2) + '€' : '') + '</span></div>').join('')
+      : '<div style="padding:4px 8px;font-size:11px;color:#64748b;font-style:italic;">Aucun produit — utilise « + Ligne libre »</div>';
+    resEl.style.display = 'block';
+    resEl.querySelectorAll('div[data-vit-hit]').forEach(d => {
+      d.onclick = () => {
+        const h = hits[parseInt(d.dataset.vitHit, 10)];
+        rows.push({ nom: String(h.item.nom || ''), prix: (typeof h.item.prix === 'number') ? h.item.prix.toFixed(2) : '' });
+        searchEl.value = ''; resEl.style.display = 'none'; renderRows();
+      };
+    });
+  };
+
+  overlay.querySelector('#vitAddLibre').onclick = () => { rows.push({ nom: '', prix: '' }); renderRows(); };
+  overlay.querySelector('#vitReload').onclick = async () => { await clearEtiquetteCache(); close(); };
+  overlay.querySelector('#vitCancel').onclick = close;
+  overlay.querySelector('#vitGo').onclick = async () => {
+    const items = rows.filter(r => r.nom.trim()).map(r => {
+      const pNum = parseFloat(String(r.prix).replace(',', '.'));
+      return { nom: r.nom.trim(), prix: isFinite(pNum) && String(r.prix).trim() !== '' ? pNum : String(r.prix).trim() };
+    });
+    if (!items.length) { pvAlert('Aucune étiquette à générer — renseigne au moins un nom.'); return; }
+    close();
+    try { await generateEtiquettesVitrine(items); }
+    catch (e) { console.error(e); pvAlert('Erreur génération : ' + (e.message || e)); }
+  };
+}
+
+// --- Points d'entrée (règle 6-bis : toutes les surfaces d'un coup) ----------
+// Base Kits : les produits filtrés (mêmes filtres que le dialogue FT).
+function openVitrineDialogFromKits() {
+  const search = (document.getElementById('kitSearch')?.value || '').toLowerCase();
+  const fProfil = document.getElementById('filterProfil')?.value || '';
+  const fTirage = document.getElementById('filterTirage')?.value || '';
+  const fRole = document.getElementById('filterRole')?.value || '';
+  const fStatut = kitStatutFilter;
+  const visible = baseKits.filter(k => {
+    if (k.statutVie === 'SORTI') return false;
+    if (search && !(k.marque.toLowerCase().includes(search) || k.modele.toLowerCase().includes(search))) return false;
+    if (fProfil && k.profilChoisi !== fProfil) return false;
+    if (fTirage && normKitTirage(k.tirage) !== fTirage) return false;
+    if (fRole && !getEffectiveRoles(k).includes(fRole)) return false;
+    if (fStatut.length > 0 && !fStatut.includes(k.statutVie)) return false;
+    return true;
+  });
+  openVitrineDialog(visible.map(k => _vitrineItemFromKit(k)));
+}
+
+// Base PD : les pièces détachées filtrées (mêmes filtres que renderBasePD).
+function openVitrineDialogFromPd() {
+  const fCat = document.getElementById('pdFilterCatSel')?.value || '';
+  const fCase = document.getElementById('pdFilterCaseSel')?.value || '';
+  const fRole = document.getElementById('pdFilterRoleSel')?.value || '';
+  const fSearch = (document.getElementById('pdSearch')?.value || '').toLowerCase();
+  const fStatut = pdStatutFilter;
+  let list = basePD.filter(pd => pd.statutVie !== 'SORTI');
+  if (fCat) list = list.filter(pd => pd.categorie === fCat);
+  if (fCase) list = list.filter(pd => pd.caseTech === fCase);
+  if (fStatut.length > 0) list = list.filter(pd => fStatut.includes(pd.statutVie));
+  if (fRole) list = list.filter(pd => pd.roleChoisi === fRole);
+  if (fSearch) list = list.filter(pd => (pd.marque + ' ' + pd.modele).toLowerCase().includes(fSearch));
+  openVitrineDialog(list.map(pd => _vitrineItemFromPd(pd)));
+}
+
+// Fiche PD (panneau détail) : une seule pièce.
+function openVitrinePourPd(pdId) {
+  const pd = basePD.find(p => p.id === pdId);
+  if (!pd) return;
+  openVitrineDialog([_vitrineItemFromPd(pd)]);
+}
+
+// Carte action PRIX du dashboard : kit OU PD, au prix cible/rouge de l'action.
+function openVitrineDialogFromPrixAction(actionId) {
+  const a = actions.find(x => x.id === actionId);
+  if (!a) return;
+  const kit = baseKits.find(k => k.id === a.produitId);
+  const pd = kit ? null : basePD.find(p => p.id === a.produitId);
+  const ref = kit || pd;
+  if (!ref) { openVitrineDialog([]); return; }
+  const price = (typeof a.prixRouge === 'number') ? a.prixRouge
+              : (typeof a.prixCible === 'number') ? a.prixCible : ref.pv;
+  openVitrineDialog([kit ? _vitrineItemFromKit(kit, price) : _vitrineItemFromPd(pd, price)]);
+}
+
+// Carte OP : tous les produits de l'OP (kit, PD, liquide, hors base), prix du moment.
+function openVitrineDialogFromOp(opId) {
+  const op = ops.find(o => o.id === opId);
+  if (!op) return;
+  const items = _vitrineItemsPourOp(op);
+  if (!items.length) { openVitrineDialog([]); return; }
+  openVitrineDialog(items);
+}
+
+// Campagne : tous les produits des OPs rattachées (dédoublonnés).
+function openVitrineDialogFromCampagne(campagneId) {
+  const opsInC = ops.filter(o => o.campagneId === campagneId);
+  const seen = new Set();
+  const items = [];
+  opsInC.forEach(op => _vitrineItemsPourOp(op).forEach(it => {
+    const key = it.nom + '|' + it.prix;
+    if (!seen.has(key)) { seen.add(key); items.push(it); }
+  }));
+  if (!items.length) { pvAlert('Aucun produit résolvable pour cette campagne.'); return; }
+  openVitrineDialog(items);
 }
 
 loadData().then(async () => {
@@ -30856,6 +31269,7 @@ function renderBasePD() {
           '<input type="checkbox" ' + (pd.oneShot ? 'checked' : '') + ' onchange="togglePdOneShot(\'' + pd.id + '\')" style="margin:0; cursor:pointer; accent-color:#fcd34d;">' +
           ' ⚡ One-shot' +
         '</label>' +
+        '<button onclick="event.stopPropagation(); openVitrinePourPd(\'' + pd.id + '\')" style="padding:2px 8px; font-size:10px; background:#38bdf815; color:#38bdf8; border:1px solid #38bdf850; border-radius:3px; cursor:pointer;" title="Planche d\'étiquette vitrine CIGUSTO (48 par feuille A4)">🪟 Étiquette vitrine</button>' +
         '<button onclick="event.stopPropagation(); ouvrirCommandeClient(\'pd\',\'' + pd.id + '\')" style="padding:2px 8px; font-size:10px; background:' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#0e749022' : '#0f172a') + '; color:' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#67e8f9' : '#94a3b8') + '; border:1px solid ' + (pd.commandeClient && SHOPS.some(s => pd.commandeClient[s]) ? '#06b6d460' : '#47556960') + '; border-radius:3px; cursor:pointer;" title="Commande client : garder la réf en tiroir dans certaines boutiques">🗄️ Cmd client</button>' +
         ((typeof isAdmin === 'function' && isAdmin()) ? '<button onclick="event.stopPropagation(); lancerRetrocession(\'pd\',\'' + pd.id + '\')" style="padding:2px 8px; font-size:10px; background:#0e749022; color:#67e8f9; border:1px solid #06b6d460; border-radius:3px; cursor:pointer;" title="Rétrocession : transférer cette pièce d\'une boutique à une autre">🔁 Rétrocession</button>' : '') +
         badgeCommandeClient(pd) +
