@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 20:55</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 21:10</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -20848,7 +20848,17 @@ function renderDashboard() {
     return !_attenteInstallePourShop(a, sh);
   });
   const actionsAInstaller = _lignesRecuesNonInstallees.filter(_ligneInstallActionnable);
-  const actionsInstallEnAttente = _lignesRecuesNonInstallees.filter(a => !_ligneInstallActionnable(a));
+  // 2026-08-03 21h (retour Fabien) : une attente de DATE n'a rien à faire dans « À installer »
+  // — ce n'est pas encore à installer, et la date vit déjà dans « À anticiper » et sur la
+  // ligne À rentrer (badge 📌 / suit l'OP). Seule l'attente de SORTIE du remplacé reste
+  // visible ⏳ ici : personne d'autre ne la montre, et c'est de l'installation empêchée.
+  const actionsInstallEnAttente = _lignesRecuesNonInstallees.filter(a => !_ligneInstallActionnable(a))
+    .filter(a => _shsQualif.some(sh => {
+      const st = a.etats && a.etats[sh];
+      if (!(st && st.steps && st.steps.recu === true && st.steps.installe === false)) return false;
+      const _w = _attenteInstallePourShop(a, sh);
+      return !!(_w && _w.type === 'sortie');
+    }));
   // …et les OP nouveauté/exclu dont le PRODUIT est reçu mais l'installation pas finie
   // (cas Kit Force : ligne réglée depuis longtemps, le travail restant est côté OP).
   const _shsInstall = fShop ? [fShop] : SHOPS;
@@ -20890,7 +20900,7 @@ function renderDashboard() {
       + opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')
       + (actionsAInstaller.length ? renderGroupedActionCards(actionsAInstaller) : '')
       + (opsRecuesNonInstallees.length ? opsRecuesNonInstallees.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : '')
-      + (actionsInstallEnAttente.length ? `<div style="font-size:9px; color:#fbbf24; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Pas un retard : ces installations attendent leur déclencheur — date d'installation ou sortie du produit remplacé (par boutique). Hors compteurs.">⏳ En attente</div>` + renderGroupedActionCards(actionsInstallEnAttente) : '');
+      + (actionsInstallEnAttente.length ? `<div style="font-size:9px; color:#fbbf24; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Pas un retard : ces installations attendent la sortie du produit remplacé (par boutique). Hors compteurs. Les installations à date future vivent dans « À anticiper ».">⏳ En attente de sortie</div>` + renderGroupedActionCards(actionsInstallEnAttente) : '');
   const installBlock = (_nbInstallTotal + _nbInstallAttente) === 0 ? '' : block('install', '📦 À installer' + (_nbInstallAttente ? ` <span style="font-size:10px; font-weight:600; color:#fbbf24;">· ${_nbInstallAttente} ⏳</span>` : ''), '#f472b6', _nbInstallTotal, installBlockInner,
     'Tout ce qui doit être posé en rayon — une entrée par produit. ⏳ = attend sa date d\'installation ou la sortie du remplacé (pas un retard).');
 
@@ -25126,7 +25136,8 @@ function pvArchiverBilanCampagne(campagneId, opts) {
 // ═══ Généralisée à TOUS les types d'OP (2026-07-31, retour Fabien : « faut faire pareil pour
 // toutes les campagnes » — lancement kits terminé, une boutique n'a pas installé) :
 //   • PR/COUP : écoulée partout → archivée « sortie » ; sinon détachée + réouverte,
-//     coches étiquette libérées où stock, conservées où écoulé (inchangé) ;
+//     coches CONSERVÉES partout (2026-08-03 : une étiquette au même prix reste bonne —
+//     la re-proposition ne passe que par un CHANGEMENT de prix, au bilan) ;
 //   • AUTRES types : tout coché partout → archivée ; il ne reste QUE de la désinstallation
 //     → détachée SANS réouvrir (l'OP reste terminée, le bloc « À désinstaller » la suit) ;
 //     du travail d'installation reste quelque part → détachée + RÉOUVERTE en individuel,
@@ -25153,20 +25164,11 @@ async function _cloturerCampagne(campagneId, destCampagneId) {
         op.campagneId = destCampagneId || '';
         op.dateFin = null; op._dateFinManuelle = false; op.motifCloture = '';
         _reveillerObjet(op); // 2026-08-03 : réouverture depuis UN poste → passeport _reviveTs, sinon les autres postes repoussent l'ancienne dateFin par merge
-        const _cles = _clesEtapesEtiquettePR(op);
-        SHOPS.forEach(sh => {
-          if (_opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh)) return; // écoulée : coches conservées
-          const st = op.etats && op.etats[sh];
-          if (!st || !st.steps) return;
-          _cles.forEach(k => {
-            if (st.steps[k] === true) {
-              st.steps[k] = false;
-              if (!st._stepTs) st._stepTs = {};
-              st._stepTs[k] = _now;
-              nCochesLib++;
-            }
-          });
-        });
+        // 2026-08-03 21h (retour Fabien : « refaire une étiquette alors que le prix n'a pas
+        // changé, c'est sacrément con ») : la clôture ne libère PLUS les coches d'étiquette /
+        // Swappy sans condition. Une étiquette au même prix reste bonne — les coches sont
+        // CONSERVÉES. La re-proposition ne passe QUE par le changement de prix
+        // (updateOpPrixRouge → _reproposerEtapesEtiquettePR, qui ne fait rien à prix égal).
         op._ts = _now; op._adminTs = _now;
         try { syncOpStepsToAction(op); } catch (e) {}
         nDetachees++;
@@ -25295,7 +25297,7 @@ async function pvArchiverEtCloturerCampagne(campagneId) {
     <div style="color:#22d3ee; font-weight:700; font-size:14px; margin-bottom:8px;">🏁 Fin de campagne — ${c.nom}</div>
     <div style="font-size:12px; color:#e2e8f0; line-height:1.6;">• le bilan du jour est archivé (photographie)<br>
     • ${nEcoul} OP écoulée${nEcoul > 1 ? 's' : ''} partout part${nEcoul > 1 ? 'ent' : ''} aux archives (« sorties »)<br>
-    • ${nRest} restante${nRest > 1 ? 's' : ''} : réouverte${nRest > 1 ? 's' : ''}, prix gardés, étiquettes re-proposées aux boutiques qui ont encore du stock, coches conservées chez celles qui ont tout écoulé<br>
+    • ${nRest} restante${nRest > 1 ? 's' : ''} : réouverte${nRest > 1 ? 's' : ''}, prix gardés, coches conservées — les étiquettes ne se re-proposent que si un prix CHANGE (au bilan)<br>
     • la campagne disparaît des vues — son bilan archivé reste consultable</div>
     ${_destSelect}
   </div>`;
