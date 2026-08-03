@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 15:51</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 15:58</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -15823,7 +15823,7 @@ function renderVueTesteurs() {
     <button onclick="pvImprimerAfficheTesteurs()" style="margin-left:auto; padding:5px 14px; font-size:11px; font-weight:700; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:4px; cursor:pointer;" title="Générer l'affiche A5 du meuble de test (maquette réseau), remplie avec la sélection actuelle">🖨️ Affiche A5</button>
   </div>`;
   if (admin) {
-    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Tu coches/décoches via le bouton 🧪 des lignes parfum (base) ou les suggestions ci-dessous. <b style="color:#94a3b8;">Glisse-dépose (⠿) un parfum sur un autre emplacement de sa zone</b> pour le déplacer — les autres se décalent. Priorité stratégique : <b style="color:#c4b5fd;">CigustoMDD</b> d'abord, puis la <b style="color:#4ade80;">marge/mL</b>.</div>`;
+    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Tu coches/décoches via le bouton 🧪 des lignes parfum (base) ou les suggestions ci-dessous. <b style="color:#94a3b8;">Glisse-dépose (⠿) un parfum sur un autre emplacement de sa zone</b> pour le déplacer — les autres se décalent. Priorité stratégique : <b style="color:#60a5fa;">50 mL</b> d'abord, puis <b style="color:#c4b5fd;">CigustoMDD</b>, puis la <b style="color:#4ade80;">marge/mL</b>.</div>`;
   } else {
     html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">La sélection est faite par Fabien — ici tu consultes la malette et tu imprimes l'affiche du meuble de test.</div>`;
   }
@@ -15851,14 +15851,23 @@ function renderVueTesteurs() {
         const key = _testeurKeyDe(g, p);
         if (!key || key === '||' || _seenKeys.has(key)) return; // déjà dans la malette
         const mml = _testeurMargeMl(g, p);
-        if (!_candByKey[key] || mml > _candByKey[key].mml) _candByKey[key] = { g, p, zone, mml, key };
+        // Dédoublonnage multi-format : on garde la déclinaison 50 mL si elle existe
+        // (priorité Fabien 2026-08-03), sinon la meilleure marge/mL.
+        const cur = _candByKey[key];
+        const is50 = g.format === '50mL';
+        if (!cur || (is50 && cur.g.format !== '50mL') || (is50 === (cur.g.format === '50mL') && mml > cur.mml)) {
+          _candByKey[key] = { g, p, zone, mml, key };
+        }
       });
     });
     Object.values(_candByKey).forEach(c => { (_candParZone[c.zone] = _candParZone[c.zone] || []).push(c); });
+    // Tri stratégique (Fabien 2026-08-03) : 50 mL d'abord, puis CigustoMDD, puis marge/mL.
     Object.values(_candParZone).forEach(list => list.sort((a, b) => {
+      const fa = a.g.format === '50mL' ? 1 : 0, fb = b.g.format === '50mL' ? 1 : 0;
+      if (fa !== fb) return fb - fa;
       const ma = _testeurEstMDD(a.g) ? 1 : 0, mb = _testeurEstMDD(b.g) ? 1 : 0;
-      if (ma !== mb) return mb - ma;          // CigustoMDD d'abord (stratégie Fabien)
-      return b.mml - a.mml;                    // puis marge/mL décroissante
+      if (ma !== mb) return mb - ma;
+      return b.mml - a.mml;
     }));
   }
 
@@ -15909,10 +15918,11 @@ function renderVueTesteurs() {
       const cands = (_candParZone[z.key] || []).slice(0, 5);
       if (cands.length > 0) {
         html += `<div style="padding:4px 10px 6px; background:#1e293b40; border-top:1px dashed #33415580;">
-          <div style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:2px;">💡 Suggestions (MDD puis marge/mL)</div>
+          <div style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:2px;">💡 Suggestions (50 mL puis MDD puis marge/mL)</div>
           ${cands.map(c => `<span onclick="toggleTesteur('${c.g.id}','${c.p.id}')" style="display:inline-flex; gap:4px; align-items:center; font-size:10px; color:#cbd5e1; padding:2px 7px; background:#1e293b; border:1px solid ${z.color}40; border-radius:3px; margin:1px 3px 1px 0; cursor:pointer;" title="${c.g.marque} ${c.g.gamme} ${LIQ_FORMAT_LABELS[c.g.format] || ''} — ajouter à la malette">
             <b style="color:${z.color};">+</b> ${c.p.n || '(sans nom)'}
             <span style="color:#64748b; font-size:8.5px;">${c.g.marque}</span>
+            <span style="font-size:7.5px; padding:0 3px; background:${(LIQ_FORMAT_COLORS[c.g.format] || '#64748b')}20; color:${LIQ_FORMAT_COLORS[c.g.format] || '#94a3b8'}; border-radius:2px;">${LIQ_FORMAT_LABELS[c.g.format] || c.g.format}</span>
             ${_testeurEstMDD(c.g) ? `<span style="font-size:7.5px; padding:0 3px; background:#a78bfa20; color:#c4b5fd; border-radius:2px; font-weight:700;">MDD</span>` : ''}
             <span style="color:#4ade80; font-size:8.5px;">${c.mml.toFixed(2)}/mL</span>
           </span>`).join('')}
