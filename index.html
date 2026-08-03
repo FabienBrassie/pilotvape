@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 17:12</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 18:57</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2384,6 +2384,11 @@ const PIECE_TYPES = [
   { key: 'MACARON_ETAGERE',       label: 'Macaron étagère',       support: 'physique', perShop: true },
   { key: 'FRONTON_BAC',           label: 'Fronton bac à fouille', support: 'physique', perShop: true },
   { key: 'PLV_AUTRE',             label: 'PLV autre',             support: 'physique', perShop: true },
+  // 🧪 Testeur événementiel (2026-08-03, demande Fabien) : une OP peut installer un testeur
+  // dans la malette — le parfum couvert entre en zone EXTRA le temps de l'OP (sync dans
+  // syncAutoActions), l'étape « Installer Testeur → Meuble de test » vient du maillon
+  // plv_pose comme toute pièce, et le retrait passe par la désinstallation de fin d'OP.
+  { key: 'TESTEUR',               label: 'Testeur (malette)',     support: 'physique', perShop: true },
   { key: 'PRODUIT',              label: 'Produit',               support: 'physique', perShop: true },
   // --- Digitales ---
   { key: 'VIDEO_ECRAN',           label: 'Vidéo écran boutique',  support: 'digital',  perShop: true  },
@@ -2411,6 +2416,7 @@ const EMPLACEMENTS_PHYSIQUES = [
   { key: 'EMPL_LIQUIDE_MOMENT', label: 'Emplacement liquide du moment' },
   { key: 'COMMODES',            label: 'Commodes' },
   { key: 'ZONE_FOUILLE',        label: 'Zone bac à fouille' },
+  { key: 'MEUBLE_TEST',         label: 'Meuble de test (malette)' },
   { key: 'CAISSE',              label: 'Caisse' },
   { key: 'AUTRE',               label: 'Autre (voir note)' }
 ];
@@ -3021,7 +3027,11 @@ const TESTEUR_ZONES = [
   { key: 'FRUITE',       label: 'FRUITÉ',       quota: 15, color: '#d9539b', start: 15 },
   { key: 'CLASSIQUE',    label: 'CLASSIQUE',    quota: 7,  color: '#7a4a33', start: 30 },
   { key: 'MENTHE',       label: 'MENTHE',       quota: 3,  color: '#3f7d4f', start: 37 },
-  { key: 'GOURMAND',     label: 'GOURMAND',     quota: 6,  color: '#2f6391', start: 40 }
+  { key: 'GOURMAND',     label: 'GOURMAND',     quota: 6,  color: '#2f6391', start: 40 },
+  // EXTRA (2026-08-03, demande Fabien) : testeurs ÉVÉNEMENTIELS — hors plan réseau des 45,
+  // SANS quota (souple), numéros à la suite (46+). Alimentée par les pièces d'OP « Testeur »
+  // (sync automatique, zone forcée par le flag extra) ou à la main depuis la vue Testeurs.
+  { key: 'EXTRA',        label: 'EXTRA',        quota: null, color: '#b23a48', start: 46 }
 ];
 const TESTEUR_ZONE_META = Object.fromEntries(TESTEUR_ZONES.map(z => [z.key, z]));
 // Catégorie de goût (parfum sinon gamme) → zone de la malette. 'De_Tout' ou goût
@@ -3056,7 +3066,8 @@ function _testeurEntries() {
     if (!g || g.statutVie === 'SORTI') return;
     const p = (g.parfums || []).find(x => x.id === t.parfumId);
     if (!p || p.s === 'SORTI') return;
-    out.push({ t, g, p, zone: testeurZoneDe(g, p), key: _testeurKeyDe(g, p), pos: out.length });
+    // Zone : le flag extra (testeur événementiel — OP ou ajout manuel) PRIME sur le goût.
+    out.push({ t, g, p, zone: t.extra ? 'EXTRA' : testeurZoneDe(g, p), key: _testeurKeyDe(g, p), pos: out.length });
   });
   return out;
 }
@@ -3065,7 +3076,43 @@ function estTesteur(g, p) {
   if (!key || key === '||') return false;
   return _testeurEntries().some(e => e.key === key);
 }
-// Coche/décoche un parfum comme testeur (admin seul). Quota de zone vérifié à l'ajout.
+// ── Lignes de travail malette (2026-08-03, demande Fabien : « les testeurs, lorsqu'ils
+// seront modifiés, dans À installer ») : chaque changement de malette crée une action
+// TESTEUR (1 étape par boutique) — INSTALLER / RETIRER / REMPLACER (retrait + ajout dans
+// la MÊME zone = un seul geste : le nouveau prend l'emplacement du sortant).
+function _testeurActionOuverte(filtre) {
+  return actions.find(a => a.type === 'TESTEUR' && !a.annulee && !a.dateCloture && !a._archived && !_deletedIds.has(a.id) && filtre(a));
+}
+// Une action TESTEUR a-t-elle au moins une coche quelque part ?
+function _testeurActionCochee(a) {
+  return SHOPS.some(sh => { const st = a.etats && a.etats[sh]; return !!(st && st.steps && Object.values(st.steps).some(v => v === true)); });
+}
+// Crée une action TESTEUR. NE PASSE PAS par ensureAction : sa priorité 2 (réutiliser une
+// action FAIT) interdirait tout nouveau cycle installer→retirer→réinstaller. Invariant
+// anti-dédup (le merge fusionne par produit+type+parfum les actions NON annulées) : on
+// annule d'abord toute vieille TESTEUR clôturée du même parfum — il n'existe jamais plus
+// d'UNE action TESTEUR non annulée par parfum. Les fonctions de merge ne sont PAS touchées.
+function _testeurCreerAction(g, p, testeurOp, extraFields) {
+  const _now = new Date().toISOString();
+  actions.forEach(a => {
+    if (a.type !== 'TESTEUR' || a.annulee) return;
+    if (a.produitId !== g.id || a.produitParfumId !== p.id) return;
+    if (a.dateCloture) { a.annulee = true; a._ts = _now; }
+  });
+  const a = {
+    id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
+    type: 'TESTEUR', produitId: g.id, produitType: 'liq',
+    produitParfumId: p.id, _parfumNom: p.n || null,
+    priorite: 'AUTO', dateCreation: ymd(new Date()), auteur: 'Auto',
+    etats: makeShopStates('TESTEUR'), dateCloture: null, annulee: false, lienOP: null,
+    testeurOp: testeurOp, _ts: _now
+  };
+  if (extraFields) Object.assign(a, extraFields);
+  actions.push(a);
+  return a;
+}
+// Coche/décoche un parfum comme testeur (admin seul). Quota de zone vérifié à l'ajout
+// (EXTRA : souple, pas de quota). Chaque changement produit sa ligne de travail boutique.
 function toggleTesteur(gId, parfumId) {
   if (!isAdmin()) { pvAlert('La sélection des testeurs est faite par Fabien — ici tu peux la consulter (vue 🧪 Testeurs) et imprimer l\'affiche.'); return; }
   const g = baseLiq.find(x => x.id === gId); if (!g) return;
@@ -3075,23 +3122,84 @@ function toggleTesteur(gId, parfumId) {
   const key = _testeurKeyDe(g, p);
   const existing = entries.find(e => e.key === key);
   if (existing) {
+    const exG = existing.g, exP = existing.p;
+    const zoneEx = existing.zone;
+    const ordreEx = (typeof existing.t.ordre === 'number') ? existing.t.ordre : null;
     _deletedIds.add(existing.t.id); // tombstone : le retrait se propage et ne ressuscite pas
     testeursLiq = testeursLiq.filter(x => x.id !== existing.t.id);
-    logAction('Testeur retiré', (g.marque || '') + ' ' + (g.gamme || '') + ' · ' + (p.n || ''));
+    logAction('Testeur retiré', (exG.marque || '') + ' ' + (exG.gamme || '') + ' · ' + (exP.n || ''));
+    // ── Ligne de travail ──
+    const aOuverte = _testeurActionOuverte(a => a.produitId === exG.id && a.produitParfumId === exP.id && (a.testeurOp === 'INSTALLER' || a.testeurOp === 'REMPLACER'));
+    if (aOuverte) {
+      // L'installation n'a pas abouti : on annule la ligne. Si des coches existaient
+      // (posé quelque part), il faut le faire retirer ; sinon annulation silencieuse.
+      const _coche = _testeurActionCochee(aOuverte);
+      const _op = aOuverte.testeurOp;
+      _cancelAction(aOuverte);
+      if (_op === 'REMPLACER' && aOuverte.testeurAncienGammeId) {
+        // Le remplacement n'aura pas lieu : l'ANCIEN doit quand même sortir de la malette.
+        const agR = baseLiq.find(x => x.id === aOuverte.testeurAncienGammeId);
+        const apR = agR && (agR.parfums || []).find(x => x.id === aOuverte.testeurAncienParfumId);
+        if (agR && apR) _testeurCreerAction(agR, apR, 'RETIRER', { testeurOrdre: (typeof aOuverte.testeurOrdre === 'number' ? aOuverte.testeurOrdre : undefined), testeurZone: aOuverte.testeurZone });
+      }
+      if (_coche) _testeurCreerAction(exG, exP, 'RETIRER', { testeurOrdre: ordreEx !== null ? ordreEx : undefined, testeurZone: zoneEx });
+    } else {
+      // Testeur en place → le faire retirer par les boutiques
+      _testeurCreerAction(exG, exP, 'RETIRER', { testeurOrdre: ordreEx !== null ? ordreEx : undefined, testeurZone: zoneEx });
+    }
   } else {
     const zone = testeurZoneDe(g, p);
     if (!zone) { pvAlert('Ce parfum n\'a pas de catégorie de goût exploitable (ou « De_Tout »).\nPose d\'abord son goût (Fruité, Menthe…) sur le parfum ou la gamme — la malette est rangée par catégorie.'); return; }
     const zMeta = TESTEUR_ZONE_META[zone];
     const zoneCount = entries.filter(e => e.zone === zone).length;
-    if (zoneCount >= zMeta.quota) {
+    if (typeof zMeta.quota === 'number' && zoneCount >= zMeta.quota) {
       pvAlert('Zone ' + zMeta.label + ' pleine (' + zoneCount + '/' + zMeta.quota + ').\nRetire d\'abord un testeur de cette zone (vue 🧪 Testeurs de Base Liquides).');
       return;
     }
-    testeursLiq.push({ id: 'TST-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), gammeId: gId, parfumId: parfumId, _ts: _now, _adminTs: _now });
+    const t = { id: 'TST-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), gammeId: gId, parfumId: parfumId, _ts: _now, _adminTs: _now };
+    // ── Remplacement ? Un RETIRER encore ouvert dans la même zone = « remplacer X par Y » :
+    // une seule ligne pour les boutiques, et le nouveau hérite de l'emplacement libéré.
+    const aRet = _testeurActionOuverte(a => a.testeurOp === 'RETIRER' && a.testeurZone === zone);
+    if (aRet) {
+      if (typeof aRet.testeurOrdre === 'number') t.ordre = aRet.testeurOrdre;
+      const agA = baseLiq.find(x => x.id === aRet.produitId);
+      _cancelAction(aRet);
+      _testeurCreerAction(g, p, 'REMPLACER', {
+        testeurAncienNom: aRet._parfumNom || '?',
+        testeurAncienMarque: agA ? (agA.marque || '') : '',
+        testeurAncienGammeId: aRet.produitId,
+        testeurAncienParfumId: aRet.produitParfumId || '',
+        testeurOrdre: (typeof aRet.testeurOrdre === 'number' ? aRet.testeurOrdre : undefined),
+        testeurZone: zone
+      });
+    } else {
+      _testeurCreerAction(g, p, 'INSTALLER', { testeurZone: zone });
+    }
+    testeursLiq.push(t);
     logAction('Testeur ajouté', (g.marque || '') + ' ' + (g.gamme || '') + ' · ' + (p.n || '') + ' → ' + zMeta.label);
   }
   saveData();
   renderLiqAll();
+  try { if (typeof renderDashboard === 'function') renderDashboard(); } catch (e) {}
+}
+// Ajout MANUEL d'un testeur événementiel en zone EXTRA (picker de la vue Testeurs).
+// La valeur vient du datalist — on la résout via la table construite au rendu.
+function pvAjouterTesteurExtra(inputEl) {
+  if (!isAdmin() || !inputEl) return;
+  const val = (inputEl.value || '').trim();
+  const ids = (window._testeurExtraOptions || {})[val];
+  if (!ids) return; // saisie libre non résolue : on attend un choix du datalist
+  inputEl.value = '';
+  const g = baseLiq.find(x => x.id === ids.g); if (!g) return;
+  const p = (g.parfums || []).find(x => x.id === ids.p); if (!p) return;
+  if (estTesteur(g, p)) { pvAlert((p.n || 'Ce parfum') + ' est déjà dans la malette.'); return; }
+  const _now = new Date().toISOString();
+  testeursLiq.push({ id: 'TST-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), gammeId: g.id, parfumId: p.id, extra: true, _ts: _now, _adminTs: _now });
+  _testeurCreerAction(g, p, 'INSTALLER', { testeurZone: 'EXTRA' });
+  logAction('Testeur ajouté (Extra)', (g.marque || '') + ' ' + (g.gamme || '') + ' · ' + (p.n || ''));
+  saveData();
+  renderLiqAll();
+  try { if (typeof renderDashboard === 'function') renderDashboard(); } catch (e) {}
 }
 
 function ensureCampagneModel(c) {
@@ -3740,6 +3848,9 @@ const ACTION_STEPS = {
                   // pas coché, la ligne reste sur les radars (et apparaît dans « À installer »).
                   { key: 'installe',  label: 'Installé en rayon', nat: 'cond', condKey: 'recu', condLabel: 'après réception' }],
   MISE_EN_PLACE: [{ key: 'monte',     label: 'Monté sur le mur', nat: 'imm' }],
+  // 🧪 Changement de malette de testeurs (2026-08-03) : une seule étape par boutique —
+  // le libellé est spécialisé par getActionSteps selon testeurOp (INSTALLER/RETIRER/REMPLACER).
+  TESTEUR:       [{ key: 'testeur_fait', label: 'Malette mise à jour', nat: 'imm' }],
   PRIX:          [{ key: 'etiquette', label: 'Étiquette faite', nat: 'imm' },
                   { key: 'rayon',     label: 'Changée en rayon', nat: 'imm' },
                   { key: 'swappy',    label: 'Mis à jour sur Swappy', nat: 'imm' }],
@@ -4331,6 +4442,16 @@ function getActionSteps(typeOrAction) {
     const et = base.find(s => s.key === 'etiquette');
     if (et) et.label = 'Prix rouge imprimé';
   }
+  // 🧪 Changement de malette (2026-08-03) : libellé spécialisé par geste.
+  if (type === 'TESTEUR' && typeof typeOrAction === 'object' && typeOrAction) {
+    const _tSt = base.find(s => s.key === 'testeur_fait');
+    if (_tSt) {
+      const _tOp = typeOrAction.testeurOp;
+      if (_tOp === 'INSTALLER') _tSt.label = 'Testeur installé dans la malette';
+      else if (_tOp === 'RETIRER') _tSt.label = 'Testeur retiré de la malette';
+      else if (_tOp === 'REMPLACER') _tSt.label = 'Ancien testeur retiré, nouveau installé';
+    }
+  }
   // Commande gérée par l'admin (feature 2026-06-18) : la boutique ne commande pas. Le bon ordre
   // est : d'abord RÉCEPTION, ensuite SAISIE en stock. On réordonne (reçu → saisie) et on rend la
   // saisie conditionnée à la réception. Clés inchangées → _stepTs/done préservés.
@@ -4808,6 +4929,13 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
     if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE' && parfumStatus === 'REPRISE') return;
     // ── Rétrocession inter-boutiques : vit sa vie, annulée seulement si le parfum est Sorti ──
     if (a.type === 'RETRO_ENVOI' || a.type === 'RETRO_RECEPTION') { if (parfumStatus === 'SORTI') _cancelAction(a); return; }
+    // 🧪 Changement de malette (2026-08-03) : la ligne vit jusqu'à FAIT partout —
+    // seul ménage : un parfum SORTI n'a plus de malette (le testeur est retiré par
+    // ailleurs via la résolution dynamique des entrées).
+    if (a.type === 'TESTEUR') {
+      if (parfumStatus === 'SORTI' && !a.dateCloture) _cancelAction(a);
+      return;
+    }
     if (a.type === 'PRIX') {
       if (parfumStatus === 'SORTI') _cancelAction(a);
       return;
@@ -5381,6 +5509,55 @@ function syncAutoActions() {
         console.log('[MIGRATION-PARFUM] ' + aG.id + ' (' + cfg.type + ' · ' + (g.marque || '') + ' ' + (g.gamme || '') + ') → ' + pfActs.length + ' ligne(s) parfum');
       });
     });
+  }
+
+  // ═══ 🧪 PIÈCES D'OP « TESTEUR » → MALETTE ZONE EXTRA (2026-08-03, demande Fabien) ═══
+  // Une OP ouverte portant une pièce Testeur met ses parfums couverts dans la malette,
+  // zone EXTRA (événementiel), le temps de l'OP. Idempotent, côté admin (les boutiques
+  // adoptent au poll). Id déterministe TST-OP-<op>-<parfum> : un retrait MANUEL (tombstone)
+  // n'est jamais recréé. OP terminée / pièce retirée / parfum plus couvert → l'entrée sort
+  // de la malette (le retrait PHYSIQUE, lui, vit sur l'étape de désinstallation de l'OP).
+  if (typeof isAdmin === 'function' && isAdmin()) {
+    const _nowTst = new Date().toISOString();
+    let _tstOpChanged = false;
+    ops.forEach(op => {
+      const hasTesteurPiece = !op._archived && (op.pieces || []).some(x => x.type === 'TESTEUR');
+      const opActive = hasTesteurPiece && opTimeStatus(op) !== 'TERMINEE';
+      // Parfums couverts (liquides en base uniquement — un produit libre n'a pas de parfum)
+      const cibles = [];
+      if (opActive) {
+        const pfIds = op.produitParfumId ? [op.produitParfumId]
+          : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+        (op.produitIds || []).forEach(pid => {
+          const gT = baseLiq.find(l => l.id === pid);
+          if (!gT || gT.statutVie === 'SORTI') return;
+          (gT.parfums || []).forEach(pp => {
+            if (!pp.id || pp.s === 'SORTI') return;
+            if (pfIds && !pfIds.includes(pp.id)) return;
+            cibles.push({ g: gT, p: pp });
+          });
+        });
+      }
+      cibles.forEach(c => {
+        const tid = 'TST-OP-' + op.id + '-' + c.p.id;
+        if (_deletedIds.has(tid)) return;                 // retrait manuel : respecté
+        if (testeursLiq.some(x => x.id === tid)) return;  // déjà en place
+        if (estTesteur(c.g, c.p)) return;                 // déjà dans la malette par ailleurs
+        testeursLiq.push({ id: tid, gammeId: c.g.id, parfumId: c.p.id, extra: true, opId: op.id, _ts: _nowTst, _adminTs: _nowTst });
+        _tstOpChanged = true;
+        console.log('[TESTEUR-OP] + ' + (c.g.marque || '') + ' ' + (c.g.gamme || '') + ' · ' + (c.p.n || '') + ' → EXTRA (' + op.id + ')');
+      });
+      // Retraits : entrées de CETTE op qui ne sont plus couvertes
+      const _cibleIds = new Set(cibles.map(c => c.p.id));
+      testeursLiq.forEach(x => {
+        if (x.opId !== op.id || !String(x.id).startsWith('TST-OP-')) return;
+        if (opActive && _cibleIds.has(x.parfumId)) return;
+        _deletedIds.add(x.id);
+        _tstOpChanged = true;
+        console.log('[TESTEUR-OP] − ' + x.id + ' (OP finie / pièce retirée / parfum plus couvert)');
+      });
+    });
+    if (_tstOpChanged) testeursLiq = testeursLiq.filter(x => !_deletedIds.has(x.id));
   }
 
   // Actions auto pour les pièces détachées (même logique que kits)
@@ -15986,7 +16163,14 @@ function renderLiqGammeDetail(g) {
           // avec les initiales des boutiques qui le gardent (demande Fabien 2026-06-12).
           _prBadge += badgeCommandeClient(p);
         }
-        html += `<div style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}">`;
+        // 🧪/⚡ Teinte de ligne (2026-08-03, demande Fabien) : un parfum testeur a sa ligne
+        // légèrement VERDIE (couleur de l'émoji 🧪), un one-shot sa ligne JAUNIE — les deux
+        // à la fois : dégradé. Le fond reste discret pour ne pas gêner la lecture.
+        const _pEstTesteur = p.id ? estTesteur(g, p) : false;
+        const _pTint = (_pEstTesteur && p.oneShot) ? ' background:linear-gradient(90deg, #2dd4bf14, #fcd34d12); border-radius:3px;'
+          : _pEstTesteur ? ' background:#2dd4bf14; border-radius:3px;'
+          : p.oneShot ? ' background:#fcd34d12; border-radius:3px;' : '';
+        html += `<div style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}${_pTint}">`;
         html += `<span style="width:2px; height:18px; background:${pSc}; border-radius:1px; flex-shrink:0;"></span>`;
         html += `<input value="${(p.n||'').replace(/"/g,'&quot;')}" onblur="updateLiqParfumField('${g.id}',${pi},'n',this.value)" style="flex:1; min-width:100px; padding:2px 4px; font-size:11px; background:#0f172a; border:1px solid #33415580; color:#cbd5e1; border-radius:2px;">`;
         html += _prBadge;
@@ -16004,7 +16188,7 @@ function renderLiqGammeDetail(g) {
           <input type="checkbox" ${p.exclu ? 'checked' : ''} onchange="updateLiqParfumField('${g.id}',${pi},'exclu',this.checked)" style="margin:0; cursor:pointer; accent-color:#64748b; transform:scale(0.8);">Exclu</label>`;
         // 🧪 Malette de testeurs (2026-08-03) : coche admin sur la ligne parfum ; les
         // boutiques voient un badge passif (la sélection est réseau, faite par Fabien).
-        const _pEstTesteur = p.id ? estTesteur(g, p) : false;
+        // (_pEstTesteur calculé plus haut, avec la teinte de ligne.)
         if (isAdmin()) {
           if (p.id && p.s !== 'SORTI') {
             html += `<button onclick="event.stopPropagation(); toggleTesteur('${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:${_pEstTesteur ? '#2dd4bf22' : 'none'}; border:1px solid ${_pEstTesteur ? '#2dd4bf80' : '#2dd4bf35'}; color:#2dd4bf; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:${_pEstTesteur ? 700 : 400};" title="${_pEstTesteur ? 'Testeur dans la malette — cliquer pour le retirer' : 'Ajouter ce parfum à la malette de testeurs (45 emplacements, quotas par catégorie de goût)'}">🧪</button>`;
@@ -16135,15 +16319,18 @@ function renderVueTesteurs() {
   const admin = isAdmin();
   const uniques = _testeurUniques();
   const _seenKeys = new Set(uniques.map(e => e.key));
-  const total = uniques.length;
+  // Le compteur X/45 ne compte QUE le plan réseau — l'EXTRA (événementiel) est hors plan.
+  const totalPlan = uniques.filter(e => e.zone && e.zone !== 'EXTRA').length;
+  const totalExtra = uniques.filter(e => e.zone === 'EXTRA').length;
   const aClasser = uniques.filter(e => !e.zone);
 
   let html = `<div>`; // pleine largeur de la fenêtre (retour Fabien 2026-08-03 15:50)
   // Bandeau : compteur global + affiche + qui fait quoi
   html += `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 12px; background:#2dd4bf0d; border:1px solid #2dd4bf35; border-radius:6px; margin-bottom:10px;">
     <span style="font-size:14px; font-weight:800; color:#2dd4bf;">🧪 Malette de testeurs</span>
-    <span style="font-size:12px; font-weight:700; color:${total > TESTEUR_TOTAL ? '#ef4444' : '#e2e8f0'};">${total}/${TESTEUR_TOTAL} emplacements</span>
-    <span style="font-size:10px; color:#94a3b8;">Sélection réseau unique (les 3 boutiques) · quotas fixes par catégorie</span>
+    <span style="font-size:12px; font-weight:700; color:${totalPlan > TESTEUR_TOTAL ? '#ef4444' : '#e2e8f0'};">${totalPlan}/${TESTEUR_TOTAL} emplacements</span>
+    ${totalExtra > 0 ? `<span style="font-size:11px; font-weight:700; color:#f0a5ae;" title="Testeurs événementiels (hors plan des 45)">+ ${totalExtra} Extra</span>` : ''}
+    <span style="font-size:10px; color:#94a3b8;">Sélection réseau unique (les 3 boutiques) · quotas fixes par catégorie · Extra = événementiel, souple</span>
     <button onclick="pvImprimerAfficheTesteurs()" style="margin-left:auto; padding:5px 14px; font-size:11px; font-weight:700; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:4px; cursor:pointer;" title="Générer l'affiche A5 du meuble de test (maquette réseau), remplie avec la sélection actuelle">🖨️ Affiche A5</button>
   </div>`;
   if (admin) {
@@ -16229,19 +16416,46 @@ function renderVueTesteurs() {
   html += `<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; align-items:start;">`;
   TESTEUR_ZONES.forEach(z => {
     const zEntries = uniques.filter(e => e.zone === z.key);
-    const over = zEntries.length > z.quota;
+    const _souple = typeof z.quota !== 'number'; // EXTRA : événementiel, sans quota
+    const over = !_souple && zEntries.length > z.quota;
     html += `<div style="background:#0f172a; border:1px solid ${z.color}40; border-radius:6px; overflow:hidden;">`;
     html += `<div style="display:flex; gap:8px; align-items:center; padding:4px 10px; background:${z.color}22;">
       <span style="font-size:11px; font-weight:800; color:${z.color}; letter-spacing:1px; padding:1px 8px; background:${z.color}; color:#fff; border-radius:3px;">${z.label}</span>
-      <span style="font-size:10px; font-weight:700; color:${over ? '#ef4444' : '#e2e8f0'};">${zEntries.length}/${z.quota}</span>
-      <span style="font-size:9px; color:#64748b;">emplacements ${String(z.start).padStart(2, '0')} → ${String(z.start + z.quota - 1).padStart(2, '0')}</span>
+      <span style="font-size:10px; font-weight:700; color:${over ? '#ef4444' : '#e2e8f0'};">${_souple ? zEntries.length : zEntries.length + '/' + z.quota}</span>
+      <span style="font-size:9px; color:#64748b;">${_souple ? 'événementiel · sans quota · emplacements ' + String(z.start).padStart(2, '0') + '+' : 'emplacements ' + String(z.start).padStart(2, '0') + ' → ' + String(z.start + z.quota - 1).padStart(2, '0')}</span>
       ${over ? `<span style="font-size:9px; color:#ef4444; font-weight:700;">⚠ dépassement — un goût a changé de catégorie : retire ${zEntries.length - z.quota} testeur${zEntries.length - z.quota > 1 ? 's' : ''}</span>` : ''}
     </div>`;
-    for (let i = 0; i < Math.max(z.quota, zEntries.length); i++) {
+    const _nbSlots = _souple ? zEntries.length : Math.max(z.quota, zEntries.length);
+    for (let i = 0; i < _nbSlots; i++) {
       html += _slotRow(z.start + i, zEntries[i] || null, z.color, z.key, i);
     }
+    if (_souple && zEntries.length === 0) {
+      html += `<div style="padding:6px 10px; font-size:10px; color:#64748b; font-style:italic;">Aucun testeur événementiel — alimenté par les OP (pièce « Testeur (malette) ») ou l'ajout ci-dessous.</div>`;
+    }
+    // EXTRA (admin) : ajout manuel d'un testeur événementiel — n'importe quel parfum actif.
+    if (_souple && admin) {
+      window._testeurExtraOptions = window._testeurExtraOptions || {};
+      const _optMap = {};
+      let _optHtml = '';
+      baseLiq.forEach(gX => {
+        if (gX.statutVie === 'SORTI') return;
+        (gX.parfums || []).forEach(pX => {
+          if (!pX.id || pX.s === 'SORTI') return;
+          const lbl = (gX.marque || '') + ' ' + (gX.gamme || '') + ' ' + (LIQ_FORMAT_LABELS[gX.format] || '') + ' · ' + (pX.n || '');
+          if (_optMap[lbl]) return;
+          _optMap[lbl] = { g: gX.id, p: pX.id };
+          _optHtml += `<option value="${lbl.replace(/"/g, '&quot;')}">`;
+        });
+      });
+      window._testeurExtraOptions = _optMap;
+      html += `<div style="padding:4px 10px 6px; background:#1e293b40; border-top:1px dashed #33415580; display:flex; gap:6px; align-items:center;">
+        <span style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700;">➕ Ajouter un testeur événementiel</span>
+        <input list="_tstExtraDL" onchange="pvAjouterTesteurExtra(this)" placeholder="Tape marque / gamme / parfum…" style="flex:1; min-width:160px; padding:3px 8px; font-size:10px; background:#0f172a; border:1px solid ${z.color}50; color:#e2e8f0; border-radius:3px;">
+        <datalist id="_tstExtraDL">${_optHtml}</datalist>
+      </div>`;
+    }
     // Suggestions admin : les meilleurs candidats PAS ENCORE dans la malette pour cette zone
-    if (admin && zEntries.length < z.quota) {
+    if (admin && !_souple && zEntries.length < z.quota) {
       const cands = (_candParZone[z.key] || []).slice(0, 5);
       if (cands.length > 0) {
         html += `<div style="padding:4px 10px 6px; background:#1e293b40; border-top:1px dashed #33415580;">
@@ -16262,6 +16476,35 @@ function renderVueTesteurs() {
 
   html += `</div>`;
   return html;
+}
+
+// ── 🧪 Carte compacte d'une ligne de travail malette (dashboard « À installer ») ──
+// Une étape unique par boutique : coche directe sur la carte (toggleActionStep canonique).
+function _renderTesteurActionCard(a, fShop) {
+  const g = baseLiq.find(x => x.id === a.produitId);
+  const p = g && (g.parfums || []).find(x => x.id === a.produitParfumId);
+  const nom = (p && p.n) || a._parfumNom || '?';
+  const marque = g ? (g.marque || '') : '';
+  const zMeta = TESTEUR_ZONE_META[a.testeurZone] || null;
+  const numTxt = (zMeta && typeof a.testeurOrdre === 'number')
+    ? `<span style="font-size:9px; padding:1px 5px; background:${zMeta.color}; color:#fff; border-radius:2px; font-weight:800;" title="Emplacement dans la malette">${String(zMeta.start + a.testeurOrdre).padStart(2, '0')}</span>` : '';
+  const zoneChip = zMeta ? `<span style="font-size:8.5px; padding:1px 5px; background:${zMeta.color}22; color:${zMeta.color}; border:1px solid ${zMeta.color}60; border-radius:2px; font-weight:700;">${zMeta.label}</span>` : '';
+  let libelle;
+  if (a.testeurOp === 'REMPLACER') libelle = `Remplacer le testeur <b>${a.testeurAncienNom || '?'}</b>${a.testeurAncienMarque ? ` <span style="color:#64748b; font-size:9.5px;">(${a.testeurAncienMarque})</span>` : ''} par <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
+  else if (a.testeurOp === 'RETIRER') libelle = `Retirer le testeur <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
+  else libelle = `Installer le testeur <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
+  const shs = fShop ? [fShop] : SHOPS;
+  const coches = shs.map(sh => {
+    const st = a.etats && a.etats[sh];
+    const done = !!(st && st.steps && st.steps.testeur_fait === true);
+    return `<span onclick="toggleActionStep('${a.id}','${sh}','testeur_fait')" style="cursor:pointer; font-size:9.5px; padding:2px 8px; border-radius:3px; font-weight:700; background:${done ? '#22c55e25' : '#1e293b'}; color:${done ? '#4ade80' : '#94a3b8'}; border:1px solid ${done ? '#22c55e60' : '#47556960'}; white-space:nowrap;" title="${done ? 'Fait à ' + (SHOP_LABELS[sh] || sh) + ' — cliquer pour décocher' : 'À faire à ' + (SHOP_LABELS[sh] || sh) + ' — cliquer quand la malette est à jour'}">${done ? '✓' : '☐'} ${SHOP_LABELS[sh] || sh}</span>`;
+  }).join(' ');
+  return `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; padding:5px 10px; margin-bottom:4px; background:#0f172a; border:1px solid #2dd4bf30; border-left:3px solid #2dd4bf; border-radius:4px;">
+    <span style="font-size:12px;">🧪</span>
+    ${numTxt}${zoneChip}
+    <span style="font-size:11px; color:#e2e8f0;">${libelle}</span>
+    <span style="margin-left:auto; display:flex; gap:4px; align-items:center;">${coches}</span>
+  </div>`;
 }
 
 // ═══ 🖨️ AFFICHE A5 DU MEUBLE DE TEST (2026-08-03) ═══
@@ -16303,13 +16546,22 @@ async function pvImprimerAfficheTesteurs() {
   page.drawText(t2b, { x: t2x + bold.widthOfTextAtSize(t2a, t2s), y: y, size: t2s, font: bold, color: TEAL });
   y -= 20;
 
-  // Grille : 3 colonnes de slots par zone
+  // Grille : 3 colonnes de slots par zone. La zone EXTRA (événementielle, souple)
+  // n'apparaît que si elle contient quelque chose ; la hauteur de ligne s'adapte
+  // pour que tout tienne sur l'A5 même avec des emplacements Extra en plus.
   const MX = 34;                 // marge horizontale
   const colW = (W - 2 * MX) / 3;
-  const rowH = 20.5;
   const headH = 15;
+  const zonesAff = TESTEUR_ZONES.filter(z => (typeof z.quota === 'number') || uniques.some(e => e.zone === z.key));
+  let _totalRows = 0;
+  zonesAff.forEach(z => {
+    const n = (typeof z.quota === 'number') ? Math.max(z.quota, uniques.filter(e => e.zone === z.key).length) : uniques.filter(e => e.zone === z.key).length;
+    _totalRows += Math.ceil(Math.max(n, 1) / 3);
+  });
+  const _availH = y - 24 - zonesAff.length * 26; // 26 ≈ bandeau + respirations par zone
+  const rowH = Math.min(20.5, Math.max(12.5, _availH / Math.max(_totalRows, 1)));
 
-  TESTEUR_ZONES.forEach(z => {
+  zonesAff.forEach(z => {
     const zc = _hex(z.color);
     const zEntries = uniques.filter(e => e.zone === z.key);
     // Bandeau de zone (pill colorée, texte blanc)
@@ -16318,8 +16570,9 @@ async function pvImprimerAfficheTesteurs() {
     page.drawRectangle({ x: MX, y: y, width: zlW, height: headH, color: zc, borderColor: zc, borderWidth: 0 });
     page.drawText(z.label, { x: MX + 8, y: y + 4, size: 10.5, font: bold, color: PDFLib.rgb(1, 1, 1) });
     y -= 4;
-    // Slots numérotés, 3 par ligne (quota fixe → dépassements affichés quand même)
-    const nbSlots = Math.max(z.quota, zEntries.length);
+    // Slots numérotés, 3 par ligne (quota fixe → dépassements affichés quand même ;
+    // zone souple = juste ce qu'elle contient)
+    const nbSlots = (typeof z.quota === 'number') ? Math.max(z.quota, zEntries.length) : zEntries.length;
     const rows = Math.ceil(nbSlots / 3);
     for (let r = 0; r < rows; r++) {
       y -= rowH;
@@ -18611,6 +18864,7 @@ function renderDashboard() {
   const TYPE_META = {
     SORTIR:           { verb: 'Sors',             icon: '↓',  color: '#ef4444' },
     RENTRER:          { verb: 'Rentre',           icon: '↑',  color: '#22c55e' },
+    TESTEUR:          { verb: 'Malette',          icon: '🧪', color: '#2dd4bf' },
     BESOIN_A_COMBLER: { verb: 'Besoin à combler', icon: '⚠',  color: '#fb923c' },
     MISE_EN_PLACE:    { verb: 'Monte',            icon: '🔧', color: '#8b5cf6' },
     PRIX:             { verb: 'Ajuste prix',       icon: '€',  color: '#f59e0b' },
@@ -20427,7 +20681,7 @@ function renderDashboard() {
   // (seule la vue boutique filtrait). Même règle pour tout le monde : au moins une boutique
   // du périmètre affiché n'a pas fini. L'OP reste « En cours » jusqu'à sa fin prévue (la
   // période de mise en avant), mais n'a plus rien à faire dans 📦 À installer.
-  const opsInstallVisibles = opsAInstaller.filter(op =>
+  let opsInstallVisibles = opsAInstaller.filter(op =>
     (fShop ? [fShop] : SHOPS).some(sh => !opAllStepsDone(op, sh)));
   // 2026-08-01 (demande Fabien) : les produits REÇUS mais PAS INSTALLÉS rejoignent la card —
   // le cas « on attend qu'un autre produit sorte pour pouvoir le poser ». Une ligne À rentrer
@@ -20459,6 +20713,16 @@ function renderDashboard() {
   // chacune par une boutique DIFFÉRENTE — on ne montre jamais les deux pour le même produit,
   // la LIGNE (qui porte la coche « installé ») a priorité.
   const _idsLignesInstall = new Set(_lignesRecuesNonInstallees.map(a => a.id)); // 2026-08-03 : une ligne en attente ⏳ compte aussi pour l'anti-doublon (la ligne prime toujours sur l'OP)
+  // 2026-08-03 18h (retour Fabien, cas Bankiz LDM : « doublon ou nœud ») : l'anti-doublon
+  // vaut AUSSI pour les OP qui démarrent aujourd'hui/demain — si des lignes À rentrer du
+  // même produit portent déjà le travail d'installation dans la card, l'OP ne s'affiche
+  // pas en plus (la LIGNE gagne, toujours ; l'OP reste accessible depuis la ligne dépliée
+  // et l'onglet OP). Une entrée par produit, sans exception.
+  opsInstallVisibles = opsInstallVisibles.filter(op => {
+    const _prodSet = new Set(op.produitIds || []);
+    return !_lignesRecuesNonInstallees.some(a =>
+      a.opId === op.id || a.id === op.rentrerActionId || (a.produitId && _prodSet.has(a.produitId)));
+  });
   const opsRecuesNonInstallees = ops.filter(op => {
     if (opsInstallVisibles.includes(op)) return false;
     const _pfL = opRentrerParfumActions(op);
@@ -20466,14 +20730,21 @@ function renderDashboard() {
     if (_lignesOp.some(x => _idsLignesInstall.has(x.id))) return false;
     return _shsInstall.some(sh => _opRecueNonInstalleePourShop(op, sh));
   });
-  const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length + opsRecuesNonInstallees.length;
+  // 🧪 Changements de malette de testeurs (2026-08-03, demande Fabien) : chaque geste
+  // (installer / retirer / remplacer un testeur) est une ligne de travail boutique ici.
+  const testeurActionsInstall = actions.filter(a => {
+    if (a.type !== 'TESTEUR' || a.annulee || a._archived || a.dateCloture || _deletedIds.has(a.id)) return false;
+    return (fShop ? [fShop] : SHOPS).some(sh => { const st = a.etats && a.etats[sh]; return !(st && st.done); });
+  });
+  const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length + opsRecuesNonInstallees.length + testeurActionsInstall.length;
   const _nbInstallAttente = actionsInstallEnAttente.length;
   // 2026-08-03 (retour Fabien : « trop d'info ») : UNE seule liste — une entrée par produit,
   // que le travail vive sur la ligne ou sur l'OP (plomberie interne, pas son affaire).
   // Seule distinction conservée : ⏳ en attente (date / sortie du remplacé), hors compteurs.
   const installBlockInner = (_nbInstallTotal + _nbInstallAttente) === 0
     ? ''
-    : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')
+    : (testeurActionsInstall.length ? testeurActionsInstall.map(a => _renderTesteurActionCard(a, fShop || '')).join('') : '')
+      + opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')
       + (actionsAInstaller.length ? renderGroupedActionCards(actionsAInstaller) : '')
       + (opsRecuesNonInstallees.length ? opsRecuesNonInstallees.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : '')
       + (actionsInstallEnAttente.length ? `<div style="font-size:9px; color:#fbbf24; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Pas un retard : ces installations attendent leur déclencheur — date d'installation ou sortie du produit remplacé (par boutique). Hors compteurs.">⏳ En attente</div>` + renderGroupedActionCards(actionsInstallEnAttente) : '');
@@ -28488,8 +28759,12 @@ function addPieceToOp(opId, pieceType) {
   const op = ops.find(o => o.id === opId); if (!op) return;
   ensureOpModel(op);
   const t = pieceType || 'PLV_AUTRE';
-  const piece = makePiece(t, defaultSourceForPieceType(t), null);
+  // 🧪 Testeur (2026-08-03) : l'emplacement est toujours le meuble de test → pré-affecté
+  // (l'étape « Installer Testeur → Meuble de test » apparaît sans réglage supplémentaire),
+  // et le(s) parfum(s) couvert(s) par l'OP entrent en malette zone EXTRA via syncAutoActions.
+  const piece = makePiece(t, defaultSourceForPieceType(t), t === 'TESTEUR' ? 'MEUBLE_TEST' : null);
   op.pieces.push(piece);
+  if (t === 'TESTEUR') { try { syncAutoActions(); } catch (e) { console.error(e); } }
   op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   ensureOpSteps(op);
   saveData(); renderDashboard(); renderOps && renderOps();
@@ -28497,10 +28772,13 @@ function addPieceToOp(opId, pieceType) {
 function removePiece(opId, pieceId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
+  const _wasTesteur = (op.pieces || []).some(p => p.id === pieceId && p.type === 'TESTEUR');
   op.pieces = op.pieces.filter(p => p.id !== pieceId);
   op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
   // Purge des steps associés
   ensureOpSteps(op);
+  // 🧪 Pièce Testeur retirée → les entrées EXTRA de cette OP sortent de la malette tout de suite
+  if (_wasTesteur) { try { syncAutoActions(); } catch (e) { console.error(e); } }
   saveData(); renderDashboard(); renderOps && renderOps();
 }
 // Déplace une pièce PLV d'une OP vers une autre (module campagne 2026-07-18 : « cet élément
