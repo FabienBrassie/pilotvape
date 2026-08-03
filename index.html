@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:42</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:46</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -31062,11 +31062,16 @@ let _etqShop = '';             // FT uniquement
 let _etqSearch = '';
 let _etqCoches = new Set();
 let _etqLibres = [];           // [{nom, prix}] — planches uniquement
+// Filtres de la liste (planches) : catégories actives + format liquide.
+// Défauts (demande Fabien 2026-08-04) : Vitrine → PD, Étagère → liquides —
+// mais TOUT est activable partout (un kit en étagère, un liquide en vitrine…).
+let _etqCats = new Set(['PD']);
+let _etqFormat = '';           // '' = tous les formats liquides
 
 const _ETQ_SUPPORTS = [
   { key: 'FT',      icon: '🏷️', titre: 'Freetouch',        sous: 'kits · par boutique · profil ou OP' },
-  { key: 'VITRINE', icon: '🪟', titre: 'Vitrine',           sous: '48/A4 · kits, PD, liquides, libre' },
-  { key: 'ETAGERE', icon: '💧', titre: 'Étagère liquides',  sous: '44/A4 · une étiquette par gamme' }
+  { key: 'VITRINE', icon: '🪟', titre: 'Vitrine',           sous: '48/A4 · PD par défaut, tout activable' },
+  { key: 'ETAGERE', icon: '💧', titre: 'Étagère liquides',  sous: '44/A4 · liquides par défaut, tout activable' }
 ];
 function _etqVariantes() {
   if (_etqSupport === 'FT') return [
@@ -31097,14 +31102,17 @@ function _etqCandidats() {
     label: (p.marque || '') + ' — ' + (p.modele || ''),
     sub: typeof p.pv === 'number' ? p.pv.toFixed(2) + '€' : ''
   }));
-  const liqs = () => baseLiq.filter(g => g.statutVie !== 'SORTI' && g.marque && g.gamme && !(g.marque === 'autre' && g.gamme.includes('PA +/-'))).forEach(g => out.push({
+  const liqs = () => baseLiq.filter(g => g.statutVie !== 'SORTI' && g.marque && g.gamme && !(g.marque === 'autre' && g.gamme.includes('PA +/-'))
+    && (!_etqFormat || g.format === _etqFormat)).forEach(g => out.push({
     id: g.id, icon: '💧',
     label: (g.marque || '') + ' — ' + (g.gamme || '') + (g.format ? ' ' + g.format : ''),
     sub: typeof g.pv === 'number' ? g.pv.toFixed(2) + '€' : ''
   }));
-  if (_etqSupport === 'FT') { kits(); }
-  else if (_etqSupport === 'ETAGERE') { liqs(); }
-  else { kits(); pds(); liqs(); }
+  if (_etqSupport === 'FT') { kits(); return out; }
+  // Planches : les catégories cochées décident (tout est imprimable dans tout).
+  if (_etqCats.has('KIT')) kits();
+  if (_etqCats.has('PD')) pds();
+  if (_etqCats.has('LIQ')) liqs();
   return out;
 }
 
@@ -31148,6 +31156,26 @@ function renderEtiquettesTab() {
         </select></label>`
     : '';
 
+  // Filtres de liste (planches) : catégories + format liquide
+  const catDefs = [{ key: 'KIT', label: '🔧 Kits' }, { key: 'PD', label: '🔋💨 Pièces détachées' }, { key: 'LIQ', label: '💧 Liquides' }];
+  const catChips = _etqSupport === 'FT' ? '' : catDefs.map(c => {
+    const on = _etqCats.has(c.key);
+    return `<button onclick="_etqToggleCat('${c.key}')" style="padding:5px 12px; font-size:10.5px; font-weight:700; background:${on ? '#38bdf822' : '#1e293b'}; color:${on ? '#38bdf8' : '#64748b'}; border:1px solid ${on ? '#38bdf8' : '#334155'}; border-radius:999px; cursor:pointer;">${c.label}${on ? ' ✓' : ''}</button>`;
+  }).join('');
+  const fmtSel = (_etqSupport !== 'FT' && _etqCats.has('LIQ'))
+    ? `<label style="font-size:11px; color:#cbd5e1; display:inline-flex; align-items:center; gap:6px;">Format :
+        <select onchange="_etqFormat = this.value; _etqRenderListe();" style="padding:5px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:3px;">
+          <option value=""${!_etqFormat ? ' selected' : ''}>Tous</option>
+          ${(typeof LIQ_FORMATS !== 'undefined' ? LIQ_FORMATS : []).map(f => `<option value="${f}"${_etqFormat === f ? ' selected' : ''}>${f}</option>`).join('')}
+        </select></label>`
+    : '';
+  const filtresHtml = (catChips || fmtSel)
+    ? `<div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:6px;">
+         <span style="font-size:10px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px;">Dans la liste :</span>
+         ${catChips}${fmtSel}
+       </div>`
+    : '';
+
   const libresHtml = _etqSupport === 'FT' ? '' : `
     <div style="margin-top:10px;">
       <div style="font-size:10.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; margin-bottom:4px; display:flex; justify-content:space-between; align-items:center;">
@@ -31168,6 +31196,7 @@ function renderEtiquettesTab() {
       <div style="font-size:11px; color:#94a3b8; margin-bottom:10px;">Le moteur d'étiquettes : choisis le <b>support</b>, la <b>variante</b>, coche les <b>produits</b>, génère. Chaque planche reste modifiable avant impression (planches vitrine/étagère).</div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">${supportBtns}</div>
       <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">${varBtns}${shopSel}</div>
+      ${filtresHtml}
       <div style="display:flex; gap:8px; align-items:center; margin-bottom:6px;">
         <input id="etqSearch" value="${_etqSearch.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')}" oninput="_etqSearch = this.value; _etqRenderListe();" placeholder="🔎 Filtrer la liste…" style="flex:1; padding:6px 10px; font-size:12px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <button onclick="_etqToutCocher(true)" style="padding:4px 10px; font-size:10px; background:#33415550; color:#94a3b8; border:1px solid #47556960; border-radius:3px; cursor:pointer;">Tout cocher</button>
@@ -31188,10 +31217,23 @@ function _etqSetSupport(s) {
     _etqSupport = s;
     _etqCoches = new Set();
     _etqVariante = (s === 'FT') ? '' : s;
+    // Catégories par défaut (Fabien 2026-08-04) : Vitrine → PD, Étagère → liquides.
+    if (s === 'VITRINE') _etqCats = new Set(['PD']);
+    if (s === 'ETAGERE') _etqCats = new Set(['LIQ']);
+    _etqFormat = '';
   }
   renderEtiquettesTab();
 }
 function _etqSetVariante(v) { _etqVariante = v; renderEtiquettesTab(); }
+function _etqToggleCat(c) {
+  if (_etqCats.has(c)) {
+    if (_etqCats.size === 1) return; // toujours au moins une catégorie
+    _etqCats.delete(c);
+  } else {
+    _etqCats.add(c);
+  }
+  renderEtiquettesTab();
+}
 function _etqToggle(id, on) {
   if (on) _etqCoches.add(id); else _etqCoches.delete(id);
   _etqMajCompteur();
