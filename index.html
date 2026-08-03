@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 18:57</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 19:05</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -16163,13 +16163,21 @@ function renderLiqGammeDetail(g) {
           // avec les initiales des boutiques qui le gardent (demande Fabien 2026-06-12).
           _prBadge += badgeCommandeClient(p);
         }
-        // 🧪/⚡ Teinte de ligne (2026-08-03, demande Fabien) : un parfum testeur a sa ligne
-        // légèrement VERDIE (couleur de l'émoji 🧪), un one-shot sa ligne JAUNIE — les deux
-        // à la fois : dégradé. Le fond reste discret pour ne pas gêner la lecture.
+        // 🧪/⚡/🔴/statuts — Teinte de ligne (2026-08-03, généralisée à la demande de Fabien) :
+        // chaque état notable teinte légèrement la ligne de SA couleur — testeur = vert 🧪,
+        // one-shot = jaune ⚡, prix rouge actif = rouge, statut ≠ « dans l'offre » = la couleur
+        // du statut (à rentrer vert, à sortir rouge, reprise bleu, fin de vie ambre…).
+        // Plusieurs états à la fois → dégradé des deux premiers. Fond discret, lecture intacte.
         const _pEstTesteur = p.id ? estTesteur(g, p) : false;
-        const _pTint = (_pEstTesteur && p.oneShot) ? ' background:linear-gradient(90deg, #2dd4bf14, #fcd34d12); border-radius:3px;'
-          : _pEstTesteur ? ' background:#2dd4bf14; border-radius:3px;'
-          : p.oneShot ? ' background:#fcd34d12; border-radius:3px;' : '';
+        const _tintCols = [];
+        if (_pEstTesteur) _tintCols.push('#2dd4bf14');
+        if (p.oneShot) _tintCols.push('#fcd34d12');
+        if (_isPr) _tintCols.push('#ef444412');
+        const _pStatutEff = p.s || 'OK';
+        if (!['', 'OK', 'DANS_OFFRE', 'SORTI'].includes(_pStatutEff)) _tintCols.push(liqGammeStatusColor(_pStatutEff) + '12');
+        const _pTint = _tintCols.length === 0 ? ''
+          : _tintCols.length === 1 ? ` background:${_tintCols[0]}; border-radius:3px;`
+          : ` background:linear-gradient(90deg, ${_tintCols[0]}, ${_tintCols[1]}); border-radius:3px;`;
         html += `<div style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}${_pTint}">`;
         html += `<span style="width:2px; height:18px; background:${pSc}; border-radius:1px; flex-shrink:0;"></span>`;
         html += `<input value="${(p.n||'').replace(/"/g,'&quot;')}" onblur="updateLiqParfumField('${g.id}',${pi},'n',this.value)" style="flex:1; min-width:100px; padding:2px 4px; font-size:11px; background:#0f172a; border:1px solid #33415580; color:#cbd5e1; border-radius:2px;">`;
