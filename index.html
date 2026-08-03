@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 16:02</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 16:09</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3034,7 +3034,7 @@ function _testeurEntries() {
     if (!g || g.statutVie === 'SORTI') return;
     const p = (g.parfums || []).find(x => x.id === t.parfumId);
     if (!p || p.s === 'SORTI') return;
-    out.push({ t, g, p, zone: testeurZoneDe(g, p), key: _testeurKeyDe(g, p) });
+    out.push({ t, g, p, zone: testeurZoneDe(g, p), key: _testeurKeyDe(g, p), pos: out.length });
   });
   return out;
 }
@@ -15890,10 +15890,64 @@ function _testeurJumeaux(key) {
 }
 // LA liste ordonnée et dédoublonnée de la malette (règle 8) : même source pour la
 // vue 🧪 Testeurs ET l'affiche A5 — l'ordre des numéros ne peut pas diverger.
+// Ordre DANS une zone (2026-08-03, drag & drop) : champ `ordre` posé par testeurReorder ;
+// une entrée sans ordre (coche récente, données d'avant) va en fin de zone, à l'ancienneté.
 function _testeurUniques() {
   const seen = new Set();
-  return _testeurEntries().filter(e => { if (seen.has(e.key)) return false; seen.add(e.key); return true; });
+  return _testeurEntries()
+    .filter(e => { if (seen.has(e.key)) return false; seen.add(e.key); return true; })
+    .sort((a, b) => {
+      const oa = typeof a.t.ordre === 'number' ? a.t.ordre : 1e9;
+      const ob = typeof b.t.ordre === 'number' ? b.t.ordre : 1e9;
+      return (oa - ob) || (a.pos - b.pos);
+    });
 }
+// ── Drag & drop des emplacements (2026-08-03, demande Fabien : « prendre le parfum en
+// n°1 et le bouger en n°5, les présents se décalent ») — DANS une zone uniquement
+// (la zone vient du goût, on ne change pas de catégorie en glissant). Admin seul.
+let _testeurDrag = null; // { zone, idx } pendant un glisser
+function testeurReorder(zoneKey, fromIdx, toIdx) {
+  if (!isAdmin()) return;
+  const zList = _testeurUniques().filter(e => e.zone === zoneKey);
+  if (fromIdx < 0 || fromIdx >= zList.length) return;
+  toIdx = Math.max(0, Math.min(toIdx, zList.length - 1));
+  if (fromIdx === toIdx) return;
+  const moved = zList.splice(fromIdx, 1)[0];
+  zList.splice(toIdx, 0, moved);
+  const _now = new Date().toISOString();
+  // Réécrit l'ordre 0..n-1 de la zone ; _ts/_adminTs frais → l'ordre se propage par merge.
+  zList.forEach((e, i) => {
+    if (e.t.ordre !== i) { e.t.ordre = i; e.t._ts = _now; e.t._adminTs = _now; }
+  });
+  logAction('Testeurs réordonnés', (TESTEUR_ZONE_META[zoneKey] ? TESTEUR_ZONE_META[zoneKey].label : zoneKey) + ' : ' + (moved.p.n || '?') + ' → emplacement ' + (toIdx + 1));
+  saveData();
+  renderLiqAll();
+}
+function pvTesteurDragStart(ev, zone, idx) {
+  if (!isAdmin()) { ev.preventDefault(); return; }
+  _testeurDrag = { zone, idx };
+  try { ev.dataTransfer.setData('text/plain', zone + ':' + idx); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
+}
+function pvTesteurDragOver(ev, zone) {
+  if (!_testeurDrag || _testeurDrag.zone !== zone) return; // autre zone → refus (le goût décide)
+  ev.preventDefault();
+  try { ev.dataTransfer.dropEffect = 'move'; } catch (e) {}
+  const row = ev.currentTarget;
+  if (row && !row._dndHl) { row._dndHl = row.style.background || ''; row.style.background = '#2dd4bf1c'; }
+}
+function pvTesteurDragLeave(ev) {
+  const row = ev.currentTarget;
+  if (row && row._dndHl !== undefined) { row.style.background = row._dndHl; delete row._dndHl; }
+}
+function pvTesteurDrop(ev, zone, idx) {
+  ev.preventDefault();
+  pvTesteurDragLeave(ev);
+  if (!_testeurDrag || _testeurDrag.zone !== zone) { _testeurDrag = null; return; }
+  const from = _testeurDrag.idx;
+  _testeurDrag = null;
+  testeurReorder(zone, from, idx);
+}
+function pvTesteurDragEnd() { _testeurDrag = null; }
 function renderVueTesteurs() {
   const admin = isAdmin();
   const uniques = _testeurUniques();
@@ -15901,7 +15955,7 @@ function renderVueTesteurs() {
   const total = uniques.length;
   const aClasser = uniques.filter(e => !e.zone);
 
-  let html = `<div style="max-width:860px;">`;
+  let html = `<div>`; // pleine largeur de la fenêtre (retour Fabien 2026-08-03 15:50)
   // Bandeau : compteur global + affiche + qui fait quoi
   html += `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 12px; background:#2dd4bf0d; border:1px solid #2dd4bf35; border-radius:6px; margin-bottom:10px;">
     <span style="font-size:14px; font-weight:800; color:#2dd4bf;">🧪 Malette de testeurs</span>
@@ -15910,7 +15964,7 @@ function renderVueTesteurs() {
     <button onclick="pvImprimerAfficheTesteurs()" style="margin-left:auto; padding:5px 14px; font-size:11px; font-weight:700; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:4px; cursor:pointer;" title="Générer l'affiche A5 du meuble de test (maquette réseau), remplie avec la sélection actuelle">🖨️ Affiche A5</button>
   </div>`;
   if (admin) {
-    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Tu coches/décoches via le bouton 🧪 des lignes parfum (base) ou les suggestions ci-dessous. Priorité stratégique : <b style="color:#c4b5fd;">CigustoMDD</b> d'abord, puis la <b style="color:#4ade80;">marge/mL</b>.</div>`;
+    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Tu coches/décoches via le bouton 🧪 des lignes parfum (base) ou les suggestions ci-dessous. <b style="color:#94a3b8;">Glisse-dépose (⠿) un parfum sur un autre emplacement de sa zone</b> pour le déplacer — les autres se décalent. Priorité stratégique : <b style="color:#60a5fa;">50 mL</b> d'abord, puis <b style="color:#c4b5fd;">CigustoMDD</b>, puis la <b style="color:#4ade80;">marge/mL</b>.</div>`;
   } else {
     html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">La sélection est faite par Fabien — ici tu consultes la malette et tu imprimes l'affiche du meuble de test.</div>`;
   }
@@ -15938,44 +15992,62 @@ function renderVueTesteurs() {
         const key = _testeurKeyDe(g, p);
         if (!key || key === '||' || _seenKeys.has(key)) return; // déjà dans la malette
         const mml = _testeurMargeMl(g, p);
-        if (!_candByKey[key] || mml > _candByKey[key].mml) _candByKey[key] = { g, p, zone, mml, key };
+        // Dédoublonnage multi-format : on garde la déclinaison 50 mL si elle existe
+        // (priorité Fabien 2026-08-03), sinon la meilleure marge/mL.
+        const cur = _candByKey[key];
+        const is50 = g.format === '50mL';
+        if (!cur || (is50 && cur.g.format !== '50mL') || (is50 === (cur.g.format === '50mL') && mml > cur.mml)) {
+          _candByKey[key] = { g, p, zone, mml, key };
+        }
       });
     });
     Object.values(_candByKey).forEach(c => { (_candParZone[c.zone] = _candParZone[c.zone] || []).push(c); });
+    // Tri stratégique (Fabien 2026-08-03) : 50 mL d'abord, puis CigustoMDD, puis marge/mL.
     Object.values(_candParZone).forEach(list => list.sort((a, b) => {
+      const fa = a.g.format === '50mL' ? 1 : 0, fb = b.g.format === '50mL' ? 1 : 0;
+      if (fa !== fb) return fb - fa;
       const ma = _testeurEstMDD(a.g) ? 1 : 0, mb = _testeurEstMDD(b.g) ? 1 : 0;
-      if (ma !== mb) return mb - ma;          // CigustoMDD d'abord (stratégie Fabien)
-      return b.mml - a.mml;                    // puis marge/mL décroissante
+      if (ma !== mb) return mb - ma;
+      return b.mml - a.mml;
     }));
   }
 
-  // Une ligne de slot (remplie ou libre)
-  const _slotRow = (num, e, zColor) => {
+  // Une ligne de slot (remplie ou libre). Drag & drop (admin) : une ligne remplie se
+  // GLISSE ; remplie ou libre, elle ACCEPTE un dépôt de SA zone (cible libre = fin de zone).
+  const _slotRow = (num, e, zColor, zKey, idx) => {
     const numBadge = `<span style="display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:18px; background:${zColor}; color:#fff; font-size:10px; font-weight:800; border-radius:3px; flex-shrink:0;">${String(num).padStart(2, '0')}</span>`;
+    const dropAttrs = admin ? ` ondragover="pvTesteurDragOver(event,'${zKey}')" ondragleave="pvTesteurDragLeave(event)" ondrop="pvTesteurDrop(event,'${zKey}',${idx})"` : '';
     if (!e) {
-      return `<div style="display:flex; gap:8px; align-items:center; padding:2px 6px; opacity:0.4;">${numBadge}<span style="flex:1; border-bottom:1px dashed #47556960; font-size:10px; color:#475569; padding:1px 4px;">— libre —</span></div>`;
+      return `<div${dropAttrs} style="display:flex; gap:8px; align-items:center; padding:2px 6px; opacity:0.4;">${numBadge}<span style="flex:1; border-bottom:1px dashed #47556960; font-size:10px; color:#475569; padding:1px 4px;">— libre —</span></div>`;
     }
+    const dragAttrs = admin ? ` draggable="true" ondragstart="pvTesteurDragStart(event,'${zKey}',${idx})" ondragend="pvTesteurDragEnd()"${dropAttrs}` : '';
     const twins = _testeurJumeaux(e.key);
     const fmts = [...new Set(twins.map(t => t.g.format))];
-    const bestMml = Math.max(...twins.map(t => _testeurMargeMl(t.g, t.p)), 0);
+    // Marge/mL affichée : celle du 50 mL si la déclinaison existe (priorité Fabien
+    // 2026-08-03, cohérente avec les suggestions), sinon la meilleure de la déclinaison.
+    const t50 = twins.find(t => t.g.format === '50mL');
+    const mmlAff = t50 ? _testeurMargeMl(t50.g, t50.p) : Math.max(...twins.map(t => _testeurMargeMl(t.g, t.p)), 0);
     const mdd = _testeurEstMDD(e.g);
-    return `<div style="display:flex; gap:8px; align-items:center; padding:2px 6px; border-bottom:1px solid #1e293b60;">
-      ${numBadge}
+    return `<div${dragAttrs} style="display:flex; gap:8px; align-items:center; padding:2px 6px; border-bottom:1px solid #1e293b60;${admin ? ' cursor:grab;' : ''}">
+      ${admin ? `<span style="font-size:10px; color:#475569; flex-shrink:0; user-select:none;" title="Glisser pour déplacer dans la zone">⠿</span>` : ''}${numBadge}
       <span style="font-size:10px; color:#94a3b8; width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;">${e.g.marque}</span>
       <span style="font-size:11px; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><b>${e.p.n || '(sans nom)'}</b> <span style="color:#64748b; font-size:9px;">· ${e.g.gamme}</span></span>
       ${mdd ? `<span style="font-size:8px; padding:1px 4px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; font-weight:700; flex-shrink:0;">MDD</span>` : ''}
       <span style="margin-left:auto; display:flex; gap:4px; align-items:center; flex-shrink:0;">
         ${fmts.map(f => `<span style="font-size:8px; padding:1px 4px; background:${(LIQ_FORMAT_COLORS[f] || '#64748b')}20; color:${LIQ_FORMAT_COLORS[f] || '#94a3b8'}; border-radius:2px;">${LIQ_FORMAT_LABELS[f] || f}</span>`).join('')}
-        <span style="font-size:9px; color:#4ade80; font-weight:600;" title="Meilleure marge par mL de la déclinaison">${bestMml.toFixed(2)}/mL</span>
+        <span style="font-size:9px; color:#4ade80; font-weight:600;" title="Marge par mL — celle du 50 mL si la déclinaison existe, sinon la meilleure de la déclinaison">${mmlAff.toFixed(2)}/mL</span>
         ${admin ? `<span onclick="toggleTesteur('${e.g.id}','${e.p.id}')" style="cursor:pointer; color:#ef4444; font-size:11px; font-weight:700; padding:0 4px;" title="Retirer de la malette">✕</span>` : ''}
       </span>
     </div>`;
   };
 
+  // Blocs de zone sur 2 colonnes qui occupent TOUTE la largeur de la fenêtre
+  // (demande Fabien 2026-08-03, précisée 15:50 : pleine largeur, toujours 2 par ligne).
+  html += `<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; align-items:start;">`;
   TESTEUR_ZONES.forEach(z => {
     const zEntries = uniques.filter(e => e.zone === z.key);
     const over = zEntries.length > z.quota;
-    html += `<div style="margin-bottom:10px; background:#0f172a; border:1px solid ${z.color}40; border-radius:6px; overflow:hidden;">`;
+    html += `<div style="background:#0f172a; border:1px solid ${z.color}40; border-radius:6px; overflow:hidden;">`;
     html += `<div style="display:flex; gap:8px; align-items:center; padding:4px 10px; background:${z.color}22;">
       <span style="font-size:11px; font-weight:800; color:${z.color}; letter-spacing:1px; padding:1px 8px; background:${z.color}; color:#fff; border-radius:3px;">${z.label}</span>
       <span style="font-size:10px; font-weight:700; color:${over ? '#ef4444' : '#e2e8f0'};">${zEntries.length}/${z.quota}</span>
@@ -15983,17 +16055,18 @@ function renderVueTesteurs() {
       ${over ? `<span style="font-size:9px; color:#ef4444; font-weight:700;">⚠ dépassement — un goût a changé de catégorie : retire ${zEntries.length - z.quota} testeur${zEntries.length - z.quota > 1 ? 's' : ''}</span>` : ''}
     </div>`;
     for (let i = 0; i < Math.max(z.quota, zEntries.length); i++) {
-      html += _slotRow(z.start + i, zEntries[i] || null, z.color);
+      html += _slotRow(z.start + i, zEntries[i] || null, z.color, z.key, i);
     }
     // Suggestions admin : les meilleurs candidats PAS ENCORE dans la malette pour cette zone
     if (admin && zEntries.length < z.quota) {
       const cands = (_candParZone[z.key] || []).slice(0, 5);
       if (cands.length > 0) {
         html += `<div style="padding:4px 10px 6px; background:#1e293b40; border-top:1px dashed #33415580;">
-          <div style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:2px;">💡 Suggestions (MDD puis marge/mL)</div>
+          <div style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:2px;">💡 Suggestions (50 mL puis MDD puis marge/mL)</div>
           ${cands.map(c => `<span onclick="toggleTesteur('${c.g.id}','${c.p.id}')" style="display:inline-flex; gap:4px; align-items:center; font-size:10px; color:#cbd5e1; padding:2px 7px; background:#1e293b; border:1px solid ${z.color}40; border-radius:3px; margin:1px 3px 1px 0; cursor:pointer;" title="${c.g.marque} ${c.g.gamme} ${LIQ_FORMAT_LABELS[c.g.format] || ''} — ajouter à la malette">
             <b style="color:${z.color};">+</b> ${c.p.n || '(sans nom)'}
             <span style="color:#64748b; font-size:8.5px;">${c.g.marque}</span>
+            <span style="font-size:7.5px; padding:0 3px; background:${(LIQ_FORMAT_COLORS[c.g.format] || '#64748b')}20; color:${LIQ_FORMAT_COLORS[c.g.format] || '#94a3b8'}; border-radius:2px;">${LIQ_FORMAT_LABELS[c.g.format] || c.g.format}</span>
             ${_testeurEstMDD(c.g) ? `<span style="font-size:7.5px; padding:0 3px; background:#a78bfa20; color:#c4b5fd; border-radius:2px; font-weight:700;">MDD</span>` : ''}
             <span style="color:#4ade80; font-size:8.5px;">${c.mml.toFixed(2)}/mL</span>
           </span>`).join('')}
@@ -16002,6 +16075,7 @@ function renderVueTesteurs() {
     }
     html += `</div>`;
   });
+  html += `</div>`; // ferme la grille 2 colonnes
 
   html += `</div>`;
   return html;
