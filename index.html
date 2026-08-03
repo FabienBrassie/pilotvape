@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:05</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:22</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -611,6 +611,7 @@ window.addEventListener('DOMContentLoaded', function() {
       </select>
       <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
       <button onclick="pvOuvrirPointageEtageres()" title="Pointer, gamme par gamme et par boutique, si chaque liquide est posé sur les étagères : détecte les « à sortir » encore posés et les emplacements manquants." style="padding:6px 12px; font-size:11px; font-weight:700; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; cursor:pointer; white-space:nowrap;">📋 Pointage étagères</button>
+      <button onclick="openVitrineDialogFromLiq()" title="Planche d'étiquettes étagère liquides (44 par feuille A4, blanc sur fond noir) : une étiquette par gamme+format filtrée, au prix du format" style="padding:6px 12px; font-size:11px; background:#38bdf8; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-weight:700; white-space:nowrap;">💧 Étiquettes…</button>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="testeurs">Vue: 🧪 Testeurs (malette)</option><option value="marque">Tri: Par marque</option><option value="gamme">Tri: Par gamme (tous formats)</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
       </select>
@@ -29318,8 +29319,9 @@ async function getTemplateBytes(filename) {
     }
   } catch (e) { console.warn('etiq IDB get failed', e); }
   try {
-    // Planche vitrine : à la RACINE d'Etiquette template/ (pas de variante par boutique).
-    const url = filename.startsWith('Planche vitrine')
+    // Planches (vitrine, étagère liquides…) : à la RACINE d'Etiquette template/
+    // (pas de variante par boutique).
+    const url = filename.startsWith('Planche')
       ? 'Etiquette template/' + filename
       : 'Etiquette template/' + (filename.startsWith('Mur complet') ? 'Pessac Etiquettes Freetouch ' : 'Mérignac - Langon Etiquettes Freetouch ') + '/' + filename;
     const r = await fetch(encodeURI(url));
@@ -30465,7 +30467,7 @@ function openEtiquettesDialog() {
 }
 
 async function clearEtiquetteCache() {
-  const needed = listAllExpectedFiles().concat([VITRINE_TEMPLATE_FILE]);
+  const needed = listAllExpectedFiles().concat([VITRINE_TEMPLATE_FILE, ETAGERE_TEMPLATE_FILE]);
   for (const f of needed) {
     delete etiqCache[f];
     try {
@@ -30516,16 +30518,58 @@ const VITRINE_SLOTS = (() => {
   return out;
 })();
 
-// Prix au style du template d'origine : « 79.90€ » (point, pas d'espace).
+// ─── 💧 Planche étagère liquides (2026-08-04, demande Fabien) ────────────────
+// Template « etiquettes etagere liquides » : 44 étiquettes par A4 (4×11), texte
+// BLANC sur fond noir quadrillé, prix à la VIRGULE (« 25,90€ »), imprimé à 100 %.
+// `Etiquette template/Planche etagere liquides.pdf` = le PDF de Fabien nettoyé
+// (champs de formulaire retirés, fond conservé). Une étiquette = une GAMME dans
+// un FORMAT (nom = « gamme + format », décision Fabien) + le prix du format.
+const ETAGERE_TEMPLATE_FILE = 'Planche etagere liquides.pdf';
+// Rectangles nom/prix des 44 cases, extraits des champs nomN/prixN du template
+// d'origine (ordre de lecture ; la zone prix est bornée sous la zone nom).
+const _ETAGERE_RAW = [[22.84,785.52,23.17,739.56,45.96],[164.55,786.4,164.88,739.56,46.84],[307.26,785.52,307.59,739.56,45.96],[448.97,785.52,449.3,739.56,45.96],[22.84,714.83,23.17,668.87,45.96],[164.55,714.83,164.88,668.87,45.96],[307.26,714.83,307.59,668.87,45.96],[448.97,714.83,449.3,668.87,45.96],[22.84,643.49,23.17,597.52,45.97],[164.55,643.49,164.88,597.52,45.97],[307.26,643.49,307.59,597.52,45.97],[448.97,643.49,449.3,598.4,45.09],[22.84,573.12,23.17,527.16,45.96],[164.55,573.12,164.88,527.16,45.96],[307.26,573.12,307.59,527.16,45.96],[448.97,573.12,449.3,527.16,45.96],[22.84,502.11,23.17,456.14,45.96],[164.55,502.11,164.88,456.14,45.96],[307.26,502.11,307.59,456.14,45.96],[448.97,502.11,449.3,456.14,45.96],[22.84,431.42,23.17,385.45,45.96],[164.55,431.42,164.88,385.45,45.96],[307.26,431.42,307.59,385.45,45.96],[448.97,431.42,449.3,385.45,45.96],[22.84,360.4,23.17,314.43,45.96],[164.55,360.4,164.88,315.31,45.09],[307.26,360.4,307.59,314.43,45.96],[448.97,360.4,449.3,314.43,45.96],[22.84,289.38,23.17,243.42,45.96],[164.55,289.38,164.88,243.42,45.96],[307.26,289.38,307.59,243.42,45.96],[448.97,289.38,449.3,243.42,45.96],[22.84,218.69,23.17,172.72,45.96],[164.55,219.56,164.88,172.72,46.84],[307.26,218.69,307.59,172.72,45.96],[448.97,218.69,449.3,172.72,45.96],[22.84,147.67,23.17,101.71,45.96],[164.55,147.67,164.88,101.71,45.96],[307.26,147.67,307.59,101.71,45.96],[448.97,147.67,449.3,101.71,45.96],[22.84,77.31,23.17,31.34,45.96],[164.55,77.31,164.88,31.34,45.96],[307.26,77.31,307.59,31.34,45.96],[448.97,77.31,449.3,31.34,45.96]];
+const ETAGERE_SLOTS = _ETAGERE_RAW.map(v => ({
+  nom:  { x: v[0], y: v[1], w: 123.22, h: 25.67 },
+  prix: { x: v[2], y: v[3], w: 123.22, h: v[4] }
+}));
+
+// LA table des types de planche (règle 8) : tout nouveau format d'étiquette
+// s'ajoute ICI (fichier + géométrie + style), jamais un générateur en plus.
+const PLANCHE_TYPES = {
+  VITRINE: {
+    label: '🪟 Vitrine CIGUSTO — 48 par feuille',
+    info: '48 étiquettes par feuille A4 (déjà réduites à 50 % — <b>imprimer à 100 %</b>). Noir sur blanc, prix « 79.90€ ».',
+    file: VITRINE_TEMPLATE_FILE, slots: VITRINE_SLOTS, slug: 'vitrine',
+    couleur: [0, 0, 0], nomBold: true, nomUpper: true, nomMax: 11, nomMin: 6.5,
+    prixMax: 22, prixMin: 8, prixPad: 7,
+    prixFmt: function(p) { return p.toFixed(2) + '€'; }
+  },
+  ETAGERE: {
+    label: '💧 Étagère liquides — 44 par feuille',
+    info: '44 étiquettes par feuille A4 (étagères liquides — <b>imprimer à 100 %</b>). Blanc sur fond noir, prix « 25,90€ ».',
+    file: ETAGERE_TEMPLATE_FILE, slots: ETAGERE_SLOTS, slug: 'etagere_liquides',
+    couleur: [1, 1, 1], nomBold: false, nomUpper: false, nomMax: 13, nomMin: 6.5,
+    prixMax: 30, prixMin: 9, prixPad: 6,
+    prixFmt: function(p) { return p.toFixed(2).replace('.', ',') + '€'; }
+  }
+};
+
+// Prix au style du template vitrine : « 79.90€ » (point, pas d'espace).
 function formatPrixVitrine(p) {
-  if (typeof p === 'number' && isFinite(p)) return p.toFixed(2) + '€';
+  if (typeof p === 'number' && isFinite(p)) return PLANCHE_TYPES.VITRINE.prixFmt(p);
   return (p === null || p === undefined) ? '' : String(p).trim();
 }
 
-async function ensureVitrineTemplateLoaded() {
-  const b = await getTemplateBytes(VITRINE_TEMPLATE_FILE);
+// Prix formaté selon le type de planche (nombre → format du type, string → tel quel).
+function _planchePrixTxt(T, p) {
+  if (typeof p === 'number' && isFinite(p)) return T.prixFmt(p);
+  return (p === null || p === undefined) ? '' : String(p).trim();
+}
+
+async function _ensurePlancheTemplate(file) {
+  const b = await getTemplateBytes(file);
   if (b) return true;
-  return showTemplatePicker([VITRINE_TEMPLATE_FILE]);
+  return showTemplatePicker([file]);
 }
 
 // La plus grande taille de police (bornée) qui tient dans le cadre.
@@ -30545,7 +30589,7 @@ function _vitrineTrunc(font, str, size, maxW) {
   return s + '…';
 }
 
-function _vitrineDrawCentered(page, font, str, box, maxSize, minSize, pad) {
+function _vitrineDrawCentered(page, font, str, box, maxSize, minSize, pad, color) {
   if (!str) return;
   if (typeof pad !== 'number') pad = 3;
   const maxW = box.w - pad * 2;
@@ -30556,20 +30600,22 @@ function _vitrineDrawCentered(page, font, str, box, maxSize, minSize, pad) {
   page.drawText(txt, {
     x: box.x + (box.w - tw) / 2,
     y: box.y + (box.h - th) / 2,
-    size: size, font: font, color: PDFLib.rgb(0, 0, 0)
+    size: size, font: font, color: color || PDFLib.rgb(0, 0, 0)
   });
 }
 
-// Le NOM : une ligne tant que ça reste lisible (≥ 6.5), sinon 2 lignes équilibrées
+// Le NOM : une ligne tant que ça reste lisible (≥ minSize), sinon 2 lignes équilibrées
 // (coupure au meilleur espace), toujours tronquées si un mot-fleuve dépasse encore.
-function _vitrineDrawNom(page, font, str, box) {
+function _vitrineDrawNom(page, font, str, box, maxSize, minSize, color) {
   if (!str) return;
+  if (typeof maxSize !== 'number') maxSize = 11;
+  if (typeof minSize !== 'number') minSize = 6.5;
   const pad = 3;
   const maxW = box.w - pad * 2;
-  const oneSize = _vitrineFitSize(font, str, maxW, box.h - 2, 11, 6.5);
+  const oneSize = _vitrineFitSize(font, str, maxW, box.h - 2, maxSize, minSize);
   const words = str.split(/\s+/).filter(Boolean);
   if (font.widthOfTextAtSize(str, oneSize) <= maxW || words.length < 2) {
-    _vitrineDrawCentered(page, font, str, box, 11, 6.5);
+    _vitrineDrawCentered(page, font, str, box, maxSize, minSize, pad, color);
     return;
   }
   // Coupure la plus équilibrée (largeur max des 2 lignes minimale)
@@ -30588,37 +30634,41 @@ function _vitrineDrawNom(page, font, str, box) {
   const draw = (txt, cy) => {
     const t = _vitrineTrunc(font, txt, size, maxW);
     const tw = font.widthOfTextAtSize(t, size);
-    page.drawText(t, { x: box.x + (box.w - tw) / 2, y: cy - (size * 0.72) / 2, size: size, font: font, color: PDFLib.rgb(0, 0, 0) });
+    page.drawText(t, { x: box.x + (box.w - tw) / 2, y: cy - (size * 0.72) / 2, size: size, font: font, color: color || PDFLib.rgb(0, 0, 0) });
   };
   draw(best.l1, box.y + box.h * 0.72);
   draw(best.l2, box.y + box.h * 0.28);
 }
 
-// LE générateur canonique de planches vitrine (règle 8).
-// items = [{ nom, prix }] — nom déjà résolu (modèle seul, mis en MAJUSCULES au dessin),
-// prix nombre ou string ('' = case prix laissée vide). Retourne les bytes (pour les tests)
-// via l'option { returnBytes: true }, sinon télécharge le PDF.
-async function generateEtiquettesVitrine(items, outputFilename, opts) {
+// LE générateur canonique de planches d'étiquettes (règle 8) — tous types.
+// typeKey = clé de PLANCHE_TYPES ('VITRINE', 'ETAGERE', …) ; items = [{ nom, prix }]
+// déjà résolus, prix nombre ou string ('' = case prix laissée vide). Retourne les
+// bytes (pour les tests) via l'option { returnBytes: true }, sinon télécharge le PDF.
+async function generateEtiquettesPlanche(typeKey, items, outputFilename, opts) {
+  const T = PLANCHE_TYPES[typeKey] || PLANCHE_TYPES.VITRINE;
   const clean = (items || []).filter(it => it && String(it.nom || '').trim());
   if (!clean.length) { pvAlert('Aucune étiquette à générer.'); return false; }
   if (!window.PDFLib) { pvAlert('pdf-lib non chargé — recharge la page et réessaie.'); return false; }
-  const ok = await ensureVitrineTemplateLoaded();
+  const ok = await _ensurePlancheTemplate(T.file);
   if (!ok) return false;
-  const bytes = await getTemplateBytes(VITRINE_TEMPLATE_FILE);
-  if (!bytes) { pvAlert('Template « ' + VITRINE_TEMPLATE_FILE + ' » introuvable.'); return false; }
+  const bytes = await getTemplateBytes(T.file);
+  if (!bytes) { pvAlert('Template « ' + T.file + ' » introuvable.'); return false; }
   const { PDFDocument, StandardFonts } = PDFLib;
   const master = await PDFDocument.create();
-  const pages = chunkArr(clean, VITRINE_SLOTS.length);
+  const pages = chunkArr(clean, T.slots.length);
   for (const pageItems of pages) {
     const pdf = await PDFDocument.load(bytes);
     const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const regular = await pdf.embedFont(StandardFonts.Helvetica);
     const page = pdf.getPages()[0];
+    const color = PDFLib.rgb(T.couleur[0], T.couleur[1], T.couleur[2]);
     pageItems.forEach((it, idx) => {
-      const slot = VITRINE_SLOTS[idx];
-      _vitrineDrawNom(page, bold, String(it.nom || '').trim().toUpperCase(), slot.nom);
-      // Prix : marge élargie (pad 7) pour que le € ne colle pas au bord de la case
-      // (retour Fabien 2026-08-04).
-      _vitrineDrawCentered(page, bold, formatPrixVitrine(it.prix), slot.prix, 22, 8, 7);
+      const slot = T.slots[idx];
+      let nom = String(it.nom || '').trim();
+      if (T.nomUpper) nom = nom.toUpperCase();
+      _vitrineDrawNom(page, T.nomBold ? bold : regular, nom, slot.nom, T.nomMax, T.nomMin, color);
+      // Prix : marge élargie pour que le € ne colle pas au bord (retour Fabien 2026-08-04).
+      _vitrineDrawCentered(page, bold, _planchePrixTxt(T, it.prix), slot.prix, T.prixMax, T.prixMin, T.prixPad, color);
     });
     const [copied] = await master.copyPages(pdf, [0]);
     master.addPage(copied);
@@ -30629,11 +30679,19 @@ async function generateEtiquettesVitrine(items, outputFilename, opts) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = outputFilename || ('etiquettes_vitrine_' + new Date().toISOString().slice(0, 10) + '.pdf');
+  a.download = outputFilename || ('etiquettes_' + T.slug + '_' + new Date().toISOString().slice(0, 10) + '.pdf');
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 2000);
-  if (typeof logAction === 'function') logAction('Planche vitrine générée', clean.length + ' étiquette(s), ' + pages.length + ' page(s)');
+  if (typeof logAction === 'function') logAction('Planche ' + T.slug + ' générée', clean.length + ' étiquette(s), ' + pages.length + ' page(s)');
   return true;
+}
+
+// Wrappers historiques / lisibilité.
+async function generateEtiquettesVitrine(items, outputFilename, opts) {
+  return generateEtiquettesPlanche('VITRINE', items, outputFilename, opts);
+}
+async function generateEtiquettesEtagereLiquides(items, outputFilename, opts) {
+  return generateEtiquettesPlanche('ETAGERE', items, outputFilename, opts);
 }
 
 // --- Fabrique d'items par type de produit -----------------------------------
@@ -30693,19 +30751,24 @@ function _vitrineCandidats() {
   return out;
 }
 
-function openVitrineDialog(prefill) {
+function openVitrineDialog(prefill, opts) {
   const rows = (prefill || []).map(it => ({
     nom: String(it.nom || ''),
     prix: (typeof it.prix === 'number' && isFinite(it.prix)) ? it.prix.toFixed(2) : String(it.prix || '')
   }));
   if (!rows.length) rows.push({ nom: '', prix: '' });
+  let typeKey = (opts && opts.type && PLANCHE_TYPES[opts.type]) ? opts.type : 'VITRINE';
 
+  const typeOpts = Object.keys(PLANCHE_TYPES).map(k =>
+    '<option value="' + k + '"' + (k === typeKey ? ' selected' : '') + '>' + PLANCHE_TYPES[k].label + '</option>').join('');
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:#0f172ad8;z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
   overlay.innerHTML =
     '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:22px;max-width:560px;width:100%;color:#e2e8f0;max-height:90vh;display:flex;flex-direction:column;">' +
-      '<h3 style="margin:0 0 4px;font-size:16px;">🪟 Étiquettes vitrine</h3>' +
-      '<p style="font-size:11px;color:#94a3b8;margin:0 0 10px;">Planche CIGUSTO de <b>48 étiquettes par feuille A4</b> (déjà réduites à 50 % — <b>imprimer à 100 %</b>). Nom et prix modifiables ligne par ligne ; ligne libre pour un produit hors base.</p>' +
+      '<h3 style="margin:0 0 6px;font-size:16px;">🏷️ Planche d’étiquettes</h3>' +
+      '<label style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:8px;margin:0 0 6px;">Type de planche : ' +
+        '<select id="vitType" style="flex:1;padding:5px 8px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + typeOpts + '</select></label>' +
+      '<p id="vitInfo" style="font-size:11px;color:#94a3b8;margin:0 0 10px;">' + PLANCHE_TYPES[typeKey].info + ' Nom et prix modifiables ligne par ligne ; ligne libre pour un produit hors base.</p>' +
       '<input id="vitSearch" type="text" placeholder="🔎 Ajouter un produit des bases (kits, PD, liquides)…" style="padding:6px 10px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:4px;margin-bottom:4px;">' +
       '<div id="vitSearchRes" style="display:none;max-height:140px;overflow-y:auto;background:#0f172a;border:1px solid #334155;border-radius:4px;margin-bottom:6px;"></div>' +
       '<div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;margin:6px 0 4px;display:flex;justify-content:space-between;align-items:center;">' +
@@ -30728,9 +30791,15 @@ function openVitrineDialog(prefill) {
   const count = overlay.querySelector('#vitCount');
 
   const refreshCount = () => {
+    const perPage = PLANCHE_TYPES[typeKey].slots.length;
     const n = rows.filter(r => r.nom.trim()).length;
-    const p = Math.max(1, Math.ceil(n / VITRINE_SLOTS.length));
-    count.textContent = n + ' étiquette' + (n > 1 ? 's' : '') + ' → ' + p + ' page' + (p > 1 ? 's' : '') + ' A4 (48 par page)';
+    const p = Math.max(1, Math.ceil(n / perPage));
+    count.textContent = n + ' étiquette' + (n > 1 ? 's' : '') + ' → ' + p + ' page' + (p > 1 ? 's' : '') + ' A4 (' + perPage + ' par page)';
+  };
+  overlay.querySelector('#vitType').onchange = (e) => {
+    typeKey = e.target.value;
+    overlay.querySelector('#vitInfo').innerHTML = PLANCHE_TYPES[typeKey].info + ' Nom et prix modifiables ligne par ligne ; ligne libre pour un produit hors base.';
+    refreshCount();
   };
   const renderRows = () => {
     list.innerHTML = rows.map((r, i) =>
@@ -30779,7 +30848,7 @@ function openVitrineDialog(prefill) {
     });
     if (!items.length) { pvAlert('Aucune étiquette à générer — renseigne au moins un nom.'); return; }
     close();
-    try { await generateEtiquettesVitrine(items); }
+    try { await generateEtiquettesPlanche(typeKey, items); }
     catch (e) { console.error(e); pvAlert('Erreur génération : ' + (e.message || e)); }
   };
 }
@@ -30820,6 +30889,33 @@ function openVitrineDialogFromPd() {
   openVitrineDialog(list.map(pd => _vitrineItemFromPd(pd)));
 }
 
+// Base Liquides : une étiquette étagère par GAMME+FORMAT filtrée (décision Fabien
+// 2026-08-04 : nom = gamme + format, une étiquette par gamme — mêmes filtres que renderLiqAll).
+function openVitrineDialogFromLiq() {
+  const search = (document.getElementById('liqSearch')?.value || '').toLowerCase();
+  const fFormat = document.getElementById('liqFilterFormat')?.value || '';
+  const fProfil = document.getElementById('liqFilterProfil')?.value || '';
+  const fRole = document.getElementById('liqFilterRole')?.value || '';
+  const fStatut = liqStatutFilter;
+  const fShopLiq = document.getElementById('liqShopFilter')?.value || '';
+  let list = baseLiq.filter(g => {
+    if (g.statutVie === 'SORTI') return false;
+    const matchSearch = !search || g.marque.toLowerCase().includes(search)
+      || g.gamme.toLowerCase().includes(search)
+      || (g.parfums || []).some(p => (p.n || '').toLowerCase().includes(search));
+    const matchFormat = !fFormat || g.format === fFormat;
+    const matchProfil = !fProfil || g.profilChoisi === fProfil;
+    const matchRole = !fRole || g.roleChoisi === fRole;
+    const matchStatut = fStatut.length === 0 || fStatut.includes(g.statutVie)
+      || (g.parfums || []).some(p => fStatut.includes(p.s));
+    const matchShop = !fShopLiq || !(g.parfums || []).length
+      || (g.parfums || []).some(p => isLiqParfumPresentAtShop(g, p, fShopLiq));
+    return matchSearch && matchFormat && matchProfil && matchRole && matchStatut && matchShop;
+  });
+  list = list.filter(g => g.marque && g.gamme && !(g.marque === 'autre' && g.gamme.includes('PA +/-')));
+  openVitrineDialog(list.map(g => _vitrineItemFromLiq(g)), { type: 'ETAGERE' });
+}
+
 // Fiche PD (panneau détail) : une seule pièce.
 function openVitrinePourPd(pdId) {
   const pd = basePD.find(p => p.id === pdId);
@@ -30827,39 +30923,54 @@ function openVitrinePourPd(pdId) {
   openVitrineDialog([_vitrineItemFromPd(pd)]);
 }
 
-// Carte action PRIX du dashboard : kit OU PD, au prix cible/rouge de l'action.
+// Type de planche par défaut pour un lot d'ids produits : étagère si TOUT est liquide.
+function _plancheTypePourIds(ids) {
+  const arr = (ids || []).filter(Boolean);
+  if (arr.length && arr.every(pid => baseLiq.some(x => x.id === pid))) return 'ETAGERE';
+  return 'VITRINE';
+}
+
+// Carte action PRIX du dashboard : kit, PD ou liquide, au prix cible/rouge de l'action.
 function openVitrineDialogFromPrixAction(actionId) {
   const a = actions.find(x => x.id === actionId);
   if (!a) return;
   const kit = baseKits.find(k => k.id === a.produitId);
   const pd = kit ? null : basePD.find(p => p.id === a.produitId);
-  const ref = kit || pd;
+  const liq = (kit || pd) ? null : baseLiq.find(g => g.id === a.produitId);
+  const ref = kit || pd || liq;
   if (!ref) { openVitrineDialog([]); return; }
   const price = (typeof a.prixRouge === 'number') ? a.prixRouge
               : (typeof a.prixCible === 'number') ? a.prixCible : ref.pv;
-  openVitrineDialog([kit ? _vitrineItemFromKit(kit, price) : _vitrineItemFromPd(pd, price)]);
+  const item = kit ? _vitrineItemFromKit(kit, price) : pd ? _vitrineItemFromPd(pd, price) : _vitrineItemFromLiq(liq, price);
+  openVitrineDialog([item], { type: liq ? 'ETAGERE' : 'VITRINE' });
 }
 
 // Carte OP : tous les produits de l'OP (kit, PD, liquide, hors base), prix du moment.
+// Défaut étagère si l'OP ne porte QUE des liquides.
 function openVitrineDialogFromOp(opId) {
   const op = ops.find(o => o.id === opId);
   if (!op) return;
   const items = _vitrineItemsPourOp(op);
   if (!items.length) { openVitrineDialog([]); return; }
-  openVitrineDialog(items);
+  openVitrineDialog(items, { type: _plancheTypePourIds(op.produitIds) });
 }
 
 // Campagne : tous les produits des OPs rattachées (dédoublonnés).
+// Défaut étagère si la campagne ne porte QUE des liquides.
 function openVitrineDialogFromCampagne(campagneId) {
   const opsInC = ops.filter(o => o.campagneId === campagneId);
   const seen = new Set();
   const items = [];
-  opsInC.forEach(op => _vitrineItemsPourOp(op).forEach(it => {
-    const key = it.nom + '|' + it.prix;
-    if (!seen.has(key)) { seen.add(key); items.push(it); }
-  }));
+  const allIds = [];
+  opsInC.forEach(op => {
+    (op.produitIds || []).forEach(pid => allIds.push(pid));
+    _vitrineItemsPourOp(op).forEach(it => {
+      const key = it.nom + '|' + it.prix;
+      if (!seen.has(key)) { seen.add(key); items.push(it); }
+    });
+  });
   if (!items.length) { pvAlert('Aucun produit résolvable pour cette campagne.'); return; }
-  openVitrineDialog(items);
+  openVitrineDialog(items, { type: _plancheTypePourIds(allIds) });
 }
 
 loadData().then(async () => {
