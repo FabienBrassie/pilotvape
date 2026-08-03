@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 16:59</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 17:12</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -12058,14 +12058,25 @@ async function _syncWrite(payload, baseUpdatedAt) {
     } catch (e) { body = jsonBody; gz = false; delete headers['X-Pv-Gzip']; }
   }
   const _t0 = Date.now();
-  let res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', {
-    method: 'PUT', headers: headers, body: body
-  }, 45000); // 45 s : wifi lent (fix 2026-06-11) — désormais l'envoi gzippé tient en quelques secondes
-  if (!res.ok && gz && res.status !== 409) {
-    // Worker pas encore à jour pour le gzip (ou proxy récalcitrant) → renvoi en clair,
-    // et plus de tentative compressée pour cette session.
+  let res = null, _jetGz = null;
+  try {
+    res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', {
+      method: 'PUT', headers: headers, body: body
+    }, 45000); // 45 s : wifi lent (fix 2026-06-11) — désormais l'envoi gzippé tient en quelques secondes
+  } catch (e) {
+    // ⚠ HOTFIX 2026-08-03 17:10 : avec le VIEUX Worker, l'en-tête X-Pv-Gzip fait échouer la
+    // PRÉ-VÉRIFICATION CORS du navigateur — le fetch ne renvoie pas un code, il JETTE
+    // (« Failed to fetch »). La bascule en clair doit donc attraper AUSSI l'exception,
+    // pas seulement les codes d'erreur. (Si le réseau est vraiment coupé, le renvoi en
+    // clair échouera pareil et l'erreur remontera normalement.)
+    if (!gz) throw e;
+    _jetGz = e;
+  }
+  if (gz && (_jetGz || (!res.ok && res.status !== 409))) {
+    // Worker pas encore à jour pour le gzip (préflight CORS refusé ou erreur) → renvoi en
+    // clair, et plus de tentative compressée pour cette session.
     _gzipUploadOk = false;
-    console.warn('[SYNC] Envoi compressé refusé (' + res.status + ') — bascule en clair pour la session. Redéployer le Worker pour activer la compression.');
+    console.warn('[SYNC] Envoi compressé refusé (' + (_jetGz ? _jetGz.message : res.status) + ') — bascule en clair pour la session. Redéployer le Worker pour activer la compression.');
     delete headers['X-Pv-Gzip'];
     res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', { method: 'PUT', headers: headers, body: jsonBody }, 45000);
     gz = false;
