@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 15:58</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 16:02</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2716,8 +2716,16 @@ function _maillonFanfareRentrer(op, shop, defs) {
         // 2026-08-01 : la pose 📍 (étape « Poser → Vitrine… ») EST l'installation pour cette
         // boutique — on ne double pas avec le miroir « ① Installé en rayon ».
         if (s.key === 'installe' && _poseCross) return;
-        defs.push({ key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key,
-          nat: s.nat, resp: s.resp, condLabel: s.condLabel, condKey: s.condKey ? 'rentrer_' + s.condKey : undefined });
+        const _mDef = { key: 'rentrer_' + s.key, label: '① ' + s.label, kind: 'fanfare_rentrer', actionStep: s.key,
+          nat: s.nat, resp: s.resp, condLabel: s.condLabel, condKey: s.condKey ? 'rentrer_' + s.condKey : undefined };
+        // 2026-08-03 : le miroir ① installe porte la même attente dynamique que la ligne —
+        // la boutique est connue ICI (le maillon est généré par boutique), closure directe.
+        if (s.key === 'installe') {
+          const _aRFm = aRF, _shM = shop;
+          _mDef._attenteDyn = () => !!_attenteInstallePourShop(_aRFm, _shM);
+          _mDef._attenteLabelDyn = () => { const w = _attenteInstallePourShop(_aRFm, _shM); return w ? w.label : ''; };
+        }
+        defs.push(_mDef);
       });
     }
 }
@@ -3026,7 +3034,7 @@ function _testeurEntries() {
     if (!g || g.statutVie === 'SORTI') return;
     const p = (g.parfums || []).find(x => x.id === t.parfumId);
     if (!p || p.s === 'SORTI') return;
-    out.push({ t, g, p, zone: testeurZoneDe(g, p), key: _testeurKeyDe(g, p), pos: out.length });
+    out.push({ t, g, p, zone: testeurZoneDe(g, p), key: _testeurKeyDe(g, p) });
   });
   return out;
 }
@@ -3972,7 +3980,11 @@ function _courtCircuiterTiroirSortir() {
 //    affichée avec sa condition, jamais comptée en retard.
 // stepsObj = l'objet steps de l'action/OP pour la boutique (ex : a.etats[sh].steps).
 function stepEstEnAttente(def, stepsObj) {
-  if (!def || !def.nat) return false;
+  if (!def) return false;
+  // 2026-08-03 : attente DYNAMIQUE (date d'installation / sortie du remplacé) — le def
+  // porte une closure posée par getActionSteps ou _maillonFanfareRentrer.
+  if (typeof def._attenteDyn === 'function' && def._attenteDyn(stepsObj)) return true;
+  if (!def.nat) return false;
   if (def.nat === 'evt') return true;
   if (def.nat === 'cond') {
     if (def.condKey) return !(stepsObj && stepsObj[def.condKey] === true);
@@ -3985,7 +3997,11 @@ function stepEstEnAttente(def, stepsObj) {
 function stepBadgeAttente(def, stepsObj) {
   if (!stepEstEnAttente(def, stepsObj)) return '';
   const evt = def.nat === 'evt';
-  const lbl = def.condLabel || (evt ? 'attend la livraison' : 'en attente');
+  // 2026-08-03 : le blocage le plus AMONT donne le libellé — une condition classique non
+  // débloquée (ex : « après réception ») prime sur l'attente dynamique (date / sortie).
+  const _condActive = def.nat === 'cond' && def.condKey && !(stepsObj && stepsObj[def.condKey] === true);
+  const _dynLbl = (!_condActive && typeof def._attenteLabelDyn === 'function') ? (def._attenteLabelDyn(stepsObj) || '') : '';
+  const lbl = _dynLbl || def.condLabel || (evt ? 'attend la livraison' : 'en attente');
   return ' <span style="font-size:9px; color:#fbbf24; background:#78350f30; border:1px solid #f59e0b40; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Pas un retard : cette étape attend son déclencheur (spéc métier 2026-06-11)">' + (evt ? '📦' : '⏳') + ' ' + lbl + '</span>';
 }
 // Badge "👤 Fabien" pour une étape dont le responsable est l'admin (resp:'admin') :
@@ -3993,6 +4009,68 @@ function stepBadgeAttente(def, stepsObj) {
 function stepBadgeAdmin(def) {
   if (!def || def.resp !== 'admin') return '';
   return ' <span style="font-size:9px; color:#c4b5fd; background:#4c1d9530; border:1px solid #8b5cf640; padding:0 5px; border-radius:3px; white-space:nowrap;" title="Étape gérée par Fabien — pas du travail boutique">👤 Fabien</span>';
+}
+
+// ── 📦⏳ ATTENTE D'INSTALLATION (2026-08-03 — brique de rationalisation À rentrer / À sortir,
+// process validé par Fabien) : reçu ≠ installé, et l'installation peut être DIFFÉRÉE par
+// deux déclencheurs :
+//   1. une DATE d'installation posée (a.dateInstallation, champ additif modèle dateRentrer,
+//      propagée à toute la gamme) — pas de date = installation dès réception (inchangé) ;
+//   2. un REMPLACEMENT : le rentrant remplace un « à sortir » (lien replaceParId existant,
+//      posé par les dropdowns « remplace X ») — PAR BOUTIQUE (décision Fabien 2026-08-03) :
+//      chaque boutique installe dès que SA sortie du sortant est faite, sans attendre les autres.
+// L'attente est 100 % DYNAMIQUE (aucun état stocké, aucune cascade) : lue au rendu via les
+// canoniques statutEtape/compteurEtapes (hook _attenteDyn de stepEstEnAttente). Conséquences
+// automatiques : badge ⏳ sur l'étape partout où elle s'affiche, HORS compteurs d'urgence
+// (attente ≠ retard, spéc 2026-06-11), ligne en retrait 💤 — et le process « se met en
+// route » tout seul quand le déclencheur tombe (date atteinte / sortie faite).
+
+// Les actions SORTIR que ce RENTRER remplace. Gamme déclinée : toutes les lignes parfum
+// du produit sortant (l'espace se libère quand TOUT le sortant est sorti chez la boutique).
+function _rentrerSortantActions(a) {
+  if (!a || a.type !== 'RENTRER') return [];
+  let sBase = actions.filter(s => s.type === 'SORTIR' && !s.annulee && !_deletedIds.has(s.id) && s.replaceParId === a.produitId);
+  if (!sBase.length && (!a.produitType || a.produitType === 'kit')) {
+    const k = baseKits.find(x => x.id === a.produitId);
+    if (k && k.remplaceId) sBase = actions.filter(s => s.type === 'SORTIR' && !s.annulee && !_deletedIds.has(s.id) && s.produitId === k.remplaceId);
+  }
+  if (!sBase.length) return [];
+  const _prodIds = new Set(sBase.map(s => s.produitId));
+  return actions.filter(s => s.type === 'SORTIR' && !s.annulee && !_deletedIds.has(s.id) && _prodIds.has(s.produitId));
+}
+// L'installation de cette ligne est-elle EN ATTENTE pour cette boutique ?
+// → { type: 'date'|'sortie', label } ou null (= installable dès réception).
+function _attenteInstallePourShop(a, sh) {
+  if (!a || a.type !== 'RENTRER') return null;
+  if (a.dateInstallation && a.dateInstallation > ymd(new Date())) {
+    return { type: 'date', label: 'installation le ' + (fmtFR(a.dateInstallation) || a.dateInstallation) };
+  }
+  if (!sh) return null;
+  const sActs = _rentrerSortantActions(a);
+  if (!sActs.length) return null;
+  const _pasSorti = sActs.find(s => { const st = s.etats && s.etats[sh]; return !(st && st.done === true); });
+  if (!_pasSorti) return null;
+  const _nom = (_pasSorti.produitNom || _pasSorti.kitNom || 'le sortant');
+  return { type: 'sortie', label: 'en attente : ' + _nom + ' à sortir' };
+}
+// Retrouve la boutique dont provient un objet steps (référence vivante a.etats[sh].steps) —
+// permet aux canoniques statutEtape/compteurEtapes, qui ne connaissent pas la boutique,
+// d'évaluer l'attente PAR BOUTIQUE sans changer leur signature.
+function _shopDeStepsObj(a, stepsObj) {
+  if (!a || !a.etats || !stepsObj) return null;
+  return SHOPS.find(sh => a.etats[sh] && (a.etats[sh].steps === stepsObj || a.etats[sh] === stepsObj)) || null;
+}
+function _attenteInstalleDepuisSteps(a, stepsObj) {
+  const sh = _shopDeStepsObj(a, stepsObj);
+  if (!sh) {
+    // Boutique non identifiable (objet copié) : seule l'attente de DATE (indépendante de la
+    // boutique) est signalée — jamais de blocage inféré (lecture zéro inférence).
+    if (a && a.type === 'RENTRER' && a.dateInstallation && a.dateInstallation > ymd(new Date())) {
+      return { type: 'date', label: 'installation le ' + (fmtFR(a.dateInstallation) || a.dateInstallation) };
+    }
+    return null;
+  }
+  return _attenteInstallePourShop(a, sh);
 }
 
 // ── FONCTIONS CANONIQUES natures/compteurs (audit 2026-07-09) ────────────────────
@@ -4199,6 +4277,17 @@ function getActionSteps(typeOrAction) {
     return ACTION_STEPS_REPRISE.map(s => ({ ...s }));
   }
   const base = (ACTION_STEPS[type] || [{ key: 'done', label: 'Fait' }]).map(s => ({ ...s }));
+  // 2026-08-03 : attente d'installation dynamique (date posée / sortie du remplacé, PAR
+  // boutique) — closure sur l'ACTION, portée par le def « installe ». Toutes les surfaces
+  // qui passent par statutEtape/compteurEtapes/stepBadgeAttente suivent sans autre code.
+  if (type === 'RENTRER' && typeof typeOrAction === 'object' && typeOrAction && typeOrAction.id) {
+    const _aInst = typeOrAction;
+    const _instDef = base.find(s => s.key === 'installe');
+    if (_instDef) {
+      _instDef._attenteDyn = stepsObj => !!_attenteInstalleDepuisSteps(_aInst, stepsObj);
+      _instDef._attenteLabelDyn = stepsObj => { const w = _attenteInstalleDepuisSteps(_aInst, stepsObj); return w ? w.label : ''; };
+    }
+  }
   if (type === 'PRIX' && typeof typeOrAction === 'object' && typeOrAction && typeOrAction.etiquetteRouge) {
     const et = base.find(s => s.key === 'etiquette');
     if (et) et.label = 'Prix rouge imprimé';
@@ -5142,7 +5231,7 @@ function syncAutoActions() {
     // statut déclencheur, couverture, champs partagés à recopier, champ de lien d'OP.
     const _MIG_CONFIGS = [
       { type: 'RENTRER', statut: 'A_RENTRER', couverts: _pfsCouvertsRentrer,
-        champs: ['commandeAdmin', 'paCommande', 'expeditionDate', 'dateRentrer', 'dispatchHub'], opLink: 'rentrerActionId' },
+        champs: ['commandeAdmin', 'paCommande', 'expeditionDate', 'dateRentrer', 'dateInstallation', 'dispatchHub'], opLink: 'rentrerActionId' },
       { type: 'SORTIR', statut: 'A_SORTIR', couverts: _pfsCouvertsSortir,
         champs: ['priorite', 'prixRouge', 'prixAvantRouge', 'replaceParId'], opLink: 'sortirActionId' }
     ];
@@ -5883,6 +5972,21 @@ async function annulerActionManuelle(actionId) {
   renderBaseLiquides && renderBaseLiquides();
 }
 
+// 2026-08-03 : une OP ROUVERTE volontairement (date de fin supprimée / bouton rouvrir —
+// passeport _reviveTs) ne doit PAS être re-fermée par l'auto-close tant qu'aucune coche
+// n'a bougé DEPUIS la réouverture. Sans ça : Fabien supprime la date de fin, l'auto-close
+// la repose au prochain sync (les lignes liées sont toujours FAIT) → la date « réapparaît
+// chaque jour ». Le choix manuel gagne ; une NOUVELLE activité de coche (a._ts plus récent
+// que le réveil) relance le cycle auto normal.
+function _opRouvertVolontairement(op) {
+  if (!op || !op._reviveTs || op.dateFin) return false;
+  let last = '';
+  const ids = new Set(typeof opLinkedActionIds === 'function' ? opLinkedActionIds(op) : []);
+  actions.forEach(a => { if (ids.has(a.id) && a._ts && a._ts > last) last = a._ts; });
+  if (typeof opRentrerParfumActions === 'function') opRentrerParfumActions(op).forEach(a => { if (a._ts && a._ts > last) last = a._ts; });
+  if (typeof opSortirParfumActions === 'function') opSortirParfumActions(op).forEach(a => { if (a._ts && a._ts > last) last = a._ts; });
+  return !last || op._reviveTs >= last;
+}
 // Clôt les OP déjà LIÉES à une action (PRIX ou RENTRER) en fonction de l'état de l'action.
 // Les OP PRIX_ROUGE sont désormais auto-créées par syncPrixRougeOp() dès que decisionChoice='rouge'
 // (appelé depuis decidePrixAction et syncPriceActions). Les OP fanfare restent déclenchées à la main
@@ -5896,6 +6000,11 @@ function syncOpsFromVerdicts() {
       // L'utilisateur a posé cette date manuellement → ne PAS écraser
       return;
     }
+    if (_opRouvertVolontairement(op)) {
+      // Réouverture manuelle plus récente que toute activité de coche → respectée
+      console.log('[SYNC-AUTO-SKIP]', op.id, op.type, '— rouverte volontairement (réveil', op._reviveTs, '), auto-close suspendu —', raison);
+      return;
+    }
     if (!op.dateFin) {
       console.log('[SYNC-AUTO]', op.id, op.type, '→ dateFin =', today, '—', raison);
       op.dateFin = today;
@@ -5907,6 +6016,11 @@ function syncOpsFromVerdicts() {
     // On ne ferme que si l'action existe ET est explicitement annulée.
     if (!action) {
       console.log('[SYNC-ORPHAN-SKIP]', op.id, op.type, '— action introuvable, attente sync —', raison);
+      return;
+    }
+    if (_opRouvertVolontairement(op)) {
+      // 2026-08-03 : même règle que _autoClose — une réouverture manuelle récente gagne
+      console.log('[SYNC-ORPHAN-SKIP]', op.id, op.type, '— rouverte volontairement, auto-close suspendu —', raison);
       return;
     }
     if (!op.dateFin) {
@@ -8618,6 +8732,33 @@ function _badgeDateRentrer(d) {
 function _badgeDateRentrerAction(a) {
   const e = dateRentrerEffective(a);
   return (e && e.source === 'action') ? _badgeDateRentrer(e.date) : '';
+}
+
+// ── 📌 Date d'installation (2026-08-03, brique À rentrer/À sortir) — champ additif
+// a.dateInstallation, modèle setRentrerDate : choix de GAMME, propagé à toute la série
+// (tous formats & parfums — une mise en rayon = un geste). Vide = dès réception.
+// L'effet (⏳, hors compteurs, retrait) est lu dynamiquement par _attenteInstallePourShop.
+function setDateInstallation(actionId, val) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'RENTRER') return;
+  const v = (val && /^\d{4}-\d{2}-\d{2}$/.test(val)) ? val : null;
+  const _now = new Date().toISOString();
+  const _apply = (act) => { if (v === null) delete act.dateInstallation; else act.dateInstallation = v; act._ts = _now; };
+  _apply(a);
+  if (a.produitType === 'liq') {
+    const g = baseLiq.find(x => x.id === a.produitId);
+    if (g) {
+      const serieIds = baseLiq.filter(x => x.marque === g.marque && x.gamme === g.gamme).map(x => x.id);
+      actions.forEach(x => {
+        if (x.id === a.id || x.type !== 'RENTRER' || x.annulee || x.produitType !== 'liq') return;
+        if (!serieIds.includes(x.produitId)) return;
+        _apply(x);
+      });
+    }
+  }
+  if (typeof logAction === 'function') logAction('Date d\'installation', _logActionLabel(actionId) + ' → ' + (v ? fmtFR(v) : 'effacée (dès réception)'));
+  saveData(); try { renderDashboard(); } catch (e) {}
 }
 
 // ── RÉCEPTION CENTRALISÉE sur une OP, SÉPARÉE produit / PLV (refonte 2026-06-13, demande
@@ -15749,64 +15890,10 @@ function _testeurJumeaux(key) {
 }
 // LA liste ordonnée et dédoublonnée de la malette (règle 8) : même source pour la
 // vue 🧪 Testeurs ET l'affiche A5 — l'ordre des numéros ne peut pas diverger.
-// Ordre DANS une zone (2026-08-03, drag & drop) : champ `ordre` posé par testeurReorder ;
-// une entrée sans ordre (coche récente, données d'avant) va en fin de zone, à l'ancienneté.
 function _testeurUniques() {
   const seen = new Set();
-  return _testeurEntries()
-    .filter(e => { if (seen.has(e.key)) return false; seen.add(e.key); return true; })
-    .sort((a, b) => {
-      const oa = typeof a.t.ordre === 'number' ? a.t.ordre : 1e9;
-      const ob = typeof b.t.ordre === 'number' ? b.t.ordre : 1e9;
-      return (oa - ob) || (a.pos - b.pos);
-    });
+  return _testeurEntries().filter(e => { if (seen.has(e.key)) return false; seen.add(e.key); return true; });
 }
-// ── Drag & drop des emplacements (2026-08-03, demande Fabien : « prendre le parfum en
-// n°1 et le bouger en n°5, les présents se décalent ») — DANS une zone uniquement
-// (la zone vient du goût, on ne change pas de catégorie en glissant). Admin seul.
-let _testeurDrag = null; // { zone, idx } pendant un glisser
-function testeurReorder(zoneKey, fromIdx, toIdx) {
-  if (!isAdmin()) return;
-  const zList = _testeurUniques().filter(e => e.zone === zoneKey);
-  if (fromIdx < 0 || fromIdx >= zList.length) return;
-  toIdx = Math.max(0, Math.min(toIdx, zList.length - 1));
-  if (fromIdx === toIdx) return;
-  const moved = zList.splice(fromIdx, 1)[0];
-  zList.splice(toIdx, 0, moved);
-  const _now = new Date().toISOString();
-  // Réécrit l'ordre 0..n-1 de la zone ; _ts/_adminTs frais → l'ordre se propage par merge.
-  zList.forEach((e, i) => {
-    if (e.t.ordre !== i) { e.t.ordre = i; e.t._ts = _now; e.t._adminTs = _now; }
-  });
-  logAction('Testeurs réordonnés', (TESTEUR_ZONE_META[zoneKey] ? TESTEUR_ZONE_META[zoneKey].label : zoneKey) + ' : ' + (moved.p.n || '?') + ' → emplacement ' + (toIdx + 1));
-  saveData();
-  renderLiqAll();
-}
-function pvTesteurDragStart(ev, zone, idx) {
-  if (!isAdmin()) { ev.preventDefault(); return; }
-  _testeurDrag = { zone, idx };
-  try { ev.dataTransfer.setData('text/plain', zone + ':' + idx); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
-}
-function pvTesteurDragOver(ev, zone) {
-  if (!_testeurDrag || _testeurDrag.zone !== zone) return; // autre zone → refus (le goût décide)
-  ev.preventDefault();
-  try { ev.dataTransfer.dropEffect = 'move'; } catch (e) {}
-  const row = ev.currentTarget;
-  if (row && !row._dndHl) { row._dndHl = row.style.background || ''; row.style.background = '#2dd4bf1c'; }
-}
-function pvTesteurDragLeave(ev) {
-  const row = ev.currentTarget;
-  if (row && row._dndHl !== undefined) { row.style.background = row._dndHl; delete row._dndHl; }
-}
-function pvTesteurDrop(ev, zone, idx) {
-  ev.preventDefault();
-  pvTesteurDragLeave(ev);
-  if (!_testeurDrag || _testeurDrag.zone !== zone) { _testeurDrag = null; return; }
-  const from = _testeurDrag.idx;
-  _testeurDrag = null;
-  testeurReorder(zone, from, idx);
-}
-function pvTesteurDragEnd() { _testeurDrag = null; }
 function renderVueTesteurs() {
   const admin = isAdmin();
   const uniques = _testeurUniques();
@@ -15814,7 +15901,7 @@ function renderVueTesteurs() {
   const total = uniques.length;
   const aClasser = uniques.filter(e => !e.zone);
 
-  let html = `<div>`; // pleine largeur de la fenêtre (retour Fabien 2026-08-03 15:50)
+  let html = `<div style="max-width:860px;">`;
   // Bandeau : compteur global + affiche + qui fait quoi
   html += `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 12px; background:#2dd4bf0d; border:1px solid #2dd4bf35; border-radius:6px; margin-bottom:10px;">
     <span style="font-size:14px; font-weight:800; color:#2dd4bf;">🧪 Malette de testeurs</span>
@@ -15823,7 +15910,7 @@ function renderVueTesteurs() {
     <button onclick="pvImprimerAfficheTesteurs()" style="margin-left:auto; padding:5px 14px; font-size:11px; font-weight:700; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:4px; cursor:pointer;" title="Générer l'affiche A5 du meuble de test (maquette réseau), remplie avec la sélection actuelle">🖨️ Affiche A5</button>
   </div>`;
   if (admin) {
-    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Tu coches/décoches via le bouton 🧪 des lignes parfum (base) ou les suggestions ci-dessous. <b style="color:#94a3b8;">Glisse-dépose (⠿) un parfum sur un autre emplacement de sa zone</b> pour le déplacer — les autres se décalent. Priorité stratégique : <b style="color:#60a5fa;">50 mL</b> d'abord, puis <b style="color:#c4b5fd;">CigustoMDD</b>, puis la <b style="color:#4ade80;">marge/mL</b>.</div>`;
+    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Tu coches/décoches via le bouton 🧪 des lignes parfum (base) ou les suggestions ci-dessous. Priorité stratégique : <b style="color:#c4b5fd;">CigustoMDD</b> d'abord, puis la <b style="color:#4ade80;">marge/mL</b>.</div>`;
   } else {
     html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">La sélection est faite par Fabien — ici tu consultes la malette et tu imprimes l'affiche du meuble de test.</div>`;
   }
@@ -15851,41 +15938,29 @@ function renderVueTesteurs() {
         const key = _testeurKeyDe(g, p);
         if (!key || key === '||' || _seenKeys.has(key)) return; // déjà dans la malette
         const mml = _testeurMargeMl(g, p);
-        // Dédoublonnage multi-format : on garde la déclinaison 50 mL si elle existe
-        // (priorité Fabien 2026-08-03), sinon la meilleure marge/mL.
-        const cur = _candByKey[key];
-        const is50 = g.format === '50mL';
-        if (!cur || (is50 && cur.g.format !== '50mL') || (is50 === (cur.g.format === '50mL') && mml > cur.mml)) {
-          _candByKey[key] = { g, p, zone, mml, key };
-        }
+        if (!_candByKey[key] || mml > _candByKey[key].mml) _candByKey[key] = { g, p, zone, mml, key };
       });
     });
     Object.values(_candByKey).forEach(c => { (_candParZone[c.zone] = _candParZone[c.zone] || []).push(c); });
-    // Tri stratégique (Fabien 2026-08-03) : 50 mL d'abord, puis CigustoMDD, puis marge/mL.
     Object.values(_candParZone).forEach(list => list.sort((a, b) => {
-      const fa = a.g.format === '50mL' ? 1 : 0, fb = b.g.format === '50mL' ? 1 : 0;
-      if (fa !== fb) return fb - fa;
       const ma = _testeurEstMDD(a.g) ? 1 : 0, mb = _testeurEstMDD(b.g) ? 1 : 0;
-      if (ma !== mb) return mb - ma;
-      return b.mml - a.mml;
+      if (ma !== mb) return mb - ma;          // CigustoMDD d'abord (stratégie Fabien)
+      return b.mml - a.mml;                    // puis marge/mL décroissante
     }));
   }
 
-  // Une ligne de slot (remplie ou libre). Drag & drop (admin) : une ligne remplie se
-  // GLISSE ; remplie ou libre, elle ACCEPTE un dépôt de SA zone (cible libre = fin de zone).
-  const _slotRow = (num, e, zColor, zKey, idx) => {
+  // Une ligne de slot (remplie ou libre)
+  const _slotRow = (num, e, zColor) => {
     const numBadge = `<span style="display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:18px; background:${zColor}; color:#fff; font-size:10px; font-weight:800; border-radius:3px; flex-shrink:0;">${String(num).padStart(2, '0')}</span>`;
-    const dropAttrs = admin ? ` ondragover="pvTesteurDragOver(event,'${zKey}')" ondragleave="pvTesteurDragLeave(event)" ondrop="pvTesteurDrop(event,'${zKey}',${idx})"` : '';
     if (!e) {
-      return `<div${dropAttrs} style="display:flex; gap:8px; align-items:center; padding:2px 6px; opacity:0.4;">${numBadge}<span style="flex:1; border-bottom:1px dashed #47556960; font-size:10px; color:#475569; padding:1px 4px;">— libre —</span></div>`;
+      return `<div style="display:flex; gap:8px; align-items:center; padding:2px 6px; opacity:0.4;">${numBadge}<span style="flex:1; border-bottom:1px dashed #47556960; font-size:10px; color:#475569; padding:1px 4px;">— libre —</span></div>`;
     }
-    const dragAttrs = admin ? ` draggable="true" ondragstart="pvTesteurDragStart(event,'${zKey}',${idx})" ondragend="pvTesteurDragEnd()"${dropAttrs}` : '';
     const twins = _testeurJumeaux(e.key);
     const fmts = [...new Set(twins.map(t => t.g.format))];
     const bestMml = Math.max(...twins.map(t => _testeurMargeMl(t.g, t.p)), 0);
     const mdd = _testeurEstMDD(e.g);
-    return `<div${dragAttrs} style="display:flex; gap:8px; align-items:center; padding:2px 6px; border-bottom:1px solid #1e293b60;${admin ? ' cursor:grab;' : ''}">
-      ${admin ? `<span style="font-size:10px; color:#475569; flex-shrink:0; user-select:none;" title="Glisser pour déplacer dans la zone">⠿</span>` : ''}${numBadge}
+    return `<div style="display:flex; gap:8px; align-items:center; padding:2px 6px; border-bottom:1px solid #1e293b60;">
+      ${numBadge}
       <span style="font-size:10px; color:#94a3b8; width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;">${e.g.marque}</span>
       <span style="font-size:11px; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><b>${e.p.n || '(sans nom)'}</b> <span style="color:#64748b; font-size:9px;">· ${e.g.gamme}</span></span>
       ${mdd ? `<span style="font-size:8px; padding:1px 4px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; font-weight:700; flex-shrink:0;">MDD</span>` : ''}
@@ -15897,13 +15972,10 @@ function renderVueTesteurs() {
     </div>`;
   };
 
-  // Blocs de zone sur 2 colonnes qui occupent TOUTE la largeur de la fenêtre
-  // (demande Fabien 2026-08-03, précisée 15:50 : pleine largeur, toujours 2 par ligne).
-  html += `<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; align-items:start;">`;
   TESTEUR_ZONES.forEach(z => {
     const zEntries = uniques.filter(e => e.zone === z.key);
     const over = zEntries.length > z.quota;
-    html += `<div style="background:#0f172a; border:1px solid ${z.color}40; border-radius:6px; overflow:hidden;">`;
+    html += `<div style="margin-bottom:10px; background:#0f172a; border:1px solid ${z.color}40; border-radius:6px; overflow:hidden;">`;
     html += `<div style="display:flex; gap:8px; align-items:center; padding:4px 10px; background:${z.color}22;">
       <span style="font-size:11px; font-weight:800; color:${z.color}; letter-spacing:1px; padding:1px 8px; background:${z.color}; color:#fff; border-radius:3px;">${z.label}</span>
       <span style="font-size:10px; font-weight:700; color:${over ? '#ef4444' : '#e2e8f0'};">${zEntries.length}/${z.quota}</span>
@@ -15911,18 +15983,17 @@ function renderVueTesteurs() {
       ${over ? `<span style="font-size:9px; color:#ef4444; font-weight:700;">⚠ dépassement — un goût a changé de catégorie : retire ${zEntries.length - z.quota} testeur${zEntries.length - z.quota > 1 ? 's' : ''}</span>` : ''}
     </div>`;
     for (let i = 0; i < Math.max(z.quota, zEntries.length); i++) {
-      html += _slotRow(z.start + i, zEntries[i] || null, z.color, z.key, i);
+      html += _slotRow(z.start + i, zEntries[i] || null, z.color);
     }
     // Suggestions admin : les meilleurs candidats PAS ENCORE dans la malette pour cette zone
     if (admin && zEntries.length < z.quota) {
       const cands = (_candParZone[z.key] || []).slice(0, 5);
       if (cands.length > 0) {
         html += `<div style="padding:4px 10px 6px; background:#1e293b40; border-top:1px dashed #33415580;">
-          <div style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:2px;">💡 Suggestions (50 mL puis MDD puis marge/mL)</div>
+          <div style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:2px;">💡 Suggestions (MDD puis marge/mL)</div>
           ${cands.map(c => `<span onclick="toggleTesteur('${c.g.id}','${c.p.id}')" style="display:inline-flex; gap:4px; align-items:center; font-size:10px; color:#cbd5e1; padding:2px 7px; background:#1e293b; border:1px solid ${z.color}40; border-radius:3px; margin:1px 3px 1px 0; cursor:pointer;" title="${c.g.marque} ${c.g.gamme} ${LIQ_FORMAT_LABELS[c.g.format] || ''} — ajouter à la malette">
             <b style="color:${z.color};">+</b> ${c.p.n || '(sans nom)'}
             <span style="color:#64748b; font-size:8.5px;">${c.g.marque}</span>
-            <span style="font-size:7.5px; padding:0 3px; background:${(LIQ_FORMAT_COLORS[c.g.format] || '#64748b')}20; color:${LIQ_FORMAT_COLORS[c.g.format] || '#94a3b8'}; border-radius:2px;">${LIQ_FORMAT_LABELS[c.g.format] || c.g.format}</span>
             ${_testeurEstMDD(c.g) ? `<span style="font-size:7.5px; padding:0 3px; background:#a78bfa20; color:#c4b5fd; border-radius:2px; font-weight:700;">MDD</span>` : ''}
             <span style="color:#4ade80; font-size:8.5px;">${c.mml.toFixed(2)}/mL</span>
           </span>`).join('')}
@@ -15931,7 +16002,6 @@ function renderVueTesteurs() {
     }
     html += `</div>`;
   });
-  html += `</div>`; // ferme la grille 2 colonnes
 
   html += `</div>`;
   return html;
@@ -19083,6 +19153,19 @@ function renderDashboard() {
             </div>`;
           }
         }
+        // ── 📌 Date d'installation (2026-08-03, brique À rentrer/À sortir) : différer la mise
+        // en rayon APRÈS réception. Vide = dès réception (comportement historique). Posée =
+        // l'étape « Installé en rayon » passe en ⏳ (pas un retard) jusqu'à la date.
+        let dateInstallBlock = '';
+        if (typeof isAdmin === 'function' && isAdmin()) {
+          dateInstallBlock = `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+            <span style="font-size:10px; color:#64748b;">📌 Installation le :</span>
+            <input type="date" value="${a.dateInstallation || ''}" onchange="setDateInstallation('${a.id}', this.value)" onclick="event.stopPropagation()" title="Vide = installation dès réception. Posée = l'étape « Installé en rayon » attend cette date (⏳, pas un retard)." style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${a.dateInstallation ? '#f472b660' : '#475569'}; color:${a.dateInstallation ? '#f9a8d4' : '#cbd5e1'}; border-radius:3px;">
+            <span style="font-size:9px; color:#64748b; font-style:italic;">vide = dès réception${isLiq ? ' · appliquée à toute la gamme' : ''}</span>
+          </div>`;
+        } else if (a.dateInstallation && a.dateInstallation > ymd(new Date())) {
+          dateInstallBlock = `<div style="display:inline-flex; gap:6px; align-items:center;"><span style="font-size:10px; color:#f9a8d4;">📌 Installation prévue le ${fmtFR(a.dateInstallation)} — ne pas poser en rayon avant</span></div>`;
+        }
         // ── 📦 Réception centralisée (dispatch, 2026-06-12) : la décision se prend ICI, sur
         // le À rentrer. Hub choisi → rétrocessions hub → autres boutiques créées et suivies.
         let dispatchBlock = '';
@@ -19113,7 +19196,7 @@ function renderDashboard() {
         // (qui commande, expédition, réception, prix de saisie, remplace, fanfare, étiquette,
         // prix rouge) deviennent des segments qui PARTAGENT les lignes (flex-wrap).
         return `<div style="display:flex; flex-wrap:wrap; gap:6px 26px; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed #33415580;">`
-          + commandeAdminBlock + paCommandeBlock + dateRentrerBlock + dispatchBlock + `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          + commandeAdminBlock + paCommandeBlock + dateRentrerBlock + dateInstallBlock + dispatchBlock + `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${remplBlock}
           <span style="font-size:10px; color:#64748b;">Entrée en fanfare ?</span>
           ${fanfareChips}
@@ -20076,21 +20159,32 @@ function renderDashboard() {
   // le cas « on attend qu'un autre produit sorte pour pouvoir le poser ». Une ligne À rentrer
   // avec « Reçu » coché et « Installé en rayon » pas coché (chez la boutique filtrée, ou
   // n'importe laquelle en vue admin) est du travail d'installation en attente.
-  const actionsAInstaller = actions.filter(a => {
+  const _shsQualif = fShop ? [fShop] : SHOPS;
+  const _lignesRecuesNonInstallees = actions.filter(a => {
     if (a.type !== 'RENTRER' || a.annulee || a._archived || a.dateCloture || _deletedIds.has(a.id)) return false;
-    const _shs = fShop ? [fShop] : SHOPS;
-    return _shs.some(sh => {
+    return _shsQualif.some(sh => {
       const st = a.etats && a.etats[sh];
       return st && st.steps && st.steps.recu === true && st.steps.installe === false;
     });
   });
+  // 2026-08-03 (brique À rentrer/À sortir, décisions Fabien) : une ligne dont l'installation
+  // est EN ATTENTE (date d'installation future, ou sortant pas encore sorti CHEZ la boutique)
+  // reste VISIBLE dans la card (section ⏳ dédiée) mais HORS compteurs — attente ≠ retard.
+  // Actionnable = au moins UNE boutique qualifiée (reçu ✓ installé ✗) sans attente.
+  const _ligneInstallActionnable = a => _shsQualif.some(sh => {
+    const st = a.etats && a.etats[sh];
+    if (!(st && st.steps && st.steps.recu === true && st.steps.installe === false)) return false;
+    return !_attenteInstallePourShop(a, sh);
+  });
+  const actionsAInstaller = _lignesRecuesNonInstallees.filter(_ligneInstallActionnable);
+  const actionsInstallEnAttente = _lignesRecuesNonInstallees.filter(a => !_ligneInstallActionnable(a));
   // …et les OP nouveauté/exclu dont le PRODUIT est reçu mais l'installation pas finie
   // (cas Kit Force : ligne réglée depuis longtemps, le travail restant est côté OP).
   const _shsInstall = fShop ? [fShop] : SHOPS;
   // Anti-doublon global (retour Fabien 2026-08-01) : la ligne et l'OP peuvent se qualifier
   // chacune par une boutique DIFFÉRENTE — on ne montre jamais les deux pour le même produit,
   // la LIGNE (qui porte la coche « installé ») a priorité.
-  const _idsLignesInstall = new Set(actionsAInstaller.map(a => a.id));
+  const _idsLignesInstall = new Set(_lignesRecuesNonInstallees.map(a => a.id)); // 2026-08-03 : une ligne en attente ⏳ compte aussi pour l'anti-doublon (la ligne prime toujours sur l'OP)
   const opsRecuesNonInstallees = ops.filter(op => {
     if (opsInstallVisibles.includes(op)) return false;
     const _pfL = opRentrerParfumActions(op);
@@ -20099,13 +20193,15 @@ function renderDashboard() {
     return _shsInstall.some(sh => _opRecueNonInstalleePourShop(op, sh));
   });
   const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length + opsRecuesNonInstallees.length;
-  const installBlockInner = _nbInstallTotal === 0
+  const _nbInstallAttente = actionsInstallEnAttente.length;
+  const installBlockInner = (_nbInstallTotal + _nbInstallAttente) === 0
     ? ''
     : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')
       + (actionsAInstaller.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Reçus, pas encore installés</div>` + renderGroupedActionCards(actionsAInstaller) : '')
-      + (opsRecuesNonInstallees.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Produits reçus — installation à finir (OP)</div>` + opsRecuesNonInstallees.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : '');
-  const installBlock = _nbInstallTotal === 0 ? '' : block('install', '📦 À installer', '#f472b6', _nbInstallTotal, installBlockInner,
-    'OPs dont l\'installation commence aujourd\'hui ou demain · produits reçus en boutique mais pas encore posés en rayon.');
+      + (opsRecuesNonInstallees.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Produits reçus — installation à finir (OP)</div>` + opsRecuesNonInstallees.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : '')
+      + (actionsInstallEnAttente.length ? `<div style="font-size:9px; color:#fbbf24; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Pas un retard : ces installations attendent leur déclencheur — date posée ou sortie du produit remplacé (par boutique)">⏳ En attente — date d'installation ou sortie du remplacé (hors compteurs)</div>` + renderGroupedActionCards(actionsInstallEnAttente) : '');
+  const installBlock = (_nbInstallTotal + _nbInstallAttente) === 0 ? '' : block('install', '📦 À installer' + (_nbInstallAttente ? ` <span style="font-size:10px; font-weight:600; color:#fbbf24;">· ${_nbInstallAttente} ⏳</span>` : ''), '#f472b6', _nbInstallTotal, installBlockInner,
+    'OPs dont l\'installation commence aujourd\'hui ou demain · produits reçus en boutique mais pas encore posés en rayon. ⏳ = en attente (date d\'installation ou sortie du remplacé), hors compteurs.');
 
   // --- OPs terminées à désinstaller (inclut dernier jour = dateFin aujourd'hui) ---
   // Uniquement les OPs qui ont effectivement des étapes de désinstallation (matériel physique).
@@ -21257,9 +21353,9 @@ function renderDashboard() {
       })();
 
       const _cards = [];
-      if (_nbInstallTotal > 0) {
+      if ((_nbInstallTotal + _nbInstallAttente) > 0) {
         const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInstallVisibles, fShop) : '';
-        _cards.push(_renderDashSectionCard('install', '📦 À installer', '#f472b6', _nbInstallTotal, _dotsHtml, _installCtx));
+        _cards.push(_renderDashSectionCard('install', '📦 À installer' + (_nbInstallAttente ? ' · ' + _nbInstallAttente + ' ⏳' : ''), '#f472b6', _nbInstallTotal, _dotsHtml, _installCtx));
       }
       if (opsDesinstVisibles && opsDesinstVisibles.length > 0) {
         const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsDesinstVisibles, fShop) : '';
@@ -21320,6 +21416,7 @@ function renderDashboard() {
       onmouseout="this.style.background='transparent'">${label}</span>`;
   const summaryParts = [];
   if (_nbInstallTotal) summaryParts.push(chip('#f472b6', `${_nbInstallTotal} à installer`, 'install'));
+  if (_nbInstallAttente) summaryParts.push(chip('#fbbf24', `⏳ ${_nbInstallAttente} install. en attente`, 'install'));
   if (opsDesinstVisibles.length) summaryParts.push(chip('#f97316', `${opsDesinstVisibles.length} à désinstaller`, 'desinstall'));
   if (sortirAffich.length) summaryParts.push(chip('#ef4444', `${sortirAffich.length} à sortir`, 'sortir'));
   if (retrosAffich.length) summaryParts.push(chip('#06b6d4', `${retrosAffich.length} rétrocession${retrosAffich.length > 1 ? 's' : ''}`, 'retros'));
@@ -23026,7 +23123,7 @@ function opUpdateExistingCampagne() {
       if (c.dateDebut) { op.dateDebut = c.dateDebut; op._dateDebutManuelle = true; _touched = true; }
       if (c.dateFin)   { op.dateFin = c.dateFin; op._dateFinManuelle = true; _touched = true; }
       // Garde-fou : dateFin < dateDebut → annuler dateFin
-      if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) { op.dateFin = null; op._dateFinManuelle = false; }
+      if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) { op.dateFin = null; op._dateFinManuelle = false; _reveillerObjet(op); /* 2026-08-03 : null propagable */ }
       if (_touched) { op._ts = new Date().toISOString(); _nbAlign++; }
     });
   }
@@ -23234,8 +23331,12 @@ function reopenOp(id) {
   const op = ops.find(o => o.id === id);
   if (!op) return;
   op.dateFin = null;
-  op._dateFinManuelle = false; // réouverture explicite → le cycle auto peut reprendre
-  op._ts = new Date().toISOString();
+  op._dateFinManuelle = false;
+  // 2026-08-03 : réveil canonique (passeport _reviveTs) — le null se propage aux autres
+  // postes (exception _nullGuard du merge) ET l'auto-close est suspendu tant qu'aucune
+  // coche n'a bougé depuis la réouverture (_opRouvertVolontairement). Avant : le cycle
+  // auto refermait l'OP au sync suivant et/ou l'ancienne date revenait par merge.
+  _reveillerObjet(op);
   saveData();
   renderOps();
 }
@@ -23284,6 +23385,7 @@ async function editCampagne(campagneId) {
         if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) {
           console.warn('[CAMPAGNE] dateFin', op.dateFin, '< dateDebut', op.dateDebut, '→ dateFin annulée');
           op.dateFin = null; op._dateFinManuelle = false;
+          _reveillerObjet(op); // 2026-08-03 : null propagable (passeport _reviveTs, garde _nullGuard du merge)
         }
       });
     }
@@ -23989,6 +24091,7 @@ async function pvCampagnePicker(opId) {
           if (op.dateFin && op.dateDebut && op.dateFin < op.dateDebut) {
             console.warn('[CAMPAGNE] dateFin', op.dateFin, '< dateDebut', op.dateDebut, '→ dateFin annulée');
             op.dateFin = null; op._dateFinManuelle = false;
+            _reveillerObjet(op); // 2026-08-03 : null propagable (passeport _reviveTs, garde _nullGuard du merge)
           }
         }
       }
@@ -24358,6 +24461,7 @@ async function _cloturerCampagne(campagneId, destCampagneId) {
         // Destination choisie à la clôture (2026-07-31) : une autre campagne, ou libre.
         op.campagneId = destCampagneId || '';
         op.dateFin = null; op._dateFinManuelle = false; op.motifCloture = '';
+        _reveillerObjet(op); // 2026-08-03 : réouverture depuis UN poste → passeport _reviveTs, sinon les autres postes repoussent l'ancienne dateFin par merge
         const _cles = _clesEtapesEtiquettePR(op);
         SHOPS.forEach(sh => {
           if (_opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh)) return; // écoulée : coches conservées
@@ -24398,6 +24502,7 @@ async function _cloturerCampagne(campagneId, destCampagneId) {
       // Une boutique n'a pas fini l'installation : l'OP repart en INDIVIDUEL, réouverte,
       // coches existantes conservées — elle se refermera toute seule quand tout sera fait.
       op.dateFin = null; op._dateFinManuelle = false; op.motifCloture = '';
+      _reveillerObjet(op); // 2026-08-03 : réouverture depuis UN poste → passeport _reviveTs, sinon les autres postes repoussent l'ancienne dateFin par merge
       nDetachees++;
     }
     op._ts = _now; op._adminTs = _now;
@@ -27854,10 +27959,17 @@ async function setOpDateDebut(opId, v) {
 async function setOpDateFin(opId, v) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const op = ops.find(o => o.id === opId); if (!op) return;
-  logAction('Date fin OP', _logOpLabel(opId) + ' → ' + v);
-  op.dateFin = v || null; // NB : cas "suppression dateFin" (réouverture) = Phase 3, non traité ici
+  logAction('Date fin OP', _logOpLabel(opId) + ' → ' + (v || '(supprimée — réouverture)'));
+  op.dateFin = v || null;
   op._dateFinManuelle = !!(v); // marquer comme posée manuellement (protège contre les auto-sync)
   op._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
+  // 2026-08-03 : SUPPRESSION de la date de fin = RÉOUVERTURE volontaire. Sans passeport
+  // _reviveTs, le merge refusait le null (garde _nullGuard « jamais écraser une date par
+  // null ») : les autres postes repoussaient l'ancienne date à chaque sync → la date de
+  // fin « réapparaissait chaque jour » (signalement Fabien 2026-08-03, 2 nouveautés).
+  // _reveillerObjet = réveil canonique (D3) : _reviveTs propagable + désarchivage
+  // (une OP finie depuis > 15 j est _archived — la rouvrir doit la faire revivre).
+  if (!v) _reveillerObjet(op);
   // Première sauvegarde : l'OP principale est à jour
   saveData();
   // Sync sibling one-shot ↔ PR : toujours proposer d'aligner la date de fin
@@ -27869,6 +27981,7 @@ async function setOpDateFin(opId, v) {
     if (await pvConfirm('Synchroniser la date de fin sur l\'OP liée (' + sibling.id + ' — ' + sibType + ') ?\n\nDate actuelle : ' + sibFinLbl + '\nNouvelle date : ' + (newFin || 'aucune'))) {
       sibling.dateFin = newFin;
       sibling._ts = new Date().toISOString(); // fix 2026-05-20 phase 2
+      if (!newFin) _reveillerObjet(sibling); // 2026-08-03 : suppression = réouverture propagable (passeport _reviveTs)
       saveData();
       pvAlert('✅ Date de fin synchronisée sur ' + sibling.id + ' (' + sibType + ') → ' + (newFin || 'aucune'));
     }
