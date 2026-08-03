@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 19:32</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 19:50</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4733,11 +4733,53 @@ function ensureAction(produitId, type, produitType, opts) {
     if (opts.parfumNom && opts.parfumId) existing._parfumNom = opts.parfumNom;
     return existing;
   }
-  // Priorité 2 : action déjà FAIT → ne PAS recréer, retourner l'existante
+  // Priorité 2 : action déjà FAIT → ne PAS recréer, retourner l'existante…
+  // …SAUF NOUVEAU CYCLE (2026-08-03, cas Felicita — trou résiduel de la suite 41 TRAITÉ) :
+  // si la CIBLE est repassée « à rentrer »/« à sortir » APRÈS la fin de l'action
+  // (_ts cible > _ts action), l'ancienne ligne est du passé — il en faut une NEUVE.
+  // Sans ça : parfum « à rentrer » en base, AUCUNE ligne au dashboard, pour toujours
+  // (la guérison-cascade le laissait à raison : choix manuel plus récent respecté).
+  // Id DÉTERMINISTE par cycle (modèle OPGOODS) : deux postes non synchronisés créent le
+  // MÊME id → le merge fusionne leurs coches, zéro doublon par construction.
+  let _forceCycleId = null;
   const existingDone = actions.find(a => _matchBase(a));
   if (existingDone) {
-    if (opts.parfumNom && opts.parfumId) existingDone._parfumNom = opts.parfumNom;
-    return existingDone;
+    const _attenduC = type === 'RENTRER' ? 'A_RENTRER' : type === 'SORTIR' ? 'A_SORTIR' : null;
+    let _cibleStatutC = null, _cibleTsC = '';
+    if (_attenduC) {
+      if (produitType === 'liq') {
+        const _gC = baseLiq.find(x => x.id === produitId);
+        if (_gC && opts.parfumId) { const _pC = (_gC.parfums || []).find(x => x.id === opts.parfumId); if (_pC) { _cibleStatutC = _pC.s; _cibleTsC = _pC._ts || ''; } }
+        else if (_gC) { _cibleStatutC = _gC.statutVie; _cibleTsC = _gC._ts || ''; }
+      } else {
+        const _bC = produitType === 'pd' ? basePD : baseKits;
+        const _prodC = _bC.find(x => x.id === produitId);
+        if (_prodC) { _cibleStatutC = _prodC.statutVie; _cibleTsC = _prodC._ts || ''; }
+      }
+    }
+    const _finieC = actionGlobalState(existingDone) === 'FAIT' || !!existingDone.dateCloture;
+    const _nouveauCycle = _attenduC && _finieC && _cibleStatutC === _attenduC
+      && _cibleTsC && existingDone._ts && _cibleTsC > existingDone._ts
+      && !existingDone.motifSortie; // reprises : jamais de cycle auto
+    if (_nouveauCycle) {
+      const _nbCycles = actions.filter(a => a.produitId === produitId && a.type === type
+        && (produitType === 'kit' ? (!a.produitType || a.produitType === 'kit') : a.produitType === produitType)
+        && (opts.parfumId ? a.produitParfumId === opts.parfumId : !a.produitParfumId)).length;
+      const _cid = 'ACT-CY' + _nbCycles + '-' + type.charAt(0) + '-' + produitId + (opts.parfumId ? '-' + opts.parfumId : '');
+      const _dejaLa = actions.find(a => a.id === _cid);
+      if (_dejaLa) {
+        if (opts.parfumNom && opts.parfumId) _dejaLa._parfumNom = opts.parfumNom;
+        return _dejaLa; // déjà créée (par ce poste ou arrivée par merge)
+      }
+      if (!_deletedIds.has(_cid)) {
+        _forceCycleId = _cid;
+        console.log('[ENSURE-ACTION] NOUVEAU CYCLE ' + type + ' → ligne ' + _cid + ' (ancienne ' + existingDone.id + ' finie, cible repassée ' + _attenduC + ')');
+      }
+    }
+    if (!_forceCycleId) {
+      if (opts.parfumNom && opts.parfumId) existingDone._parfumNom = opts.parfumNom;
+      return existingDone;
+    }
   }
   // Priorité 3 : action ANNULÉE récente avec des steps cochés → RÉACTIVER au lieu de recréer.
   // Cela protège contre la perte de coches quand le merge annule/recrée des actions en boucle.
@@ -4753,7 +4795,7 @@ function ensureAction(produitId, type, produitType, opts) {
     if (checked > 0 && (!best || checked > best._checked)) return Object.assign(a, { _checked: checked });
     return best;
   }, null);
-  if (_bestCancelled) {
+  if (_bestCancelled && !_forceCycleId) { // nouveau cycle → jamais réactiver une annulée du cycle PRÉCÉDENT (ses coches sont du passé)
     console.log('[ENSURE-ACTION] Réactivation action annulée ' + _bestCancelled.id + ' (' + _bestCancelled._checked + ' steps cochés) au lieu de créer une nouvelle');
     // Réveil complet (cf. règle d'or §0.12) + passeport _reviveTs propagable (chantier D3) :
     _reveillerObjet(_bestCancelled);
@@ -4765,7 +4807,7 @@ function ensureAction(produitId, type, produitType, opts) {
   }
   const isManual = (type === 'PRIX');
   const a = {
-    id: 'ACT-' + String(nextActionId++).padStart(4, '0'),
+    id: _forceCycleId || ('ACT-' + String(nextActionId++).padStart(4, '0')),
     type,
     produitId,
     produitType,
@@ -8010,24 +8052,31 @@ function _applyActionShopChange(a, shop) {
         try { _closeRelatedOpsAfterSorti(a.produitId, a.produitParfumId || null); } catch(e) { console.error('[CASCADE-SORTI] _closeRelatedOpsAfterSorti error :', e); }
       }
     } else if (a.type === 'RENTRER') {
+      // ⚡ ONE-SHOT (décision Fabien 2026-08-03, cas Japura Conquistador/Royal) : un one-shot
+      // rentré partout ne rejoint PAS l'offre permanente — il passe DIRECTEMENT « à sortir »
+      // (le principe du one-shot : il rentre, il s'écoule, il sort). Sa ligne À sortir existe
+      // déjà (volet ② du COUP) ou naît du balayage périodique des statuts. Les non-one-shot
+      // gardent le comportement historique (→ « dans l'offre »).
+      const _apresRentree = p => (p && p.oneShot === true) ? 'A_SORTIR' : 'DANS_OFFRE';
+      const _cibleRentree = targetParfum ? _apresRentree(targetParfum) : _apresRentree(prod);
       const curStatus = targetParfum ? targetParfum.s : prod.statutVie;
-      if (curStatus !== 'DANS_OFFRE') {
+      if (curStatus !== _cibleRentree) {
         a.statutKitAvant = curStatus;
         if (targetParfum) {
-          targetParfum._ts = _nowTs; targetParfum.s = 'DANS_OFFRE'; if (liq) liq._ts = _nowTs;
+          targetParfum._ts = _nowTs; targetParfum.s = _cibleRentree; if (liq) liq._ts = _nowTs;
           // Un parfum qui revient DANS_OFFRE doit prioriser la gamme entière en DANS_OFFRE
           // (même si les autres parfums sont en REPRISE / A_SORTIR / etc.). C'est la règle métier.
           if (liq) _recomputeGammeStatutFromParfums(liq);
         }
         else {
           prod._ts = _nowTs;
-          prod.statutVie = 'DANS_OFFRE';
+          prod.statutVie = _cibleRentree;
           if (kit) syncKitToProp(kit);
           if (liq) {
             // Rentrée de la GAMME ENTIÈRE validée → les parfums encore "à rentrer" passent dans
-            // l'offre. Sans ça, ils restaient "à rentrer" en base et regénéraient des lignes
-            // fantômes alors que la rentrée était bouclée (incohérence signalée Fabien 2026-06-18).
-            (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = 'DANS_OFFRE'; p._ts = _nowTs; } });
+            // l'offre (ou « à sortir » pour un parfum ⚡). Sans ça, ils restaient "à rentrer" en
+            // base et regénéraient des lignes fantômes (incohérence signalée Fabien 2026-06-18).
+            (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = _apresRentree(p); p._ts = _nowTs; } });
             syncLiqToPropLiq(liq);
           }
           // PD : statutVie mis à jour directement via prod.statutVie
@@ -8036,10 +8085,10 @@ function _applyActionShopChange(a, shop) {
         // Guérison 2026-08-03 (cas PuffX) : la gamme est DÉJÀ « dans l'offre » (il suffit
         // qu'UN parfum le soit — règle de priorité des statuts) → l'ancien garde sautait
         // TOUT le bloc, y compris le balayage des parfums encore « à rentrer ». Or une
-        // rentrée gamme validée partout = ces parfums passent dans l'offre, même quand le
-        // statut de la gamme, lui, n'a pas à bouger.
+        // rentrée gamme validée partout = ces parfums passent dans l'offre (ou « à sortir »
+        // pour un ⚡), même quand le statut de la gamme, lui, n'a pas à bouger.
         let _swept = false;
-        (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = 'DANS_OFFRE'; p._ts = _nowTs; _swept = true; } });
+        (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = _apresRentree(p); p._ts = _nowTs; _swept = true; } });
         if (_swept) { liq._ts = _nowTs; syncLiqToPropLiq(liq); }
       }
     } else if (a.type === 'PRIX' && typeof a.prixCible === 'number') {
@@ -8903,10 +8952,32 @@ function _badgeExpeditionDate(d) {
   const txt = _passee ? '🚚 peut arriver' : '🚚 à partir du ' + _jm;
   return `<span title="Commande Fabien — le fournisseur expédie à partir du ${fmtFR(d)} : la marchandise peut arriver en boutique dès cette date" style="font-size:9px; font-weight:700; padding:1px 6px; background:${bg}; color:${col}; border:1px solid ${border}; border-radius:3px; white-space:nowrap;">${txt}</span>`;
 }
+// Badge canonique 📦 reçu (2026-08-03, retour Fabien cas Mini Meuble : « peut arriver »
+// affiché alors que tout le monde avait déclaré reçu) : dès qu'une réception est COCHÉE,
+// c'est elle qui parle — plus jamais la seule date d'expédition.
+function _badgeRecuShops(shRecu) {
+  const _partout = shRecu.length === SHOPS.length;
+  const txt = _partout ? '📦 reçu partout' : '📦 reçu ' + shRecu.length + '/' + SHOPS.length;
+  const title = _partout ? 'Commande Fabien — réceptionnée dans toutes les boutiques'
+    : 'Commande Fabien — déjà réceptionnée par : ' + shRecu.map(sh => SHOP_LABELS[sh] || sh).join(', ');
+  return `<span title="${title}" style="font-size:9px; font-weight:700; padding:1px 6px; background:#14532d30; color:#86efac; border:1px solid #22c55e50; border-radius:3px; white-space:nowrap;">${txt}</span>`;
+}
 // Variante par action : ne s'affiche QUE si la commande est gérée par Fabien.
+// Coches réelles d'abord (reçu partout / x sur 3), date d'expédition sinon.
 function _badgeExpeditionAction(a) {
   if (!a || a.type !== 'RENTRER' || a.commandeAdmin !== true || !a.expeditionDate) return '';
+  const _shRecu = SHOPS.filter(sh => { const st = a.etats && a.etats[sh]; return st && st.steps && st.steps.recu === true; });
+  if (_shRecu.length > 0) return _badgeRecuShops(_shRecu);
   return _badgeExpeditionDate(a.expeditionDate);
+}
+// Variante GROUPE (ligne gamme pliée, ligne fusionnée multi-format) : une boutique compte
+// « reçu » si TOUTES les lignes du groupe sont reçues chez elle.
+function _badgeExpeditionGroupe(acts) {
+  const _list = (acts || []).filter(a => a && a.type === 'RENTRER' && a.commandeAdmin === true && a.expeditionDate);
+  if (!_list.length) return '';
+  const _shRecu = SHOPS.filter(sh => _list.every(a => { const st = a.etats && a.etats[sh]; return st && st.steps && st.steps.recu === true; }));
+  if (_shRecu.length > 0) return _badgeRecuShops(_shRecu);
+  return _badgeExpeditionDate(_list.map(a => a.expeditionDate).sort()[0]);
 }
 
 // ── 📅 Date « à rentrer » (2026-07-20, demande Fabien : « mettre les À rentrer dans
@@ -20168,7 +20239,7 @@ function renderDashboard() {
     const _grpExtraBadges =
       (_grpRentrer && grp.every(a => a.commandeAdmin === true) ? _badgeCommandeAdmin()
         : (_grpRentrer && grp.some(a => a.commandeAdmin === undefined) ? _badgeQuiCommandeAttente() : ''))
-      + ((_grpRentrer && grp.every(a => a.commandeAdmin === true) && _grpExpDates.length > 0) ? _badgeExpeditionDate(_grpExpDates[0]) : '')
+      + ((_grpRentrer && grp.every(a => a.commandeAdmin === true) && _grpExpDates.length > 0) ? _badgeExpeditionGroupe(grp) : '')
       + (_grpRentrer ? _badgeDateRentrer(dateRentrerGroupe(grp, 'action')) : '') // 📅 2026-07-20
       + ((_grpRentrer && grp[0].dispatchHub && grp.every(a => a.dispatchHub === grp[0].dispatchHub)) ? _badgeHub(grp[0].dispatchHub) : '');
 
@@ -20418,7 +20489,7 @@ function renderDashboard() {
         badgesHtml: `<span style="font-size:8.5px; padding:1px 5px; background:#33415560; color:#94a3b8; border-radius:2px; white-space:nowrap;">${_libelleParfumsParFormat(allActions) || (allActions.length + ' action' + (allActions.length > 1 ? 's' : ''))}</span>`
           + (_allAdmin ? `<span style="font-size:8.5px; padding:1px 5px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; white-space:nowrap;">📦 Commande Fabien</span>` : '')
           // 🚚 date d'expédition (2026-07-18) : la ligne fusionnée porte la plus proche de la série
-          + ((_allAdmin && _fuseExpDates.length > 0) ? _badgeExpeditionDate(_fuseExpDates[0]) : '')
+          + ((_allAdmin && _fuseExpDates.length > 0) ? _badgeExpeditionGroupe(_rentrers) : '')
           // 📅 date à rentrer posée (2026-07-20) : idem, la plus proche de la série
           + (_rentrers.length > 0 ? _badgeDateRentrer(dateRentrerGroupe(_rentrers, 'action')) : ''),
         profShort: '', profColor: '',
