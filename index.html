@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 14:58</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 15:34</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -611,7 +611,7 @@ window.addEventListener('DOMContentLoaded', function() {
       <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
       <button onclick="pvOuvrirPointageEtageres()" title="Pointer, gamme par gamme et par boutique, si chaque liquide est posé sur les étagères : détecte les « à sortir » encore posés et les emplacements manquants." style="padding:6px 12px; font-size:11px; font-weight:700; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; cursor:pointer; white-space:nowrap;">📋 Pointage étagères</button>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="marque">Tri: Par marque</option><option value="gamme">Tri: Par gamme (tous formats)</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
+        <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="testeurs">Vue: 🧪 Testeurs (malette)</option><option value="marque">Tri: Par marque</option><option value="gamme">Tri: Par gamme (tous formats)</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
       </select>
     </div>
     <div id="liqStats" style="margin-bottom:8px;"></div>
@@ -2978,6 +2978,91 @@ let nextBilanId = 1;
 // aRevoir = relance de vérification (réponses gardées en pré-rempli). Merge par id, le
 // plus récent gagne (motif bilans/campagnes).
 let pointagesEtagere = []; // [{ id:'PTG-<shop>-<gammeId>', shop, gammeId, poses:{}, aRevoir, datePointage, _ts }]
+
+// ═══ 🧪 MALETTE DE TESTEURS LIQUIDES (2026-08-03, demande Fabien) ═══
+// 45 emplacements physiques répartis en 5 zones, QUOTAS FIXES du plan réseau
+// (choix Fabien 2026-08-03). La sélection est RÉSEAU (une seule pour les 3 boutiques),
+// faite par l'admin ; les boutiques la consultent (vue 🧪 Testeurs de Base Liquides)
+// et impriment l'affiche A5. Merge : _mergeArray par id + tombstones _deletedIds
+// (motif bilans/pointages) — retrait = tombstone, re-coche = nouvel id.
+const TESTEUR_TOTAL = 45;
+const TESTEUR_ZONES = [
+  { key: 'FRUITE_FRAIS', label: 'FRUITÉ FRAIS', quota: 14, color: '#c79a2b', start: 1 },
+  { key: 'FRUITE',       label: 'FRUITÉ',       quota: 15, color: '#d9539b', start: 15 },
+  { key: 'CLASSIQUE',    label: 'CLASSIQUE',    quota: 7,  color: '#7a4a33', start: 30 },
+  { key: 'MENTHE',       label: 'MENTHE',       quota: 3,  color: '#3f7d4f', start: 37 },
+  { key: 'GOURMAND',     label: 'GOURMAND',     quota: 6,  color: '#2f6391', start: 40 }
+];
+const TESTEUR_ZONE_META = Object.fromEntries(TESTEUR_ZONES.map(z => [z.key, z]));
+// Catégorie de goût (parfum sinon gamme) → zone de la malette. 'De_Tout' ou goût
+// non renseigné → null : l'admin doit d'abord poser le goût (aucune inférence).
+const TESTEUR_CAT_TO_ZONE = {
+  'Fruité / Frais': 'FRUITE_FRAIS',
+  'Fruité': 'FRUITE',
+  'Tabac': 'CLASSIQUE',
+  'Tabac / Gourmand': 'CLASSIQUE',
+  'Menthe': 'MENTHE',
+  'Gourmand': 'GOURMAND',
+  'Gourmand / Fruité': 'GOURMAND'
+};
+let testeursLiq = []; // [{ id:'TST-<aléa>', gammeId, parfumId, _ts, _adminTs }]
+
+function testeurZoneDe(g, p) {
+  const ct = (p && p.ct) || (g && g.ct) || '';
+  return TESTEUR_CAT_TO_ZONE[ct] || null;
+}
+// Clé de dédoublonnage multi-format : le MÊME jus décliné en 10/50/100 mL ne compte
+// qu'une fois dans la malette (marque + gamme + nom de parfum, insensible à la casse).
+function _testeurKeyDe(g, p) {
+  return ((g && g.marque || '') + '|' + (g && g.gamme || '') + '|' + (p && p.n || '')).toLowerCase().trim();
+}
+// LES entrées vivantes de la malette, résolues vers gamme/parfum (canonique — règle 8).
+// Une entrée dont la gamme/le parfum a disparu ou est SORTI ne compte plus (ni quota, ni affiche).
+function _testeurEntries() {
+  const out = [];
+  (testeursLiq || []).forEach(t => {
+    if (!t || !t.id || _deletedIds.has(t.id)) return;
+    const g = baseLiq.find(x => x.id === t.gammeId);
+    if (!g || g.statutVie === 'SORTI') return;
+    const p = (g.parfums || []).find(x => x.id === t.parfumId);
+    if (!p || p.s === 'SORTI') return;
+    out.push({ t, g, p, zone: testeurZoneDe(g, p), key: _testeurKeyDe(g, p) });
+  });
+  return out;
+}
+function estTesteur(g, p) {
+  const key = _testeurKeyDe(g, p);
+  if (!key || key === '||') return false;
+  return _testeurEntries().some(e => e.key === key);
+}
+// Coche/décoche un parfum comme testeur (admin seul). Quota de zone vérifié à l'ajout.
+function toggleTesteur(gId, parfumId) {
+  if (!isAdmin()) { pvAlert('La sélection des testeurs est faite par Fabien — ici tu peux la consulter (vue 🧪 Testeurs) et imprimer l\'affiche.'); return; }
+  const g = baseLiq.find(x => x.id === gId); if (!g) return;
+  const p = (g.parfums || []).find(x => x.id === parfumId); if (!p) return;
+  const _now = new Date().toISOString();
+  const entries = _testeurEntries();
+  const key = _testeurKeyDe(g, p);
+  const existing = entries.find(e => e.key === key);
+  if (existing) {
+    _deletedIds.add(existing.t.id); // tombstone : le retrait se propage et ne ressuscite pas
+    testeursLiq = testeursLiq.filter(x => x.id !== existing.t.id);
+    logAction('Testeur retiré', (g.marque || '') + ' ' + (g.gamme || '') + ' · ' + (p.n || ''));
+  } else {
+    const zone = testeurZoneDe(g, p);
+    if (!zone) { pvAlert('Ce parfum n\'a pas de catégorie de goût exploitable (ou « De_Tout »).\nPose d\'abord son goût (Fruité, Menthe…) sur le parfum ou la gamme — la malette est rangée par catégorie.'); return; }
+    const zMeta = TESTEUR_ZONE_META[zone];
+    const zoneCount = entries.filter(e => e.zone === zone).length;
+    if (zoneCount >= zMeta.quota) {
+      pvAlert('Zone ' + zMeta.label + ' pleine (' + zoneCount + '/' + zMeta.quota + ').\nRetire d\'abord un testeur de cette zone (vue 🧪 Testeurs de Base Liquides).');
+      return;
+    }
+    testeursLiq.push({ id: 'TST-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), gammeId: gId, parfumId: parfumId, _ts: _now, _adminTs: _now });
+    logAction('Testeur ajouté', (g.marque || '') + ' ' + (g.gamme || '') + ' · ' + (p.n || '') + ' → ' + zMeta.label);
+  }
+  saveData();
+  renderLiqAll();
+}
 
 function ensureCampagneModel(c) {
   if (!c) return;
@@ -9564,6 +9649,7 @@ async function loadData() {
     if (localData.campagnes || remoteData.campagnes) remoteData.campagnes = _mergeArray(localData.campagnes || [], remoteData.campagnes || [], 'id');
     if (localData.bilans || remoteData.bilans) remoteData.bilans = _mergeArray(localData.bilans || [], remoteData.bilans || [], 'id');
     if (localData.pointagesEtagere || remoteData.pointagesEtagere) remoteData.pointagesEtagere = _mergeArray(localData.pointagesEtagere || [], remoteData.pointagesEtagere || [], 'id');
+    if (localData.testeursLiq || remoteData.testeursLiq) remoteData.testeursLiq = _mergeArray(localData.testeursLiq || [], remoteData.testeursLiq || [], 'id');
     // Compteurs : max des deux
     if (typeof localData.nextActionId === 'number') remoteData.nextActionId = Math.max(remoteData.nextActionId || 0, localData.nextActionId);
     if (typeof localData.nextOpId === 'number') remoteData.nextOpId = Math.max(remoteData.nextOpId || 0, localData.nextOpId);
@@ -9753,6 +9839,8 @@ async function loadData() {
       : (bilans.length ? Math.max(...bilans.map(b => parseInt(String(b.id).replace('BILAN-','')) || 0)) + 1 : 1);
     // 📋 Pointage étagères liquides (2026-07-30) : chargé + tombstones filtrées
     pointagesEtagere = (Array.isArray(data.pointagesEtagere) ? data.pointagesEtagere : []).filter(x => x && x.id && !_deletedIds.has(x.id));
+    // 🧪 Malette de testeurs (2026-08-03) : chargée + tombstones filtrées
+    testeursLiq = (Array.isArray(data.testeursLiq) ? data.testeursLiq : []).filter(x => x && x.id && !_deletedIds.has(x.id));
     // Journal d'activité : fusionner les logs distants avec les logs locaux (dédoublonnage par ts+action+detail)
     if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {
       const existingKeys = new Set(auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -10926,7 +11014,7 @@ async function forcerVersionAdminPartout() {
 // ailleurs = perte silencieuse de données. Désormais, UNE source de vérité.
 // Tout nouveau champ de données se déclare ICI et nulle part ailleurs.
 function buildPayload() {
-  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, pointagesEtagere, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
+  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, pointagesEtagere, testeursLiq, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
 }
 
 function saveData() {
@@ -11744,6 +11832,7 @@ async function _saveToSupabase(payload, _retryCount) {
       if (payload.campagnes) payload.campagnes = _mergeArray(payload.campagnes, remote.campagnes, 'id');
       if (payload.bilans || remote.bilans) payload.bilans = _mergeArray(payload.bilans || [], remote.bilans || [], 'id');
       if (payload.pointagesEtagere || remote.pointagesEtagere) payload.pointagesEtagere = _mergeArray(payload.pointagesEtagere || [], remote.pointagesEtagere || [], 'id');
+      if (payload.testeursLiq || remote.testeursLiq) payload.testeursLiq = _mergeArray(payload.testeursLiq || [], remote.testeursLiq || [], 'id');
       // 4. Fusionner l'auditLog distant (dédoublonnage par ts+action+detail)
       if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
         const _logKeys = new Set(payload.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -11877,6 +11966,15 @@ async function _doSyncPoll() {
       if (Array.isArray(remote.propositionsLiq)) _mergeArray(propositionsLiq, remote.propositionsLiq, 'id');
       if (Array.isArray(remote.propositionsPD)) _mergeArray(propositionsPD, remote.propositionsPD, 'id');
       if (Array.isArray(remote.relevesPrix)) _mergeArray(relevesPrix, remote.relevesPrix, 'id');
+      // 🧪 Malette de testeurs (2026-08-03) : la sélection réseau vit au POLL aussi —
+      // ajouts par merge, retraits par tombstones (sinon les boutiques ne voyaient les
+      // changements de malette qu'au rechargement de la page).
+      {
+        const _prevTst = testeursLiq.length;
+        if (Array.isArray(remote.testeursLiq)) _mergeArray(testeursLiq, remote.testeursLiq, 'id');
+        testeursLiq = testeursLiq.filter(x => x && x.id && !_deletedIds.has(x.id));
+        if (testeursLiq.length !== _prevTst) changed = true;
+      }
       if (campagnes.length !== _prevCamp || propositions.length !== _prevProp || relevesPrix.length !== _prevRel) changed = true;
       if (baseKits.length !== bk || baseLiq.length !== bl || basePD.length !== bp) changed = true;
       // Détecter aussi les mises à jour _ts (pas seulement les ajouts)
@@ -12913,6 +13011,7 @@ document.getElementById('importFile').addEventListener('change', async (e) => {
       if (Array.isArray(data.bilans)) bilans = data.bilans;
       if (typeof data.nextBilanId === 'number') nextBilanId = data.nextBilanId;
       if (Array.isArray(data.pointagesEtagere)) pointagesEtagere = data.pointagesEtagere;
+      if (Array.isArray(data.testeursLiq)) testeursLiq = data.testeursLiq;
       // Tombstones
       if (Array.isArray(data._deletedIds)) data._deletedIds.forEach(id => _deletedIds.add(id));
       if (Array.isArray(data._deletedParfumIds)) data._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
@@ -15381,6 +15480,14 @@ function renderLiqGammeCard(g, showDetail) {
       _cardParfumBadge += ' <span style="font-size:7px; padding:0 3px; background:' + _nsc + '22; color:' + _nsc + '; border:1px solid ' + _nsc + '70; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;">' + _nsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
     }
   });
+  // 🧪 Malette de testeurs (2026-08-03) : nombre de parfums de cette gamme dans la malette,
+  // visible sans déplier (toutes les vues qui passent par cette carte — règle 6-bis).
+  (function() {
+    var _nbT = (g.parfums || []).filter(function(p) { return p.id && p.s !== 'SORTI' && estTesteur(g, p); }).length;
+    if (_nbT > 0) {
+      _cardParfumBadge += ' <span style="font-size:7px; padding:0 3px; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;" title="' + _nbT + ' parfum' + (_nbT > 1 ? 's' : '') + ' de cette gamme dans la malette de testeurs">🧪 ' + _nbT + '</span>';
+    }
+  })();
   // 🗄️ Tiroirs commande client (visu admin 2026-06-12, demande Fabien : "pas de visu chez les
   // uns ou les autres") : agrégat gamme + parfums, par boutique, SANS avoir à déplier.
   (function() {
@@ -15571,10 +15678,19 @@ function renderLiqGammeDetail(g) {
           }).join('')}</select>`;
         html += `<label onclick="event.stopPropagation();" title="Exclusif Cigusto" style="display:inline-flex; align-items:center; gap:2px; padding:1px 5px; font-size:9px; background:${p.exclu ? '#64748b30' : 'transparent'}; color:${p.exclu ? '#cbd5e1' : '#64748b'}; border:1px solid ${p.exclu ? '#64748b' : '#33415540'}; border-radius:2px; cursor:pointer; font-weight:${p.exclu ? 700 : 400}; flex-shrink:0;">
           <input type="checkbox" ${p.exclu ? 'checked' : ''} onchange="updateLiqParfumField('${g.id}',${pi},'exclu',this.checked)" style="margin:0; cursor:pointer; accent-color:#64748b; transform:scale(0.8);">Exclu</label>`;
+        // 🧪 Malette de testeurs (2026-08-03) : coche admin sur la ligne parfum ; les
+        // boutiques voient un badge passif (la sélection est réseau, faite par Fabien).
+        const _pEstTesteur = p.id ? estTesteur(g, p) : false;
         if (isAdmin()) {
+          if (p.id && p.s !== 'SORTI') {
+            html += `<button onclick="event.stopPropagation(); toggleTesteur('${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:${_pEstTesteur ? '#2dd4bf22' : 'none'}; border:1px solid ${_pEstTesteur ? '#2dd4bf80' : '#2dd4bf35'}; color:#2dd4bf; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:${_pEstTesteur ? 700 : 400};" title="${_pEstTesteur ? 'Testeur dans la malette — cliquer pour le retirer' : 'Ajouter ce parfum à la malette de testeurs (45 emplacements, quotas par catégorie de goût)'}">🧪</button>`;
+          }
           html += `<button onclick="event.stopPropagation(); toggleLiqParfumOneShot('${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:${p.oneShot ? '#fcd34d22' : 'none'}; border:1px solid ${p.oneShot ? '#fcd34d70' : '#fcd34d40'}; color:#fcd34d; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:${p.oneShot ? 700 : 400};" title="${p.oneShot ? 'One-shot actif sur ce parfum — cliquer pour désactiver' : 'Mettre ce parfum en one-shot (bon plan temporaire : entrée + sortie + prix rouge)'}">⚡</button>`;
           html += `<button onclick="event.stopPropagation(); lancerReprise('liq','${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #0ea5e960; color:#7dd3fc; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:600;" title="Lancer une reprise fournisseur sur ce parfum">📦</button>`;
           html += `<button onclick="event.stopPropagation(); lancerRetrocession('liq','${g.id}','${p.id}')" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #06b6d460; color:#67e8f9; border-radius:2px; cursor:pointer; line-height:1.2; font-weight:600;" title="Rétrocession : transférer ce parfum d'une boutique à une autre">🔁</button>`;
+        } else if (_pEstTesteur) {
+          // Boutique : badge passif — le parfum est dans la malette de testeurs (sélection Fabien)
+          html += `<span style="font-size:8px; padding:1px 5px; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf50; border-radius:2px; white-space:nowrap; flex-shrink:0; font-weight:700;" title="Dans la malette de testeurs (sélection réseau) — vue 🧪 Testeurs pour la malette complète et l'affiche">🧪 testeur</span>`;
         }
         html += `<button onclick="removeLiqParfum('${g.id}',${pi})" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #ef444440; color:#ef4444; border-radius:2px; cursor:pointer; line-height:1.2;" title="Retirer">×</button>`;
         html += `</div>`;
@@ -15606,6 +15722,247 @@ function renderLiqGammeDetail(g) {
 
     html += `</div>`;
   return html;
+}
+
+// ═══ 🧪 VUE TESTEURS — la malette (2026-08-03, demande Fabien) ═══
+// Marge par mL d'un PARFUM (prix du parfum s'ils existent, sinon ceux de la gamme).
+function _testeurMargeMl(g, p) {
+  const pa = (p && typeof p.pa === 'number' && p.pa > 0) ? p.pa : g.pa;
+  const pv = (p && typeof p.pv === 'number' && p.pv > 0) ? p.pv : g.pv;
+  const ml = LIQ_FORMAT_ML[g.format] || 50;
+  if (!pa || !pv || ml <= 0) return 0;
+  return computeMarge(pa, pv).marge / ml;
+}
+function _testeurEstMDD(g) { return ((g && g.marque) || '').toLowerCase().includes('mdd'); }
+// Tous les jumeaux multi-format d'un parfum (même marque+gamme+nom, tous formats) :
+// formats affichés + meilleure marge/mL de la déclinaison.
+function _testeurJumeaux(key) {
+  const twins = [];
+  baseLiq.forEach(g => {
+    if (g.statutVie === 'SORTI') return;
+    (g.parfums || []).forEach(p => {
+      if (p.s === 'SORTI') return;
+      if (_testeurKeyDe(g, p) === key) twins.push({ g, p });
+    });
+  });
+  return twins;
+}
+// LA liste ordonnée et dédoublonnée de la malette (règle 8) : même source pour la
+// vue 🧪 Testeurs ET l'affiche A5 — l'ordre des numéros ne peut pas diverger.
+function _testeurUniques() {
+  const seen = new Set();
+  return _testeurEntries().filter(e => { if (seen.has(e.key)) return false; seen.add(e.key); return true; });
+}
+function renderVueTesteurs() {
+  const admin = isAdmin();
+  const uniques = _testeurUniques();
+  const _seenKeys = new Set(uniques.map(e => e.key));
+  const total = uniques.length;
+  const aClasser = uniques.filter(e => !e.zone);
+
+  let html = `<div style="max-width:860px;">`;
+  // Bandeau : compteur global + affiche + qui fait quoi
+  html += `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 12px; background:#2dd4bf0d; border:1px solid #2dd4bf35; border-radius:6px; margin-bottom:10px;">
+    <span style="font-size:14px; font-weight:800; color:#2dd4bf;">🧪 Malette de testeurs</span>
+    <span style="font-size:12px; font-weight:700; color:${total > TESTEUR_TOTAL ? '#ef4444' : '#e2e8f0'};">${total}/${TESTEUR_TOTAL} emplacements</span>
+    <span style="font-size:10px; color:#94a3b8;">Sélection réseau unique (les 3 boutiques) · quotas fixes par catégorie</span>
+    <button onclick="pvImprimerAfficheTesteurs()" style="margin-left:auto; padding:5px 14px; font-size:11px; font-weight:700; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:4px; cursor:pointer;" title="Générer l'affiche A5 du meuble de test (maquette réseau), remplie avec la sélection actuelle">🖨️ Affiche A5</button>
+  </div>`;
+  if (admin) {
+    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Tu coches/décoches via le bouton 🧪 des lignes parfum (base) ou les suggestions ci-dessous. Priorité stratégique : <b style="color:#c4b5fd;">CigustoMDD</b> d'abord, puis la <b style="color:#4ade80;">marge/mL</b>.</div>`;
+  } else {
+    html += `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">La sélection est faite par Fabien — ici tu consultes la malette et tu imprimes l'affiche du meuble de test.</div>`;
+  }
+
+  // ⚠ Testeurs sans catégorie exploitable (goût manquant ou « De_Tout »)
+  if (aClasser.length > 0) {
+    html += `<div style="padding:6px 10px; background:#f59e0b10; border:1px solid #f59e0b40; border-radius:5px; margin-bottom:8px;">
+      <div style="font-size:10px; font-weight:700; color:#f59e0b; margin-bottom:3px;">⚠ ${aClasser.length} testeur${aClasser.length > 1 ? 's' : ''} sans catégorie de goût exploitable — pose le goût du parfum (ou de la gamme) pour ${aClasser.length > 1 ? 'les' : 'le'} ranger dans une zone :</div>
+      ${aClasser.map(e => `<span style="display:inline-flex; gap:4px; align-items:center; font-size:10px; color:#e2e8f0; padding:2px 6px; background:#1e293b; border-radius:3px; margin:1px;">${e.g.marque} ${e.g.gamme} · <b>${e.p.n || '(sans nom)'}</b>${admin ? ` <span onclick="toggleTesteur('${e.g.id}','${e.p.id}')" style="cursor:pointer; color:#ef4444; font-weight:700;" title="Retirer de la malette">✕</span>` : ''}</span>`).join('')}
+    </div>`;
+  }
+
+  // Candidats par zone (pour les suggestions admin) : parfums actifs, dédoublonnés
+  // multi-format (on garde la déclinaison à la meilleure marge/mL), non sélectionnés.
+  const _candParZone = {};
+  if (admin) {
+    const _candByKey = {};
+    const _statutsOk = ['', 'OK', 'DANS_OFFRE', 'A_RENTRER'];
+    baseLiq.forEach(g => {
+      if (g.statutVie === 'SORTI') return;
+      (g.parfums || []).forEach(p => {
+        if (!p.id || !_statutsOk.includes(p.s || '')) return;
+        const zone = testeurZoneDe(g, p);
+        if (!zone) return;
+        const key = _testeurKeyDe(g, p);
+        if (!key || key === '||' || _seenKeys.has(key)) return; // déjà dans la malette
+        const mml = _testeurMargeMl(g, p);
+        if (!_candByKey[key] || mml > _candByKey[key].mml) _candByKey[key] = { g, p, zone, mml, key };
+      });
+    });
+    Object.values(_candByKey).forEach(c => { (_candParZone[c.zone] = _candParZone[c.zone] || []).push(c); });
+    Object.values(_candParZone).forEach(list => list.sort((a, b) => {
+      const ma = _testeurEstMDD(a.g) ? 1 : 0, mb = _testeurEstMDD(b.g) ? 1 : 0;
+      if (ma !== mb) return mb - ma;          // CigustoMDD d'abord (stratégie Fabien)
+      return b.mml - a.mml;                    // puis marge/mL décroissante
+    }));
+  }
+
+  // Une ligne de slot (remplie ou libre)
+  const _slotRow = (num, e, zColor) => {
+    const numBadge = `<span style="display:inline-flex; align-items:center; justify-content:center; min-width:22px; height:18px; background:${zColor}; color:#fff; font-size:10px; font-weight:800; border-radius:3px; flex-shrink:0;">${String(num).padStart(2, '0')}</span>`;
+    if (!e) {
+      return `<div style="display:flex; gap:8px; align-items:center; padding:2px 6px; opacity:0.4;">${numBadge}<span style="flex:1; border-bottom:1px dashed #47556960; font-size:10px; color:#475569; padding:1px 4px;">— libre —</span></div>`;
+    }
+    const twins = _testeurJumeaux(e.key);
+    const fmts = [...new Set(twins.map(t => t.g.format))];
+    const bestMml = Math.max(...twins.map(t => _testeurMargeMl(t.g, t.p)), 0);
+    const mdd = _testeurEstMDD(e.g);
+    return `<div style="display:flex; gap:8px; align-items:center; padding:2px 6px; border-bottom:1px solid #1e293b60;">
+      ${numBadge}
+      <span style="font-size:10px; color:#94a3b8; width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;">${e.g.marque}</span>
+      <span style="font-size:11px; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><b>${e.p.n || '(sans nom)'}</b> <span style="color:#64748b; font-size:9px;">· ${e.g.gamme}</span></span>
+      ${mdd ? `<span style="font-size:8px; padding:1px 4px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; font-weight:700; flex-shrink:0;">MDD</span>` : ''}
+      <span style="margin-left:auto; display:flex; gap:4px; align-items:center; flex-shrink:0;">
+        ${fmts.map(f => `<span style="font-size:8px; padding:1px 4px; background:${(LIQ_FORMAT_COLORS[f] || '#64748b')}20; color:${LIQ_FORMAT_COLORS[f] || '#94a3b8'}; border-radius:2px;">${LIQ_FORMAT_LABELS[f] || f}</span>`).join('')}
+        <span style="font-size:9px; color:#4ade80; font-weight:600;" title="Meilleure marge par mL de la déclinaison">${bestMml.toFixed(2)}/mL</span>
+        ${admin ? `<span onclick="toggleTesteur('${e.g.id}','${e.p.id}')" style="cursor:pointer; color:#ef4444; font-size:11px; font-weight:700; padding:0 4px;" title="Retirer de la malette">✕</span>` : ''}
+      </span>
+    </div>`;
+  };
+
+  TESTEUR_ZONES.forEach(z => {
+    const zEntries = uniques.filter(e => e.zone === z.key);
+    const over = zEntries.length > z.quota;
+    html += `<div style="margin-bottom:10px; background:#0f172a; border:1px solid ${z.color}40; border-radius:6px; overflow:hidden;">`;
+    html += `<div style="display:flex; gap:8px; align-items:center; padding:4px 10px; background:${z.color}22;">
+      <span style="font-size:11px; font-weight:800; color:${z.color}; letter-spacing:1px; padding:1px 8px; background:${z.color}; color:#fff; border-radius:3px;">${z.label}</span>
+      <span style="font-size:10px; font-weight:700; color:${over ? '#ef4444' : '#e2e8f0'};">${zEntries.length}/${z.quota}</span>
+      <span style="font-size:9px; color:#64748b;">emplacements ${String(z.start).padStart(2, '0')} → ${String(z.start + z.quota - 1).padStart(2, '0')}</span>
+      ${over ? `<span style="font-size:9px; color:#ef4444; font-weight:700;">⚠ dépassement — un goût a changé de catégorie : retire ${zEntries.length - z.quota} testeur${zEntries.length - z.quota > 1 ? 's' : ''}</span>` : ''}
+    </div>`;
+    for (let i = 0; i < Math.max(z.quota, zEntries.length); i++) {
+      html += _slotRow(z.start + i, zEntries[i] || null, z.color);
+    }
+    // Suggestions admin : les meilleurs candidats PAS ENCORE dans la malette pour cette zone
+    if (admin && zEntries.length < z.quota) {
+      const cands = (_candParZone[z.key] || []).slice(0, 5);
+      if (cands.length > 0) {
+        html += `<div style="padding:4px 10px 6px; background:#1e293b40; border-top:1px dashed #33415580;">
+          <div style="font-size:8.5px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; font-weight:700; margin-bottom:2px;">💡 Suggestions (MDD puis marge/mL)</div>
+          ${cands.map(c => `<span onclick="toggleTesteur('${c.g.id}','${c.p.id}')" style="display:inline-flex; gap:4px; align-items:center; font-size:10px; color:#cbd5e1; padding:2px 7px; background:#1e293b; border:1px solid ${z.color}40; border-radius:3px; margin:1px 3px 1px 0; cursor:pointer;" title="${c.g.marque} ${c.g.gamme} ${LIQ_FORMAT_LABELS[c.g.format] || ''} — ajouter à la malette">
+            <b style="color:${z.color};">+</b> ${c.p.n || '(sans nom)'}
+            <span style="color:#64748b; font-size:8.5px;">${c.g.marque}</span>
+            ${_testeurEstMDD(c.g) ? `<span style="font-size:7.5px; padding:0 3px; background:#a78bfa20; color:#c4b5fd; border-radius:2px; font-weight:700;">MDD</span>` : ''}
+            <span style="color:#4ade80; font-size:8.5px;">${c.mml.toFixed(2)}/mL</span>
+          </span>`).join('')}
+        </div>`;
+      }
+    }
+    html += `</div>`;
+  });
+
+  html += `</div>`;
+  return html;
+}
+
+// ═══ 🖨️ AFFICHE A5 DU MEUBLE DE TEST (2026-08-03) ═══
+// Reproduit la maquette réseau (« Testez, comparez, choisissez ») : fond crème,
+// bandeaux de catégorie colorés, badges numérotés, un trait par emplacement —
+// remplie avec LA sélection réseau (_testeurUniques, même ordre que la vue).
+// Accessible à TOUS (boutiques comprises) : bouton 🖨️ de la vue 🧪 Testeurs.
+async function pvImprimerAfficheTesteurs() {
+  if (!window.PDFLib) { pvAlert('pdf-lib non chargé — recharge la page et réessaie.'); return; }
+  const uniques = _testeurUniques();
+  if (uniques.length === 0) { pvAlert('La malette est vide — aucune affiche à générer.\n(Sélection : boutons 🧪 des lignes parfum, côté admin.)'); return; }
+
+  const pdf = await PDFLib.PDFDocument.create();
+  const bold = await pdf.embedFont(PDFLib.StandardFonts.HelveticaBold);
+  const reg = await pdf.embedFont(PDFLib.StandardFonts.Helvetica);
+  const W = 419.53, H = 595.28; // A5 portrait
+  const page = pdf.addPage([W, H]);
+
+  const _hex = (h) => { const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(h); return PDFLib.rgb(parseInt(m[1], 16) / 255, parseInt(m[2], 16) / 255, parseInt(m[3], 16) / 255); };
+  const CREME = _hex('#f1efe3');
+  const NAVY = _hex('#1e3a4a');
+  const TEAL = _hex('#37839b');
+  const INK = _hex('#2b2b2b');
+
+  // Fond crème
+  page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: CREME });
+
+  // Titre : « Testez, » / « comparez, choisissez »
+  let y = H - 44;
+  const t1 = 'Testez,';
+  const t1s = 27;
+  page.drawText(t1, { x: (W - bold.widthOfTextAtSize(t1, t1s)) / 2, y: y, size: t1s, font: bold, color: NAVY });
+  y -= 30;
+  const t2a = 'comparez, ', t2b = 'choisissez';
+  const t2s = 27;
+  const t2w = bold.widthOfTextAtSize(t2a, t2s) + bold.widthOfTextAtSize(t2b, t2s);
+  const t2x = (W - t2w) / 2;
+  page.drawText(t2a, { x: t2x, y: y, size: t2s, font: bold, color: NAVY });
+  page.drawText(t2b, { x: t2x + bold.widthOfTextAtSize(t2a, t2s), y: y, size: t2s, font: bold, color: TEAL });
+  y -= 20;
+
+  // Grille : 3 colonnes de slots par zone
+  const MX = 34;                 // marge horizontale
+  const colW = (W - 2 * MX) / 3;
+  const rowH = 20.5;
+  const headH = 15;
+
+  TESTEUR_ZONES.forEach(z => {
+    const zc = _hex(z.color);
+    const zEntries = uniques.filter(e => e.zone === z.key);
+    // Bandeau de zone (pill colorée, texte blanc)
+    y -= headH + 5;
+    const zlW = bold.widthOfTextAtSize(z.label, 10.5) + 16;
+    page.drawRectangle({ x: MX, y: y, width: zlW, height: headH, color: zc, borderColor: zc, borderWidth: 0 });
+    page.drawText(z.label, { x: MX + 8, y: y + 4, size: 10.5, font: bold, color: PDFLib.rgb(1, 1, 1) });
+    y -= 4;
+    // Slots numérotés, 3 par ligne (quota fixe → dépassements affichés quand même)
+    const nbSlots = Math.max(z.quota, zEntries.length);
+    const rows = Math.ceil(nbSlots / 3);
+    for (let r = 0; r < rows; r++) {
+      y -= rowH;
+      for (let c = 0; c < 3; c++) {
+        const i = r * 3 + c;
+        if (i >= nbSlots) continue;
+        const num = z.start + i;
+        const e = zEntries[i] || null;
+        const x0 = MX + c * colW;
+        // Badge numéro (carré arrondi zone)
+        page.drawRectangle({ x: x0, y: y, width: 15, height: 13, color: zc });
+        const numTxt = String(num).padStart(2, '0');
+        page.drawText(numTxt, { x: x0 + (15 - bold.widthOfTextAtSize(numTxt, 7.5)) / 2, y: y + 3.5, size: 7.5, font: bold, color: PDFLib.rgb(1, 1, 1) });
+        // Nom du parfum + trait
+        const nameMax = colW - 22;
+        if (e) {
+          let nom = e.p.n || '';
+          let ns = 8.5;
+          while (bold.widthOfTextAtSize(nom, ns) > nameMax && ns > 5) ns -= 0.5;
+          while (bold.widthOfTextAtSize(nom, ns) > nameMax && nom.length > 3) nom = nom.slice(0, -1);
+          page.drawText(nom, { x: x0 + 19, y: y + 3.5, size: ns, font: bold, color: INK });
+        }
+        page.drawLine({ start: { x: x0 + 18, y: y - 1 }, end: { x: x0 + 18 + nameMax, y: y - 1 }, thickness: 0.8, color: zc });
+      }
+    }
+    y -= 2;
+  });
+
+  // Pied discret : date de génération (repère de version pour les boutiques)
+  const foot = 'Malette de testeurs — ' + fmtFR(ymd(new Date()));
+  page.drawText(foot, { x: (W - reg.widthOfTextAtSize(foot, 6)) / 2, y: 10, size: 6, font: reg, color: _hex('#9a967f') });
+
+  const bytes = await pdf.save();
+  const blob = new Blob([bytes], { type: 'application/pdf' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'affiche_testeurs_' + new Date().toISOString().slice(0, 10) + '.pdf';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  logAction('Affiche testeurs générée', _testeurUniques().length + ' testeur(s)');
 }
 
 function renderLiqAll() {
@@ -15903,6 +16260,10 @@ function renderLiqAll() {
       }
     }
     html += `</div>`; // ferme zoom:1.25
+  }
+  // ═══ VUE 🧪 TESTEURS — la malette (2026-08-03, demande Fabien) ═══
+  else if (viewMode === 'testeurs') {
+    html += renderVueTesteurs();
   }
   // ═══ MODE LISTE ═══
   else if (viewMode === 'liste') {
