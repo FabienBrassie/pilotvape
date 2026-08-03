@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 21:10</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 21:54</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -5241,6 +5241,34 @@ function syncAutoActions() {
       _aHP.dateCloture = null; _aHP._archived = false;
       _aHP._ts = _aHP._reviveTs = new Date().toISOString();
     }
+  });
+  // Guérison [DEDUP-RETRO] (2026-08-03 21h, cas Cigusto Pod Hello Pro « Aura ») : rétros en
+  // DOUBLE quand deux canaux ont créé les mêmes transferts — « Qui réceptionne ? » à la
+  // CRÉATION de l'OP hors base (la ligne À rentrer OPGOODS n'existe pas encore → le garde
+  // « SAUF si À rentrer lié » ne voit rien) puis la ligne, née ensuite, reçoit le hub et crée
+  // les siennes. Règle : quand la LIGNE porte le dispatch, elle est LE canal (rétrocession =
+  // dispatch dans le flux) → les rétros du canal OP s'annulent, SAUF si du travail y est déjà
+  // coché (alors c'est le canal ligne, vierge, qui s'efface ; travail des DEUX côtés → on ne
+  // détruit rien, on signale). Idempotent, tous postes.
+  ops.forEach(op => {
+    if (op.annulee || _deletedIds.has(op.id) || !op.dispatchProduit) return;
+    const _aRD = op.rentrerActionId ? actions.find(x => x.id === op.rentrerActionId && !x.annulee) : null;
+    if (!_aRD || !_aRD.dispatchHub) return; // la ligne ne porte pas (encore) le dispatch → pas de doublon possible
+    const _opRetros = actions.filter(x => x.retroOpId === op.id && !x.retroRentrerActionId
+      && (x.retroNature === 'produit' || x.retroNature == null) && !x.annulee && !_deletedIds.has(x.id));
+    if (!_opRetros.length) return;
+    const _porteeD = (typeof _dispatchPorteeGamme === 'function' ? _dispatchPorteeGamme(_aRD) : [_aRD]).map(x => x.id);
+    const _ligneRetros = actions.filter(x => x.retroRentrerActionId && _porteeD.includes(x.retroRentrerActionId)
+      && !x.annulee && !_deletedIds.has(x.id));
+    if (!_ligneRetros.length) return; // un seul canal → rien à dédoublonner
+    const _aDuTravailR = x => SHOPS.some(sh => { const st = x.etats && x.etats[sh];
+      return !!(st && ((st.steps && Object.keys(st.steps).some(k => st.steps[k] === true)) || st.done)); });
+    const _opTouchees = _opRetros.some(_aDuTravailR);
+    const _ligneTouchees = _ligneRetros.some(_aDuTravailR);
+    if (_opTouchees && _ligneTouchees) { console.warn('[DEDUP-RETRO]', op.id, '— doublon avec du travail des DEUX côtés, non résolu (à trancher à la main)'); return; }
+    const _aTuer = _opTouchees ? _ligneRetros : _opRetros;
+    _aTuer.forEach(x => _cancelAction(x));
+    console.log('[DEDUP-RETRO]', op.id, '—', _aTuer.length, 'rétro(s) du canal', _opTouchees ? 'LIGNE (vierge)' : 'OP (la ligne porte le dispatch)', 'annulée(s)');
   });
   // Guérison (2026-08-01, cas Kit Force) : une ligne rouverte par décochage a pu, sur les
   // versions précédentes, rester ARCHIVÉE ou même être RE-ANNULÉE par le ménage par statut
