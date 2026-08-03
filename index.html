@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 19:26</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 19:32</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -28293,8 +28293,22 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
     // chez elle. Même liste que le bloc « À désinstaller » du dashboard, jamais contradictoire.
     const _dShopsReels = _opShopsADesinstaller(op);
     if (_dShopsReels.length > 0) {
-      const _dLabel = _dShopsReels.map(sh => SHOP_LABELS[sh]).join(', ');
+      // 2026-08-03 (retour Fabien, cas Freezy Crush : « validé par tout le monde, pourquoi
+      // encore là ? ») : quand il ne reste QUE des étapes de fin côté Fabien (ex : stopper
+      // la promo en caisse), le badge n'accuse plus les boutiques — il nomme le vrai
+      // travail restant. L'OP reste listée (une promo encore active en caisse ne doit
+      // JAMAIS disparaître des radars) ; même verdict canonique, seul le libellé change.
+      const _dResteAdmin = new Set();
+      const _dShopsBoutique = _dShopsReels.filter(sh => {
+        const _stD = (op.etats || {})[sh];
+        const _restD = computeOpShopStepDefs(op, sh).filter(d => d.kind === 'desinstall' && !(_stD && _stD.steps && _stD.steps[d.key] === true));
+        _restD.filter(d => d.resp === 'admin').forEach(d => _dResteAdmin.add(d.label));
+        return _restD.some(d => d.resp !== 'admin');
+      });
       const _dTiming = _isLastDay ? ' ce soir' : '';
+      const _dLabel = _dShopsBoutique.length > 0
+        ? _dShopsBoutique.map(sh => SHOP_LABELS[sh]).join(', ')
+        : 'reste 👤 Fabien : ' + Array.from(_dResteAdmin).join(' · ');
       _desinstBadgeHtml = '<span style="flex-shrink:0; font-size:9px; padding:2px 8px; background:#f9731630; color:#fdba74; border:1px solid #f9731680; border-radius:3px; font-weight:700; white-space:nowrap; animation:pulse-alert 2s infinite;">🔻 À désinstaller' + _dTiming + ' — ' + _dLabel + '</span>';
     }
   }
