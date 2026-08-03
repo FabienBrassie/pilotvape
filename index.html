@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 15:45</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 15:51</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -15814,7 +15814,7 @@ function renderVueTesteurs() {
   const total = uniques.length;
   const aClasser = uniques.filter(e => !e.zone);
 
-  let html = `<div style="max-width:1000px;">`;
+  let html = `<div>`; // pleine largeur de la fenêtre (retour Fabien 2026-08-03 15:50)
   // Bandeau : compteur global + affiche + qui fait quoi
   html += `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:8px 12px; background:#2dd4bf0d; border:1px solid #2dd4bf35; border-radius:6px; margin-bottom:10px;">
     <span style="font-size:14px; font-weight:800; color:#2dd4bf;">🧪 Malette de testeurs</span>
@@ -15888,9 +15888,9 @@ function renderVueTesteurs() {
     </div>`;
   };
 
-  // Blocs de zone sur 2 colonnes (demande Fabien 2026-08-03) — repli en 1 colonne
-  // sur écran étroit via minmax.
-  html += `<div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:10px; align-items:start;">`;
+  // Blocs de zone sur 2 colonnes qui occupent TOUTE la largeur de la fenêtre
+  // (demande Fabien 2026-08-03, précisée 15:50 : pleine largeur, toujours 2 par ligne).
+  html += `<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; align-items:start;">`;
   TESTEUR_ZONES.forEach(z => {
     const zEntries = uniques.filter(e => e.zone === z.key);
     const over = zEntries.length > z.quota;
