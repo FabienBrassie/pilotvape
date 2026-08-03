@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:33</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:42</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -30479,7 +30479,7 @@ function openEtiquettesDialog() {
 }
 
 async function clearEtiquetteCache() {
-  const needed = listAllExpectedFiles().concat([VITRINE_TEMPLATE_FILE, ETAGERE_TEMPLATE_FILE]);
+  const needed = listAllExpectedFiles().concat(Object.keys(PLANCHE_TYPES).map(k => PLANCHE_TYPES[k].file));
   for (const f of needed) {
     delete etiqCache[f];
     try {
@@ -30545,23 +30545,10 @@ const ETAGERE_SLOTS = _ETAGERE_RAW.map(v => ({
   prix: { x: v[2], y: v[3], w: 123.22, h: v[4] }
 }));
 
-// Cadres des 48 étiquettes vitrine (la carte sombre entière, pour le liseré PR) :
-// rectangles des 12 cartes du template d'origine × 0.5, tuilés comme VITRINE_SLOTS.
-const VITRINE_CADRES = (() => {
-  const W = 595.28, H = 841.89;
-  const cx = [14.17, 207.99, 401.81], cy = [631.15, 428.03, 224.91, 21.79];
-  const out = [];
-  [H / 2, 0].forEach(ty => {
-    for (let row = 0; row < 4; row++) {
-      [0, W / 2].forEach(tx => {
-        for (let col = 0; col < 3; col++) {
-          out.push({ x: cx[col] * 0.5 + tx, y: cy[row] * 0.5 + ty, w: 89.83, h: 94.48 });
-        }
-      });
-    }
-  });
-  return out;
-})();
+// Template vitrine PRIX ROUGE : la MÊME planche mais la structure sombre passée
+// en rouge CIGUSTO dans le PDF (logo recoloré en blanc pour rester lisible) —
+// recadrage Fabien 2026-08-04 : « pas un cadre en plus, le cadre existant devient rouge ».
+const VITRINE_PR_TEMPLATE_FILE = 'Planche vitrine rouge.pdf';
 
 // Cellules de la grille étagère (44, pour le fond jaune PR) : entre les traits
 // blancs du template (positions extraites du PDF d'origine).
@@ -30594,12 +30581,11 @@ const PLANCHE_TYPES = {
   },
   VITRINE_PR: {
     label: '🔴 Vitrine PRIX ROUGE — 48 par feuille',
-    info: 'Comme la vitrine (48 par feuille A4 — <b>imprimer à 100 %</b>), avec <b>cadre et texte ROUGES</b>.',
-    file: VITRINE_TEMPLATE_FILE, slots: VITRINE_SLOTS, slug: 'vitrine_pr',
-    couleur: PLANCHE_ROUGE, nomBold: true, nomUpper: true, nomMax: 11, nomMin: 6.5,
+    info: 'Comme la vitrine (48 par feuille A4 — <b>imprimer à 100 %</b>) : la <b>structure devient ROUGE</b>, texte rouge.',
+    file: VITRINE_PR_TEMPLATE_FILE, slots: VITRINE_SLOTS, slug: 'vitrine_pr',
+    couleur: [0.966, 0.118, 0], nomBold: true, nomUpper: true, nomMax: 11, nomMin: 6.5,
     prixMax: 22, prixMin: 8, prixPad: 7,
-    prixFmt: function(p) { return p.toFixed(2) + '€'; },
-    cadre: { rects: VITRINE_CADRES, couleur: PLANCHE_ROUGE, epaisseur: 2.5 }
+    prixFmt: function(p) { return p.toFixed(2) + '€'; }
   },
   ETAGERE: {
     label: '💧 Étagère liquides — 44 par feuille',
