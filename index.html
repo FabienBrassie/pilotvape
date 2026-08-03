@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 20:02</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 20:55</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -20757,9 +20757,32 @@ function renderDashboard() {
   const _bulkEtiqBtn = _prixKitActions.length > 0
     ? `<div style="margin-bottom:8px;"><button onclick="openBulkPrixEtiquetteDialog()" style="padding:5px 14px; font-size:11px; font-weight:700; background:#f59e0b20; color:#f59e0b; border:1px solid #f59e0b60; border-radius:4px; cursor:pointer; display:inline-flex; align-items:center; gap:6px;">🏷️ Étiquettes FT — ${_prixKitActions.length} kit${_prixKitActions.length > 1 ? 's' : ''} à modifier</button></div>`
     : '';
-  const prixInner = prix.length === 0 ? emptyState('— ajoute un relevé concurrent dans l\'onglet Relevés prix') : (_bulkEtiqBtn + renderGroupedActionCards(prix));
-  const prixBlock    = block('prix', 'Prix à modifier', '#f59e0b', prixAffich.length, prixInner,
-    'Déplier → cocher par boutique : prix en rayon · Swappy · (prix rouge si besoin). Auto-généré depuis les relevés concurrents.');
+  // ── 🏷️ Volet OP (2026-08-03, retour Fabien : « un prix à modifier, PR ou pas, je m'attends
+  // à le voir dans Prix à modifier ») : les prix rouges dont l'étiquette / la caisse restent à
+  // faire (nouveaux OU re-proposés après changement de prix au bilan) entrent dans LA card —
+  // en renvoi vers la carte OP (les coches restent sur l'OP, zéro doublon : même modèle que
+  // le volet OP d'À installer). Une boutique écoulée/épuisée ne compte pas (règle « écoulé
+  // chez moi = invisible chez moi »). Anti-doublon : action PRIX liée déjà listée → elle gagne.
+  const _shsPrix = fShop ? [fShop] : SHOPS;
+  const opsPrixARefaire = ops.filter(op => {
+    if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return false;
+    if (op.annulee || op._archived || _deletedIds.has(op.id)) return false;
+    if (!(typeof op.prixRouge === 'number' && op.prixRouge > 0)) return false;
+    if (op.prixActionId && prix.some(a => a.id === op.prixActionId)) return false;
+    return _shsPrix.some(sh => {
+      if (typeof _opProduitEcouleChezShop === 'function' && _opProduitEcouleChezShop(op, sh)) return false;
+      if (typeof _opPrEpuiseePourShop === 'function' && _opPrEpuiseePourShop(op, sh)) return false;
+      const _clesPR = new Set(_clesEtapesEtiquettePR(op));
+      const _defsPR = computeOpShopStepDefs(op, sh).filter(d => _clesPR.has(d.key));
+      if (!_defsPR.length) return false;
+      return _defsPR.some(d => !_getOpStepChecked(op, sh, d));
+    });
+  });
+  const _nbPrixTotal = prixAffich.length + opsPrixARefaire.length;
+  const prixInner = (prix.length === 0 && opsPrixARefaire.length === 0) ? emptyState('— ajoute un relevé concurrent dans l\'onglet Relevés prix') : (_bulkEtiqBtn + renderGroupedActionCards(prix)
+    + (opsPrixARefaire.length ? `<div style="font-size:9px; color:#fca5a5; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Prix rouges d'OP : étiquette à (ré)imprimer / poser, prix ou promo à (re)passer en caisse — les coches se font sur la carte OP">🏷️ Prix rouges — étiquette / caisse à refaire</div>` + opsPrixARefaire.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : ''));
+  const prixBlock    = block('prix', 'Prix à modifier', '#f59e0b', _nbPrixTotal, prixInner,
+    'Prix de BASE à changer (relevés concurrents) + prix rouges d\'OP dont l\'étiquette / la caisse restent à faire. Déplier → cocher par boutique.');
   // --- Opérations en cours ---
   // Rassemble toutes les OP non-terminées (à venir, imminentes, en cours).
   // Groupées par statut temporel, chaque groupe avec sous-header. Terminées exclues.
@@ -22054,7 +22077,7 @@ function renderDashboard() {
         _cards.push(_renderDashSectionCard('retros', '🔁 Rétrocessions', '#06b6d4', retrosAffich.length, retrosAffich, _retroCtxParts.join(' · ')));
       }
       if (rentrerAffich.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrerAffich.length, rentrerAffich, _countByProdType(rentrerAffich)));
-      if (prixAffich.length > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', prixAffich.length, prixAffich, _countByProdType(prixAffich)));
+      if (_nbPrixTotal > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', _nbPrixTotal, prixAffich, _countByProdType(prixAffich)));
       // « Besoins à combler » et « Historique » ne sont pas rendus en vue cards (décision Fabien
       // 2026-06-10) : trop secondaires pour le coup d'œil quotidien. Restent accessibles via le
       // mode "Tout déplier" si besoin.
@@ -22096,7 +22119,7 @@ function renderDashboard() {
     summaryParts.push(chip(besoinColor, `${totalBesoins} besoin${totalBesoins>1?'s':''}${pureTrous ? ` (${pureTrous} vide${pureTrous>1?'s':''})` : ''}`, 'besoins'));
   }
   if (staleAlerts.length) summaryParts.push(chip('#ef4444', `${staleAlerts.length} relevé${staleAlerts.length>1?'s':''} à faire`, 'prix'));
-  if (prixAffich.length) summaryParts.push(chip('#f59e0b', `${prixAffich.length} prix à modifier`, 'prix'));
+  if (_nbPrixTotal) summaryParts.push(chip('#f59e0b', `${_nbPrixTotal} prix à modifier`, 'prix'));
   // "En cours" = dateDebut déjà passée ou aujourd'hui, pas des prévisions (IMMINENTE, A_VENIR).
   const opsEnCoursStricte = ops.filter(op => opTimeStatus(op) === 'EN_COURS');
   if (opsEnCoursStricte.length) summaryParts.push(chip('#a855f7', `${opsEnCoursStricte.length} OP en cours`, 'opEnCours'));
