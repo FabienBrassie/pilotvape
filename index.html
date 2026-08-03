@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:46</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 00:48</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -30581,9 +30581,9 @@ const PLANCHE_TYPES = {
   },
   VITRINE_PR: {
     label: '🔴 Vitrine PRIX ROUGE — 48 par feuille',
-    info: 'Comme la vitrine (48 par feuille A4 — <b>imprimer à 100 %</b>) : la <b>structure devient ROUGE</b>, texte rouge.',
+    info: 'Comme la vitrine (48 par feuille A4 — <b>imprimer à 100 %</b>) : <b>structure ROUGE</b>, nom en noir, prix en rouge.',
     file: VITRINE_PR_TEMPLATE_FILE, slots: VITRINE_SLOTS, slug: 'vitrine_pr',
-    couleur: [0.966, 0.118, 0], nomBold: true, nomUpper: true, nomMax: 11, nomMin: 6.5,
+    couleur: [0.966, 0.118, 0], nomCouleur: [0, 0, 0], nomBold: true, nomUpper: true, nomMax: 11, nomMin: 6.5,
     prixMax: 22, prixMin: 8, prixPad: 7,
     prixFmt: function(p) { return p.toFixed(2) + '€'; }
   },
@@ -30724,7 +30724,9 @@ async function generateEtiquettesPlanche(typeKey, items, outputFilename, opts) {
       }
       let nom = String(it.nom || '').trim();
       if (T.nomUpper) nom = nom.toUpperCase();
-      _vitrineDrawNom(page, T.nomBold ? bold : regular, nom, slot.nom, T.nomMax, T.nomMin, color);
+      // Le nom peut avoir sa couleur propre (ex. vitrine PR : nom NOIR, prix rouge — Fabien 2026-08-04).
+      const nomColor = T.nomCouleur ? PDFLib.rgb(T.nomCouleur[0], T.nomCouleur[1], T.nomCouleur[2]) : color;
+      _vitrineDrawNom(page, T.nomBold ? bold : regular, nom, slot.nom, T.nomMax, T.nomMin, nomColor);
       // Prix : marge élargie pour que le € ne colle pas au bord (retour Fabien 2026-08-04).
       _vitrineDrawCentered(page, bold, _planchePrixTxt(T, it.prix), slot.prix, T.prixMax, T.prixMin, T.prixPad, color);
       // Décor PR — cadre (vitrine : liseré rouge autour de la carte), en 4 barres pleines.
