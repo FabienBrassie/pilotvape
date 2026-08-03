@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-01 18:25</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 14:58</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2154,7 +2154,9 @@ const OP_TYPES = [
     ]
   },
   {
-    key: 'NOUVEAUTE', label: 'Nouveauté', color: '#22d3ee', auto: false,
+    // Couleur 2026-08-03 (demande Fabien) : VERT, aligné sur les lignes « À rentrer » du
+    // dashboard (une nouveauté EST un à-rentrer) — avant : cyan, confondu avec du bleu.
+    key: 'NOUVEAUTE', label: 'Nouveauté', color: '#22c55e', auto: false,
     steps: [
       { key: 'etiquette', label: 'Étiquette nouveauté posée', hint: 'Signalétique « nouveau »' },
       { key: 'facing',    label: 'Mis en rayon',              hint: 'Produit visible sur le mur' },
@@ -2173,7 +2175,9 @@ const OP_TYPES = [
     // Rotation périodique (semaine / quinzaine) : on choisit un e-liquide à mettre
     // en vedette — dégustation, brief équipe, facing dédié. Typiquement sur produit libre
     // famille "liquide".
-    key: 'LIQUIDE_DU_MOMENT', label: 'Liquide du moment', color: '#10b981', auto: false,
+    // Couleur 2026-08-03 (demande Fabien) : VIOLET — avant : vert, confondu avec les
+    // « À rentrer » (le vert appartient maintenant aux Nouveautés, cf. ci-dessus).
+    key: 'LIQUIDE_DU_MOMENT', label: 'Liquide du moment', color: '#8b5cf6', auto: false,
     steps: [
       { key: 'facing',       label: 'Facing dédié',          hint: 'Emplacement visible liquide du moment' },
       { key: 'signaletique', label: 'Cartel « liquide du moment »', hint: 'PLV / étiquette dédiée' },
@@ -4815,6 +4819,47 @@ function syncAutoActions() {
       console.log('[HEAL] ligne', a.id, 'désarchivée (rouverte par décochage, jamais désarchivée)');
     }
   });
+  // Guérison (2026-08-03, cas PuffX) : une action RENTRER/SORTIR peut devenir FAIT par
+  // MERGE — deux boutiques cochent leur dernière étape chacune sur son poste avant de
+  // s'être synchronisées : au moment du clic, aucun poste ne voit « tout le monde a
+  // fini », donc AUCUN n'exécute la cascade de statut. Résultat : la ligne disparaît du
+  // dashboard (états done partout) mais le produit/parfum reste « à rentrer »/« à
+  // sortir » en base — et sans dateCloture, la ligne ne s'archive jamais. On rejoue la
+  // cascade canonique (_applyActionShopChange, idempotente) sur toute action FAIT dont
+  // la cible attend encore. Garde-fou : si la cible a été modifiée APRÈS la dernière
+  // activité de l'action (_ts cible > _ts action), c'est un choix manuel plus récent
+  // (ex : Fabien repasse un parfum « à rentrer » pour un nouveau cycle) → on ne touche pas.
+  actions.forEach(a => {
+    if (a.annulee || a._archived) return;
+    if (a.type !== 'RENTRER' && a.type !== 'SORTIR') return;
+    if (a.motifSortie === 'REPRISE') return; // reprise : clôture manuelle 🏁, jamais de cascade auto
+    if (actionGlobalState(a) !== 'FAIT') return;
+    const _attendu = a.type === 'RENTRER' ? 'A_RENTRER' : 'A_SORTIR';
+    let _cibleEnAttente = false, _cibleTs = '';
+    if (a.produitType === 'liq') {
+      const g = baseLiq.find(x => x.id === a.produitId);
+      if (!g) return;
+      if (a.produitParfumId) {
+        const p = (g.parfums || []).find(x => x.id === a.produitParfumId);
+        if (!p) return;
+        _cibleEnAttente = (p.s === _attendu); _cibleTs = p._ts || '';
+      } else {
+        // Gamme-level : statut gamme en attente OU parfums « à rentrer » résiduels
+        // (gamme déjà dans l'offre par la règle de priorité — cas PuffX).
+        const _pfResiduels = a.type === 'RENTRER' && (g.parfums || []).some(x => x.s === 'A_RENTRER');
+        _cibleEnAttente = (g.statutVie === _attendu || _pfResiduels); _cibleTs = g._ts || '';
+      }
+    } else {
+      const _base = a.produitType === 'pd' ? basePD : baseKits;
+      const prod = _base.find(x => x.id === a.produitId);
+      if (!prod) return;
+      _cibleEnAttente = (prod.statutVie === _attendu); _cibleTs = prod._ts || '';
+    }
+    if (!_cibleEnAttente) return;
+    if (_cibleTs && a._ts && _cibleTs > a._ts) return; // édition manuelle plus récente → on respecte
+    console.log('[GUERISON-CASCADE]', a.id, a.type, '→ cascade rejouée (action FAIT partout, statut resté en attente)');
+    _applyActionShopChange(a, SHOPS[0]);
+  });
   // Nettoyage : supprimer les actions parfum orphelines (parfum introuvable dans la gamme)
   const _orphanIds = new Set();
   actions.forEach(a => {
@@ -6272,7 +6317,7 @@ async function proposerOpNouveauteApresCreation(produitType, produitId, label, p
 
   const msg = '« ' + label + ' » est créé et passe en À rentrer.\n\nCréer une OP Nouveauté pour son lancement ?'
     + (multi ? '\n\n(série multi-format : l\'OP sera rattachée à la campagne commune de la gamme' + (siblingOp ? ', avec les mêmes dates que le format déjà lancé' : '') + ')' : '');
-  const ok = await pvConfirm(msg, { title: '🌟 Nouveauté', ok: 'Créer l\'OP', cancel: 'Pas d\'OP', okColor: '#22d3ee' });
+  const ok = await pvConfirm(msg, { title: '🌟 Nouveauté', ok: 'Créer l\'OP', cancel: 'Pas d\'OP', okColor: OP_TYPE_META.NOUVEAUTE.color });
   if (!ok) return;
 
   let dates;
@@ -7528,6 +7573,15 @@ function _applyActionShopChange(a, shop) {
           }
           // PD : statutVie mis à jour directement via prod.statutVie
         }
+      } else if (!targetParfum && liq) {
+        // Guérison 2026-08-03 (cas PuffX) : la gamme est DÉJÀ « dans l'offre » (il suffit
+        // qu'UN parfum le soit — règle de priorité des statuts) → l'ancien garde sautait
+        // TOUT le bloc, y compris le balayage des parfums encore « à rentrer ». Or une
+        // rentrée gamme validée partout = ces parfums passent dans l'offre, même quand le
+        // statut de la gamme, lui, n'a pas à bouger.
+        let _swept = false;
+        (liq.parfums || []).forEach(p => { if (p.s === 'A_RENTRER') { p.s = 'DANS_OFFRE'; p._ts = _nowTs; _swept = true; } });
+        if (_swept) { liq._ts = _nowTs; syncLiqToPropLiq(liq); }
       }
     } else if (a.type === 'PRIX' && typeof a.prixCible === 'number') {
       const curPv = targetParfum ? targetParfum.pv : prod.pv;
@@ -18407,8 +18461,8 @@ function renderDashboard() {
         // Picker OP complémentaire (uniquement si la décision n'est pas rouge — rouge est déjà auto)
         const prixOpPicker = (a.decisionChoice && a.decisionChoice !== 'rouge')
           ? `<span style="flex-basis:100%; height:0;"></span>` + renderOpPromotionPicker(a, 'OP associée ?', [
-              { key: 'NOUVEAUTE',     label: 'Nouveauté',     color: '#22d3ee' },
-              { key: 'EXCLU',         label: 'Exclu',         color: '#a855f7' }
+              { key: 'NOUVEAUTE',     label: 'Nouveauté',     color: OP_TYPE_META.NOUVEAUTE.color },
+              { key: 'EXCLU',         label: 'Exclu',         color: OP_TYPE_META.EXCLU.color }
             ])
           : '';
         return `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
@@ -18500,8 +18554,8 @@ function renderDashboard() {
         const currentFanfare = a.fanfareOpType || (linkedFanfareOp ? linkedFanfareOp.type : null);
         const fanfareOptions = [
           { key: '', label: 'Non', color: '#64748b' },
-          { key: 'NOUVEAUTE',     label: 'Nouveauté',    color: '#22d3ee' },
-          { key: 'EXCLU',         label: 'Exclu',        color: '#a855f7' }
+          { key: 'NOUVEAUTE',     label: 'Nouveauté',    color: OP_TYPE_META.NOUVEAUTE.color },
+          { key: 'EXCLU',         label: 'Exclu',        color: OP_TYPE_META.EXCLU.color }
         ];
         const fanfareChips = fanfareOptions.map(o => {
           const active = (o.key || null) === (currentFanfare || null);
@@ -18726,8 +18780,8 @@ function renderDashboard() {
         // Pendant la MEP on peut choisir d'accompagner par une OP de mise en avant / nouveauté / etc.
         // (Kits uniquement — les liquides n'ont pas de MISE_EN_PLACE)
         const picker = renderOpPromotionPicker(a, 'OP d\'accompagnement ?', [
-          { key: 'NOUVEAUTE',     label: 'Nouveauté',     color: '#22d3ee' },
-          { key: 'EXCLU',         label: 'Exclu',         color: '#a855f7' }
+          { key: 'NOUVEAUTE',     label: 'Nouveauté',     color: OP_TYPE_META.NOUVEAUTE.color },
+          { key: 'EXCLU',         label: 'Exclu',         color: OP_TYPE_META.EXCLU.color }
         ]);
         return `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${picker}
@@ -28393,9 +28447,9 @@ function pickEtiquetteTemplate(op) {
     const overlay = document.createElement('div');
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:10000;display:flex;align-items:center;justify-content:center;';
     const choices = [
-      { key: 'PRIX_ROUGE', label: 'Prix Rouge', color: '#ef4444', icon: '🔴' },
-      { key: 'NOUVEAUTE',  label: 'Nouveauté',  color: '#22d3ee', icon: '✨' },
-      { key: 'EXCLU',      label: 'Exclu',       color: '#a855f7', icon: '⭐' }
+      { key: 'PRIX_ROUGE', label: 'Prix Rouge', color: OP_TYPE_META.PRIX_ROUGE.color, icon: '🔴' },
+      { key: 'NOUVEAUTE',  label: 'Nouveauté',  color: OP_TYPE_META.NOUVEAUTE.color, icon: '✨' },
+      { key: 'EXCLU',      label: 'Exclu',       color: OP_TYPE_META.EXCLU.color, icon: '⭐' }
     ];
     const btns = choices.map(c => {
       const isSuggested = c.key === suggested;
