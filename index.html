@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 16:21</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-03 16:35</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2314,17 +2314,14 @@ function getOpProductDisplay(op) {
         // (retour Fabien 2026-07-28 : « Press Start 50mL · Sword » pour une OP de toute la gamme).
         const _viaRentrer = _srcAId === op.rentrerActionId && _srcA.type === 'RENTRER';
         const _soeurs = (_viaRentrer && typeof opRentrerParfumActions === 'function') ? opRentrerParfumActions(op) : [];
-        // 2026-08-03 (retour Fabien, cas PuffX « · CHERRY ICE ») : une fois la gamme rentrée,
-        // les lignes sœurs sont clôturées/annulées et le périmètre vivant tombe à 1 — le nom
-        // du représentant réapparaissait. On compte aussi l'HISTORIQUE : si la gamme a eu
-        // plusieurs lignes parfum pour cette rentrée, l'OP reste « Gamme entière ».
-        let _nbSoeurs = _soeurs.length;
-        if (_viaRentrer && _nbSoeurs <= 1) {
-          const _gidHisto = (op.produitIds || [])[0];
-          _nbSoeurs = Math.max(_nbSoeurs, actions.filter(x => x.type === 'RENTRER' && x.produitId === _gidHisto
-            && x.produitParfumId && !_deletedIds.has(x.id)).length);
-        }
-        if (_nbSoeurs <= 1) _opParfumId = _srcA.produitParfumId;
+        // 2026-08-03 (retour Fabien ×2, cas PuffX « · CHERRY ICE ») : une fois la gamme
+        // rentrée, les lignes sœurs sont clôturées/annulées voire PURGÉES et le périmètre
+        // vivant tombe à 1 — le nom du représentant réapparaissait. Règle durcie : le
+        // représentant ne peut nommer l'OP que si la GAMME n'a qu'un seul parfum en vie
+        // (les vraies OP au niveau parfum portent op.produitParfumId — priorité 1 ci-dessus,
+        // elles n'arrivent jamais ici).
+        const _nbParfumsVifs = (liq.parfums || []).filter(p => p.s !== 'SORTI').length;
+        if (Math.max(_soeurs.length, _viaRentrer ? _nbParfumsVifs : 0) <= 1) _opParfumId = _srcA.produitParfumId;
       }
     }
     let _scope = '';
@@ -5015,6 +5012,50 @@ async function purgerDonneesAnciennes() {
 }
 
 function syncAutoActions() {
+  // Guérison [HEAL-POSE] (2026-08-03, retour Fabien sur PuffX : « le À rentrer doit rester
+  // tant que l'installé n'est pas validé ») : PAIRE POSE CROISÉE DÉSYNCHRONISÉE. Le
+  // grand-père du 2026-08-01 a réputé « installé » les lignes déjà réglées ; quand une
+  // pose 📍 du produit est ensuite déclarée (setOpPoseProduit), la pose EST l'installation
+  // (même interrupteur) — or elle dit « à faire » et n'a JAMAIS été cliquée (aucun _stepTs).
+  // La déclaration de pose est la définition la plus récente de l'installation → elle
+  // gagne : on décoche installe (merge-safe, _stepTs frais) et la ligne revit → elle
+  // RÉAPPARAÎT dans À rentrer et « Reçus, pas encore installés ». Idempotent (installe
+  // passe à false). Une pose déjà cliquée (cochée OU décochée, _stepTs présent) n'est
+  // jamais touchée — c'est le territoire de _syncCocheBidi (horodaté, plus récent gagne).
+  ops.forEach(op => {
+    if (op._archived || op.annulee || _deletedIds.has(op.id)) return;
+    if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return;
+    const _pps = (typeof opPiecesProduit === 'function') ? opPiecesProduit(op) : [];
+    if (!_pps.length) return;
+    let _aHP = actions.find(x => x.id === op.rentrerActionId && !x.annulee);
+    if (!_aHP && typeof opRentrerParfumActions === 'function') { const _pfHP = opRentrerParfumActions(op); if (_pfHP.length) _aHP = _pfHP[0]; }
+    if (!_aHP || !_aHP.etats) return;
+    let _healed = false;
+    SHOPS.forEach(sh => {
+      if (typeof _opPoseCrossActive === 'function' && !_opPoseCrossActive(op, sh)) return;
+      const st = _aHP.etats[sh];
+      if (!st || !st.steps || st.steps.installe !== true) return;
+      const _ppSh = _pps.find(p => p.affectations && p.affectations[sh] && p.affectations[sh].emplacement);
+      if (!_ppSh) return;
+      const _poseKey = 'plv_' + _ppSh.id + '_posee';
+      const ost = op.etats && op.etats[sh];
+      const _poseChecked = !!(ost && ost.steps && ost.steps[_poseKey] === true);
+      const _poseTouched = !!(ost && ost._stepTs && ost._stepTs[_poseKey]);
+      if (_poseChecked || _poseTouched) return;
+      st.steps.installe = false;
+      if (!st._stepTs) st._stepTs = {};
+      st._stepTs.installe = new Date().toISOString();
+      st.done = false; st.dateFait = null;
+      _healed = true;
+      console.log('[HEAL-POSE]', _aHP.id, sh, '— « installé » hérité décoché : la pose 📍 (jamais faite) est la vraie installation');
+    });
+    if (_healed) {
+      // La ligne revit (elle avait pu être clôturée/archivée en tant que FAIT) —
+      // _ligneEnInstallation la protège ensuite des ménages par statut.
+      _aHP.dateCloture = null; _aHP._archived = false;
+      _aHP._ts = _aHP._reviveTs = new Date().toISOString();
+    }
+  });
   // Guérison (2026-08-01, cas Kit Force) : une ligne rouverte par décochage a pu, sur les
   // versions précédentes, rester ARCHIVÉE ou même être RE-ANNULÉE par le ménage par statut
   // (avec done forcé). Signature de l'accident : travail d'installation en attente
@@ -20270,14 +20311,17 @@ function renderDashboard() {
   });
   const _nbInstallTotal = opsInstallVisibles.length + actionsAInstaller.length + opsRecuesNonInstallees.length;
   const _nbInstallAttente = actionsInstallEnAttente.length;
+  // 2026-08-03 (retour Fabien : « trop d'info ») : UNE seule liste — une entrée par produit,
+  // que le travail vive sur la ligne ou sur l'OP (plomberie interne, pas son affaire).
+  // Seule distinction conservée : ⏳ en attente (date / sortie du remplacé), hors compteurs.
   const installBlockInner = (_nbInstallTotal + _nbInstallAttente) === 0
     ? ''
     : opsInstallVisibles.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')
-      + (actionsAInstaller.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Reçus, pas encore installés</div>` + renderGroupedActionCards(actionsAInstaller) : '')
-      + (opsRecuesNonInstallees.length ? `<div style="font-size:9px; color:#f9a8d4; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;">Produits reçus — installation à finir (OP)</div>` + opsRecuesNonInstallees.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : '')
-      + (actionsInstallEnAttente.length ? `<div style="font-size:9px; color:#fbbf24; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Pas un retard : ces installations attendent leur déclencheur — date posée ou sortie du produit remplacé (par boutique)">⏳ En attente — date d'installation ou sortie du remplacé (hors compteurs)</div>` + renderGroupedActionCards(actionsInstallEnAttente) : '');
+      + (actionsAInstaller.length ? renderGroupedActionCards(actionsAInstaller) : '')
+      + (opsRecuesNonInstallees.length ? opsRecuesNonInstallees.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : '')
+      + (actionsInstallEnAttente.length ? `<div style="font-size:9px; color:#fbbf24; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Pas un retard : ces installations attendent leur déclencheur — date d'installation ou sortie du produit remplacé (par boutique). Hors compteurs.">⏳ En attente</div>` + renderGroupedActionCards(actionsInstallEnAttente) : '');
   const installBlock = (_nbInstallTotal + _nbInstallAttente) === 0 ? '' : block('install', '📦 À installer' + (_nbInstallAttente ? ` <span style="font-size:10px; font-weight:600; color:#fbbf24;">· ${_nbInstallAttente} ⏳</span>` : ''), '#f472b6', _nbInstallTotal, installBlockInner,
-    'OPs dont l\'installation commence aujourd\'hui ou demain · produits reçus en boutique mais pas encore posés en rayon. ⏳ = en attente (date d\'installation ou sortie du remplacé), hors compteurs.');
+    'Tout ce qui doit être posé en rayon — une entrée par produit. ⏳ = attend sa date d\'installation ou la sortie du remplacé (pas un retard).');
 
   // --- OPs terminées à désinstaller (inclut dernier jour = dateFin aujourd'hui) ---
   // Uniquement les OPs qui ont effectivement des étapes de désinstallation (matériel physique).
