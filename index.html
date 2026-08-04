@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:07</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:31</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4883,15 +4883,31 @@ function ensureAction(produitId, type, produitType, opts) {
       const _nbCycles = actions.filter(a => a.produitId === produitId && a.type === type
         && (produitType === 'kit' ? (!a.produitType || a.produitType === 'kit') : a.produitType === produitType)
         && (opts.parfumId ? a.produitParfumId === opts.parfumId : !a.produitParfumId)).length;
-      const _cid = 'ACT-CY' + _nbCycles + '-' + type.charAt(0) + '-' + produitId + (opts.parfumId ? '-' + opts.parfumId : '');
-      const _dejaLa = actions.find(a => a.id === _cid);
+      const _cidDe = n => 'ACT-CY' + n + '-' + type.charAt(0) + '-' + produitId + (opts.parfumId ? '-' + opts.parfumId : '');
+      // [CAS M100 2026-08-04] Un id de cycle a pu être TOMBSTONÉ par l'ancien dédoublonnage
+      // sémantique (qui fusionnait la ligne neuve dans la vieille ligne close — corrigé dans
+      // _mergeEtats). Un tombstone est définitif (anti-résurrection) : on ne le retire jamais,
+      // on SAUTE au numéro de cycle suivant libre. Déterministe : mêmes actions + mêmes
+      // tombstones (fusionnés entre postes) → même id partout, zéro doublon par construction.
+      // Un id est aussi sauté si sa ligne EXISTE mais appartient à un cycle RÉVOLU (annulée,
+      // ou finie AVANT le changement de statut actuel) — la numérotation devenue creuse par
+      // les sauts ferait sinon retomber un futur cycle sur un vieil id et rendrait sa ligne
+      // morte au lieu d'en créer une neuve. Une ligne du cycle COURANT (ouverte, ou finie
+      // après _sTs — arrivée par merge) est au contraire retournée telle quelle (_dejaLa).
+      const _mortPourCeCycle = x => x && (x.annulee === true
+        || ((x.dateCloture || actionGlobalState(x) === 'FAIT') && (x._ts || '') < _cibleTsC));
+      let _cyN = _nbCycles, _cid = _cidDe(_cyN), _exN = actions.find(a => a.id === _cid);
+      while ((_deletedIds.has(_cid) || _mortPourCeCycle(_exN)) && _cyN < _nbCycles + 30) {
+        _cyN++; _cid = _cidDe(_cyN); _exN = actions.find(a => a.id === _cid);
+      }
+      const _dejaLa = _exN;
       if (_dejaLa) {
         if (opts.parfumNom && opts.parfumId) _dejaLa._parfumNom = opts.parfumNom;
         return _dejaLa; // déjà créée (par ce poste ou arrivée par merge)
       }
       if (!_deletedIds.has(_cid)) {
         _forceCycleId = _cid;
-        console.log('[ENSURE-ACTION] NOUVEAU CYCLE ' + type + ' → ligne ' + _cid + ' (ancienne ' + existingDone.id + ' finie, cible repassée ' + _attenduC + ')');
+        console.log('[ENSURE-ACTION] NOUVEAU CYCLE ' + type + ' → ligne ' + _cid + ' (ancienne ' + existingDone.id + ' finie, cible repassée ' + _attenduC + (_cyN !== _nbCycles ? ', id CY' + _nbCycles + ' tombstoné → CY' + _cyN : '') + ')');
       }
     }
     if (!_forceCycleId) {
@@ -12155,7 +12171,14 @@ function _mergeEtats(localActions, remoteActions) {
   const _semMap = {};
   let _dedupCount = 0;
   localActions.forEach(a => {
-    if (!a || !a.id || a.annulee) return;
+    // [CAS M100 2026-08-04] Une action CLOSE (dateCloture) est un cycle FINI, pas un doublon :
+    // elle ne participe plus au dédoublonnage. Sans ça, l'ancienne ligne SORTIR fermée
+    // (6 coches d'archive) « gagnait » contre la ligne de NOUVEAU CYCLE fraîche (5 coches),
+    // qui se faisait tombstoner → produit fantôme définitif (statut en attente, ligne
+    // irrecréable). Le but historique du dédoublonnage — deux postes créent la même action
+    // avec deux ids aléatoires — ne concerne que des lignes OUVERTES. Même règle que le
+    // dédoublonnage du chargement (a.annulee || a.dateCloture → ignorée).
+    if (!a || !a.id || a.annulee || a.dateCloture) return;
     const sk = _semKey(a);
     if (!sk || sk === '||') return;
     if (_semMap[sk]) {
