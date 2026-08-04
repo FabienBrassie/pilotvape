@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 01:01</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 10:45</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -29900,7 +29900,7 @@ function openBulkPrixEtiquetteDialog() {
       : (typeof a.prixCible === 'number') ? a.prixCible : kit.pv;
     var isRouge = (a.decisionChoice === 'rouge' || a.etiquetteRouge);
     var rougeBadge = isRouge ? ' <span style="font-size:8px; padding:0 4px; background:#ef444425; color:#fca5a5; border:1px solid #ef444460; border-radius:2px;">PR</span>' : '';
-    return '<label style="display:flex; align-items:center; gap:8px; padding:4px 6px; border-bottom:1px solid #33415530; cursor:pointer;" onmouseover="this.style.background=\'#1e293b80\'" onmouseout="this.style.background=\'transparent\'">'
+    return '<label data-bulk-row="' + ((kit.marque || '') + ' ' + (kit.modele || '')).toLowerCase().replace(/"/g, '') + '" style="display:flex; align-items:center; gap:8px; padding:4px 6px; border-bottom:1px solid #33415530; cursor:pointer;" onmouseover="this.style.background=\'#1e293b80\'" onmouseout="this.style.background=\'transparent\'">'
       + '<input type="checkbox" checked data-action-id="' + a.id + '" data-kit-id="' + kit.id + '" data-price="' + price + '" data-rouge="' + (isRouge ? '1' : '') + '" style="accent-color:#f59e0b; cursor:pointer;">'
       + '<span style="flex:1; font-size:11px; color:#e2e8f0;">' + kit.marque + ' — <strong>' + kit.modele + '</strong>' + rougeBadge + '</span>'
       + '<span style="font-size:10px; color:#f59e0b; font-weight:600;">' + price.toFixed(2) + '€</span>'
@@ -29914,7 +29914,7 @@ function openBulkPrixEtiquetteDialog() {
     + '<div style="display:flex;gap:8px;margin-bottom:10px;align-items:center;">'
     +   '<label style="font-size:11px;color:#cbd5e1;">Boutique :</label>'
     +   '<select id="bulkPrixShop" style="padding:4px 8px;font-size:11px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + shopOpts + '</select>'
-    +   '<span style="flex:1;"></span>'
+    +   '<input id="bulkPrixSearch" type="text" placeholder="🔎 Filtrer…" style="flex:1;min-width:100px;padding:4px 8px;font-size:11px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">'
     +   '<button id="bulkPrixSelectAll" style="padding:2px 8px;font-size:10px;background:#33415550;color:#94a3b8;border:1px solid #47556960;border-radius:3px;cursor:pointer;">Tout cocher</button>'
     +   '<button id="bulkPrixSelectNone" style="padding:2px 8px;font-size:10px;background:#33415550;color:#94a3b8;border:1px solid #47556960;border-radius:3px;cursor:pointer;">Tout décocher</button>'
     + '</div>'
@@ -29950,11 +29950,19 @@ function openBulkPrixEtiquetteDialog() {
     close();
     openVitrineDialog(items, { type: (items.length && tousRouges) ? 'VITRINE_PR' : 'VITRINE' });
   };
+  // Recherche (2026-08-04) : filtre d'affichage seul, coches conservées ;
+  // Tout cocher/décocher n'agit que sur les lignes visibles.
+  var _bulkRows = Array.prototype.slice.call(overlay.querySelectorAll('#bulkPrixList label[data-bulk-row]'));
+  var _bulkVisibles = function() { return _bulkRows.filter(function(r) { return r.style.display !== 'none'; }); };
+  overlay.querySelector('#bulkPrixSearch').oninput = function() {
+    var q = this.value.trim().toLowerCase();
+    _bulkRows.forEach(function(r) { r.style.display = (!q || (r.getAttribute('data-bulk-row') || '').indexOf(q) !== -1) ? 'flex' : 'none'; });
+  };
   overlay.querySelector('#bulkPrixSelectAll').onclick = function() {
-    overlay.querySelectorAll('#bulkPrixList input[type=checkbox]').forEach(function(cb) { cb.checked = true; });
+    _bulkVisibles().forEach(function(r) { var cb = r.querySelector('input[type=checkbox]'); if (cb) cb.checked = true; });
   };
   overlay.querySelector('#bulkPrixSelectNone').onclick = function() {
-    overlay.querySelectorAll('#bulkPrixList input[type=checkbox]').forEach(function(cb) { cb.checked = false; });
+    _bulkVisibles().forEach(function(r) { var cb = r.querySelector('input[type=checkbox]'); if (cb) cb.checked = false; });
   };
   overlay.querySelector('#bulkPrixGo').onclick = async function() {
     var shop = overlay.querySelector('#bulkPrixShop').value;
@@ -30431,7 +30439,7 @@ function openEtiquettesDialog() {
     '<option value="NOUVEAUTE">Nouveauté</option>' +
     '<option value="EXCLU">Exclusivité</option>' +
     '<option value="PRIX_ROUGE">Prix Rouge</option>';
-  const preview = visible.map(k => '<div style="font-size:11px;color:#cbd5e1;margin:3px 0;display:flex;align-items:center;gap:6px;"><input type="checkbox" data-kit-id="' + k.id + '" checked style="cursor:pointer;"><span>' + (k.marque||'') + ' — ' + (k.modele||'') + ' <span style="color:#64748b;">(' + (k.profilChoisi||'sans profil') + ', ' + (typeof k.pv==='number'?k.pv.toFixed(2)+'€':'—') + ')</span></span></div>').join('');
+  const preview = visible.map(k => '<div data-etq-row="' + ((k.marque||'') + ' ' + (k.modele||'')).toLowerCase().replace(/"/g, '') + '" style="font-size:11px;color:#cbd5e1;margin:3px 0;display:flex;align-items:center;gap:6px;"><input type="checkbox" data-kit-id="' + k.id + '" checked style="cursor:pointer;"><span>' + (k.marque||'') + ' — ' + (k.modele||'') + ' <span style="color:#64748b;">(' + (k.profilChoisi||'sans profil') + ', ' + (typeof k.pv==='number'?k.pv.toFixed(2)+'€':'—') + ')</span></span></div>').join('');
   const moreTxt = '';
   overlay.innerHTML =
     '<div style="background:#1e293b;border:1px solid #334155;border-radius:8px;padding:22px;max-width:540px;width:100%;color:#e2e8f0;max-height:90vh;overflow-y:auto;">' +
@@ -30441,11 +30449,12 @@ function openEtiquettesDialog() {
         '<label style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:6px;">Boutique : <select id="etiqDlgShop" style="padding:4px 8px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + shopOpts + '</select></label>' +
         '<label style="font-size:12px;color:#cbd5e1;display:flex;align-items:center;gap:6px;">Opération commerciale : <select id="etiqDlgOp" style="padding:4px 8px;font-size:12px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;">' + opOpts + '</select></label>' +
       '</div>' +
-      '<div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;margin:10px 0 4px;display:flex;justify-content:space-between;align-items:center;">' +
-        '<span>Produits à imprimer</span>' +
-        '<button id="etiqDlgToggleAll" style="padding:2px 8px;background:transparent;border:1px solid #64748b60;color:#64748b;border-radius:3px;font-size:9px;cursor:pointer;">Tout cocher</button>' +
+      '<div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:0.4px;margin:10px 0 4px;display:flex;justify-content:space-between;align-items:center;gap:8px;">' +
+        '<span style="white-space:nowrap;">Produits à imprimer</span>' +
+        '<input id="etiqDlgSearch" type="text" placeholder="🔎 Filtrer…" style="flex:1;min-width:120px;padding:4px 8px;font-size:11px;background:#0f172a;border:1px solid #475569;color:#e2e8f0;border-radius:3px;text-transform:none;letter-spacing:normal;">' +
+        '<button id="etiqDlgToggleAll" title="Coche/décoche uniquement les produits actuellement filtrés" style="padding:2px 8px;background:transparent;border:1px solid #64748b60;color:#64748b;border-radius:3px;font-size:9px;cursor:pointer;white-space:nowrap;">Tout décocher</button>' +
       '</div>' +
-      '<div style="list-style:none;margin:0;padding:8px 10px;background:#0f172a;border-radius:4px;max-height:240px;overflow-y:auto;border:1px solid #334155;">' + preview + moreTxt + '</div>' +
+      '<div id="etiqDlgList" style="list-style:none;margin:0;padding:8px 10px;background:#0f172a;border-radius:4px;max-height:240px;overflow-y:auto;border:1px solid #334155;">' + preview + moreTxt + '</div>' +
       '<div style="margin-top:14px;text-align:right;display:flex;gap:8px;justify-content:space-between;align-items:center;">' +
         '<button id="etiqDlgReload" style="padding:0;background:none;border:none;color:#64748b;cursor:pointer;font-size:10px;text-decoration:none;transition:color 0.2s;">🔄 Recharger templates</button>' +
         '<div style="display:flex;gap:8px;">' +
@@ -30460,21 +30469,30 @@ function openEtiquettesDialog() {
     await clearEtiquetteCache();
     close();
   };
+  // Recherche dans la liste (2026-08-04, demande Fabien) : le filtre n'affecte que
+  // l'AFFICHAGE — les coches déjà posées restent, « Tout cocher/décocher » n'agit
+  // que sur les lignes visibles (même logique que l'onglet Étiquettes).
   const toggleAllBtn = overlay.querySelector('#etiqDlgToggleAll');
-  const checkboxes = Array.from(overlay.querySelectorAll('input[type="checkbox"]'));
-  let allChecked = true;
+  const searchEl = overlay.querySelector('#etiqDlgSearch');
+  const rows = Array.from(overlay.querySelectorAll('#etiqDlgList div[data-etq-row]'));
+  const visibleRows = () => rows.filter(r => r.style.display !== 'none');
   const updateToggleBtn = () => {
-    allChecked = checkboxes.every(cb => cb.checked);
+    const vis = visibleRows();
+    const allChecked = vis.length > 0 && vis.every(r => r.querySelector('input').checked);
     toggleAllBtn.textContent = allChecked ? 'Tout décocher' : 'Tout cocher';
   };
-  toggleAllBtn.onclick = () => {
-    allChecked = checkboxes.every(cb => cb.checked);
-    checkboxes.forEach(cb => { cb.checked = !allChecked; });
+  searchEl.oninput = () => {
+    const q = searchEl.value.trim().toLowerCase();
+    rows.forEach(r => { r.style.display = (!q || (r.dataset.etqRow || '').includes(q)) ? 'flex' : 'none'; });
     updateToggleBtn();
   };
-  checkboxes.forEach(cb => {
-    cb.onchange = updateToggleBtn;
-  });
+  toggleAllBtn.onclick = () => {
+    const vis = visibleRows();
+    const allChecked = vis.length > 0 && vis.every(r => r.querySelector('input').checked);
+    vis.forEach(r => { r.querySelector('input').checked = !allChecked; });
+    updateToggleBtn();
+  };
+  rows.forEach(r => { r.querySelector('input').onchange = updateToggleBtn; });
   overlay.querySelector('#etiqDlgCancel').onclick = close;
   overlay.querySelector('#etiqDlgGo').onclick = async () => {
     const shop = overlay.querySelector('#etiqDlgShop').value;
@@ -30547,14 +30565,34 @@ const VITRINE_SLOTS = (() => {
 // `Etiquette template/Planche etagere liquides.pdf` = le PDF de Fabien nettoyé
 // (champs de formulaire retirés, fond conservé). Une étiquette = une GAMME dans
 // un FORMAT (nom = « gamme + format », décision Fabien) + le prix du format.
-const ETAGERE_TEMPLATE_FILE = 'Planche etagere liquides.pdf';
-// Rectangles nom/prix des 44 cases, extraits des champs nomN/prixN du template
-// d'origine (ordre de lecture ; la zone prix est bornée sous la zone nom).
+// 2026-08-04 : en réalité ces planches aussi étaient photocopiées à 50 % —
+// le template est donc réduit à 50 % et tuilé 2×2 comme la vitrine :
+// 176 étiquettes par feuille A4 (44 × 4), à IMPRIMER À 100 %.
+const ETAGERE_TEMPLATE_FILE = 'Planche etagere liquides 50.pdf';
+// Rectangles nom/prix des 44 cases du template d'ORIGINE (extraits des champs
+// nomN/prixN, ordre de lecture ; zone prix bornée sous la zone nom) — la grille
+// finale ci-dessous les met à l'échelle 0.5 et les tuile.
 const _ETAGERE_RAW = [[22.84,785.52,23.17,739.56,45.96],[164.55,786.4,164.88,739.56,46.84],[307.26,785.52,307.59,739.56,45.96],[448.97,785.52,449.3,739.56,45.96],[22.84,714.83,23.17,668.87,45.96],[164.55,714.83,164.88,668.87,45.96],[307.26,714.83,307.59,668.87,45.96],[448.97,714.83,449.3,668.87,45.96],[22.84,643.49,23.17,597.52,45.97],[164.55,643.49,164.88,597.52,45.97],[307.26,643.49,307.59,597.52,45.97],[448.97,643.49,449.3,598.4,45.09],[22.84,573.12,23.17,527.16,45.96],[164.55,573.12,164.88,527.16,45.96],[307.26,573.12,307.59,527.16,45.96],[448.97,573.12,449.3,527.16,45.96],[22.84,502.11,23.17,456.14,45.96],[164.55,502.11,164.88,456.14,45.96],[307.26,502.11,307.59,456.14,45.96],[448.97,502.11,449.3,456.14,45.96],[22.84,431.42,23.17,385.45,45.96],[164.55,431.42,164.88,385.45,45.96],[307.26,431.42,307.59,385.45,45.96],[448.97,431.42,449.3,385.45,45.96],[22.84,360.4,23.17,314.43,45.96],[164.55,360.4,164.88,315.31,45.09],[307.26,360.4,307.59,314.43,45.96],[448.97,360.4,449.3,314.43,45.96],[22.84,289.38,23.17,243.42,45.96],[164.55,289.38,164.88,243.42,45.96],[307.26,289.38,307.59,243.42,45.96],[448.97,289.38,449.3,243.42,45.96],[22.84,218.69,23.17,172.72,45.96],[164.55,219.56,164.88,172.72,46.84],[307.26,218.69,307.59,172.72,45.96],[448.97,218.69,449.3,172.72,45.96],[22.84,147.67,23.17,101.71,45.96],[164.55,147.67,164.88,101.71,45.96],[307.26,147.67,307.59,101.71,45.96],[448.97,147.67,449.3,101.71,45.96],[22.84,77.31,23.17,31.34,45.96],[164.55,77.31,164.88,31.34,45.96],[307.26,77.31,307.59,31.34,45.96],[448.97,77.31,449.3,31.34,45.96]];
-const ETAGERE_SLOTS = _ETAGERE_RAW.map(v => ({
-  nom:  { x: v[0], y: v[1], w: 123.22, h: 25.67 },
-  prix: { x: v[2], y: v[3], w: 123.22, h: v[4] }
-}));
+const ETAGERE_SLOTS = (() => {
+  // × 0.5 puis tuilage 2×2, en ordre de lecture (demi-planche haute puis basse,
+  // dans chaque rangée : tuile gauche puis droite → 8 étiquettes de large).
+  const W = 595.28, H = 841.89;
+  const out = [];
+  [H / 2, 0].forEach(ty => {
+    for (let r = 0; r < 11; r++) {
+      [0, W / 2].forEach(tx => {
+        for (let c = 0; c < 4; c++) {
+          const v = _ETAGERE_RAW[r * 4 + c];
+          out.push({
+            nom:  { x: v[0] * 0.5 + tx, y: v[1] * 0.5 + ty, w: 61.61, h: 12.84 },
+            prix: { x: v[2] * 0.5 + tx, y: v[3] * 0.5 + ty, w: 61.61, h: v[4] * 0.5 }
+          });
+        }
+      });
+    }
+  });
+  return out;
+})();
 
 // Template vitrine PRIX ROUGE : la MÊME planche mais la structure sombre passée
 // en rouge CIGUSTO dans le PDF (logo recoloré en blanc pour rester lisible) —
@@ -30566,12 +30604,42 @@ const VITRINE_PR_TEMPLATE_FILE = 'Planche vitrine rouge.pdf';
 const _ETAG_VX = [14.22, 155.96, 297.69, 439.42, 581.05];
 const _ETAG_HY = [810.48, 739.72, 668.85, 597.99, 527.12, 456.35, 385.39, 314.57, 243.6, 172.89, 101.92, 31.41];
 const ETAGERE_CELLULES = (() => {
+  // Mêmes échelle et tuilage que ETAGERE_SLOTS (l'index i doit correspondre).
+  const W = 595.28, H = 841.89;
   const out = [];
-  for (let r = 0; r < 11; r++) {
-    for (let c = 0; c < 4; c++) {
-      out.push({ x: _ETAG_VX[c], y: _ETAG_HY[r + 1], w: _ETAG_VX[c + 1] - _ETAG_VX[c], h: _ETAG_HY[r] - _ETAG_HY[r + 1] });
+  [H / 2, 0].forEach(ty => {
+    for (let r = 0; r < 11; r++) {
+      [0, W / 2].forEach(tx => {
+        for (let c = 0; c < 4; c++) {
+          out.push({
+            x: _ETAG_VX[c] * 0.5 + tx,
+            y: _ETAG_HY[r + 1] * 0.5 + ty,
+            w: (_ETAG_VX[c + 1] - _ETAG_VX[c]) * 0.5,
+            h: (_ETAG_HY[r] - _ETAG_HY[r + 1]) * 0.5
+          });
+        }
+      });
     }
-  }
+  });
+  return out;
+})();
+
+// Empreintes des cartes vitrine (la carte entière, pour MASQUER EN BLANC les
+// cases vides — demande Fabien 2026-08-04 : ne pas imprimer les étiquettes vides).
+// Rectangles des 12 cartes du template d'origine × 0.5, tuilés comme VITRINE_SLOTS.
+const VITRINE_EMPREINTES = (() => {
+  const W = 595.28, H = 841.89;
+  const cx = [14.17, 207.99, 401.81], cy = [631.15, 428.03, 224.91, 21.79];
+  const out = [];
+  [H / 2, 0].forEach(ty => {
+    for (let row = 0; row < 4; row++) {
+      [0, W / 2].forEach(tx => {
+        for (let col = 0; col < 3; col++) {
+          out.push({ x: cx[col] * 0.5 + tx, y: cy[row] * 0.5 + ty, w: 89.83, h: 94.48 });
+        }
+      });
+    }
+  });
   return out;
 })();
 
@@ -30585,35 +30653,35 @@ const PLANCHE_TYPES = {
   VITRINE: {
     label: '🪟 Vitrine CIGUSTO — 48 par feuille',
     info: '48 étiquettes par feuille A4 (déjà réduites à 50 % — <b>imprimer à 100 %</b>). Noir sur blanc, prix « 79.90€ ».',
-    file: VITRINE_TEMPLATE_FILE, slots: VITRINE_SLOTS, slug: 'vitrine',
+    file: VITRINE_TEMPLATE_FILE, slots: VITRINE_SLOTS, empreintes: VITRINE_EMPREINTES,
     couleur: [0, 0, 0], nomBold: true, nomUpper: true, nomMax: 11, nomMin: 6.5,
-    prixMax: 22, prixMin: 8, prixPad: 7,
+    prixMax: 22, prixMin: 8, prixPad: 7, slug: 'vitrine',
     prixFmt: function(p) { return p.toFixed(2) + '€'; }
   },
   VITRINE_PR: {
     label: '🔴 Vitrine PRIX ROUGE — 48 par feuille',
     info: 'Comme la vitrine (48 par feuille A4 — <b>imprimer à 100 %</b>) : <b>structure ROUGE</b>, nom en noir, prix en rouge.',
-    file: VITRINE_PR_TEMPLATE_FILE, slots: VITRINE_SLOTS, slug: 'vitrine_pr',
+    file: VITRINE_PR_TEMPLATE_FILE, slots: VITRINE_SLOTS, empreintes: VITRINE_EMPREINTES, slug: 'vitrine_pr',
     couleur: [0.966, 0.118, 0], nomCouleur: [0, 0, 0], nomBold: true, nomUpper: true, nomMax: 11, nomMin: 6.5,
     prixMax: 22, prixMin: 8, prixPad: 7,
     prixFmt: function(p) { return p.toFixed(2) + '€'; }
   },
   ETAGERE: {
-    label: '💧 Étagère liquides — 44 par feuille',
-    info: '44 étiquettes par feuille A4 (étagères liquides — <b>imprimer à 100 %</b>). Blanc sur fond noir, prix « 25,90€ ».',
-    file: ETAGERE_TEMPLATE_FILE, slots: ETAGERE_SLOTS, slug: 'etagere_liquides',
-    couleur: [1, 1, 1], nomBold: false, nomUpper: false, nomMax: 13, nomMin: 6.5,
-    prixMax: 30, prixMin: 9, prixPad: 6,
+    label: '💧 Étagère liquides — 176 par feuille',
+    info: '176 étiquettes par feuille A4 (étagères liquides, déjà réduites à 50 % — <b>imprimer à 100 %</b>). Blanc sur fond noir, prix « 25,90€ ».',
+    file: ETAGERE_TEMPLATE_FILE, slots: ETAGERE_SLOTS, empreintes: ETAGERE_CELLULES, slug: 'etagere_liquides',
+    couleur: [1, 1, 1], nomBold: false, nomUpper: false, nomMax: 7, nomMin: 4.5,
+    prixMax: 15, prixMin: 6, prixPad: 3.5,
     prixFmt: function(p) { return p.toFixed(2).replace('.', ',') + '€'; }
   },
   ETAGERE_PR: {
-    label: '🔴 Étagère liquides PRIX ROUGE — 44 par feuille',
-    info: '44 étiquettes par feuille A4 (étagères liquides — <b>imprimer à 100 %</b>), avec <b>fond JAUNE et texte ROUGE</b>.',
-    file: ETAGERE_TEMPLATE_FILE, slots: ETAGERE_SLOTS, slug: 'etagere_liquides_pr',
-    couleur: PLANCHE_ROUGE, nomBold: false, nomUpper: false, nomMax: 13, nomMin: 6.5,
-    prixMax: 30, prixMin: 9, prixPad: 6,
+    label: '🔴 Étagère liquides PRIX ROUGE — 176 par feuille',
+    info: '176 étiquettes par feuille A4 (étagères liquides, déjà réduites à 50 % — <b>imprimer à 100 %</b>), avec <b>fond JAUNE et texte ROUGE</b>.',
+    file: ETAGERE_TEMPLATE_FILE, slots: ETAGERE_SLOTS, empreintes: ETAGERE_CELLULES, slug: 'etagere_liquides_pr',
+    couleur: PLANCHE_ROUGE, nomBold: false, nomUpper: false, nomMax: 7, nomMin: 4.5,
+    prixMax: 15, prixMin: 6, prixPad: 3.5,
     prixFmt: function(p) { return p.toFixed(2).replace('.', ',') + '€'; },
-    fond: { rects: ETAGERE_CELLULES, couleur: PLANCHE_JAUNE, inset: 1.2 }
+    fond: { rects: ETAGERE_CELLULES, couleur: PLANCHE_JAUNE, inset: 0.8 }
   }
 };
 
@@ -30740,7 +30808,7 @@ async function generateEtiquettesPlanche(typeKey, items, outputFilename, opts) {
       _vitrineDrawNom(page, T.nomBold ? bold : regular, nom, slot.nom, T.nomMax, T.nomMin, nomColor);
       // Prix : marge élargie pour que le € ne colle pas au bord (retour Fabien 2026-08-04).
       _vitrineDrawCentered(page, bold, _planchePrixTxt(T, it.prix), slot.prix, T.prixMax, T.prixMin, T.prixPad, color);
-      // Décor PR — cadre (vitrine : liseré rouge autour de la carte), en 4 barres pleines.
+      // Décor PR — cadre (liseré en 4 barres pleines), si un type l'utilise un jour.
       if (T.cadre && T.cadre.rects[idx]) {
         const c = T.cadre.rects[idx];
         const e = T.cadre.epaisseur || 2;
@@ -30749,6 +30817,24 @@ async function generateEtiquettesPlanche(typeKey, items, outputFilename, opts) {
           .forEach(v => page.drawRectangle({ x: v[0], y: v[1], width: v[2], height: v[3], color: R }));
       }
     });
+    // ── Masquage BLANC des cases vides (demande Fabien 2026-08-04 : ne pas imprimer
+    // du fond pour rien). Les planches se remplissent en ordre de lecture, donc :
+    // 1) tout ce qui est SOUS la rangée de la dernière étiquette → un grand rect blanc ;
+    // 2) le reste de la rangée en cours, à droite de la dernière étiquette.
+    // On préserve ~1 pt autour des cases remplies (leur bord reste imprimé).
+    if (T.empreintes && pageItems.length < T.slots.length && pageItems.length > 0) {
+      const BLANC = PDFLib.rgb(1, 1, 1);
+      const pw = page.getWidth();
+      const derniere = T.empreintes[pageItems.length - 1];
+      const premiereVide = T.empreintes[pageItems.length];
+      if (derniere.y > 2) {
+        page.drawRectangle({ x: 0, y: 0, width: pw, height: Math.max(0, derniere.y - 1), color: BLANC });
+      }
+      if (premiereVide && Math.abs(premiereVide.y - derniere.y) < 3) {
+        const x0 = premiereVide.x - 0.2;
+        page.drawRectangle({ x: x0, y: derniere.y - 1, width: Math.max(0, pw - x0), height: derniere.h + 2, color: BLANC });
+      }
+    }
     const [copied] = await master.copyPages(pdf, [0]);
     master.addPage(copied);
   }
