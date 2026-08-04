@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 14:32</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 15:21</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -25375,6 +25375,23 @@ async function _cloturerCampagne(campagneId, destCampagneId) {
         // Swappy sans condition. Une étiquette au même prix reste bonne — les coches sont
         // CONSERVÉES. La re-proposition ne passe QUE par le changement de prix
         // (updateOpPrixRouge → _reproposerEtapesEtiquettePR, qui ne fait rien à prix égal).
+        // 2026-08-04 (process Fabien) : la POSE DU PRODUIT, elle, se RE-PROPOSE à la
+        // clôture-destination — nouvelle campagne = nouvelle mise en place, la boutique
+        // reconfirme OÙ va le produit (ex : bac à fouille). Seulement chez les boutiques
+        // qui ont encore du stock (écoulé chez moi = rien à re-poser chez moi).
+        (typeof opPiecesProduit === 'function' ? opPiecesProduit(op) : []).forEach(pp => {
+          const _kPose = 'plv_' + pp.id + '_posee';
+          SHOPS.forEach(sh => {
+            if (_opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh)) return;
+            const st = op.etats && op.etats[sh];
+            if (st && st.steps && st.steps[_kPose] === true) {
+              st.steps[_kPose] = false;
+              if (!st._stepTs) st._stepTs = {};
+              st._stepTs[_kPose] = _now;
+              nCochesLib++;
+            }
+          });
+        });
         op._ts = _now; op._adminTs = _now;
         try { syncOpStepsToAction(op); } catch (e) {}
         nDetachees++;
@@ -25503,7 +25520,7 @@ async function pvArchiverEtCloturerCampagne(campagneId) {
     <div style="color:#22d3ee; font-weight:700; font-size:14px; margin-bottom:8px;">🏁 Fin de campagne — ${c.nom}</div>
     <div style="font-size:12px; color:#e2e8f0; line-height:1.6;">• le bilan du jour est archivé (photographie)<br>
     • ${nEcoul} OP écoulée${nEcoul > 1 ? 's' : ''} partout part${nEcoul > 1 ? 'ent' : ''} aux archives (« sorties »)<br>
-    • ${nRest} restante${nRest > 1 ? 's' : ''} : réouverte${nRest > 1 ? 's' : ''}, prix gardés, coches conservées — les étiquettes ne se re-proposent que si un prix CHANGE (au bilan)<br>
+    • ${nRest} restante${nRest > 1 ? 's' : ''} : réouverte${nRest > 1 ? 's' : ''}, prix gardés — étiquettes re-proposées SEULEMENT si un prix change (au bilan), POSE du produit re-proposée là où il reste du stock (nouvelle campagne = reconfirmer où il va)<br>
     • la campagne disparaît des vues — son bilan archivé reste consultable</div>
     ${_destSelect}
   </div>`;
@@ -28386,7 +28403,10 @@ function _renderOpCardHtmlInner(op, options) {
     ${(() => {
       // 📍 Pose du produit (2026-07-27) : pour les OP qui amènent un produit à mettre en place
       if (!(typeof isAdmin === 'function' && isAdmin())) return '';
-      const _poseEligible = ['NOUVEAUTE', 'EXCLU', 'LIQUIDE_DU_MOMENT'].includes(op.type) || !!(op.prep && op.prep.commanderProduits);
+      // 2026-08-04 (retour Fabien, cas PR Kit/PD héritées des soldes : « je ne peux pas dire
+      // de les installer quelque part ») : la pose vaut AUSSI pour les destockages — un prix
+      // rouge déménage le produit (bac à fouille, vitrine…). PRIX_ROUGE et COUP éligibles.
+      const _poseEligible = ['NOUVEAUTE', 'EXCLU', 'LIQUIDE_DU_MOMENT', 'PRIX_ROUGE', 'COUP'].includes(op.type) || !!(op.prep && op.prep.commanderProduits);
       if (!_poseEligible) return '';
       const _pp = opPiecesProduit(op)[0];
       const _curPose = _pp ? (((_pp.affectations || {})[SHOPS[0]] || {}).emplacement || '') : '';
@@ -28396,7 +28416,7 @@ function _renderOpCardHtmlInner(op, options) {
           <option value="">— pas d'étape de pose —</option>
           ${EMPLACEMENTS_PHYSIQUES.map(e => `<option value="${e.key}" ${_curPose === e.key ? 'selected' : ''}>${e.label}</option>`).join('')}
         </select>
-        ${_curPose ? `<span style="font-size:9.5px; color:#64748b;">étape « Poser » par boutique — l'OP se clôt à la POSE</span>` : ''}
+        ${_curPose ? `<span style="font-size:9.5px; color:#64748b;">étape « Poser » par boutique${(op.type === 'NOUVEAUTE' || op.type === 'EXCLU') ? ' — l\'OP se clôt à la POSE' : ''}</span>` : ''}
       </div>`;
     })()}
     ${piecesHtml}
