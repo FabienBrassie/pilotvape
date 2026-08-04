@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:02</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:07</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4525,7 +4525,10 @@ function getActionSteps(typeOrAction) {
   // (setter setSortirPoseEmplacement, propagé aux sœurs parfum). L'étape apparaît en TÊTE
   // (on déplace le produit, puis on écoule, puis on coupe). Jamais sur une reprise.
   if (type === 'SORTIR' && typeof typeOrAction === 'object' && typeOrAction && typeOrAction.poseEmplacement
-      && typeOrAction.motifSortie !== 'REPRISE') {
+      && typeOrAction.motifSortie !== 'REPRISE'
+      && !(typeof _opPosePilotePourSortir === 'function' && _opPosePilotePourSortir(typeOrAction))) {
+    // (si une OP liée porte une pose produit, ELLE pilote — l'étape de la ligne s'efface,
+    // ses clés sont purgées par ensureActionSteps, et elle REVIENT si l'OP disparaît)
     const _lblPoseS = (EMPLACEMENT_META[typeOrAction.poseEmplacement] || {}).label || typeOrAction.poseEmplacement;
     base.unshift({ key: 'pose', label: '📌 Poser → ' + _lblPoseS, nat: 'imm' });
   }
@@ -9300,10 +9303,31 @@ function setDateInstallation(actionId, val) {
 // aux lignes parfum sœurs (portée canonique). Retirer l'emplacement retire l'étape
 // (les clés orphelines sont purgées par ensureActionSteps) — refusé si une boutique a
 // déjà coché la pose (ne jamais jeter du travail fait).
+// LA canonique (règle 8) : la pose qui fait foi pour une ligne À SORTIR. Une OP OUVERTE
+// liée (sortirActionId / groupActionIds) qui porte une pièce PRODUIT affectée PILOTE —
+// même modèle que dateRentrerEffective : aucune contradiction possible, l'étape de la
+// ligne s'efface au profit de celle de l'OP et revient si l'OP disparaît.
+function _opPosePilotePourSortir(a) {
+  if (!a || a.type !== 'SORTIR') return null;
+  const op = ops.find(o => isOpOuverte(o) && !o.annulee && !o._archived
+    && (o.sortirActionId === a.id || (Array.isArray(o.groupActionIds) && o.groupActionIds.includes(a.id))));
+  if (!op) return null;
+  const pp = (typeof opPiecesProduit === 'function' ? opPiecesProduit(op) : []).find(p =>
+    p.affectations && SHOPS.some(sh => p.affectations[sh] && p.affectations[sh].emplacement));
+  if (!pp) return null;
+  const _empl = ((pp.affectations[SHOPS.find(sh => pp.affectations[sh] && pp.affectations[sh].emplacement)] || {}).emplacement) || null;
+  return { op, piece: pp, emplacement: _empl };
+}
 function setSortirPoseEmplacement(actionId, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const a = actions.find(x => x.id === actionId);
   if (!a || a.type !== 'SORTIR' || a.motifSortie === 'REPRISE') return;
+  const _pilote = _opPosePilotePourSortir(a);
+  if (_pilote) {
+    pvAlert('La pose suit l\'OP ' + _pilote.op.id + ' (' + (((EMPLACEMENT_META[_pilote.emplacement] || {}).label) || _pilote.emplacement) + ') — modifie la pose sur la carte OP.');
+    try { renderDashboard(); } catch (e) {}
+    return;
+  }
   const v = val || null;
   const _portee = (typeof _dispatchPorteeGamme === 'function') ? _dispatchPorteeGamme(a) : [a];
   if (!v) {
@@ -20186,7 +20210,11 @@ function renderDashboard() {
         // Compactage 2026-07-18 : mêmes règles que la zone RENTRER (segments qui partagent les lignes).
         // 📌 Pose sur la ligne (2026-08-04, demande Fabien) : déplacer le produit à sortir
         // quelque part SANS prix rouge — étape « Poser → X » par boutique.
-        const poseSortirBlock = (_estReprise || !(typeof isAdmin === 'function' && isAdmin())) ? '' : `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        const _posePiloteS = (typeof _opPosePilotePourSortir === 'function') ? _opPosePilotePourSortir(a) : null;
+        const poseSortirBlock = (_estReprise || !(typeof isAdmin === 'function' && isAdmin())) ? '' : _posePiloteS ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <span style="font-size:10px; color:#64748b;">📌 Pose :</span>
+          <span style="font-size:10px; color:#f9a8d4;" title="La pose suit l'OP liée — modifie-la sur la carte OP">suit l'OP ${_posePiloteS.op.id} · ${((EMPLACEMENT_META[_posePiloteS.emplacement] || {}).label) || _posePiloteS.emplacement}</span>
+        </div>` : `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           <span style="font-size:10px; color:#64748b;">📌 Poser / déplacer à :</span>
           <select onclick="event.stopPropagation()" onchange="setSortirPoseEmplacement('${a.id}', this.value || null)" title="Ajoute une étape « Poser → emplacement » par boutique sur cette ligne À sortir (ex : bac à fouille) — sans créer d'OP." style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${a.poseEmplacement ? '#f472b660' : '#475569'}; color:${a.poseEmplacement ? '#f9a8d4' : '#cbd5e1'}; border-radius:3px;">
             <option value="">— pas d'étape de pose —</option>
@@ -27844,6 +27872,25 @@ function setOpPoseProduit(opId, emplacement) {
     op.pieces.push(pieceP);
   }
   ensureOpSteps(op);
+  // 2026-08-04 (« connecté, pas en conflit, intelligent ? ») : si la ligne À sortir liée
+  // portait déjà une pose 📌 au MÊME emplacement, le travail coché MIGRE vers l'étape de
+  // l'OP (une boutique qui a déjà posé au bon endroit n'a rien à refaire). Emplacement
+  // DIFFÉRENT = nouveau travail, étape vierge. L'étape de la ligne s'efface dans les deux
+  // cas (l'OP pilote — _opPosePilotePourSortir), et reviendra si l'OP disparaît.
+  if (emplacement && pieceP) {
+    const _lignesS = actions.filter(x => x.type === 'SORTIR' && !x.annulee && x.poseEmplacement === emplacement
+      && (op.sortirActionId === x.id || (Array.isArray(op.groupActionIds) && op.groupActionIds.includes(x.id))));
+    _lignesS.forEach(x => {
+      SHOPS.forEach(sh => {
+        const stL = x.etats && x.etats[sh];
+        if (!(stL && stL.steps && stL.steps.pose === true)) return;
+        const stO = op.etats[sh] = op.etats[sh] || { steps: {}, _stepTs: {} };
+        stO.steps = stO.steps || {}; stO._stepTs = stO._stepTs || {};
+        const _kO = 'plv_' + pieceP.id + '_posee';
+        if (stO.steps[_kO] !== true) { stO.steps[_kO] = true; stO._stepTs[_kO] = _now; }
+      });
+    });
+  }
   op._ts = _now; op._adminTs = _now;
   if (typeof logAction === 'function') logAction('Pose du produit', _logOpLabel(opId) + ' → ' + (emplacement ? ((EMPLACEMENT_META[emplacement] || {}).label || emplacement) : 'étape de pose retirée'));
   saveData();
