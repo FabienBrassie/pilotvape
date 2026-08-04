@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 12:48</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 13:05</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3143,6 +3143,18 @@ function _testeurRetirerEntry(existing) {
   const _remise = (zoneEx === 'EXTRA' && _empruntsAvant[existing.key]) ? _empruntsAvant[existing.key].planNum : null;
   _deletedIds.add(existing.t.id); // tombstone : le retrait se propage et ne ressuscite pas
   testeursLiq = testeursLiq.filter(x => x.id !== existing.t.id);
+  // Retrait MANUEL d'un testeur d'OP (2026-08-04) : mémorisé sur l'OP pour que la synchro
+  // ne le recrée pas tant que la pièce Testeur reste en place. Enlever la pièce remet ces
+  // exclusions à zéro (re-poser la pièce = tout le périmètre revient).
+  if (existing.t.opId) {
+    const _opSrc = ops.find(o => o.id === existing.t.opId);
+    if (_opSrc && (_opSrc.pieces || []).some(x => x.type === 'TESTEUR') && opTimeStatus(_opSrc) !== 'TERMINEE') {
+      if (!Array.isArray(_opSrc._testeursExclus)) _opSrc._testeursExclus = [];
+      if (!_opSrc._testeursExclus.includes(exP.id)) _opSrc._testeursExclus.push(exP.id);
+      const _nowExcl = new Date().toISOString();
+      _opSrc._ts = _nowExcl; _opSrc._adminTs = _nowExcl;
+    }
+  }
   logAction('Testeur retiré', (exG.marque || '') + ' ' + (exG.gamme || '') + ' · ' + (exP.n || '') + (_remise !== null ? ' (fin d\'emprunt → empl. ' + _remise + ')' : ''));
   // ── Ligne de travail ──
   const aOuverte = _testeurActionOuverte(a => a.produitId === exG.id && a.produitParfumId === exP.id && (a.testeurOp === 'INSTALLER' || a.testeurOp === 'REMPLACER'));
@@ -5697,15 +5709,26 @@ function syncAutoActions() {
   // ═══ 🧪 PIÈCES D'OP « TESTEUR » → MALETTE ZONE EXTRA (2026-08-03, demande Fabien) ═══
   // Une OP ouverte portant une pièce Testeur met ses parfums couverts dans la malette,
   // zone EXTRA (événementiel), le temps de l'OP. Idempotent, côté admin (les boutiques
-  // adoptent au poll). Id déterministe TST-OP-<op>-<parfum> : un retrait MANUEL (tombstone)
-  // n'est jamais recréé. OP terminée / pièce retirée / parfum plus couvert → l'entrée sort
+  // adoptent au poll). OP terminée / pièce retirée / parfum plus couvert → l'entrée sort
   // de la malette (le retrait PHYSIQUE, lui, vit sur l'étape de désinstallation de l'OP).
+  // ⚠ Refonte 2026-08-04 (incident PuffX signalé par Fabien : « en remettant la pièce,
+  // plus rien ne réapparaît ») : l'ancien id déterministe TST-OP-<op>-<parfum>, tombstoné
+  // au retrait AUTOMATIQUE, bloquait toute recréation à vie. Désormais : id ALÉATOIRE
+  // (re-poser la pièce recrée toujours), présence jugée par (opId, parfumId), et le
+  // retrait MANUEL est respecté via `op._testeursExclus` (posé par _testeurRetirerEntry,
+  // remis à zéro quand la pièce Testeur quitte l'OP = nouveau départ).
   if (typeof isAdmin === 'function' && isAdmin()) {
     const _nowTst = new Date().toISOString();
     let _tstOpChanged = false;
     ops.forEach(op => {
       const hasTesteurPiece = !op._archived && (op.pieces || []).some(x => x.type === 'TESTEUR');
       const opActive = hasTesteurPiece && opTimeStatus(op) !== 'TERMINEE';
+      // Plus de pièce Testeur → les exclusions manuelles repartent à zéro.
+      if (!hasTesteurPiece && Array.isArray(op._testeursExclus) && op._testeursExclus.length > 0) {
+        op._testeursExclus = [];
+        op._ts = _nowTst; op._adminTs = _nowTst;
+        _tstOpChanged = true;
+      }
       // Parfums couverts (liquides en base uniquement — un produit libre n'a pas de parfum)
       const cibles = [];
       if (opActive) {
@@ -5717,19 +5740,18 @@ function syncAutoActions() {
           (gT.parfums || []).forEach(pp => {
             if (!pp.id || pp.s === 'SORTI') return;
             if (pfIds && !pfIds.includes(pp.id)) return;
+            if ((op._testeursExclus || []).includes(pp.id)) return; // retiré à la main par Fabien
             cibles.push({ g: gT, p: pp });
           });
         });
       }
       cibles.forEach(c => {
-        const tid = 'TST-OP-' + op.id + '-' + c.p.id;
-        if (_deletedIds.has(tid)) return;                 // retrait manuel : respecté
-        if (testeursLiq.some(x => x.id === tid)) return;  // déjà en place
+        if (testeursLiq.some(x => x.opId === op.id && x.parfumId === c.p.id && !_deletedIds.has(x.id))) return; // déjà en place
         // Déjà en ÉVÈNEMENTIEL (autre OP / manuel) → pas de doublon d'emplacement Extra.
         // Déjà testeur NORMAL → on crée quand même : c'est un EMPRUNT (« prendre le
         // testeur de l'emplacement #X », 2026-08-04) — le flacon existe, il voyage.
         if (_testeurUniques().some(e => e.zone === 'EXTRA' && e.key === _testeurKeyDe(c.g, c.p))) return;
-        testeursLiq.push({ id: tid, gammeId: c.g.id, parfumId: c.p.id, extra: true, opId: op.id, _ts: _nowTst, _adminTs: _nowTst });
+        testeursLiq.push({ id: 'TST-OP-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), gammeId: c.g.id, parfumId: c.p.id, extra: true, opId: op.id, _ts: _nowTst, _adminTs: _nowTst });
         _tstOpChanged = true;
         console.log('[TESTEUR-OP] + ' + (c.g.marque || '') + ' ' + (c.g.gamme || '') + ' · ' + (c.p.n || '') + ' → EXTRA (' + op.id + ')');
       });
