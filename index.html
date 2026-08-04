@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 15:53</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:02</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4520,6 +4520,15 @@ function getActionSteps(typeOrAction) {
   // 2026-08-03 : attente d'installation dynamique (date posée / sortie du remplacé, PAR
   // boutique) — closure sur l'ACTION, portée par le def « installe ». Toutes les surfaces
   // qui passent par statutEtape/compteurEtapes/stepBadgeAttente suivent sans autre code.
+  // 2026-08-04 (demande Fabien : « installer un produit à sortir quelque part SANS prix
+  // rouge ») : la pose vit AUSSI sur la ligne À sortir — champ additif a.poseEmplacement
+  // (setter setSortirPoseEmplacement, propagé aux sœurs parfum). L'étape apparaît en TÊTE
+  // (on déplace le produit, puis on écoule, puis on coupe). Jamais sur une reprise.
+  if (type === 'SORTIR' && typeof typeOrAction === 'object' && typeOrAction && typeOrAction.poseEmplacement
+      && typeOrAction.motifSortie !== 'REPRISE') {
+    const _lblPoseS = (EMPLACEMENT_META[typeOrAction.poseEmplacement] || {}).label || typeOrAction.poseEmplacement;
+    base.unshift({ key: 'pose', label: '📌 Poser → ' + _lblPoseS, nat: 'imm' });
+  }
   if (type === 'RENTRER' && typeof typeOrAction === 'object' && typeOrAction && typeOrAction.id) {
     const _aInst = typeOrAction;
     const _instDef = base.find(s => s.key === 'installe');
@@ -9284,6 +9293,30 @@ function setDateInstallation(actionId, val) {
     }
   }
   if (typeof logAction === 'function') logAction('Date d\'installation', _logActionLabel(actionId) + ' → ' + (v ? fmtFR(v) : 'effacée (dès réception)'));
+  saveData(); try { renderDashboard(); } catch (e) {}
+}
+// ── 📌 Pose sur la ligne À SORTIR (2026-08-04) : « ce produit à sortir part au bac à
+// fouille » SANS créer d'OP. Champ additif a.poseEmplacement ; choix de GAMME propagé
+// aux lignes parfum sœurs (portée canonique). Retirer l'emplacement retire l'étape
+// (les clés orphelines sont purgées par ensureActionSteps) — refusé si une boutique a
+// déjà coché la pose (ne jamais jeter du travail fait).
+function setSortirPoseEmplacement(actionId, val) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const a = actions.find(x => x.id === actionId);
+  if (!a || a.type !== 'SORTIR' || a.motifSortie === 'REPRISE') return;
+  const v = val || null;
+  const _portee = (typeof _dispatchPorteeGamme === 'function') ? _dispatchPorteeGamme(a) : [a];
+  if (!v) {
+    const _dejaCochee = _portee.some(x => SHOPS.some(sh => { const st = x.etats && x.etats[sh]; return st && st.steps && st.steps.pose === true; }));
+    if (_dejaCochee) { pvAlert('Une boutique a déjà coché la pose — décoche-la d\'abord si le retrait est vraiment voulu.'); return; }
+  }
+  const _now = new Date().toISOString();
+  _portee.forEach(x => {
+    if (v) x.poseEmplacement = v; else delete x.poseEmplacement;
+    x._ts = _now; x._adminTs = _now;
+    ensureActionSteps(x); // ajoute la clé « pose » à false (ou la purge au retrait)
+  });
+  if (typeof logAction === 'function') logAction('Pose du produit (ligne À sortir)', _logActionLabel(actionId) + ' → ' + (v ? ((EMPLACEMENT_META[v] || {}).label || v) : 'étape retirée'));
   saveData(); try { renderDashboard(); } catch (e) {}
 }
 // Badge canonique 📌 (règle 8) — étiquette « installation le … » sur les lignes/groupes.
@@ -20151,10 +20184,20 @@ function renderDashboard() {
           <button onclick="event.stopPropagation(); openVitrineDialogFromRentrer('${a.id}')" style="padding:3px 9px; font-size:10.5px; font-weight:700; background:#38bdf815; color:#38bdf8; border:1px solid #38bdf850; border-radius:3px; cursor:pointer; display:inline-flex; align-items:center; gap:4px;">${isLiq ? '💧 Étiquette étagère' : '🪟 Étiquette vitrine'}</button>
         </div>` : ''));
         // Compactage 2026-07-18 : mêmes règles que la zone RENTRER (segments qui partagent les lignes).
+        // 📌 Pose sur la ligne (2026-08-04, demande Fabien) : déplacer le produit à sortir
+        // quelque part SANS prix rouge — étape « Poser → X » par boutique.
+        const poseSortirBlock = (_estReprise || !(typeof isAdmin === 'function' && isAdmin())) ? '' : `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+          <span style="font-size:10px; color:#64748b;">📌 Poser / déplacer à :</span>
+          <select onclick="event.stopPropagation()" onchange="setSortirPoseEmplacement('${a.id}', this.value || null)" title="Ajoute une étape « Poser → emplacement » par boutique sur cette ligne À sortir (ex : bac à fouille) — sans créer d'OP." style="padding:2px 6px; font-size:11px; background:#1e293b; border:1px solid ${a.poseEmplacement ? '#f472b660' : '#475569'}; color:${a.poseEmplacement ? '#f9a8d4' : '#cbd5e1'}; border-radius:3px;">
+            <option value="">— pas d'étape de pose —</option>
+            ${EMPLACEMENTS_PHYSIQUES.map(e => `<option value="${e.key}" ${a.poseEmplacement === e.key ? 'selected' : ''}>${e.label}</option>`).join('')}
+          </select>
+          ${isLiq ? '<span style="font-size:9px; color:#64748b; font-style:italic;">appliquée aux parfums de la gamme</span>' : ''}
+        </div>`;
         return `<div style="display:flex; flex-wrap:wrap; gap:6px 26px; align-items:center; margin-bottom:6px; padding-bottom:6px; border-bottom:1px dashed #33415580;">`
           + parfumsListing + remplParBlock + (picker ? `<div style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
           ${picker}
-        </div>` : '') + prixRougeField + etiqSortirBlock + `</div>`;
+        </div>` : '') + poseSortirBlock + prixRougeField + etiqSortirBlock + `</div>`;
       })() : ''}
       ${a.type === 'MISE_EN_PLACE' && !isLiq ? (() => {
         // Pendant la MEP on peut choisir d'accompagner par une OP de mise en avant / nouveauté / etc.
