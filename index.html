@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 18:16</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 18:20</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3211,6 +3211,23 @@ function _vieOpLigneGroupes(op) {
     if (f === 'returnActionId' || !op[f]) return;
     push([actions.find(a => a.id === op[f])]);
   });
+  // 2026-08-04 (retour Fabien, cas Coolfire Z60 : PR née d'un relevé SANS lien vers la
+  // ligne À sortir — le non-lien est VOLONTAIRE, le poser déclencherait les fermetures
+  // de destockage, cf. suite 46 15:44) : la VIE du produit ne s'arrête pas aux liens
+  // explicites. Les lignes OUVERTES du même produit, au périmètre parfum de l'OP,
+  // entrent aussi dans la liste — cycle en cours seulement (jamais une vieille ligne
+  // close, leçon M100), reprises fournisseur exclues (le carton n'est pas la vie en rayon).
+  const _pidVie = (op.produitIds || [])[0];
+  if (_pidVie) {
+    const _pfVie = op.produitParfumId ? [op.produitParfumId]
+      : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+    ['SORTIR', 'RENTRER', 'PRIX', 'MISE_EN_PLACE'].forEach(t => {
+      push(actions.filter(a => a.type === t && a.produitId === _pidVie
+        && !a.annulee && !a._archived && !a.dateCloture
+        && a.motifSortie !== 'REPRISE'
+        && (!_pfVie || !a.produitParfumId || _pfVie.includes(a.produitParfumId))));
+    });
+  }
   return groupes;
 }
 // Les étapes des lignes liées SANS miroir sur la carte — celles qui manquaient à
