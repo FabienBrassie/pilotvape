@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:27</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:39</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2772,6 +2772,53 @@ function _maillonPrEtiquetteGenerique(op, shop, defs) {
   defs.push({ key: 'pr_posee',     label: '🔴 Étiquette prix rouge posée', kind: 'coup_pr', nat: 'cond', condKey: 'pr_etiquette', condLabel: 'après impression' });
 }
 
+// ── 🏷️ Étiquette NOUVEAUTÉ (règle métier énoncée par Fabien, 2026-08-04 17:30) : « il
+// faut une étiquette si un produit est nouveau — sauf si c'est un parfum d'une gamme
+// déjà en offre (il y a déjà une étiquette pour la gamme sur les étagères liquides) ».
+// Deux étapes génériques sur les OP NOUVEAUTE/EXCLU sans pièce étiquette : imprimer
+// (phase 3) puis poser (phase 5, après le prix Swappy — l'ordre canonique place tout).
+// Grand-père : pas d'apparition rétroactive sur une OP déjà TERMINÉE (sauf coches déjà
+// présentes — sinon ensureOpSteps purgerait l'historique).
+function _opEtiquetteNouveauteRequise(op) {
+  if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return false;
+  if ((op.pieces || []).some(p => p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')) return false;
+  const pid = (op.produitIds || [])[0];
+  if (!pid) return false;
+  const g = baseLiq.find(l => l.id === pid);
+  if (g) {
+    const pfIds = op.produitParfumId ? [op.produitParfumId]
+      : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+    if (pfIds) {
+      // Parfum(s) d'une gamme DÉJÀ EN OFFRE → l'étiquette étagère de la gamme existe déjà
+      const _dejaEnOffre = (g.parfums || []).some(p => !pfIds.includes(p.id)
+        && p.s !== 'SORTI' && p.s !== 'A_RENTRER' && p.s !== 'EN_ATTENTE');
+      if (_dejaEnOffre) return false;
+    }
+  }
+  const _dejaCochee = SHOPS.some(sh => {
+    const st = op.etats && op.etats[sh] && op.etats[sh].steps;
+    return st && (st.etiq_nvx_imprimee === true || st.etiq_nvx_posee === true);
+  });
+  if (!_dejaCochee && typeof opTimeStatus === 'function' && opTimeStatus(op) === 'TERMINEE') return false;
+  if (!_dejaCochee) {
+    // Grand-père bis : si l'installation est DÉJÀ réglée partout (lignes rentrer closes
+    // ou faites), l'étiquette a été faite avec l'installation d'avant la règle — pas de
+    // travail rétroactif (une OP 100 % validée ne doit pas ressquatter « À installer »).
+    const _pfs = (typeof opRentrerParfumActions === 'function') ? opRentrerParfumActions(op) : [];
+    const _lines = _pfs.length ? _pfs
+      : (op.rentrerActionId ? actions.filter(a => a.id === op.rentrerActionId && !a.annulee) : []);
+    if (_lines.length && _lines.every(a => a.dateCloture
+        || SHOPS.every(sh => a.etats && a.etats[sh] && a.etats[sh].done === true))) return false;
+  }
+  return true;
+}
+function _maillonEtiquetteNouveaute(op, shop, defs) {
+  const pid = (op.produitIds || [])[0];
+  const _lbl = baseLiq.some(l => l.id === pid) ? 'Étiquette étagère' : (baseKits.some(k => k.id === pid) ? 'Étiquette FT' : 'Étiquette');
+  defs.push({ key: 'etiq_nvx_imprimee', label: '🏷️ ' + _lbl + ' imprimée', kind: 'etiq_nvx', nat: 'imm' });
+  defs.push({ key: 'etiq_nvx_posee', label: '🏷️ ' + _lbl + ' posée en rayon', kind: 'etiq_nvx', nat: 'cond', condKey: 'etiq_nvx_imprimee', condLabel: 'après impression' });
+}
+
 // Non-COUP avec commanderProduits (sans rentrerActionId fanfare). COUP : rentrer_*/sortir_* plus bas (avec PR entre les deux).
 function _maillonProdCommande(op, shop, defs) {
     if (op.commandeAdmin === true) {
@@ -2955,6 +3002,7 @@ const OP_STEP_CHAIN = [
   { id: 'plv_pose',        when: op => (op.pieces || []).length > 0, gen: _maillonPlvPose },
   { id: 'pr_etiquette_gen', when: op => !!(op.type === 'PRIX_ROUGE' && typeof op.prixRouge === 'number' && op.prixRouge > 0
       && !(op.pieces || []).some(p => p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')), gen: _maillonPrEtiquetteGenerique },
+  { id: 'etiq_nouveaute',   when: op => _opEtiquetteNouveauteRequise(op), gen: _maillonEtiquetteNouveaute },
   { id: 'swappy_meca',     when: op => !!(op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE'), gen: _maillonSwappyMeca },
   { id: 'coup',            when: op => op.type === 'COUP', gen: _maillonCoup },
   { id: 'fin_op',          when: op => !!(op.dateFin && op.dateFin <= ymd(new Date())), gen: _maillonFinOp },
@@ -2992,7 +3040,22 @@ function computeOpShopStepDefs(op, shop) {
       defs.splice(_iRec() + 1, 0, dPose);
     }
   });
-  return defs;
+  // ORDRE CANONIQUE DE LA VIE (énoncé par Fabien, 2026-08-04 17:30) : commande →
+  // réception → étiquette imprimée → prix Swappy → pose (étiquette posée + produit
+  // installé) → sortie → fin/désinstallation. Tri STABLE par phase (_viePhaseDef) :
+  // les CLÉS et les conditions ne changent pas — seul l'ORDRE D'AFFICHAGE ; à
+  // l'intérieur d'une même phase, l'ordre des maillons est conservé. Une étape non
+  // classée hérite de la phase de la précédente (les blocs restent groupés).
+  const _phTri = [];
+  defs.forEach((d, i) => {
+    let p = 0;
+    try { p = _viePhaseDef(d, op); } catch (e) {}
+    if (!p) p = i > 0 ? _phTri[i - 1] : 1;
+    _phTri.push(p);
+  });
+  const _ordTri = defs.map((d, i) => i);
+  _ordTri.sort((x, y) => _phTri[x] - _phTri[y] || x - y);
+  return _ordTri.map(i => defs[i]);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -3004,17 +3067,20 @@ function computeOpShopStepDefs(op, shop) {
 // domicile (le clic écrit via toggleActionStep, LE toggle canonique de la
 // ligne), les compteurs d'OP existants ne comptent QUE les étapes de l'OP —
 // rien ne bouge côté données, merge, cascades.
-// La chaîne de vie canonique (phases) : 1 commande · 2 réception ·
-// 3 installation/pose · 4 prix/étiquette · 5 swappy · 6 sortie · 7 fin/désinstallation.
+// La chaîne de vie canonique (phases) — ORDRE ÉNONCÉ PAR FABIEN (2026-08-04 17:30) :
+// 1 commande · 2 réception · 3 étiquette IMPRIMÉE · 4 prix modifié Swappy ·
+// 5 pose/installation (étiquette posée + produit installé) · 6 sortie (réappro
+// coupée, désactivé) · 7 fin/désinstallation.
 // ═══════════════════════════════════════════════════════════════════════════
 function _viePhaseActionStep(type, key) {
   if (key === 'commande') return 1;
   if (key === 'recu' || key === 'recu_retro') return 2;
-  if (key === 'installe' || key === 'pose' || key === 'monte' || key === 'testeur_fait') return 3;
-  if (key === 'etiquette' || key === 'rayon') return 4;
-  if (key === 'swappy') return 5;
+  if (key === 'etiquette') return 3; // imprimée
+  if (key === 'swappy') return 4;
+  if (key === 'rayon') return 5; // étiquette changée en rayon = pose
+  if (key === 'installe' || key === 'pose' || key === 'monte' || key === 'testeur_fait') return 5;
   if (type === 'SORTIR' || type === 'RETRO_ENVOI' || type === 'RETRO_RECEPTION') return 6; // vendu, swappyOff, reprise…
-  return 5;
+  return 4;
 }
 // Phase d'une étape d'OP (defs de computeOpShopStepDefs). 0 = non classée →
 // elle hérite de la phase de l'étape précédente (l'ordre existant fait foi,
@@ -3024,14 +3090,9 @@ function _viePhaseDef(def, op) {
   if (def.actionStep) return _viePhaseActionStep(kind === 'coup_sortir' ? 'SORTIR' : 'RENTRER', def.actionStep);
   if (kind === 'prod') return k === 'prod_commandee' ? 1 : 2;
   if (/^plv_.+_recue$/.test(k)) return 2;
-  if (/^plv_.+_imprimee$/.test(k)) return 4;
-  if (/^plv_.+_posee$/.test(k)) {
-    const pid = k.slice(4, -6);
-    const p = ((op && op.pieces) || []).find(x => x.id === pid);
-    return (p && (p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')) ? 4 : 3;
-  }
-  if (k === 'pr_etiquette' || k === 'pr_posee') return 4;
-  if (k === 'swappy' || k === 'pr_swappy') return 5;
+  if (/^plv_.+_imprimee$/.test(k) || k === 'pr_etiquette' || k === 'etiq_nvx_imprimee') return 3; // imprimer
+  if (k === 'swappy' || k === 'pr_swappy') return 4; // prix en caisse
+  if (/^plv_.+_posee$/.test(k) || k === 'pr_posee' || k === 'etiq_nvx_posee') return 5; // poser (étiquette ET produit)
   if (kind === 'desinstall') return 7;
   return 0;
 }
@@ -4158,9 +4219,11 @@ const ACTION_STEPS = {
   // 🧪 Changement de malette de testeurs (2026-08-03) : une seule étape par boutique —
   // le libellé est spécialisé par getActionSteps selon testeurOp (INSTALLER/RETIRER/REMPLACER).
   TESTEUR:       [{ key: 'testeur_fait', label: 'Malette mise à jour', nat: 'imm' }],
+  // Ordre canonique de la vie (Fabien, 2026-08-04) : imprimer → prix Swappy → poser
+  // en rayon. Clés inchangées (coches préservées), seul l'ordre d'affichage change.
   PRIX:          [{ key: 'etiquette', label: 'Étiquette faite', nat: 'imm' },
-                  { key: 'rayon',     label: 'Changée en rayon', nat: 'imm' },
-                  { key: 'swappy',    label: 'Mis à jour sur Swappy', nat: 'imm' }],
+                  { key: 'swappy',    label: 'Mis à jour sur Swappy', nat: 'imm' },
+                  { key: 'rayon',     label: 'Changée en rayon', nat: 'imm' }],
   SWAP_COMPOSANT:[{ key: 'swap',      label: 'Composant changé sur le kit', nat: 'imm' },
                   { key: 'etiquette', label: 'Nouvelle étiquette imprimée', nat: 'imm' }],
   // ── Rétrocession inter-boutiques (chantier 2026-06-12, spéc classeur onglet Dispatch +
