@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:58</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 18:16</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2819,6 +2819,46 @@ function _maillonEtiquetteNouveaute(op, shop, defs) {
   defs.push({ key: 'etiq_nvx_posee', label: '🏷️ ' + _lbl + ' posée en rayon', kind: 'etiq_nvx', nat: 'cond', condKey: 'etiq_nvx_imprimee', condLabel: 'après impression' });
 }
 
+// ── 🗄️ TIROIR À PRIX ROUGE (demande Fabien, 2026-08-04 18:04) : « quand une boutique
+// garde en tiroir un produit à sortir avec un prix rouge, il faut une étape pour
+// remettre le prix normal — sinon le produit en tiroir est en prix rouge permanent. »
+// La réf reste commandable sur Swappy chez elle (c'est le sens du tiroir), donc son
+// prix Swappy resterait ROUGE pour toujours. Étape PAR BOUTIQUE (le maillon est généré
+// par boutique), uniquement chez celle(s) en tiroir — JAMAIS shuntée (exclue du shunt
+// écoulé et de l'auto-complétion : c'est précisément le travail de la boutique
+// « écoulée »), et elle maintient la carte visible chez elle tant qu'elle n'est pas faite.
+function _opTiroirPrixPourShop(op, sh) {
+  if (!op || !sh) return false;
+  if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return false;
+  if (!(typeof op.prixRouge === 'number' && op.prixRouge > 0)) return false;
+  const pid = (op.produitIds || [])[0];
+  if (!pid) return false;
+  const g = baseLiq.find(l => l.id === pid);
+  if (g) {
+    if (estCommandeClient(g, sh)) return true;
+    const pfIds = op.produitParfumId ? [op.produitParfumId]
+      : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+    const _pfs = pfIds ? (g.parfums || []).filter(p => pfIds.includes(p.id)) : (g.parfums || []);
+    return _pfs.some(p => estCommandeClient(p, sh));
+  }
+  const prod = baseKits.find(k => k.id === pid) || basePD.find(x => x.id === pid);
+  return prod ? estCommandeClient(prod, sh) : false;
+}
+// La boutique a-t-elle ENCORE ce travail à faire ? (sert au rendu : carte visible,
+// encadré pas grisé, tant que le prix normal n'est pas remis)
+function _opTiroirPrixRestant(op, sh) {
+  if (!_opTiroirPrixPourShop(op, sh)) return false;
+  const st = op.etats && op.etats[sh];
+  return !(st && st.steps && st.steps.tiroir_prix_normal === true);
+}
+function _maillonTiroirPrixNormal(op, shop, defs) {
+  if (!_opTiroirPrixPourShop(op, shop)) return;
+  const _pn = (typeof op.prixAvantRouge === 'number' && op.prixAvantRouge > 0)
+    ? ' (' + op.prixAvantRouge.toFixed(2).replace('.', ',') + ' €)' : '';
+  defs.push({ key: 'tiroir_prix_normal', kind: 'tiroir', nat: 'imm',
+    label: '🗄️ Réf gardée en tiroir : remettre le prix normal' + _pn + ' sur Swappy' });
+}
+
 // Non-COUP avec commanderProduits (sans rentrerActionId fanfare). COUP : rentrer_*/sortir_* plus bas (avec PR entre les deux).
 function _maillonProdCommande(op, shop, defs) {
     if (op.commandeAdmin === true) {
@@ -3005,6 +3045,7 @@ const OP_STEP_CHAIN = [
   { id: 'etiq_nouveaute',   when: op => _opEtiquetteNouveauteRequise(op), gen: _maillonEtiquetteNouveaute },
   { id: 'swappy_meca',     when: op => !!(op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE'), gen: _maillonSwappyMeca },
   { id: 'coup',            when: op => op.type === 'COUP', gen: _maillonCoup },
+  { id: 'tiroir_prix',     when: op => (op.type === 'PRIX_ROUGE' || op.type === 'COUP') && typeof op.prixRouge === 'number' && op.prixRouge > 0, gen: _maillonTiroirPrixNormal },
   { id: 'fin_op',          when: op => !!(op.dateFin && op.dateFin <= ymd(new Date())), gen: _maillonFinOp },
 ];
 
@@ -3145,6 +3186,7 @@ function _viePhaseDef(def, op) {
   if (/^plv_.+_imprimee$/.test(k) || k === 'pr_etiquette' || k === 'etiq_nvx_imprimee') return 3; // imprimer
   if (k === 'swappy' || k === 'pr_swappy') return 4; // prix en caisse
   if (/^plv_.+_posee$/.test(k) || k === 'pr_posee' || k === 'etiq_nvx_posee') return 5; // poser (étiquette ET produit)
+  if (kind === 'tiroir') return 7; // remettre le prix normal du tiroir : tout à la fin
   if (kind === 'desinstall') return 7;
   return 0;
 }
@@ -3909,9 +3951,11 @@ function ensureOpSteps(op) {
     // auto-cocher tous les steps (l'OP n'a pas de sens pour un shop sans stock).
     // Permet à l'OP de se clôturer quand les autres boutiques ont fini.
     if (_opProd && isProductGoneFromShop(_opProd, sh)) {
-      const hasUnchecked = defs.some(d => st.steps[d.key] !== true);
+      // 🗄️ tiroir (2026-08-04) : « remettre le prix normal » n'est JAMAIS auto-complété —
+      // c'est le seul travail restant de la boutique qui garde la réf.
+      const hasUnchecked = defs.some(d => d.kind !== 'tiroir' && st.steps[d.key] !== true);
       if (hasUnchecked) {
-        defs.forEach(d => { st.steps[d.key] = true; });
+        defs.forEach(d => { if (d.kind !== 'tiroir') st.steps[d.key] = true; });
         if (!st._autoCompleted) {
           st._autoCompleted = true;
           console.log('[OP-AUTO-COMPLETE]', op.id, op.type, '— produit absent de', sh, '→ steps auto-cochés');
@@ -7981,6 +8025,12 @@ function _reproposerEtapesEtiquettePR(op, ancienPrix, nouveauPrix) {
   // clés @n ; _clesEtapesEtiquettePR pointe la génération courante.
   const _now = new Date().toISOString();
   if (!Array.isArray(op.prixHist)) op.prixHist = [];
+  // Garde anti-double appel (attrapé le 04/08 18:08) : une PR groupée par parfum est
+  // trouvée par DEUX branches d'updateActionPrixRouge (lien sortirActionId ET groupe) —
+  // le MÊME changement ne doit empiler qu'UNE génération. Une transition identique à la
+  // dernière (même avant → même prix) ne peut pas être un vrai second changement.
+  const _dern = op.prixHist[op.prixHist.length - 1];
+  if (_dern && _dern.prix === nouveauPrix && _dern.avant === ancienPrix) return 0;
   op.prixHist.push({ prix: nouveauPrix, avant: ancienPrix, ts: _now });
   op._ts = _now; op._adminTs = _now;
   // n = coches d'HISTORIQUE conservées (l'alerte ne se montre que si du travail existait)
@@ -25194,6 +25244,23 @@ function pvCampagneFormulaire(campagneId, opIdsPreselected, opts) {
         <select id="_pvCampAddPieceOp" style="flex:1; min-width:160px; padding:4px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; font-size:11px;"></select>
         <span id="_pvCampAddPieceBtn" style="cursor:pointer; padding:4px 12px; background:#8b5cf6; color:#fff; border-radius:3px; font-size:11px; font-weight:700;">+ Ajouter la pièce</span>
       </div>
+    </div>
+    <!-- ── 📍 Pose en masse (2026-08-04, demande Fabien) : cocher un paquet de produits,
+         choisir l'endroit, appliquer — puis recommencer avec un autre paquet ailleurs. ── -->
+    <div style="border-top:1px solid #33415540; padding-top:12px; margin-top:14px;">
+      <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+        <span style="color:#94a3b8; font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;">📍 Pose en masse</span>
+        <span style="font-size:10px; color:#64748b;">coche un paquet de produits, choisis l'endroit, applique — recommence pour un autre paquet ailleurs</span>
+        <span id="_pvCampPoseAll" style="cursor:pointer; font-size:10px; color:#60a5fa; text-decoration:underline; margin-left:auto;">Tout cocher</span>
+        <span id="_pvCampPoseNone" style="cursor:pointer; font-size:10px; color:#94a3b8; text-decoration:underline;">Tout décocher</span>
+      </div>
+      <div id="_pvCampPoseList" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; padding:2px;"></div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px;">
+        <span style="font-size:10px; color:#94a3b8;">Poser la sélection à :</span>
+        <select id="_pvCampPoseEmpl" style="padding:4px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; font-size:11px;">${Object.keys(EMPLACEMENT_META).map(k => `<option value="${k}">${(EMPLACEMENT_META[k] || {}).label || k}</option>`).join('')}</select>
+        <span id="_pvCampPoseBtn" style="cursor:pointer; padding:4px 12px; background:#f472b6; color:#0f172a; border-radius:3px; font-size:11px; font-weight:700;">📍 Poser la sélection</span>
+        <span id="_pvCampPoseInfo" style="font-size:10px; color:#4ade80;"></span>
+      </div>
     </div>` : ''}
   `;
 
@@ -25322,6 +25389,52 @@ function pvCampagneFormulaire(campagneId, opIdsPreselected, opts) {
         _renderCampElems();
       });
       _renderCampElems();
+
+      // ── 📍 Pose en masse (2026-08-04, demande Fabien) — s'appuie sur setOpPoseProduit,
+      // LA canonique (pièce PRODUIT, migration intelligente, shunt hors stock immédiat).
+      const _renderCampPose = () => {
+        const box = overlay.querySelector('#_pvCampPoseList');
+        if (!box) return;
+        const _ids = [].slice.call(overlay.querySelectorAll('._pvCampOpCheck:checked')).map(cb => cb.value);
+        const _opsP = _ids.map(id => ops.find(o => o.id === id)).filter(Boolean).filter(o => !o._archived);
+        box.innerHTML = _opsP.length === 0
+          ? '<div style="color:#64748b; font-size:11px; padding:12px; text-align:center; font-style:italic;">Aucune OP rattachée à la campagne.</div>'
+          : _opsP.map(o => {
+            const d = getOpProductDisplay(o);
+            const pp = opPiecesProduit(o)[0];
+            let _cur = '';
+            if (pp && pp.affectations) {
+              const _sh = SHOPS.find(s => pp.affectations[s] && pp.affectations[s].emplacement);
+              if (_sh) _cur = ((EMPLACEMENT_META[pp.affectations[_sh].emplacement] || {}).label) || pp.affectations[_sh].emplacement;
+            }
+            const meta = OP_TYPE_META[o.type] || {};
+            return `<label style="display:flex; align-items:center; gap:8px; padding:3px 6px; border-radius:3px; cursor:pointer;" onmouseover="this.style.background='#33415530'" onmouseout="this.style.background='transparent'">
+              <input type="checkbox" class="_pvCampPoseCheck" value="${o.id}" style="accent-color:#f472b6;">
+              <span style="font-size:9px; padding:1px 6px; background:${meta.color || '#94a3b8'}25; color:${meta.color || '#94a3b8'}; border-radius:3px; font-weight:700;">${meta.label || o.type}</span>
+              <span style="font-size:11.5px; color:#e2e8f0;">${d.label || o.id}</span>
+              ${_cur ? `<span style="font-size:9.5px; color:#f9a8d4; margin-left:auto;">📍 ${_cur}</span>` : '<span style="font-size:9.5px; color:#64748b; margin-left:auto;">— pas encore posé</span>'}
+            </label>`;
+          }).join('');
+      };
+      const _poseBtn = overlay.querySelector('#_pvCampPoseBtn');
+      if (_poseBtn) _poseBtn.addEventListener('click', () => {
+        const sel = [].slice.call(overlay.querySelectorAll('._pvCampPoseCheck:checked')).map(cb => cb.value);
+        const empl = (overlay.querySelector('#_pvCampPoseEmpl') || {}).value;
+        if (!sel.length) { pvAlert('Coche au moins un produit à poser.'); return; }
+        if (!empl) { pvAlert('Choisis un endroit.'); return; }
+        let nOk = 0;
+        sel.forEach(id => { try { setOpPoseProduit(id, empl); nOk++; } catch (e) { console.error('[POSE-MASSE]', id, e); } });
+        const info = overlay.querySelector('#_pvCampPoseInfo');
+        if (info) info.textContent = '✓ ' + nOk + ' produit(s) → « ' + (((EMPLACEMENT_META[empl] || {}).label) || empl) + ' » — coche un autre paquet pour un autre endroit';
+        _renderCampPose();
+      });
+      const _poseAll = overlay.querySelector('#_pvCampPoseAll');
+      if (_poseAll) _poseAll.addEventListener('click', () => { overlay.querySelectorAll('._pvCampPoseCheck').forEach(cb => { cb.checked = true; }); });
+      const _poseNone = overlay.querySelector('#_pvCampPoseNone');
+      if (_poseNone) _poseNone.addEventListener('click', () => { overlay.querySelectorAll('._pvCampPoseCheck').forEach(cb => { cb.checked = false; }); });
+      // La liste des OPs rattachées peut changer en direct (coches du haut) → suivre.
+      overlay.addEventListener('change', e => { if (e.target && e.target.classList && e.target.classList.contains('_pvCampOpCheck')) _renderCampPose(); });
+      _renderCampPose();
     }
 
     function close(result) { overlay.remove(); resolve(result); }
@@ -28230,6 +28343,8 @@ function _shunterOpPrEpuisee() {
         // Les étapes miroir (coup_*, fanfare_rentrer, prod) vivent sur les ACTIONS —
         // on ne touche que les étapes portées par l'OP elle-même.
         if (def.kind === 'coup_rentrer' || def.kind === 'coup_sortir' || def.kind === 'fanfare_rentrer' || def.kind === 'prod') return;
+        // 🗄️ tiroir : c'est PRÉCISÉMENT le travail de la boutique « écoulée » — jamais shunté
+        if (def.kind === 'tiroir') return;
         if (!op.etats[sh]) op.etats[sh] = { done: false, dateFait: null, responsable: '', commentaire: '', steps: {} };
         const st = op.etats[sh];
         if (!st.steps) st.steps = {};
@@ -28562,8 +28677,10 @@ function renderOpCardHtml(op, options) {
     // Masquage "stock écoulé" (règle 2026-06-11) : en vue filtrée sur une boutique,
     // ou côté poste boutique connecté, la carte d'un destockage épuisé chez elle disparaît.
     const _shopVue = (options && options.shopFilter) || '';
-    if (_shopVue && _opPrEpuiseePourShop(op, _shopVue)) return '';
-    if (typeof isAdmin === 'function' && !isAdmin() && typeof currentShop !== 'undefined' && currentShop && _opPrEpuiseePourShop(op, currentShop)) return '';
+    // 🗄️ tiroir à prix rouge (2026-08-04) : tant que la boutique n'a pas remis le prix
+    // normal, SA carte reste visible malgré le « écoulé chez moi = invisible chez moi ».
+    if (_shopVue && _opPrEpuiseePourShop(op, _shopVue) && !_opTiroirPrixRestant(op, _shopVue)) return '';
+    if (typeof isAdmin === 'function' && !isAdmin() && typeof currentShop !== 'undefined' && currentShop && _opPrEpuiseePourShop(op, currentShop) && !_opTiroirPrixRestant(op, currentShop)) return '';
     return _renderOpCardHtmlInner(op, options);
   } catch (e) {
     console.error('[FILET] Carte OP illisible :', op && op.id, e);
@@ -28866,7 +28983,10 @@ function _renderOpCardHtmlInner(op, options) {
     // destockage soldé chez la boutique (_opPrEpuiseePourShop) — avant, seuls le statut
     // SORTI/parfum sorti grisaient l'encadré, et Mérignac/Langon restaient affichées
     // comme des boutiques « à faire » alors que tout y est coché d'office.
-    const _absentShop = _opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh); // périmètre OP (parfum compris) — 2026-07-28
+    // 🗄️ tiroir à prix rouge : tant que « remettre le prix normal » n'est pas fait chez
+    // elle, la boutique n'est PAS grisée (il lui reste ce travail précis).
+    const _absentShop = !_opTiroirPrixRestant(op, sh)
+      && (_opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh)); // périmètre OP (parfum compris) — 2026-07-28
     const nbDone = defs.filter(d => _getOpStepChecked(op, sh, d)).length;
     const allDone = defs.length > 0 && nbDone === defs.length;
     const _absentBadge = _absentShop
