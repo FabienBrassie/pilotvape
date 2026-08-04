@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 12:36</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 12:48</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3131,6 +3131,58 @@ function _testeurCreerAction(g, p, testeurOp, extraFields) {
   actions.push(a);
   return a;
 }
+// Retire UNE entrée précise de la malette (tombstone + ligne de travail boutique).
+// Canonique du retrait — utilisée par toggleTesteur (préférence Extra) et par le ✕ de la
+// vue Testeurs (pvRetirerTesteurEntry — cible exacte, indispensable pour les emprunts).
+function _testeurRetirerEntry(existing) {
+  const exG = existing.g, exP = existing.p;
+  const zoneEx = existing.zone;
+  const ordreEx = (typeof existing.t.ordre === 'number') ? existing.t.ordre : null;
+  // Emprunt (2026-08-04) : ce retrait d'Extra remet le flacon à son emplacement du plan.
+  const _empruntsAvant = _testeurEmprunts();
+  const _remise = (zoneEx === 'EXTRA' && _empruntsAvant[existing.key]) ? _empruntsAvant[existing.key].planNum : null;
+  _deletedIds.add(existing.t.id); // tombstone : le retrait se propage et ne ressuscite pas
+  testeursLiq = testeursLiq.filter(x => x.id !== existing.t.id);
+  logAction('Testeur retiré', (exG.marque || '') + ' ' + (exG.gamme || '') + ' · ' + (exP.n || '') + (_remise !== null ? ' (fin d\'emprunt → empl. ' + _remise + ')' : ''));
+  // ── Ligne de travail ──
+  const aOuverte = _testeurActionOuverte(a => a.produitId === exG.id && a.produitParfumId === exP.id && (a.testeurOp === 'INSTALLER' || a.testeurOp === 'REMPLACER'));
+  const _champsRetrait = { testeurOrdre: ordreEx !== null ? ordreEx : undefined, testeurZone: zoneEx };
+  if (_remise !== null) {
+    // FIN D'EMPRUNT : le testeur du PLAN reste en place — on ne touche JAMAIS à sa ligne
+    // de travail. S'il n'y a pas de ligne ouverte sur ce parfum, on crée la remise
+    // (« Remettre le testeur à son emplacement #X ») ; s'il y en a une (installation du
+    // plan encore en cours), le flacon n'a pas bougé : rien à remettre.
+    _champsRetrait.testeurRemiseEmpl = _remise;
+    if (!aOuverte) _testeurCreerAction(exG, exP, 'RETIRER', _champsRetrait);
+    return;
+  }
+  if (aOuverte) {
+    // L'installation n'a pas abouti : on annule la ligne. Si des coches existaient
+    // (posé quelque part), il faut le faire retirer ; sinon annulation silencieuse.
+    const _coche = _testeurActionCochee(aOuverte);
+    const _op = aOuverte.testeurOp;
+    _cancelAction(aOuverte);
+    if (_op === 'REMPLACER' && aOuverte.testeurAncienGammeId) {
+      // Le remplacement n'aura pas lieu : l'ANCIEN doit quand même sortir de la malette.
+      const agR = baseLiq.find(x => x.id === aOuverte.testeurAncienGammeId);
+      const apR = agR && (agR.parfums || []).find(x => x.id === aOuverte.testeurAncienParfumId);
+      if (agR && apR) _testeurCreerAction(agR, apR, 'RETIRER', { testeurOrdre: (typeof aOuverte.testeurOrdre === 'number' ? aOuverte.testeurOrdre : undefined), testeurZone: aOuverte.testeurZone });
+    }
+    if (_coche) _testeurCreerAction(exG, exP, 'RETIRER', _champsRetrait);
+  } else {
+    // Testeur en place → le faire retirer (ou remettre à son emplacement) par les boutiques
+    _testeurCreerAction(exG, exP, 'RETIRER', _champsRetrait);
+  }
+}
+function pvRetirerTesteurEntry(tid) {
+  if (!isAdmin()) { pvAlert('La sélection des testeurs est faite par Fabien.'); return; }
+  const e = _testeurEntries().find(x => x.t.id === tid);
+  if (!e) return;
+  _testeurRetirerEntry(e);
+  saveData();
+  renderLiqAll();
+  try { if (typeof renderDashboard === 'function') renderDashboard(); } catch (err) {}
+}
 // Coche/décoche un parfum comme testeur (admin seul). Quota de zone vérifié à l'ajout
 // (EXTRA : souple, pas de quota). Chaque changement produit sa ligne de travail boutique.
 function toggleTesteur(gId, parfumId) {
@@ -3140,33 +3192,12 @@ function toggleTesteur(gId, parfumId) {
   const _now = new Date().toISOString();
   const entries = _testeurEntries();
   const key = _testeurKeyDe(g, p);
-  const existing = entries.find(e => e.key === key);
+  // Un jus peut vivre dans le plan ET en Extra (emprunt) : le 🧪 retire d'abord
+  // l'ÉVÈNEMENTIEL (fin d'emprunt), un second clic retire le testeur du plan.
+  const _matches = entries.filter(e => e.key === key);
+  const existing = _matches.find(e => e.zone === 'EXTRA') || _matches[0];
   if (existing) {
-    const exG = existing.g, exP = existing.p;
-    const zoneEx = existing.zone;
-    const ordreEx = (typeof existing.t.ordre === 'number') ? existing.t.ordre : null;
-    _deletedIds.add(existing.t.id); // tombstone : le retrait se propage et ne ressuscite pas
-    testeursLiq = testeursLiq.filter(x => x.id !== existing.t.id);
-    logAction('Testeur retiré', (exG.marque || '') + ' ' + (exG.gamme || '') + ' · ' + (exP.n || ''));
-    // ── Ligne de travail ──
-    const aOuverte = _testeurActionOuverte(a => a.produitId === exG.id && a.produitParfumId === exP.id && (a.testeurOp === 'INSTALLER' || a.testeurOp === 'REMPLACER'));
-    if (aOuverte) {
-      // L'installation n'a pas abouti : on annule la ligne. Si des coches existaient
-      // (posé quelque part), il faut le faire retirer ; sinon annulation silencieuse.
-      const _coche = _testeurActionCochee(aOuverte);
-      const _op = aOuverte.testeurOp;
-      _cancelAction(aOuverte);
-      if (_op === 'REMPLACER' && aOuverte.testeurAncienGammeId) {
-        // Le remplacement n'aura pas lieu : l'ANCIEN doit quand même sortir de la malette.
-        const agR = baseLiq.find(x => x.id === aOuverte.testeurAncienGammeId);
-        const apR = agR && (agR.parfums || []).find(x => x.id === aOuverte.testeurAncienParfumId);
-        if (agR && apR) _testeurCreerAction(agR, apR, 'RETIRER', { testeurOrdre: (typeof aOuverte.testeurOrdre === 'number' ? aOuverte.testeurOrdre : undefined), testeurZone: aOuverte.testeurZone });
-      }
-      if (_coche) _testeurCreerAction(exG, exP, 'RETIRER', { testeurOrdre: ordreEx !== null ? ordreEx : undefined, testeurZone: zoneEx });
-    } else {
-      // Testeur en place → le faire retirer par les boutiques
-      _testeurCreerAction(exG, exP, 'RETIRER', { testeurOrdre: ordreEx !== null ? ordreEx : undefined, testeurZone: zoneEx });
-    }
+    _testeurRetirerEntry(existing);
   } else {
     const zone = testeurZoneDe(g, p);
     if (!zone) { pvAlert('Ce parfum n\'a pas de catégorie de goût exploitable (ou « De_Tout »).\nPose d\'abord son goût (Fruité, Menthe…) sur le parfum ou la gamme — la malette est rangée par catégorie.'); return; }
@@ -3212,10 +3243,19 @@ function pvAjouterTesteurExtra(inputEl) {
   inputEl.value = '';
   const g = baseLiq.find(x => x.id === ids.g); if (!g) return;
   const p = (g.parfums || []).find(x => x.id === ids.p); if (!p) return;
-  if (estTesteur(g, p)) { pvAlert((p.n || 'Ce parfum') + ' est déjà dans la malette.'); return; }
+  // Déjà en ÉVÈNEMENTIEL → doublon refusé. Déjà testeur NORMAL → autorisé : c'est un
+  // EMPRUNT (« prendre le testeur de l'emplacement #X », 2026-08-04) — les deux lignes
+  // se référencent mutuellement dans la vue.
+  const _keyX = _testeurKeyDe(g, p);
+  if (_testeurUniques().some(e => e.zone === 'EXTRA' && e.key === _keyX)) { pvAlert((p.n || 'Ce parfum') + ' est déjà dans les testeurs évènementiels.'); return; }
   const _now = new Date().toISOString();
   testeursLiq.push({ id: 'TST-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), gammeId: g.id, parfumId: p.id, extra: true, _ts: _now, _adminTs: _now });
-  _testeurCreerAction(g, p, 'INSTALLER', { testeurZone: 'EXTRA' });
+  // Ligne de travail : seulement s'il n'y a PAS déjà une ligne TESTEUR ouverte sur ce
+  // parfum (invariant ≤1 non annulée par parfum — un emprunt d'un testeur du plan porte
+  // son instruction sur la vue : « Prendre le testeur de l'emplacement #X »).
+  if (!_testeurActionOuverte(a => a.produitId === g.id && a.produitParfumId === p.id)) {
+    _testeurCreerAction(g, p, 'INSTALLER', { testeurZone: 'EXTRA' });
+  }
   logAction('Testeur ajouté (Extra)', (g.marque || '') + ' ' + (g.gamme || '') + ' · ' + (p.n || ''));
   saveData();
   renderLiqAll();
@@ -5685,7 +5725,10 @@ function syncAutoActions() {
         const tid = 'TST-OP-' + op.id + '-' + c.p.id;
         if (_deletedIds.has(tid)) return;                 // retrait manuel : respecté
         if (testeursLiq.some(x => x.id === tid)) return;  // déjà en place
-        if (estTesteur(c.g, c.p)) return;                 // déjà dans la malette par ailleurs
+        // Déjà en ÉVÈNEMENTIEL (autre OP / manuel) → pas de doublon d'emplacement Extra.
+        // Déjà testeur NORMAL → on crée quand même : c'est un EMPRUNT (« prendre le
+        // testeur de l'emplacement #X », 2026-08-04) — le flacon existe, il voyage.
+        if (_testeurUniques().some(e => e.zone === 'EXTRA' && e.key === _testeurKeyDe(c.g, c.p))) return;
         testeursLiq.push({ id: tid, gammeId: c.g.id, parfumId: c.p.id, extra: true, opId: op.id, _ts: _nowTst, _adminTs: _nowTst });
         _tstOpChanged = true;
         console.log('[TESTEUR-OP] + ' + (c.g.marque || '') + ' ' + (c.g.gamme || '') + ' · ' + (c.p.n || '') + ' → EXTRA (' + op.id + ')');
@@ -16449,12 +16492,38 @@ function _testeurJumeaux(key) {
 function _testeurUniques() {
   const seen = new Set();
   return _testeurEntries()
-    .filter(e => { if (seen.has(e.key)) return false; seen.add(e.key); return true; })
+    .filter(e => {
+      // Dédoublonnage par jus DANS CHAQUE MONDE (2026-08-04, demande Fabien) : plan (zones
+      // goût) et ÉVÈNEMENTIEL séparés — un testeur normal peut AUSSI vivre en Extra : c'est
+      // un EMPRUNT (« prendre le testeur de l'emplacement #X »), cf. _testeurEmprunts().
+      const k = e.key + '|' + (e.zone === 'EXTRA' ? 'X' : 'P');
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    })
     .sort((a, b) => {
       const oa = typeof a.t.ordre === 'number' ? a.t.ordre : 1e9;
       const ob = typeof b.t.ordre === 'number' ? b.t.ordre : 1e9;
       return (oa - ob) || (a.pos - b.pos);
     });
+}
+// Les EMPRUNTS (canonique) : jus présents À LA FOIS dans une zone du plan ET en Extra —
+// le flacon est PRIS à son emplacement normal le temps de l'évènementiel. Retourne
+// { clé → { planNum, extraNum } } (numéros d'emplacement des deux côtés).
+function _testeurEmprunts() {
+  const uniques = _testeurUniques();
+  const parCle = {};
+  TESTEUR_ZONES.forEach(z => {
+    uniques.filter(e => e.zone === z.key).forEach((e, i) => {
+      const s = (parCle[e.key] = parCle[e.key] || {});
+      if (z.key === 'EXTRA') s.extraNum = z.start + i; else s.planNum = z.start + i;
+    });
+  });
+  const out = {};
+  Object.keys(parCle).forEach(k => {
+    if (typeof parCle[k].planNum === 'number' && typeof parCle[k].extraNum === 'number') out[k] = parCle[k];
+  });
+  return out;
 }
 // ── Drag & drop des emplacements (2026-08-03, demande Fabien : « prendre le parfum en
 // n°1 et le bouger en n°5, les présents se décalent ») — DANS une zone uniquement
@@ -16506,6 +16575,8 @@ function renderVueTesteurs() {
   const admin = isAdmin();
   const uniques = _testeurUniques();
   const _seenKeys = new Set(uniques.map(e => e.key));
+  // Emprunts (2026-08-04) : renvois croisés plan ↔ évènementiel avec les numéros.
+  const _emprunts = _testeurEmprunts();
   // Le compteur X/45 ne compte QUE le plan réseau — l'EXTRA (événementiel) est hors plan.
   const totalPlan = uniques.filter(e => e.zone && e.zone !== 'EXTRA').length;
   const totalExtra = uniques.filter(e => e.zone === 'EXTRA').length;
@@ -16585,15 +16656,25 @@ function renderVueTesteurs() {
     const t50 = twins.find(t => t.g.format === '50mL');
     const mmlAff = t50 ? _testeurMargeMl(t50.g, t50.p) : Math.max(...twins.map(t => _testeurMargeMl(t.g, t.p)), 0);
     const mdd = _testeurEstMDD(e.g);
+    // Emprunt (2026-08-04) : renvois croisés avec numéros — côté Extra « Prendre le
+    // testeur de l'emplacement #X », côté plan « utilisé en évènementiel #Y ».
+    const _emp = _emprunts[e.key];
+    let _empBadge = '';
+    if (_emp && e.zone === 'EXTRA') {
+      _empBadge = `<span style="font-size:9px; padding:1px 6px; background:#f59e0b18; color:#fbbf24; border:1px solid #f59e0b50; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;" title="Ce jus est déjà testeur au plan : pas de nouveau flacon à remplir — on déplace celui de l'emplacement ${String(_emp.planNum).padStart(2, '0')}">📍 Prendre le testeur de l'empl. ${String(_emp.planNum).padStart(2, '0')}</span>`;
+    } else if (_emp && e.zone !== 'EXTRA') {
+      _empBadge = `<span style="font-size:9px; padding:1px 6px; background:#b23a4820; color:#f0a5ae; border:1px solid #b23a4860; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;" title="Le flacon de cet emplacement est parti en évènementiel (Extra #${_emp.extraNum}) — il reviendra ici à la fin">🎪 utilisé en évènementiel #${_emp.extraNum}</span>`;
+    }
     return `<div${dragAttrs} style="display:flex; gap:8px; align-items:center; padding:2px 6px; border-bottom:1px solid #1e293b60;${admin ? ' cursor:grab;' : ''}">
       ${admin ? `<span style="font-size:10px; color:#475569; flex-shrink:0; user-select:none;" title="Glisser pour déplacer dans la zone">⠿</span>` : ''}${numBadge}
       <span style="font-size:10px; color:#94a3b8; width:88px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex-shrink:0;">${e.g.marque}</span>
       <span style="font-size:11px; color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"><b>${e.p.n || '(sans nom)'}</b> <span style="color:#64748b; font-size:9px;">· ${e.g.gamme}</span></span>
+      ${_empBadge}
       ${mdd ? `<span style="font-size:8px; padding:1px 4px; background:#a78bfa20; color:#c4b5fd; border:1px solid #a78bfa50; border-radius:2px; font-weight:700; flex-shrink:0;">MDD</span>` : ''}
       <span style="margin-left:auto; display:flex; gap:4px; align-items:center; flex-shrink:0;">
         ${fmts.map(f => `<span style="font-size:8px; padding:1px 4px; background:${(LIQ_FORMAT_COLORS[f] || '#64748b')}20; color:${LIQ_FORMAT_COLORS[f] || '#94a3b8'}; border-radius:2px;">${LIQ_FORMAT_LABELS[f] || f}</span>`).join('')}
         <span style="font-size:9px; color:#4ade80; font-weight:600;" title="Marge par mL — celle du 50 mL si la déclinaison existe, sinon la meilleure de la déclinaison">${mmlAff.toFixed(2)}/mL</span>
-        ${admin ? `<span onclick="toggleTesteur('${e.g.id}','${e.p.id}')" style="cursor:pointer; color:#ef4444; font-size:11px; font-weight:700; padding:0 4px;" title="Retirer de la malette">✕</span>` : ''}
+        ${admin ? `<span onclick="pvRetirerTesteurEntry('${e.t.id}')" style="cursor:pointer; color:#ef4444; font-size:11px; font-weight:700; padding:0 4px;" title="Retirer CETTE ligne de la malette${_emp && e.zone === 'EXTRA' ? ' (fin d\'emprunt : le flacon revient à l\'empl. ' + String(_emp.planNum).padStart(2, '0') + ')' : ''}">✕</span>` : ''}
       </span>
     </div>`;
   };
@@ -16678,6 +16759,7 @@ function _renderTesteurActionCard(a, fShop) {
   const zoneChip = zMeta ? `<span style="font-size:8.5px; padding:1px 5px; background:${zMeta.color}22; color:${zMeta.color}; border:1px solid ${zMeta.color}60; border-radius:2px; font-weight:700;">${zMeta.label}</span>` : '';
   let libelle;
   if (a.testeurOp === 'REMPLACER') libelle = `Remplacer le testeur <b>${a.testeurAncienNom || '?'}</b>${a.testeurAncienMarque ? ` <span style="color:#64748b; font-size:9.5px;">(${a.testeurAncienMarque})</span>` : ''} par <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
+  else if (a.testeurOp === 'RETIRER' && typeof a.testeurRemiseEmpl === 'number') libelle = `Remettre le testeur <b>${nom}</b> à son emplacement <b>${String(a.testeurRemiseEmpl).padStart(2, '0')}</b> <span style="color:#64748b; font-size:9.5px;">(fin d'évènementiel — ${marque} ${g ? g.gamme || '' : ''})</span>`;
   else if (a.testeurOp === 'RETIRER') libelle = `Retirer le testeur <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
   else libelle = `Installer le testeur <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
   const shs = fShop ? [fShop] : SHOPS;
