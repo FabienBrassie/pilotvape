@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 15:44</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 15:53</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4864,9 +4864,9 @@ function ensureAction(produitId, type, produitType, opts) {
     }
     const _finieC = actionGlobalState(existingDone) === 'FAIT' || !!existingDone.dateCloture;
     const _nouveauCycle = _attenduC && _finieC && _cibleStatutC === _attenduC
-      && _cibleTsC && existingDone._ts && _cibleTsC > existingDone._ts
+      && _cibleTsC && _cibleTsC > (existingDone._ts || '')
       && !_cibleOneShotC
-      && !existingDone.motifSortie; // reprises : jamais de cycle auto
+      && !existingDone.motifSortie; // reprises : jamais de cycle auto (action sans _ts = très ancienne)
     if (_nouveauCycle) {
       const _nbCycles = actions.filter(a => a.produitId === produitId && a.type === type
         && (produitType === 'kit' ? (!a.produitType || a.produitType === 'kit') : a.produitType === produitType)
@@ -5454,7 +5454,7 @@ function syncAutoActions() {
     // one-shot n'a qu'UN cycle par définition (réappro coupée d'office), sa rentrée FAITE
     // est LA rentrée.
     const _garde = !(_cibleOneShot && a.type === 'RENTRER');
-    if (_garde && _cibleSTs && a._ts && _cibleSTs > a._ts) return; // choix de STATUT manuel plus récent → respecté
+    if (_garde && _cibleSTs && _cibleSTs > (a._ts || '')) return; // choix de STATUT manuel plus récent → respecté (action sans _ts = très ancienne : '' perd toujours)
     console.log('[GUERISON-CASCADE]', a.id, a.type, '→ cascade rejouée (action FAIT partout, statut resté en attente' + (_garde ? '' : ', one-shot') + ')');
     _applyActionShopChange(a, SHOPS[0]);
   });
@@ -15644,6 +15644,7 @@ async function updateKitStatus(id, status) {
   }
   kit._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   kit.statutVie = status;
+  kit._sTs = kit._ts; // 2026-08-04 (cas LostVape N200, export à l'appui) : setter DÉDIÉ oublié au balayage du 03/08 — sans _sTs, la guérison-cascade rebasculait le statut (aucune preuve de choix manuel)
   syncKitToProp(kit); syncAutoActions(); saveData();
   renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id);
   // Si passage à A_SORTIR → proposer un remplacement par un kit A_RENTRER
@@ -31765,6 +31766,7 @@ async function updatePdStatus(id, status) {
   }
   pd._ts = new Date().toISOString(); // fix 2026-05-19 : timestamp pour propagation merge multi-poste
   pd.statutVie = status;
+  pd._sTs = pd._ts; // 2026-08-04 (cas LostVape N200) : setter dédié oublié au balayage du 03/08 — sans _sTs, la guérison rebasculait le statut
   syncAutoActions();
   saveData();
   renderBasePD();
