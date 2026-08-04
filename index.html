@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 12:08</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 12:36</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2533,6 +2533,10 @@ function ensurePieceModel(p) {
   if (!p.id) p.id = 'P-' + Math.random().toString(36).slice(2, 8);
   if (!p.type) p.type = 'PLV_AUTRE';
   if (!p.source) p.source = 'fournie';
+  // 🧪 Migration douce (2026-08-04, retour Fabien) : un Testeur est TOUJOURS « en stock »
+  // (cartouches en boutique — jamais commandé/réceptionné). Corrige aussi les pièces déjà
+  // créées avec la source par défaut d'avant ; déterministe et idempotente sur tous les postes.
+  if (p.type === 'TESTEUR' && p.source !== 'stock') p.source = 'stock';
   if (typeof p.libelle !== 'string') p.libelle = '';
   if (!p.affectations || typeof p.affectations !== 'object') p.affectations = {};
   SHOPS.forEach(sh => {
@@ -2785,13 +2789,20 @@ function _maillonPlvPose(op, shop, defs) {
     }
     const emplLabel = (EMPLACEMENT_META[aff.emplacement] || {}).label || aff.emplacement;
     const verbe = p.source === 'stock' ? 'Installer ' : 'Poser ';
+    // 🧪 Testeur (2026-08-04, retour Fabien : « pas à commander ni réceptionner — les
+    // remplir et les installer ») : étape « Remplir » PAR boutique (cartouches en stock),
+    // puis l'installation, conditionnée au remplissage.
+    if (p.type === 'TESTEUR') {
+      defs.push({ key: 'plv_' + p.id + '_remplie', label: 'Remplir ' + pieceLabel(p) + ' (cartouches en stock)', pieceId: p.id, nat: 'imm' });
+    }
     // Nature (spéc 2026-06-11) : on ne peut poser qu'une pièce reçue (fournie) ou imprimée
     // (custom/freetouch). Une pièce de stock est déjà là → immédiate.
-    const _poseCondKey = p.source === 'fournie' ? ('plv_' + p.id + '_recue')
+    const _poseCondKey = p.type === 'TESTEUR' ? ('plv_' + p.id + '_remplie')
+      : p.source === 'fournie' ? ('plv_' + p.id + '_recue')
       : (p.source === 'custom' || p.source === 'freetouch') ? ('plv_' + p.id + '_imprimee') : null;
     const _poseDef = { key: 'plv_' + p.id + '_posee', label: verbe + pieceLabel(p) + ' → ' + emplLabel, pieceId: p.id,
       nat: _poseCondKey ? 'cond' : 'imm', condKey: _poseCondKey || undefined,
-      condLabel: _poseCondKey ? (p.source === 'fournie' ? 'après réception' : 'après impression') : undefined };
+      condLabel: _poseCondKey ? (p.type === 'TESTEUR' ? 'après remplissage' : p.source === 'fournie' ? 'après réception' : 'après impression') : undefined };
     // 2026-08-03 (retour Fabien, cas PuffX) : la pose d'une pièce PRODUIT *EST* l'installation
     // → elle porte la même attente dynamique que l'étape « Installé en rayon » de la ligne
     // (date d'installation effective — l'OP Nouveauté pilote — ou sortie du remplacé, par
@@ -28987,6 +28998,9 @@ function setOpCommanderProduits(opId, checked) {
 function defaultSourceForPieceType(type) {
   if (type === 'ETIQUETTE_FREETOUCH' || type === 'ETIQUETTE_PRIX_BARRE' || type === 'ETIQUETTE_SPECIALE') return 'freetouch';
   if (type === 'BAC_A_FOUILLE') return 'stock';
+  // 🧪 Testeur (2026-08-04, retour Fabien) : les cartouches sont EN STOCK — jamais à
+  // commander ni à réceptionner. Les étapes sont « Remplir » puis « Installer » (maillon pose).
+  if (type === 'TESTEUR') return 'stock';
   if (['AFFICHE_A3','AFFICHE_A4','AFFICHE_A5','XBANNER','KAKEMONO','VIDEO_ECRAN','SMS_CLIENT','MAIL_CLIENT','RESEAUX_SOCIAUX','SITE_WEB'].includes(type)) return 'custom';
   return 'fournie';
 }
