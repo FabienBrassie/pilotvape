@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:46</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:58</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3040,6 +3040,56 @@ function computeOpShopStepDefs(op, shop) {
       defs.splice(_iRec() + 1, 0, dPose);
     }
   });
+  // ═══ GÉNÉRATIONS DE PRIX (historique empilé — décision 2 du chantier vie unifiée) ═══
+  // op.prixHist non vide → les étapes étiquette/Swappy se déclinent par génération :
+  //  • génération COURANTE (@N) = LE travail à faire, au prix actuel ;
+  //  • générations passées (base, @1…@N-1) = affichées SEULEMENT si cochées CHEZ CETTE
+  //    boutique (historique figé _histGel, barré, lecture seule) — une ligne d'un vieux
+  //    prix jamais faite est sans objet, elle disparaît (ses clés à false sont purgées
+  //    par ensureOpSteps, aucune coche perdue).
+  const _gensPrix = Array.isArray(op.prixHist) ? op.prixHist.length : 0;
+  if (_gensPrix > 0) {
+    const _stSh = (op.etats && op.etats[shop] && op.etats[shop].steps) || {};
+    const _basePR = _clesEtapesEtiquettePRBase(op);
+    const _fmtPrix = v => (typeof v === 'number' ? v.toFixed(2).replace('.', ',') + ' €' : '?');
+    const _estSwappy = k => (k === 'swappy' || k === 'pr_swappy');
+    const _labelGen = (d, kBase, prix, courante) => {
+      if (_estSwappy(kBase)) {
+        if (/Promo configurée/.test(d.label)) return d.label + ' — ' + _fmtPrix(prix);
+        return '🔴 Prix re-modifié à ' + _fmtPrix(prix) + ' sur Swappy'; // (gen ≥ 1 uniquement ici)
+      }
+      return d.label + ' (' + _fmtPrix(prix) + ')';
+    };
+    const _out = [];
+    defs.forEach(d => {
+      if (!_basePR.includes(d.key)) { _out.push(d); return; }
+      // génération 0 : le prix d'origine (prixHist[0].avant) — souvenir si cochée ici
+      if (_stSh[d.key] === true) {
+        const _d0 = Object.assign({}, d, { _histGel: true });
+        _d0.label = _estSwappy(d.key)
+          ? '🔴 Prix modifié à ' + _fmtPrix(op.prixHist[0].avant) + ' sur Swappy'
+          : d.label + ' (' + _fmtPrix(op.prixHist[0].avant) + ')';
+        _out.push(_d0);
+      }
+      // générations intermédiaires : souvenirs si cochées ici
+      for (let g = 1; g < _gensPrix; g++) {
+        const kg = d.key + '@' + g;
+        if (_stSh[kg] === true) _out.push(Object.assign({}, d, {
+          key: kg, _histGel: true, nat: 'imm', condKey: undefined, condLabel: undefined,
+          label: _labelGen(d, d.key, op.prixHist[g - 1].prix, false)
+        }));
+      }
+      // génération COURANTE : le travail au prix actuel
+      const dN = Object.assign({}, d, {
+        key: d.key + '@' + _gensPrix,
+        label: _labelGen(d, d.key, op.prixHist[_gensPrix - 1].prix, true)
+      });
+      if (dN.condKey && _basePR.includes(dN.condKey)) dN.condKey = dN.condKey + '@' + _gensPrix;
+      _out.push(dN);
+    });
+    defs.splice(0, defs.length);
+    _out.forEach(d => defs.push(d));
+  }
   // ORDRE CANONIQUE DE LA VIE (énoncé par Fabien, 2026-08-04 17:30) : commande →
   // réception → étiquette imprimée → prix Swappy → pose (étiquette posée + produit
   // installé) → sortie → fin/désinstallation. Tri STABLE par phase (_viePhaseDef) :
@@ -3072,6 +3122,8 @@ function computeOpShopStepDefs(op, shop) {
 // 5 pose/installation (étiquette posée + produit installé) · 6 sortie (réappro
 // coupée, désactivé) · 7 fin/désinstallation.
 // ═══════════════════════════════════════════════════════════════════════════
+// Clé de base d'une étape : sans le suffixe de génération de prix (« swappy@2 » → « swappy »).
+function _vieCleBase(k) { return String(k || '').replace(/@\d+$/, ''); }
 function _viePhaseActionStep(type, key) {
   if (key === 'commande') return 1;
   if (key === 'recu' || key === 'recu_retro') return 2;
@@ -3086,7 +3138,7 @@ function _viePhaseActionStep(type, key) {
 // elle hérite de la phase de l'étape précédente (l'ordre existant fait foi,
 // on ne réordonne JAMAIS les defs — on ne fait qu'insérer entre elles).
 function _viePhaseDef(def, op) {
-  const kind = def.kind, k = def.key;
+  const kind = def.kind, k = _vieCleBase(def.key); // une génération de prix garde la phase de sa clé de base
   if (def.actionStep) return _viePhaseActionStep(kind === 'coup_sortir' ? 'SORTIR' : 'RENTRER', def.actionStep);
   if (kind === 'prod') return k === 'prod_commandee' ? 1 : 2;
   if (/^plv_.+_recue$/.test(k)) return 2;
@@ -3142,9 +3194,11 @@ function _vieOpLignesRows(op, defs) {
     if (t === 'PRIX') {
       // PR née d'un relevé : « Étiquette faite / Changée en rayon / Swappy » de la ligne
       // PRIX = le même travail réel que les étapes étiquette/pose/swappy de l'OP.
-      if (defs.some(d => d.key === 'pr_etiquette' || /^plv_.+_imprimee$/.test(d.key))) cov.add('etiquette');
-      if (defs.some(d => d.key === 'pr_posee' || (/^plv_.+_posee$/.test(d.key) && _viePhaseDef(d, op) === 4))) cov.add('rayon');
-      if (defs.some(d => d.key === 'swappy' || d.key === 'pr_swappy')) cov.add('swappy');
+      const _estPieceEtiq = k => (op.pieces || []).some(p => (p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')
+        && (k === 'plv_' + p.id + '_imprimee' || k === 'plv_' + p.id + '_posee'));
+      if (defs.some(d => { const kb = _vieCleBase(d.key); return kb === 'pr_etiquette' || (/^plv_.+_imprimee$/.test(kb) && _estPieceEtiq(kb)); })) cov.add('etiquette');
+      if (defs.some(d => { const kb = _vieCleBase(d.key); return kb === 'pr_posee' || (/^plv_.+_posee$/.test(kb) && _estPieceEtiq(kb)); })) cov.add('rayon');
+      if (defs.some(d => { const kb = _vieCleBase(d.key); return kb === 'swappy' || kb === 'pr_swappy'; })) cov.add('swappy');
     }
     getActionSteps(model).forEach(s => {
       if (cov.has(s.key)) return;
@@ -7461,12 +7515,15 @@ function _opActionStepMirror(a, op) {
   if (a.type === 'PRIX' && op.auto && op.type === 'PRIX_ROUGE' && op.prixActionId === a.id) {
     const firstPiece = (op.pieces || [])[0];
     const pid = firstPiece ? firstPiece.id : null;
+    // Générations de prix (2026-08-04) : la ligne PRIX du dashboard = UNE coche, le
+    // travail COURANT — elle se miroir(e) sur la GÉNÉRATION COURANTE des clés d'OP.
+    const _sufG = (Array.isArray(op.prixHist) && op.prixHist.length) ? '@' + op.prixHist.length : '';
     const a_to_o = {};
     if (pid) {
-      a_to_o.etiquette = 'plv_' + pid + '_imprimee';
-      a_to_o.rayon     = 'plv_' + pid + '_posee';
+      a_to_o.etiquette = 'plv_' + pid + '_imprimee' + _sufG;
+      a_to_o.rayon     = 'plv_' + pid + '_posee' + _sufG;
     }
-    a_to_o.swappy = 'swappy';
+    a_to_o.swappy = 'swappy' + _sufG;
     const o_to_a = {};
     Object.keys(a_to_o).forEach(k => { o_to_a[a_to_o[k]] = k; });
     return { a_to_o, o_to_a };
@@ -7891,7 +7948,7 @@ function toggleOpStep(opId, shop, stepKey, checked) {
 // (mécanisme canonique, rien recopié à la main). Retourne le nombre de coches re-proposées.
 // Les clés d'étapes « étiquette / prix » d'une OP PR — partagées entre le réflexe
 // « prix changé → étiquettes re-proposées » et la clôture de campagne (2026-07-30).
-function _clesEtapesEtiquettePR(op) {
+function _clesEtapesEtiquettePRBase(op) {
   const _keys = [];
   (op.pieces || []).forEach(p => {
     if (p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH') {
@@ -7901,34 +7958,66 @@ function _clesEtapesEtiquettePR(op) {
   _keys.push('swappy', 'pr_etiquette', 'pr_posee', 'pr_swappy'); // étapes PR d'OP + COUP
   return _keys;
 }
+// Les clés du travail prix COURANT : depuis l'historique empilé (chantier vie unifiée,
+// décision 2 de Fabien, 2026-08-04), un changement de prix crée une GÉNÉRATION — les
+// clés actives portent le suffixe @n de la dernière génération. Tous les mécanismes
+// qui raisonnent sur « le travail d'étiquette/prix restant » (volet Prix à modifier,
+// clôture, shunt écoulé) passent par ICI et suivent automatiquement.
+function _clesEtapesEtiquettePR(op) {
+  const base = _clesEtapesEtiquettePRBase(op);
+  const g = Array.isArray(op.prixHist) ? op.prixHist.length : 0;
+  return g > 0 ? base.map(k => k + '@' + g) : base;
+}
 function _reproposerEtapesEtiquettePR(op, ancienPrix, nouveauPrix) {
   if (!op) return 0;
   if (typeof ancienPrix !== 'number' || typeof nouveauPrix !== 'number') return 0;
   if (!(ancienPrix > 0) || !(nouveauPrix > 0) || ancienPrix === nouveauPrix) return 0;
-  const _keys = _clesEtapesEtiquettePR(op);
+  // ═══ HISTORIQUE DES PRIX EMPILÉ (chantier vie unifiée, décision 2 de Fabien,
+  // 2026-08-04) : FINI le réarmement silencieux. Chaque changement de prix EMPILE une
+  // génération dans op.prixHist (champ racine additif, propagé par _adminTs) : les
+  // coches déjà faites RESTENT visibles (« Prix modifié à 15,00 € ✓ », barré), et une
+  // nouvelle ligne « 🔴 Prix re-modifié à 12,00 € » apparaît à cocher — jusqu'à la
+  // sortie du produit ou son retour au prix normal. computeOpShopStepDefs génère les
+  // clés @n ; _clesEtapesEtiquettePR pointe la génération courante.
   const _now = new Date().toISOString();
+  if (!Array.isArray(op.prixHist)) op.prixHist = [];
+  op.prixHist.push({ prix: nouveauPrix, avant: ancienPrix, ts: _now });
+  op._ts = _now; op._adminTs = _now;
+  // n = coches d'HISTORIQUE conservées (l'alerte ne se montre que si du travail existait)
+  const _keysBase = _clesEtapesEtiquettePRBase(op);
   let n = 0;
   SHOPS.forEach(sh => {
     const st = op.etats && op.etats[sh];
     if (!st || !st.steps) return;
-    _keys.forEach(k => {
-      if (st.steps[k] === true) {
-        st.steps[k] = false;
-        if (!st._stepTs) st._stepTs = {};
-        st._stepTs[k] = _now;
-        n++;
-      }
+    Object.keys(st.steps).forEach(k => {
+      if (st.steps[k] === true && _keysBase.includes(_vieCleBase(k))) n++;
     });
   });
-  if (n > 0) {
-    op._ts = _now;
-    if (typeof logAction === 'function') logAction('Prix rouge modifié → étiquettes à refaire', _logOpLabel(op.id) + ' : ' + ancienPrix.toFixed(2) + '€ → ' + nouveauPrix.toFixed(2) + '€ · ' + n + ' coche(s) re-proposée(s) (étiquette + Swappy)');
-    try { syncOpStepsToAction(op); } catch (e) {} // décoche miroir immédiate côté dashboard
+  // Le miroir dashboard (ligne PRIX d'une PR auto) reste UNE coche = le travail COURANT :
+  // ré-armée avec un _stepTs frais — sinon sa vieille coche « gagnerait » contre la
+  // génération vierge au prochain sync bidirectionnel.
+  if (op.prixActionId) {
+    const aPx = actions.find(x => x.id === op.prixActionId && !x.annulee);
+    if (aPx && aPx.etats) SHOPS.forEach(sh => {
+      const stA = aPx.etats[sh];
+      if (!stA || !stA.steps) return;
+      ['etiquette', 'rayon', 'swappy'].forEach(k => {
+        if (stA.steps[k] === true) {
+          stA.steps[k] = false;
+          if (!stA._stepTs) stA._stepTs = {};
+          stA._stepTs[k] = _now;
+        }
+      });
+      if (stA.done) { stA.done = false; stA.dateFait = null; }
+      aPx._ts = _now;
+    });
   }
+  ensureOpSteps(op); // crée les clés @n de la nouvelle génération (à false)
+  if (typeof logAction === 'function') logAction('Prix rouge modifié → nouvelle génération', _logOpLabel(op.id) + ' : ' + ancienPrix.toFixed(2) + '€ → ' + nouveauPrix.toFixed(2) + '€ · l\'historique reste coché (' + n + '), nouvelles lignes « re-modifié » à cocher');
   return n;
 }
 function _alerteEtiquettesReproposees(n) {
-  if (n > 0) pvAlert('Prix rouge modifié : ' + n + ' coche(s) d\'étiquette / Swappy re-proposée(s) aux boutiques.\n\nLes étiquettes déjà posées sont à refaire au NOUVEAU prix — les étapes réapparaissent à cocher.');
+  if (n > 0) pvAlert('Prix rouge modifié : l\'historique des coches est CONSERVÉ (lignes barrées), et de nouvelles lignes « 🔴 re-modifié à … € » sont apparues.\n\nÉtiquette et prix en caisse sont à refaire au NOUVEAU prix par les boutiques à stock.');
 }
 
 function updateActionPrixRouge(actionId, val) {
@@ -20629,11 +20718,11 @@ function renderDashboard() {
                   // ligne À rentrer — même triangle que côté OP (l'écriture va sur l'OP, source
                   // de ces étapes). Gardes conservées : étape de Fabien côté boutique et verrou
                   // de dispatch restent en lecture seule.
-                  const _admRO = d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin();
+                  const _admRO = (d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin()) || d._histGel;
                   const _hub = (typeof opDispatchHubForStep === 'function') ? opDispatchHubForStep(_op, d) : null;
                   const _lock = !!(_hub && sh !== _hub && !_checked && !_getOpStepChecked(_op, _hub, d));
                   const _click = (_admRO || _lock)
-                    ? ' title="' + (_admRO ? 'Géré par Fabien' : 'Verrouillé : ' + (SHOP_LABELS[_hub] || _hub) + ' doit déclarer sa réception d\'abord') + '"'
+                    ? ' title="' + (d._histGel ? 'Historique — coche d\'un prix précédent' : _admRO ? 'Géré par Fabien' : 'Verrouillé : ' + (SHOP_LABELS[_hub] || _hub) + ' doit déclarer sa réception d\'abord') + '"'
                     : ' onclick="event.stopPropagation(); toggleOpStep(\'' + _op.id + '\',\'' + sh + '\',\'' + d.key + '\', ' + (!_checked) + ')" title="Coche croisée — s\'écrit sur l\'OP"';
                   return '<div' + _click + ' style="display:flex; align-items:center; gap:5px; padding:2px 3px; font-size:10px; color:' + (_checked ? '#64748b' : '#94a3b8') + '; opacity:0.7;' + (_admRO || _lock ? '' : ' cursor:pointer;') + '">' + _box + '<span style="' + (_checked ? 'text-decoration:line-through; color:#475569;' : '') + '">' + d.label + '</span> <span style="font-size:8px; color:#475569;">← OP</span></div>';
                 }).join('');
@@ -24767,6 +24856,7 @@ function _pvCheckListUnits(scopeType, scopeId) {
 // une coche = un seul propriétaire). Retourne [{type:'action',id,key}] / [{type:'op',key}] /
 // null (= lecture seule : aucune cible d'écriture valide).
 function _pvCheckListWriteTargets(op, shop, def) {
+  if (def._histGel) return null; // historique de prix : lecture seule partout
   const MIROIR = ['fanfare_rentrer', 'coup_rentrer', 'coup_sortir'];
   if (MIROIR.includes(def.kind) && def.actionStep) {
     if (def.kind === 'fanfare_rentrer') {
@@ -28821,10 +28911,10 @@ function _renderOpCardHtmlInner(op, options) {
         // 2026-08-01 : les miroirs « ← dashboard » sont désormais CLIQUABLES — la coche
         // s'écrit sur la ligne du dashboard (coche croisée, retour Fabien : pouvoir corriger
         // un « installé » coché à tort même quand la ligne a disparu du dashboard).
-        const clickAttr = (_absentShop || _adminStepReadOnly || _dispatchLocked)
-          ? `title="${_adminStepReadOnly ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : _dispatchLocked ? 'Verrouillé : ' + (SHOP_LABELS[_stepHub] || _stepHub) + ' doit déclarer sa réception en premier, puis Fabien dispatche' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
+        const clickAttr = (_absentShop || _adminStepReadOnly || _dispatchLocked || d._histGel)
+          ? `title="${d._histGel ? 'Historique — coche d\'un prix précédent (conservée)' : _adminStepReadOnly ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : _dispatchLocked ? 'Verrouillé : ' + (SHOP_LABELS[_stepHub] || _stepHub) + ' doit déclarer sa réception en premier, puis Fabien dispatche' : 'Produit hors stock à ' + label + ' — auto-complété'}"`
           : `onclick="event.stopPropagation(); toggleOpStep('${op.id}','${sh}','${d.key}', ${!checked})" ${isDashboardStep ? 'title="Coche croisée — s\'écrit sur la ligne du dashboard (la fait réapparaître si besoin)"' : ''}`;
-        const _isClickable = !_absentShop && !_adminStepReadOnly && !_dispatchLocked;
+        const _isClickable = !_absentShop && !_adminStepReadOnly && !_dispatchLocked && !d._histGel;
         const _dashLabel = isDashboardStep ? ` <span onclick="event.stopPropagation(); goToActionFromOp('${op.id}','${d.kind}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à l'action dans le dashboard">← dashboard</span>` : '';
         return `<div class="pv-step-row" ${clickAttr}
           style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${_isClickable ? 'cursor:pointer;' : ''} font-size:${isDesinstall ? '12' : '11'}px; color:${_absentShop ? '#64748b' : isDashboardStep ? (checked ? '#94a3b8' : '#64748b') : (isDesinstall && !checked ? '#fca5a5' : (checked ? '#e2e8f0' : '#94a3b8'))}; font-weight:${isDesinstall ? '700' : '400'}; border-radius:3px; user-select:none; ${isDashboardStep ? 'opacity:0.7;' : ''} ${_dispatchLocked ? 'opacity:0.45;' : ''} ${_stepGrey} ${_stepHighlight}"
