@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:08</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:27</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -6189,6 +6189,7 @@ function syncAutoActions() {
   // Destockage soldé dans une boutique → ses coches d'OP prix rouge court-circuitées
   // (« écoulé chez moi = invisible chez moi », retour Fabien 2026-07-21).
   try { _shunterOpPrEpuisee(); } catch (e) { console.error('[PR-EPUISE sync]', e); }
+  try { _shunterEtapesHorsStock(); } catch (e) { console.error('[HORS-STOCK sync]', e); }
   // Après toutes les créations auto, demander confirmation des dates (non-bloquant)
   if (_opsPendingDateConfirm.length > 0) {
     setTimeout(() => _flushPendingDateConfirm(), 200);
@@ -9574,6 +9575,9 @@ function setSortirPoseEmplacement(actionId, val) {
     ensureActionSteps(x); // ajoute la clé « pose » à false (ou la purge au retrait)
   });
   if (typeof logAction === 'function') logAction('Pose du produit (ligne À sortir)', _logActionLabel(actionId) + ' → ' + (v ? ((EMPLACEMENT_META[v] || {}).label || v) : 'étape retirée'));
+  // 2026-08-04 (Fabien) : une pose TARDIVE est sans objet chez une boutique déjà hors
+  // stock — shunt immédiat (la passe tourne aussi à chaque sync, ceci évite le clignotement).
+  try { _shunterEtapesHorsStock(); } catch (e) {}
   saveData(); try { renderDashboard(); } catch (e) {}
 }
 // Badge canonique 📌 (règle 8) — étiquette « installation le … » sur les lignes/groupes.
@@ -28048,7 +28052,20 @@ function _shunterOpPrEpuisee() {
   let n = 0;
   ops.forEach(op => {
     if (op._archived || op.annulee) return;
-    if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') return;
+    // 2026-08-04 (généralisation actée par Fabien, chantier vie unifiée) : plus limité aux
+    // PR/COUP — TOUTE OP dont le produit est écoulé chez une boutique voit ses étapes
+    // shuntées chez ELLE (une étape née après coup — pose tardive comprise — est sans
+    // objet là où il n'y a plus de stock). Le hors-stock n'est jamais deviné :
+    // _opPrEpuiseePourShop (PR/COUP, lignes SORTIR faites) et _opProduitEcouleChezShop
+    // (statut SORTI / sortie faite chez elle) restent LES deux seuls juges.
+    if (op.type !== 'PRIX_ROUGE' && op.type !== 'COUP') {
+      // Garde de la généralisation : si le produit ARRIVE (rentrer lié, commande produits,
+      // lignes parfum à rentrer), rien n'est « sans objet » — et l'écoulement d'un VIEUX
+      // cycle ne doit jamais shunter l'OP du cycle suivant (leçon M100).
+      const _arrive = !!(op.rentrerActionId || (op.prep && op.prep.commanderProduits)
+        || (typeof opRentrerParfumActions === 'function' && opRentrerParfumActions(op).length));
+      if (_arrive) return;
+    }
     // Normaliser AVANT de calculer les étapes : ensureOpModel pose la mécanique par défaut
     // (ex : swappy sur un PRIX_ROUGE) — sans ça, une étape née après le shunt resterait à faire.
     ensureOpSteps(op);
@@ -28073,6 +28090,82 @@ function _shunterOpPrEpuisee() {
     });
   });
   if (n > 0) console.log('[PR-EPUISE] ' + n + ' coche(s) d\'OP court-circuitée(s) — produit écoulé dans la boutique, rien à faire chez elle');
+  return n;
+}
+
+// ═══ 🧬 HORS STOCK = ÉTAPE SANS OBJET, côté LIGNES (généralisation actée par Fabien,
+// 2026-08-04, chantier vie unifiée) ═══
+// « À partir du moment où le produit est hors stock chez une boutique, n'importe quelle
+// nouvelle étape doit être cochée automatiquement car inutile. » Même modèle que
+// _shunterOpPrEpuisee : steps posés avec _stepTs frais (merge-safe), idempotent, jamais
+// décochés. Le hors-stock n'est JAMAIS deviné (règle zéro inférence) : il est DÉCLARÉ
+// par la boutique (stock à 0 coché chez elle / sortie faite chez elle) ou porté par le
+// statut (SORTI). Ne concerne que les lignes dont le travail PRÉSUPPOSE du stock
+// (SORTIR hors reprise, PRIX) — jamais les RENTRER (le produit arrive) ni les reprises
+// (renvoyer le carton reste un vrai travail).
+// LE prédicat canonique côté ligne (pendant de _opProduitEcouleChezShop côté OP) :
+function _ligneEcouleeChezShop(a, sh) {
+  if (!a || !sh) return false;
+  const st = a.etats && a.etats[sh];
+  if (a.type === 'SORTIR' && a.motifSortie !== 'REPRISE' && st) {
+    if (st.done === true) return true; // sortie soldée chez elle
+    if (st.steps && st.steps.swappyOff === true) return true; // stock à 0 déclaré par ELLE
+  }
+  // ⚠️ CYCLES (leçon M100, suite 47) : une VIEILLE ligne SORTIR close ne prouve RIEN
+  // sur le stock d'aujourd'hui — le produit a pu revenir (nouveau cycle), et son
+  // ancienne sortie faite shunterait la ligne neuve. Seules font foi : une ligne
+  // SORTIR OUVERTE (cycle en cours) faite chez elle, ou un statut final SORTI.
+  const _sortieFaiteIci = (pfId) => actions.some(x => x.type === 'SORTIR' && x.produitId === a.produitId
+    && !x.annulee && !x.dateCloture && x.id !== a.id
+    && x.motifSortie !== 'REPRISE'
+    && (!pfId || !x.produitParfumId || x.produitParfumId === pfId)
+    && x.etats && x.etats[sh] && x.etats[sh].done === true);
+  const g = baseLiq.find(x => x.id === a.produitId);
+  if (g) {
+    if (g.statutVie === 'SORTI') return true;
+    if (a.produitParfumId) {
+      const pf = (g.parfums || []).find(p => p.id === a.produitParfumId);
+      if (!pf) return false;
+      return pf.s === 'SORTI' || _sortieFaiteIci(a.produitParfumId);
+    }
+    const _pfs = (g.parfums || []).filter(p => p.s !== 'SORTI');
+    return _pfs.length > 0 && _pfs.every(p => _sortieFaiteIci(p.id));
+  }
+  const prod = baseKits.find(x => x.id === a.produitId) || basePD.find(x => x.id === a.produitId);
+  if (prod) {
+    if (isProductGoneFromShop(prod, sh)) return true; // statut SORTI (final)
+    return _sortieFaiteIci(null); // sortie du cycle EN COURS faite chez elle
+  }
+  return false;
+}
+// La passe (appelée par syncAutoActions, et par setSortirPoseEmplacement pour l'effet
+// immédiat) : chez une boutique hors stock, toute étape non cochée d'une ligne
+// SORTIR/PRIX est shuntée — pose tardive comprise.
+function _shunterEtapesHorsStock() {
+  const _now = new Date().toISOString();
+  let n = 0;
+  actions.forEach(a => {
+    if (a.annulee) return;
+    if (a.type !== 'SORTIR' && a.type !== 'PRIX') return;
+    if (a.type === 'SORTIR' && a.motifSortie === 'REPRISE') return;
+    let defs = null;
+    SHOPS.forEach(sh => {
+      if (!_ligneEcouleeChezShop(a, sh)) return;
+      if (!defs) { try { ensureActionSteps(a); } catch (e) {} defs = getActionSteps(a); }
+      const st = a.etats && a.etats[sh];
+      if (!st) return;
+      if (!st.steps) st.steps = {};
+      defs.forEach(d => {
+        if (st.steps[d.key] === true) return;
+        st.steps[d.key] = true;
+        if (!st._stepTs) st._stepTs = {};
+        st._stepTs[d.key] = _now;
+        a._ts = _now;
+        n++;
+      });
+    });
+  });
+  if (n > 0) console.log('[HORS-STOCK] ' + n + ' coche(s) de ligne shuntée(s) — produit hors stock chez la boutique, étape sans objet');
   return n;
 }
 
