@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:49</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:08</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2993,6 +2993,188 @@ function computeOpShopStepDefs(op, shop) {
     }
   });
   return defs;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🧬 LA VIE UNIFIÉE DU PRODUIT — chantier acté par Fabien le 2026-08-04 (suite 48).
+// UNE seule liste chronologique = la vie du produit, identique sur toutes les
+// cards. Étape 1 : la carte OP affiche AUSSI les étapes des lignes du dashboard
+// liées (ex : la sortie d'un destockage PR), grisées-mais-cliquables, badge
+// « ← dashboard ». RENDU + ROUTAGE SEULEMENT : aucune coche ne change de
+// domicile (le clic écrit via toggleActionStep, LE toggle canonique de la
+// ligne), les compteurs d'OP existants ne comptent QUE les étapes de l'OP —
+// rien ne bouge côté données, merge, cascades.
+// La chaîne de vie canonique (phases) : 1 commande · 2 réception ·
+// 3 installation/pose · 4 prix/étiquette · 5 swappy · 6 sortie · 7 fin/désinstallation.
+// ═══════════════════════════════════════════════════════════════════════════
+function _viePhaseActionStep(type, key) {
+  if (key === 'commande') return 1;
+  if (key === 'recu' || key === 'recu_retro') return 2;
+  if (key === 'installe' || key === 'pose' || key === 'monte' || key === 'testeur_fait') return 3;
+  if (key === 'etiquette' || key === 'rayon') return 4;
+  if (key === 'swappy') return 5;
+  if (type === 'SORTIR' || type === 'RETRO_ENVOI' || type === 'RETRO_RECEPTION') return 6; // vendu, swappyOff, reprise…
+  return 5;
+}
+// Phase d'une étape d'OP (defs de computeOpShopStepDefs). 0 = non classée →
+// elle hérite de la phase de l'étape précédente (l'ordre existant fait foi,
+// on ne réordonne JAMAIS les defs — on ne fait qu'insérer entre elles).
+function _viePhaseDef(def, op) {
+  const kind = def.kind, k = def.key;
+  if (def.actionStep) return _viePhaseActionStep(kind === 'coup_sortir' ? 'SORTIR' : 'RENTRER', def.actionStep);
+  if (kind === 'prod') return k === 'prod_commandee' ? 1 : 2;
+  if (/^plv_.+_recue$/.test(k)) return 2;
+  if (/^plv_.+_imprimee$/.test(k)) return 4;
+  if (/^plv_.+_posee$/.test(k)) {
+    const pid = k.slice(4, -6);
+    const p = ((op && op.pieces) || []).find(x => x.id === pid);
+    return (p && (p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')) ? 4 : 3;
+  }
+  if (k === 'pr_etiquette' || k === 'pr_posee') return 4;
+  if (k === 'swappy' || k === 'pr_swappy') return 5;
+  if (kind === 'desinstall') return 7;
+  return 0;
+}
+// Les groupes de lignes du dashboard liées à l'OP (registre unique). Un groupe =
+// les lignes qui portent LE MÊME travail (lignes parfum sœurs d'une OP groupée) —
+// une seule entrée affichée, ✓ = toutes, clic = toutes. returnActionId exclu
+// (comportement historique : pas de miroir sur le retour de prix).
+function _vieOpLigneGroupes(op) {
+  const groupes = [];
+  const seen = new Set();
+  const push = arr => {
+    const list = (arr || []).filter(a => a && !a.annulee && !a._archived && !seen.has(a.id));
+    if (!list.length) return;
+    list.forEach(a => seen.add(a.id));
+    groupes.push(list);
+  };
+  if (Array.isArray(op.groupActionIds) && op.groupActionIds.length) {
+    const grp = op.groupActionIds.map(id => actions.find(a => a.id === id)).filter(Boolean);
+    ['SORTIR', 'RENTRER', 'PRIX'].forEach(t => push(grp.filter(a => a.type === t)));
+  }
+  LIAISON_OP_ACTION_FIELDS.forEach(f => {
+    if (f === 'returnActionId' || !op[f]) return;
+    push([actions.find(a => a.id === op[f])]);
+  });
+  return groupes;
+}
+// Les étapes des lignes liées SANS miroir sur la carte — celles qui manquaient à
+// la vie du produit. Anti-doublon strict : une étape déjà représentée par un
+// miroir (coup_*, fanfare_rentrer, prod, paires _opActionStepMirror) ou par son
+// équivalent sémantique côté OP (étiquette/pose/swappy d'une PR) n'apparaît
+// qu'UNE fois — le domicile de la carte gagne chez elle.
+function _vieOpLignesRows(op, defs) {
+  const out = [];
+  if (!op) return out;
+  _vieOpLigneGroupes(op).forEach(list => {
+    const model = list[0];
+    const t = model.type;
+    try { ensureActionSteps(model); } catch (e) {}
+    const cov = new Set();
+    defs.forEach(d => {
+      if (d.actionStep && ((t === 'RENTRER' && (d.kind === 'coup_rentrer' || d.kind === 'fanfare_rentrer'))
+        || (t === 'SORTIR' && d.kind === 'coup_sortir'))) cov.add(d.actionStep);
+      if (t === 'RENTRER' && d.kind === 'prod') cov.add(d.key === 'prod_commandee' ? 'commande' : d.key === 'prod_recue' ? 'recu' : '—');
+    });
+    const m = typeof _opActionStepMirror === 'function' ? _opActionStepMirror(model, op) : null;
+    if (m && m.a_to_o) Object.keys(m.a_to_o).forEach(k => { if (defs.some(d => d.key === m.a_to_o[k])) cov.add(k); });
+    if (t === 'PRIX') {
+      // PR née d'un relevé : « Étiquette faite / Changée en rayon / Swappy » de la ligne
+      // PRIX = le même travail réel que les étapes étiquette/pose/swappy de l'OP.
+      if (defs.some(d => d.key === 'pr_etiquette' || /^plv_.+_imprimee$/.test(d.key))) cov.add('etiquette');
+      if (defs.some(d => d.key === 'pr_posee' || (/^plv_.+_posee$/.test(d.key) && _viePhaseDef(d, op) === 4))) cov.add('rayon');
+      if (defs.some(d => d.key === 'swappy' || d.key === 'pr_swappy')) cov.add('swappy');
+    }
+    getActionSteps(model).forEach(s => {
+      if (cov.has(s.key)) return;
+      out.push({ src: 'ligne', def: s, acts: list, phase: _viePhaseActionStep(t, s.key) });
+    });
+  });
+  out.sort((a, b) => a.phase - b.phase);
+  return out;
+}
+// LA liste de vie d'une OP pour une boutique : les defs de l'OP dans leur ordre
+// existant (jamais réordonnés), les étapes des lignes insérées à leur place
+// chronologique. Retourne [{src:'op'|'ligne', def, acts?}].
+function _vieOpShopRows(op, sh) {
+  const defs = computeOpShopStepDefs(op, sh);
+  const rows = defs.map(d => ({ src: 'op', def: d }));
+  let extras = [];
+  try { extras = _vieOpLignesRows(op, defs); } catch (e) { console.warn('[VIE-UNIFIEE] extras KO', e); }
+  if (!extras.length) return rows;
+  const ph = [];
+  defs.forEach((d, i) => {
+    let p = 0;
+    try { p = _viePhaseDef(d, op); } catch (e) {}
+    if (!p) p = i > 0 ? ph[i - 1] : 1;
+    ph.push(p);
+  });
+  extras.forEach(x => {
+    let at = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const rp = rows[i].src === 'op' ? ph[defs.indexOf(rows[i].def)] : rows[i].phase;
+      if (rp <= x.phase) at = i + 1;
+    }
+    rows.splice(at, 0, x);
+  });
+  return rows;
+}
+// Coche croisée d'une entrée « ligne » : écrit sur TOUTES les lignes du groupe
+// via toggleActionStep (LE toggle canonique — gardes, _stepTs, cascades, synchro).
+function vieToggleLigneStep(idsCsv, sh, key) {
+  const ids = String(idsCsv).split('|').filter(Boolean);
+  const get = id => actions.find(x => x.id === id);
+  const allOn = ids.every(id => { const a = get(id); const st = a && a.etats && a.etats[sh]; return !!(st && st.steps && st.steps[key] === true); });
+  const target = !allOn;
+  ids.forEach(id => {
+    const a = get(id);
+    if (!a) return;
+    const st = a.etats && a.etats[sh];
+    const cur = !!(st && st.steps && st.steps[key] === true);
+    if (cur !== target) toggleActionStep(id, sh, key);
+  });
+}
+// Provenance « ← dashboard » : aller à LA ligne précise (par id, surlignée).
+function goToLigneFromOp(actionId) {
+  switchTabProgrammatic('dashboard');
+  setTimeout(() => {
+    const el = document.querySelector('[data-action-id="' + actionId + '"]');
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.style.outline = '2px solid #f59e0b';
+      el.style.outlineOffset = '2px';
+      setTimeout(() => { el.style.outline = ''; el.style.outlineOffset = ''; }, 2500);
+    } else pvAlert('Ligne introuvable dans le dashboard (peut-être filtrée).');
+  }, 100);
+}
+// Rendu d'une entrée « ligne » sur la carte OP : grisée-mais-cliquable, badge de
+// provenance « ← dashboard » (même code visuel que les miroirs existants).
+function _vieRenderLigneRow(op, sh, r, ctx) {
+  const d = r.def;
+  const acts = r.acts;
+  const nb = acts.length;
+  const nbOk = acts.filter(a => { const _st = a.etats && a.etats[sh]; return !!(_st && _st.steps && _st.steps[d.key] === true); }).length;
+  const checked = nb > 0 && nbOk === nb;
+  const model = acts[0];
+  const stepsObj = ((model.etats || {})[sh] || {}).steps || {};
+  const _admRO = d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin();
+  const grey = (ctx.absentShop || ctx.terminee) ? 'opacity:0.35; filter:saturate(0.3);' : '';
+  const idsCsv = acts.map(a => a.id).join('|');
+  const clickable = !ctx.absentShop && !_admRO;
+  const box = checked
+    ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:#64748b; color:#0f172a; border:1px solid #64748b; border-radius:3px; font-size:10px; font-weight:700;">✓</span>`
+    : `<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid #475569; border-radius:3px;"></span>`;
+  const partiel = (!checked && nbOk > 0 && nb > 1) ? ` <span style="font-size:8.5px; color:#f59e0b;" title="Coché sur ${nbOk} ligne(s) sur ${nb}">${nbOk}/${nb} lignes</span>` : '';
+  const clickAttr = clickable
+    ? `onclick="event.stopPropagation(); vieToggleLigneStep('${idsCsv}','${sh}','${d.key}')" title="Coche croisée — s'écrit sur la ligne du dashboard"`
+    : `title="${_admRO ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : 'Produit hors stock à ' + ctx.shopLabel + ' — auto-complété'}"`;
+  const prov = ` <span onclick="event.stopPropagation(); goToLigneFromOp('${model.id}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à la ligne dans le dashboard">← dashboard</span>`;
+  return `<div class="pv-step-row" ${clickAttr}
+    style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${clickable ? 'cursor:pointer;' : ''} font-size:11px; color:${checked ? '#94a3b8' : '#64748b'}; border-radius:3px; user-select:none; opacity:0.7; ${grey}"
+    ${clickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'"` : ''}>
+    ${box}
+    <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${prov}${partiel}${!checked ? stepBadgeAttente(d, stepsObj) : ''}${stepBadgeAdmin(d)}</span>
+  </div>`;
 }
 
 // Toggles
@@ -28419,7 +28601,12 @@ function _renderOpCardHtmlInner(op, options) {
     // boutiques : elles vivent dans le bloc Amont avec leurs 3 coches P/M/L (demande Fabien
     // 2026-06-12 : "mes actions ensemble"). La logique de complétion (opAllStepsDone,
     // cascades) reste inchangée — seul l'AFFICHAGE est regroupé.
-    const defs = computeOpShopStepDefs(op, sh).filter(d => d.resp !== 'admin');
+    // 🧬 Vie unifiée (2026-08-04) : defs de l'OP + étapes des lignes du dashboard
+    // liées, insérées à leur place chronologique. Le compteur x/y de la carte ne
+    // compte QUE les étapes de l'OP (le travail domicilié ici) — rien ne change.
+    const _vieAll = _vieOpShopRows(op, sh);
+    const defs = _vieAll.filter(r => r.src === 'op').map(r => r.def).filter(d => d.resp !== 'admin');
+    const _vieRows = _vieAll.filter(r => r.src === 'op' ? r.def.resp !== 'admin' : true);
     const st = op.etats[sh];
     const col = SHOP_COLORS[sh];
     const label = SHOP_LABELS[sh];
@@ -28437,9 +28624,12 @@ function _renderOpCardHtmlInner(op, options) {
       <span style="font-size:9px; padding:1px 6px; background:${_absentShop ? '#64748b' : col}22; color:${_absentShop ? '#64748b' : col}; border-radius:999px; font-weight:700;">${nbDone}/${defs.length}</span>
       ${allDone && st && st.dateFait ? `<span style="font-size:9px; color:#64748b;">fait le ${st.dateFait}</span>` : ''}
     </div>`;
-    const rows = defs.length === 0
+    const rows = _vieRows.length === 0
       ? `<div style="font-size:10px; color:#64748b; font-style:italic; padding:4px 0;">Pas d'action locale (pièces non affectées à ce shop)</div>`
-      : defs.map(d => {
+      : _vieRows.map(r => {
+        // 🧬 Entrée « ligne du dashboard » : grisée-mais-cliquable, provenance affichée.
+        if (r.src === 'ligne') return _vieRenderLigneRow(op, sh, r, { absentShop: _absentShop, terminee: _isTerminee, shopLabel: label });
+        const d = r.def;
         const checked = _getOpStepChecked(op, sh, d);
         const isDesinstall = d.kind === 'desinstall';
         // Steps miroir du dashboard : lecture seule dans l'OP (on coche dans le dashboard, pas ici)
