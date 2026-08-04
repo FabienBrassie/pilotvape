@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:39</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 17:46</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -28296,6 +28296,11 @@ function setOpPoseProduit(opId, emplacement) {
   }
   op._ts = _now; op._adminTs = _now;
   if (typeof logAction === 'function') logAction('Pose du produit', _logOpLabel(opId) + ' → ' + (emplacement ? ((EMPLACEMENT_META[emplacement] || {}).label || emplacement) : 'étape de pose retirée'));
+  // 2026-08-04 (retour Fabien, cas ATVS Hexa 22) : la nouvelle étape de pose doit être
+  // shuntée IMMÉDIATEMENT chez les boutiques hors stock — pas au prochain passage de
+  // synchro (il cochait « après quelques longues minutes, sans action de ma part »).
+  try { _shunterOpPrEpuisee(); } catch (e) {}
+  try { _shunterEtapesHorsStock(); } catch (e) {}
   saveData();
   try { if (typeof renderOps === 'function') renderOps(); renderDashboard(); } catch (e) {}
 }
@@ -28767,7 +28772,11 @@ function _renderOpCardHtmlInner(op, options) {
     const col = SHOP_COLORS[sh];
     const label = SHOP_LABELS[sh];
     // Produit absent de cette boutique → section grisée, steps auto-cochés
-    const _absentShop = _opProduitEcouleChezShop(op, sh); // périmètre OP (parfum compris) — 2026-07-28
+    // 2026-08-04 (retour Fabien, cas ATVS Hexa 22) : « hors stock » se juge AUSSI par le
+    // destockage soldé chez la boutique (_opPrEpuiseePourShop) — avant, seuls le statut
+    // SORTI/parfum sorti grisaient l'encadré, et Mérignac/Langon restaient affichées
+    // comme des boutiques « à faire » alors que tout y est coché d'office.
+    const _absentShop = _opProduitEcouleChezShop(op, sh) || _opPrEpuiseePourShop(op, sh); // périmètre OP (parfum compris) — 2026-07-28
     const nbDone = defs.filter(d => _getOpStepChecked(op, sh, d)).length;
     const allDone = defs.length > 0 && nbDone === defs.length;
     const _absentBadge = _absentShop
@@ -28824,7 +28833,12 @@ function _renderOpCardHtmlInner(op, options) {
           <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${_dashLabel}${!checked ? stepBadgeAttente(d, ((op.etats || {})[sh] || {}).steps) : ''}${stepBadgeAdmin(d)}${opStepBadgeDispatch(op, sh, d, checked)}</span>
         </div>`;
       }).join('');
-    return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${rows}</div>`;
+    // Bandeau explicite au-dessus des coches (demande Fabien 2026-08-04) : POURQUOI tout
+    // est coché et grisé chez cette boutique.
+    const _horsStockLigne = _absentShop
+      ? `<div style="margin:2px 0 4px; padding:3px 6px; background:#33415530; border:1px dashed #47556960; border-radius:3px; font-size:9.5px; color:#94a3b8;">⛔ Hors stock à ${label} — étapes cochées automatiquement, rien à faire ici</div>`
+      : '';
+    return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${_horsStockLigne}${rows}</div>`;
   }).join('');
 
   // Panneau d'édition (si ouvert, et si l'édition est autorisée)
