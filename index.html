@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:31</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 16:49</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2789,7 +2789,16 @@ function _maillonProdCommande(op, shop, defs) {
 function _maillonPlvReception(op, shop, defs) {
     (op.pieces || []).forEach(p => {
     if (p.source !== 'fournie') return;
-    if (p.type === 'PRODUIT' && ((op.prep && op.prep.commanderProduits) || op.rentrerActionId)) return; // réception déjà portée par prod_recue ou la ligne À rentrer (①)
+    if (p.type === 'PRODUIT') {
+      if ((op.prep && op.prep.commanderProduits) || op.rentrerActionId) return; // réception déjà portée par prod_recue ou la ligne À rentrer (①)
+      if (typeof opRentrerParfumActions === 'function' && opRentrerParfumActions(op).length) return; // portée par les lignes parfum
+      // [2026-08-04, retour Fabien — Argus PR] Produit DÉJÀ EN STOCK (OP PRIX_ROUGE, ou OP
+      // liée à un SORTIR = destockage) : il n'arrive pas → AUCUNE étape « Réceptionner »,
+      // même si la pièce legacy est marquée 'fournie'. La pose devient immédiate
+      // (re-conditionnement dans computeOpShopStepDefs).
+      if (op.type === 'PRIX_ROUGE' || op.sortirActionId
+        || (Array.isArray(op.groupActionIds) && op.groupActionIds.length)) return;
+    }
     defs.push({ key: 'plv_' + p.id + '_recue', label: 'Réceptionner ' + pieceLabel(p), pieceId: p.id, kind: 'reception', nat: 'evt', condLabel: 'attend la livraison' });
   });
 }
@@ -2957,6 +2966,32 @@ const OP_STEP_CHAIN = [
 function computeOpShopStepDefs(op, shop) {
   const defs = [];
   OP_STEP_CHAIN.forEach(m => { if (m.when(op)) m.gen(op, shop, defs); });
+  // [2026-08-04, retour Fabien — E40 one-shot : « la pose devrait se placer APRÈS la
+  // réception en toute logique » + Argus PR : réception fantôme] Post-traitement de la
+  // pose d'une pièce PRODUIT, pour que l'ordre affiché = la vie du produit :
+  //   • sa condition pointe une étape qui n'existe pas (plv_x_recue jamais générée) →
+  //     re-conditionnée sur le VRAI porteur de réception (miroir ① Reçu en boutique /
+  //     prod_recue) s'il existe, sinon (produit déjà en stock : PR, destockage) → immédiate ;
+  //   • si le porteur de réception apparaît APRÈS elle dans la liste (chaîne COUP), la pose
+  //     est DÉPLACÉE juste derrière lui (on reçoit, PUIS on pose).
+  (op.pieces || []).forEach(p => {
+    if (!(typeof pieceEstProduit === 'function' && pieceEstProduit(p))) return;
+    const _kPose = 'plv_' + p.id + '_posee';
+    const iPose = defs.findIndex(d => d.key === _kPose);
+    if (iPose === -1) return;
+    const dPose = defs[iPose];
+    const _porteurs = ['rentrer_recu', 'prod_recue', 'plv_' + p.id + '_recue'];
+    const _iRec = () => defs.findIndex(d => _porteurs.includes(d.key));
+    const iRec = _iRec();
+    if (dPose.condKey && !defs.some(d => d.key === dPose.condKey)) {
+      if (iRec !== -1) { dPose.nat = 'cond'; dPose.condKey = defs[iRec].key; dPose.condLabel = 'après réception'; }
+      else { dPose.nat = 'imm'; delete dPose.condKey; delete dPose.condLabel; } // déjà en stock → rien à attendre
+    }
+    if (iRec !== -1 && iRec > iPose) {
+      defs.splice(iPose, 1);
+      defs.splice(_iRec() + 1, 0, dPose);
+    }
+  });
   return defs;
 }
 
@@ -27891,7 +27926,14 @@ function setOpPoseProduit(opId, emplacement) {
   } else {
     const _lblPose = (op.produitLibre && op.produitLibre.libelle) ? op.produitLibre.libelle
       : (typeof _logProdName === 'function' ? (_logProdName((op.produitIds || [])[0]) || 'Produit') : 'Produit');
-    pieceP = makePiece('PRODUIT', 'fournie', emplacement, _lblPose);
+    // [2026-08-04, retour Fabien — Argus PR : « on parle d'un produit en PR donc qui est
+    // déjà en stock, c'est quoi cette étape de con ? »] La provenance de la pièce PRODUIT
+    // suit le CONTEXTE : le produit ARRIVE (OP liée à un rentrer / commande) → 'fournie'
+    // (réception portée par la ligne À rentrer) ; sinon (PR, destockage, OP liée à un
+    // SORTIR) il est DÉJÀ EN STOCK → 'stock' : aucune réception, pose immédiate.
+    const _prodArrive = !!(op.rentrerActionId || (op.prep && op.prep.commanderProduits)
+      || (typeof opRentrerParfumActions === 'function' && opRentrerParfumActions(op).length));
+    pieceP = makePiece('PRODUIT', _prodArrive ? 'fournie' : 'stock', emplacement, _lblPose);
     op.pieces.push(pieceP);
   }
   ensureOpSteps(op);
