@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 15:21</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 15:44</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -19387,16 +19387,32 @@ function renderDashboard() {
         }
       }
       // Prix rouge (destockage) : badgePrix
-      if (a.prixRouge) {
-        const _prOpSort = ops.find(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && isOpOuverte(o) && (o.sortirActionId === a.id || (o.groupActionIds || []).includes(a.id)));
+      // 2026-08-04 (retour Fabien, cas Coolfire Z60) : une PR née d'un RELEVÉ est liée à
+      // l'action PRIX (prixActionId), pas à la ligne À sortir → a.prixRouge est vide et le
+      // badge manquait. Secours : lire l'OP PRIX_ROUGE OUVERTE du même produit (dynamique,
+      // aucune écriture — on ne lie pas sortirActionId, une PR relevé n'est pas un destockage).
+      let _prSecours = null;
+      if (!a.prixRouge && a.type === 'SORTIR') {
+        _prSecours = ops.find(o => o.type === 'PRIX_ROUGE' && isOpOuverte(o) && !o._archived && !o.annulee
+          && typeof o.prixRouge === 'number' && o.prixRouge > 0
+          && (o.produitIds || []).includes(a.produitId)
+          && (a.produitParfumId ? (!o.produitParfumId || o.produitParfumId === a.produitParfumId) : true));
+      }
+      if (a.prixRouge || _prSecours) {
+        const _prOpSort = a.prixRouge
+          ? ops.find(o => (o.type === 'PRIX_ROUGE' || o.type === 'COUP') && isOpOuverte(o) && (o.sortirActionId === a.id || (o.groupActionIds || []).includes(a.id)))
+          : _prSecours;
+        const _prVal = a.prixRouge || _prSecours.prixRouge;
+        const _prAvantVal = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge
+          : (_prSecours && typeof _prSecours.prixAvantRouge === 'number' ? _prSecours.prixAvantRouge : null);
         const _prEcSort = _prOpSort ? isPrixRougeEnCours(_prOpSort) : true;
         const _prColorSort = _prEcSort ? '#fca5a5' : '#94a3b8';
         const _prBgSort = _prEcSort ? '#ef444425' : '#94a3b815';
         const _prBorderSort = _prEcSort ? '#ef444460' : '#94a3b840';
         const _prOpaSort = _prEcSort ? '' : ' opacity:0.7;';
         const _prDateSort = (!_prEcSort && _prOpSort && _prOpSort.dateDebut) ? ' · ' + fmtFR(_prOpSort.dateDebut) : '';
-        const _pvAvantR = typeof a.prixAvantRouge === 'number' ? a.prixAvantRouge.toFixed(2) + '€' : '';
-        badgePrix += `<span title="Prix rouge ${_prEcSort ? 'actif' : 'programmé'}${_prDateSort ? ' — dès ' + fmtFR(_prOpSort.dateDebut) : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgSort}; color:${_prColorSort}; border:1px solid ${_prBorderSort}; border-radius:3px; white-space:nowrap;${_prOpaSort}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${a.prixRouge.toFixed(2)}€${_prDateSort}</span>`;
+        const _pvAvantR = _prAvantVal != null ? _prAvantVal.toFixed(2) + '€' : '';
+        badgePrix += `<span title="Prix rouge ${_prEcSort ? 'actif' : 'programmé'}${_prDateSort ? ' — dès ' + fmtFR(_prOpSort.dateDebut) : ''}${_prSecours ? ' (OP née d\'un relevé : ' + _prSecours.id + ')' : ''}" style="font-size:9px; font-weight:700; padding:1px 6px; background:${_prBgSort}; color:${_prColorSort}; border:1px solid ${_prBorderSort}; border-radius:3px; white-space:nowrap;${_prOpaSort}">🔴 ${_pvAvantR ? '<s style="color:#64748b; font-weight:400;">' + _pvAvantR + '</s> → ' : ''}${_prVal.toFixed(2)}€${_prDateSort}</span>`;
       }
       // ── 🐌 ALERTE ÉCOULEMENT LENT (correction n°1 Fabien 2026-07-09) : badge SUR LA LIGNE,
       // admin uniquement (géré dans ecoulementBadgeHtml). Pas sur les lignes parfum
