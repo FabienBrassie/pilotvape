@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 13:05</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 14:32</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2756,6 +2756,22 @@ function _maillonFanfareRentrer(op, shop, defs) {
     }
 }
 
+// ── 🔴 Étiquette PR générique (2026-08-04, cas Kroma R — données à l'appui) : une OP
+// PRIX_ROUGE SANS pièce étiquette n'avait AUCUNE étape d'étiquette — le prix changeait
+// au bilan, la re-proposition n'avait rien à décocher côté étiquette, et l'OP restait
+// invisible dans « Prix à modifier » alors que la boutique à stock devait refaire son
+// étiquette vitrine. Ces deux étapes génériques utilisent les MÊMES clés que le COUP
+// (pr_etiquette / pr_posee, déjà dans _clesEtapesEtiquettePR) → la re-proposition au
+// changement de prix, le shunt « écoulé chez moi », la clôture et le volet « Prix rouges
+// à refaire » les couvrent sans aucun code de plus. Ne s'ajoutent que s'il n'y a PAS de
+// pièce étiquette (sinon doublon avec plv_<pièce>_imprimée/posée).
+function _maillonPrEtiquetteGenerique(op, shop, defs) {
+  const _pid = (op.produitIds || [])[0];
+  const _isKitPr = _pid && baseKits.some(k => k.id === _pid);
+  defs.push({ key: 'pr_etiquette', label: '🔴 ' + (_isKitPr ? 'Étiquette FT prix rouge imprimée' : 'Étiquette prix rouge imprimée'), kind: 'coup_pr', nat: 'imm' });
+  defs.push({ key: 'pr_posee',     label: '🔴 Étiquette prix rouge posée', kind: 'coup_pr', nat: 'cond', condKey: 'pr_etiquette', condLabel: 'après impression' });
+}
+
 // Non-COUP avec commanderProduits (sans rentrerActionId fanfare). COUP : rentrer_*/sortir_* plus bas (avec PR entre les deux).
 function _maillonProdCommande(op, shop, defs) {
     if (op.commandeAdmin === true) {
@@ -2928,6 +2944,8 @@ const OP_STEP_CHAIN = [
   { id: 'prod_commande',   when: op => !!(op.prep && op.prep.commanderProduits && op.type !== 'COUP' && !((op.type === 'NOUVEAUTE' || op.type === 'EXCLU') && op.rentrerActionId)), gen: _maillonProdCommande },
   { id: 'plv_reception',   when: op => (op.pieces || []).length > 0, gen: _maillonPlvReception },
   { id: 'plv_pose',        when: op => (op.pieces || []).length > 0, gen: _maillonPlvPose },
+  { id: 'pr_etiquette_gen', when: op => !!(op.type === 'PRIX_ROUGE' && typeof op.prixRouge === 'number' && op.prixRouge > 0
+      && !(op.pieces || []).some(p => p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')), gen: _maillonPrEtiquetteGenerique },
   { id: 'swappy_meca',     when: op => !!(op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE'), gen: _maillonSwappyMeca },
   { id: 'coup',            when: op => op.type === 'COUP', gen: _maillonCoup },
   { id: 'fin_op',          when: op => !!(op.dateFin && op.dateFin <= ymd(new Date())), gen: _maillonFinOp },
