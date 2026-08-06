@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-06 16:57</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-06 17:21</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2781,7 +2781,9 @@ function _maillonPrEtiquetteGenerique(op, shop, defs) {
 // présentes — sinon ensureOpSteps purgerait l'historique).
 function _opEtiquetteNouveauteRequise(op) {
   if (op.type !== 'NOUVEAUTE' && op.type !== 'EXCLU') return false;
-  if ((op.pieces || []).some(p => p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')) return false;
+  // TOUTE pièce étiquette (FT, prix barré, SPÉCIALE/custom…) supprime la générique —
+  // reprise Fabien 2026-08-06 (cas JRN Phoenix : doublon avec son étiquette spéciale).
+  if ((op.pieces || []).some(p => p.type && String(p.type).indexOf('ETIQUETTE') === 0)) return false;
   const pid = (op.produitIds || [])[0];
   if (!pid) return false;
   const g = baseLiq.find(l => l.id === pid);
@@ -2814,7 +2816,9 @@ function _opEtiquetteNouveauteRequise(op) {
 }
 function _maillonEtiquetteNouveaute(op, shop, defs) {
   const pid = (op.produitIds || [])[0];
-  const _lbl = baseLiq.some(l => l.id === pid) ? 'Étiquette étagère' : (baseKits.some(k => k.id === pid) ? 'Étiquette FT' : 'Étiquette');
+  // Reprise Fabien 2026-08-06 : ne JAMAIS présumer le support (un puff est un KIT qui
+  // va sur l'étagère liquide) — étagère pour les gammes liquides (ses mots), neutre sinon.
+  const _lbl = baseLiq.some(l => l.id === pid) ? 'Étiquette étagère' : 'Étiquette';
   defs.push({ key: 'etiq_nvx_imprimee', label: '🏷️ ' + _lbl + ' imprimée', kind: 'etiq_nvx', nat: 'imm' });
   defs.push({ key: 'etiq_nvx_posee', label: '🏷️ ' + _lbl + ' posée en rayon', kind: 'etiq_nvx', nat: 'cond', condKey: 'etiq_nvx_imprimee', condLabel: 'après impression' });
 }
@@ -3041,7 +3045,7 @@ const OP_STEP_CHAIN = [
   { id: 'plv_reception',   when: op => (op.pieces || []).length > 0, gen: _maillonPlvReception },
   { id: 'plv_pose',        when: op => (op.pieces || []).length > 0, gen: _maillonPlvPose },
   { id: 'pr_etiquette_gen', when: op => !!(op.type === 'PRIX_ROUGE' && typeof op.prixRouge === 'number' && op.prixRouge > 0
-      && !(op.pieces || []).some(p => p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')), gen: _maillonPrEtiquetteGenerique },
+      && !(op.pieces || []).some(p => p.type && String(p.type).indexOf('ETIQUETTE') === 0)), gen: _maillonPrEtiquetteGenerique },
   { id: 'etiq_nouveaute',   when: op => _opEtiquetteNouveauteRequise(op), gen: _maillonEtiquetteNouveaute },
   { id: 'swappy_meca',     when: op => !!(op.mecanique && MECA_IMPACTE_PRIX.includes(op.mecanique.type) && op.type !== 'NATIONALE'), gen: _maillonSwappyMeca },
   { id: 'coup',            when: op => op.type === 'COUP', gen: _maillonCoup },
@@ -3253,7 +3257,7 @@ function _vieOpLignesRows(op, defs) {
     if (t === 'PRIX') {
       // PR née d'un relevé : « Étiquette faite / Changée en rayon / Swappy » de la ligne
       // PRIX = le même travail réel que les étapes étiquette/pose/swappy de l'OP.
-      const _estPieceEtiq = k => (op.pieces || []).some(p => (p.type === 'ETIQUETTE_PRIX_BARRE' || p.type === 'ETIQUETTE_FREETOUCH')
+      const _estPieceEtiq = k => (op.pieces || []).some(p => (p.type && String(p.type).indexOf('ETIQUETTE') === 0)
         && (k === 'plv_' + p.id + '_imprimee' || k === 'plv_' + p.id + '_posee'));
       if (defs.some(d => { const kb = _vieCleBase(d.key); return kb === 'pr_etiquette' || (/^plv_.+_imprimee$/.test(kb) && _estPieceEtiq(kb)); })) cov.add('etiquette');
       if (defs.some(d => { const kb = _vieCleBase(d.key); return kb === 'pr_posee' || (/^plv_.+_posee$/.test(kb) && _estPieceEtiq(kb)); })) cov.add('rayon');
@@ -19662,6 +19666,16 @@ function renderDashboard() {
     });
     let _opRowsVie = [];
     try { _opRowsVie = _vieLigneOpRows(a, sh); } catch (e) { console.warn('[VIE-DASH]', e); }
+    // ⛔ HORS STOCK (uniformisation jusqu'au bout — reprise Fabien 2026-08-06) : même
+    // règle que la carte OP. Bloc grisé + bandeau quand le produit est hors stock chez
+    // cette boutique (types où le travail présuppose du stock, comme le shunt), SAUF
+    // travail 🗄️ tiroir restant (c'est précisément SON travail).
+    let _horsStockIci = false;
+    try {
+      _horsStockIci = ((a.type === 'SORTIR' && a.motifSortie !== 'REPRISE') || a.type === 'PRIX')
+        && _ligneEcouleeChezShop(a, sh)
+        && !_opRowsVie.some(r => r.def.kind === 'tiroir' && _getOpStepChecked(r.op, sh, r.def) !== true);
+    } catch (e) {}
     _opRowsVie.forEach(x => {
       let at = 0;
       for (let i = 0; i < _rowsSeq.length; i++) if (_rowsSeq[i].phase <= x.phase) at = i + 1;
@@ -19769,8 +19783,12 @@ function renderDashboard() {
         }
       }
     }
-    return `<div style="padding:6px 8px; background:#1e293b; border:1px solid ${col}30; border-radius:4px;">
+    const _bandeauHS = _horsStockIci
+      ? `<div style="margin:2px 0 4px; padding:3px 6px; background:#33415530; border:1px dashed #47556960; border-radius:3px; font-size:9.5px; color:#94a3b8;">⛔ Hors stock à ${label} — étapes cochées automatiquement, rien à faire ici</div>`
+      : '';
+    return `<div style="padding:6px 8px; background:${_horsStockIci ? '#0a0f1a' : '#1e293b'}; border:1px solid ${_horsStockIci ? '#334155' : col + '30'}; border-radius:4px;${_horsStockIci ? ' opacity:0.5;' : ''}">
       ${header}
+      ${_bandeauHS}
       ${rows}
       ${rienZone}
       ${ccZone}
