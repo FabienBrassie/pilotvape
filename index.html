@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-06 16:02</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-06 16:57</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3349,6 +3349,75 @@ function _vieRenderLigneRow(op, sh, r, ctx) {
     ${box}
     <span style="${checked ? 'text-decoration:line-through; color:#64748b;' : ''}">${d.label}${prov}${partiel}${!checked ? stepBadgeAttente(d, stepsObj) : ''}${stepBadgeAdmin(d)}</span>
   </div>`;
+}
+
+// ═══ 🧬 VIE UNIFIÉE — étape 2 (dashboard, 2026-08-06) : les étapes d'OP liées
+// s'insèrent DANS la liste par boutique des lignes (renderShopSteps), à leur place
+// chronologique — l'encadré pointillé « Miroir OP » a disparu. Même contrat que
+// l'étape 1 : rendu + routage seulement (clic → toggleOpStep, LE toggle canonique),
+// compteurs de ligne inchangés (le x/y ne compte que les étapes de la ligne).
+// LES OP liées à une ligne (canonique — ex-filtre de l'encadré) : lien direct via le
+// registre (returnActionId exclu, comportement historique), groupe parfum, ou produit
+// avec cohérence parfum (OP gamme entière → tous les parfums ; OP parfum → le sien).
+function _vieOpsLieesALigne(a) {
+  const _pid = a.produitId;
+  const _aPf = a.produitParfumId || '';
+  return ops.filter(o => {
+    if (o._archived || !isOpOuverte(o)) return false;
+    if (LIAISON_OP_ACTION_FIELDS.some(f => f !== 'returnActionId' && o[f] === a.id)) return true;
+    if (Array.isArray(o.groupActionIds) && o.groupActionIds.includes(a.id)) return true;
+    if (_pid && o.produitIds && o.produitIds.includes(_pid)) {
+      const _oPf = o.produitParfumId || '';
+      const _oPfs = Array.isArray(o.produitParfumIds) ? o.produitParfumIds : [];
+      if (!_oPf && _oPfs.length === 0) return true;
+      if (_oPf && _oPf === _aPf) return true;
+      if (_oPfs.length > 0 && _aPf && _oPfs.includes(_aPf)) return true;
+      return false;
+    }
+    return false;
+  });
+}
+// Les étapes d'OP à insérer dans la liste d'une ligne pour une boutique. Anti-doublon
+// strict : les miroirs du dashboard (coup_*, fanfare_rentrer, prod) et les paires
+// _opActionStepMirror avec CETTE ligne restent des étapes de la LIGNE (« une entrée
+// par produit, la ligne gagne »).
+function _vieLigneOpRows(a, sh) {
+  const out = [];
+  _vieOpsLieesALigne(a).forEach(op => {
+    try { ensureOpModel(op); } catch (e) {}
+    const m = (typeof _opActionStepMirror === 'function') ? _opActionStepMirror(a, op) : null;
+    const _mirKeys = (m && m.a_to_o) ? new Set(Object.keys(m.a_to_o).map(k => m.a_to_o[k])) : new Set();
+    const _DK = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
+    computeOpShopStepDefs(op, sh).forEach(d => {
+      if (_DK.includes(d.kind)) return;
+      if (_mirKeys.has(d.key)) return;
+      let p = 0;
+      try { p = _viePhaseDef(d, op); } catch (e) {}
+      out.push({ src: 'op', def: d, op: op, phase: p || 4 });
+    });
+  });
+  out.sort((x, y) => x.phase - y.phase);
+  return out;
+}
+// Rendu d'une étape d'OP dans la liste d'une ligne : grisée-mais-cliquable, « ← OP »
+// (mêmes gardes que l'ex-encadré : admin, verrou de dispatch, historique de prix figé).
+function _vieRenderOpRowDash(a, sh, r) {
+  const d = r.def, op = r.op;
+  const checked = _getOpStepChecked(op, sh, d) === true;
+  const _admRO = (d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin()) || !!d._histGel;
+  const _hub = (typeof opDispatchHubForStep === 'function') ? opDispatchHubForStep(op, d) : null;
+  const _lock = !!(_hub && sh !== _hub && !checked && !_getOpStepChecked(op, _hub, d));
+  const box = checked
+    ? '<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:#64748b; color:#0f172a; border:1px solid #64748b; border-radius:3px; font-size:10px; font-weight:700;">✓</span>'
+    : '<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid #475569; border-radius:3px;"></span>';
+  const clickAttr = (_admRO || _lock)
+    ? ' title="' + (d._histGel ? 'Historique — coche d\'un prix précédent (conservée)' : _lock ? 'Verrouillé : ' + (SHOP_LABELS[_hub] || _hub) + ' doit déclarer sa réception d\'abord' : 'Géré par Fabien — la coche apparaîtra une fois fait de son côté') + '"'
+    : ' onclick="event.stopPropagation(); toggleOpStep(\'' + op.id + '\',\'' + sh + '\',\'' + d.key + '\', ' + (!checked) + ')" title="Coche croisée — s\'écrit sur l\'OP ' + op.id + '"';
+  const prov = ' <span onclick="event.stopPropagation(); switchTabProgrammatic(\'ops\',\'' + op.id + '\')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à la carte OP ' + op.id + '">← OP</span>';
+  return '<div class="pv-step-row"' + clickAttr
+    + ' style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; font-size:11px; color:' + (checked ? '#94a3b8' : '#64748b') + '; border-radius:3px; user-select:none; ' + (_lock ? 'opacity:0.45;' : 'opacity:0.7;') + ((_admRO || _lock) ? '' : ' cursor:pointer;') + '"'
+    + ((_admRO || _lock) ? '' : ' onmouseover="this.style.background=\'#33415540\'" onmouseout="this.style.background=\'transparent\'"')
+    + '>' + box + '<span style="' + (checked ? 'text-decoration:line-through; color:#475569;' : '') + '">' + d.label + prov + (!checked ? stepBadgeAttente(d, ((op.etats || {})[sh] || {}).steps) : '') + stepBadgeAdmin(d) + opStepBadgeDispatch(op, sh, d, checked) + '</span></div>';
 }
 
 // Toggles
@@ -19582,7 +19651,25 @@ function renderDashboard() {
       ${allDone && st.dateFait ? `<span style="font-size:9px; color:#64748b;">fait le ${st.dateFait}</span>` : ''}
       ${_subStepBadge}
     </div>`;
-    const rows = defs.map(d => {
+    // 🧬 VIE UNIFIÉE — étape 2 (2026-08-06) : les étapes des OP liées s'insèrent ICI,
+    // à leur place chronologique (grisées, « ← OP ») — l'encadré séparé a disparu.
+    // Le compteur x/y ci-dessus ne compte QUE les étapes de la ligne (inchangé).
+    const _rowsSeq = [];
+    defs.forEach(d => {
+      let _p = 0;
+      try { _p = _viePhaseActionStep(a.type, d.key); } catch (e) {}
+      _rowsSeq.push({ src: 'own', def: d, phase: _p || 4 });
+    });
+    let _opRowsVie = [];
+    try { _opRowsVie = _vieLigneOpRows(a, sh); } catch (e) { console.warn('[VIE-DASH]', e); }
+    _opRowsVie.forEach(x => {
+      let at = 0;
+      for (let i = 0; i < _rowsSeq.length; i++) if (_rowsSeq[i].phase <= x.phase) at = i + 1;
+      _rowsSeq.splice(at, 0, x);
+    });
+    const rows = _rowsSeq.map(r => {
+      if (r.src === 'op') return _vieRenderOpRowDash(a, sh, r);
+      const d = r.def;
       const checked = st.steps && st.steps[d.key] === true;
       const box = checked
         ? `<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:${col}; color:#0f172a; border:1px solid ${col}; border-radius:3px; font-size:10px; font-weight:700;">✓</span>`
@@ -20647,7 +20734,7 @@ function renderDashboard() {
         // Jamais sur une reprise fournisseur (2026-06-12) : le produit part en destruction,
         // pas en destockage — ni picker, ni champ prix rouge dans le dépliage.
         const _estReprise = a.motifSortie === 'REPRISE';
-        const _pvRef = isLiq ? (prod.pv || 0) : (kit ? kit.pv : 0);
+        const _pvRef = isLiq ? (prod.pv || 0) : (kit ? (kit.pv || 0) : 0); // (kit sans pv : ne jamais crasher la carte — durci 2026-08-06)
         const _pvInitLabel = _pvRef > 0 ? ' <span style="font-size:10px; color:#94a3b8; text-decoration:line-through; font-weight:400;">' + _pvRef.toFixed(2) + '€</span>' : '';
         const picker = _estReprise ? '' : renderOpPromotionPicker(a, 'Destocker en prix rouge ?' + _pvInitLabel, [
           { key: 'PRIX_ROUGE', label: 'Prix rouge', color: '#ef4444' }
@@ -20727,78 +20814,9 @@ function renderDashboard() {
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:6px; margin-bottom:8px;">
         ${SHOPS.filter(sh => !fShop || sh === fShop).map(sh => renderShopSteps(a, sh)).join('')}
       </div>
-      ${(() => {
-        // ── Miroir OP : afficher les étapes OP liées en lecture seule ──
-        // Cherche toute OP active liée à cette action — par lien direct OU par produit
-        const _pid = a.produitId;
-        const _aPf = a.produitParfumId || ''; // 2026-05-28 audit OP : parfum de l'action
-        const _linkedOps = ops.filter(o => {
-          if (o._archived || !isOpOuverte(o)) return false;
-          // Lien direct par ID d'action — registre unique (étape 2). returnActionId exclu :
-          // comportement historique conservé (pas de miroir OP sur l'action de retour de prix).
-          if (LIAISON_OP_ACTION_FIELDS.some(f => f !== 'returnActionId' && o[f] === a.id)) return true;
-          // Lien par produit : OP dont produitIds contient le même produit
-          if (_pid && o.produitIds && o.produitIds.includes(_pid)) {
-            // 2026-05-28 audit OP : cohérence parfum pour éviter la fuite entre parfums d'une même gamme.
-            // - OP "gamme entière" (pas de parfum spécifique) → visible pour tous les parfums de la gamme.
-            // - OP ciblant un parfum précis → visible uniquement pour ce parfum.
-            // - OP groupée (produitParfumIds) → visible uniquement pour les parfums listés (ou gamme entière si liste vide).
-            const _oPf = o.produitParfumId || '';
-            const _oPfs = Array.isArray(o.produitParfumIds) ? o.produitParfumIds : [];
-            // OP gamme entière (aucun parfum) → toujours liée
-            if (!_oPf && _oPfs.length === 0) return true;
-            // OP avec parfum unique : doit matcher
-            if (_oPf && _oPf === _aPf) return true;
-            // OP groupée avec liste de parfums
-            if (_oPfs.length > 0 && _aPf && _oPfs.includes(_aPf)) return true;
-            return false;
-          }
-          return false;
-        });
-        if (_linkedOps.length === 0) return '';
-        return _linkedOps.map(_op => {
-          ensureOpModel(_op);
-          const _DASHBOARD_KINDS = ['coup_rentrer', 'coup_sortir', 'fanfare_rentrer', 'prod'];
-          const _opLabel = (OP_TYPE_META[_op.type] || {}).label || _op.type;
-          const _opCol = (OP_TYPE_META[_op.type] || {}).color || '#94a3b8';
-          const _opPct = Math.round(opOverallProgress(_op) * 100);
-          const _opPctColor = _opPct >= 100 ? '#22c55e' : _opPct > 0 ? '#f59e0b' : '#64748b';
-          return `<div style="margin:6px 0 8px; padding:6px 8px; border:1px dashed ${_opCol}40; border-radius:4px; background:${_opCol}08;">
-            <div style="display:flex; align-items:center; gap:6px; margin-bottom:4px;">
-              <span style="font-size:10px; color:${_opCol}; font-weight:700; text-transform:uppercase; letter-spacing:0.4px;">OP ${_opLabel} ${_op.id}</span>
-              <span style="font-size:10px; color:${_opPctColor}; font-weight:600;">${_opPct}%</span>
-              <span onclick="switchTabProgrammatic('ops','${_op.id}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline; margin-left:auto;" title="Aller à l'OP">→ voir OP</span>
-            </div>
-            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(170px, 1fr)); gap:4px;">
-              ${SHOPS.filter(sh => !fShop || sh === fShop).map(sh => {
-                const _st = _op.etats && _op.etats[sh];
-                if (!_st) return '';
-                const _defs = computeOpShopStepDefs(_op, sh).filter(d => !_DASHBOARD_KINDS.includes(d.kind));
-                if (_defs.length === 0) return '';
-                const _col = SHOP_COLORS[sh];
-                const _rows = _defs.map(d => {
-                  const _checked = _st.steps && _st.steps[d.key] === true;
-                  const _box = _checked
-                    ? '<span style="display:inline-flex; align-items:center; justify-content:center; width:13px; height:13px; background:#64748b; color:#0f172a; border:1px solid #64748b; border-radius:2px; font-size:9px; font-weight:700;">✓</span>'
-                    : '<span style="display:inline-block; width:13px; height:13px; background:transparent; border:1px solid #475569; border-radius:2px;"></span>';
-                  // 2026-08-01 (retour Fabien) : les coches « ← OP » sont CLIQUABLES depuis la
-                  // ligne À rentrer — même triangle que côté OP (l'écriture va sur l'OP, source
-                  // de ces étapes). Gardes conservées : étape de Fabien côté boutique et verrou
-                  // de dispatch restent en lecture seule.
-                  const _admRO = (d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin()) || d._histGel;
-                  const _hub = (typeof opDispatchHubForStep === 'function') ? opDispatchHubForStep(_op, d) : null;
-                  const _lock = !!(_hub && sh !== _hub && !_checked && !_getOpStepChecked(_op, _hub, d));
-                  const _click = (_admRO || _lock)
-                    ? ' title="' + (d._histGel ? 'Historique — coche d\'un prix précédent' : _admRO ? 'Géré par Fabien' : 'Verrouillé : ' + (SHOP_LABELS[_hub] || _hub) + ' doit déclarer sa réception d\'abord') + '"'
-                    : ' onclick="event.stopPropagation(); toggleOpStep(\'' + _op.id + '\',\'' + sh + '\',\'' + d.key + '\', ' + (!_checked) + ')" title="Coche croisée — s\'écrit sur l\'OP"';
-                  return '<div' + _click + ' style="display:flex; align-items:center; gap:5px; padding:2px 3px; font-size:10px; color:' + (_checked ? '#64748b' : '#94a3b8') + '; opacity:0.7;' + (_admRO || _lock ? '' : ' cursor:pointer;') + '">' + _box + '<span style="' + (_checked ? 'text-decoration:line-through; color:#475569;' : '') + '">' + d.label + '</span> <span style="font-size:8px; color:#475569;">← OP</span></div>';
-                }).join('');
-                return '<div style="padding:3px 5px; border-left:2px solid ' + _col + '30; border-radius:2px;"><div style="font-size:9px; color:' + _col + '; font-weight:600; margin-bottom:2px;">' + (SHOP_LABELS[sh] || sh) + '</div>' + _rows + '</div>';
-              }).join('')}
-            </div>
-          </div>`;
-        }).join('');
-      })()}
+      ${'' /* 🧬 VIE UNIFIÉE — étape 2 (2026-08-06) : l'encadré pointillé « Miroir OP » a
+        disparu — les étapes d'OP liées vivent désormais DANS la liste de chaque boutique
+        (renderShopSteps), à leur place chronologique, grisées-cliquables « ← OP ». */}
       <div style="font-size:10px; color:#64748b; margin:2px 0 4px; text-transform:uppercase; letter-spacing:0.4px;">Notes</div>
       <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:4px;">
         ${SHOPS.filter(sh => !fShop || sh === fShop).map(sh => `
