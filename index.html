@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-06 17:53</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-06 18:29</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3268,6 +3268,20 @@ function _vieOpLignesRows(op, defs) {
       out.push({ src: 'ligne', def: s, acts: list, phase: _viePhaseActionStep(t, s.key) });
     });
   });
+  // 🔁 remplacement (2026-08-06) : les lignes rentrer/sortir liées « vivent en miroir »
+  // avec leur homologue de substitution — ses étapes entrent aussi dans la vie de la
+  // carte (agrégat mono-ligne, provenance ↔ avec le NOM de l'autre produit).
+  try {
+    const _vus = new Set();
+    _vieOpLigneGroupes(op).forEach(list => list.forEach(aL => {
+      if ((aL.type !== 'RENTRER' && aL.type !== 'SORTIR') || _vus.has(aL.id)) return;
+      _vus.add(aL.id);
+      _vieSubRows(aL, null).forEach(x => {
+        if (out.some(r => r.acts && r.acts.some(a2 => a2.id === x.subA.id) && _vieCleBase(r.def.key) === x.def.key)) return;
+        out.push({ src: 'ligne', def: x.def, acts: [x.subA], phase: x.phase, nomAutre: x.nomAutre, sens: x.sens });
+      });
+    }));
+  } catch (e) {}
   out.sort((a, b) => a.phase - b.phase);
   return out;
 }
@@ -3346,7 +3360,9 @@ function _vieRenderLigneRow(op, sh, r, ctx) {
   const clickAttr = clickable
     ? `onclick="event.stopPropagation(); vieToggleLigneStep('${idsCsv}','${sh}','${d.key}')" title="Coche croisée — s'écrit sur la ligne du dashboard"`
     : `title="${_admRO ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : 'Produit hors stock à ' + ctx.shopLabel + ' — auto-complété'}"`;
-  const prov = ` <span onclick="event.stopPropagation(); goToLigneFromOp('${model.id}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à la ligne dans le dashboard">← dashboard</span>`;
+  const prov = r.nomAutre
+    ? ` <span onclick="event.stopPropagation(); goToLigneFromOp('${model.id}')" style="font-size:9px; color:#f472b6; cursor:pointer; text-decoration:underline;" title="Aller à la ligne de ${r.nomAutre}">↔ ${r.sens === 'sortie' ? 'sortie' : 'rentrée'} ${r.nomAutre}</span>`
+    : ` <span onclick="event.stopPropagation(); goToLigneFromOp('${model.id}')" style="font-size:9px; color:#6366f1; cursor:pointer; text-decoration:underline;" title="Aller à la ligne dans le dashboard">← dashboard</span>`;
   return `<div class="pv-step-row" ${clickAttr}
     style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; ${clickable ? 'cursor:pointer;' : ''} font-size:11px; color:${checked ? '#94a3b8' : '#64748b'}; border-radius:3px; user-select:none; opacity:0.7; ${grey}"
     ${clickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'"` : ''}>
@@ -3402,6 +3418,59 @@ function _vieLigneOpRows(a, sh) {
   });
   out.sort((x, y) => x.phase - y.phase);
   return out;
+}
+// ── 🔁 REMPLACEMENT « en miroir » (suggestion Fabien, 2026-08-06 18:20) : un produit à
+// rentrer qui REMPLACE un produit à sortir et la sortie de celui-ci sont UNE histoire —
+// chaque ligne montre les étapes de l'autre, grisées-cliquables, à leur place :
+// commander/recevoir le NOUVEAU → sortir l'ANCIEN → installer le NOUVEAU (c'est déjà la
+// logique de l'attente d'installation). AUCUN lien écrit, coche routée sur l'autre ligne.
+function _vieSubRows(a, sh) {
+  const out = [];
+  if (!a || a.annulee) return out;
+  const _prodOf = pid => baseKits.find(k => k.id === pid) || basePD.find(x => x.id === pid) || baseLiq.find(l => l.id === pid);
+  const _ligneOuverte = (type, pid) => actions.find(x => x.type === type && x.produitId === pid
+    && !x.annulee && !x._archived && !x.dateCloture && x.motifSortie !== 'REPRISE');
+  let autre = null, sens = null;
+  if (a.type === 'RENTRER') {
+    const p = _prodOf(a.produitId);
+    if (p && p.remplaceId) { autre = _ligneOuverte('SORTIR', p.remplaceId); sens = 'sortie'; }
+  } else if (a.type === 'SORTIR' && a.motifSortie !== 'REPRISE') {
+    const rempl = baseKits.find(k => k.remplaceId === a.produitId)
+      || basePD.find(x => x.remplaceId === a.produitId)
+      || baseLiq.find(l => l.remplaceId === a.produitId);
+    if (rempl) { autre = _ligneOuverte('RENTRER', rempl.id); sens = 'rentree'; }
+  }
+  if (!autre) return out; // pas de paire, ou l'autre cycle est clos (leçon M100)
+  const pA = _prodOf(autre.produitId);
+  const nomAutre = pA ? ((pA.marque || '') + ' ' + (pA.modele || pA.gamme || '')).trim() : autre.produitId;
+  try { ensureActionSteps(autre); } catch (e) {}
+  getActionSteps(autre).forEach(sdef => {
+    // Place dans l'histoire de la substitution : la sortie de l'ancien AVANT « Installé
+    // en rayon » du nouveau (4.5) ; côté sortant, la commande/réception du nouveau en
+    // tête, son installation APRÈS la sortie (6.5).
+    const ph = (sens === 'sortie') ? 4.5
+      : (sdef.key === 'commande' ? 1 : sdef.key === 'recu' ? 2 : 6.5);
+    out.push({ src: 'sub', def: sdef, acts: [autre], subA: autre, nomAutre: nomAutre, sens: sens, phase: ph });
+  });
+  return out;
+}
+// Rendu d'une étape « miroir de remplacement » dans la liste d'une ligne du dashboard.
+function _vieRenderSubRowDash(a, sh, r) {
+  const d = r.def, autre = r.subA;
+  const st2 = (autre.etats && autre.etats[sh]) || {};
+  const checked = !!(st2.steps && st2.steps[d.key] === true);
+  const _admRO = d.resp === 'admin' && typeof isAdmin === 'function' && !isAdmin();
+  const box = checked
+    ? '<span style="display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; background:#64748b; color:#0f172a; border:1px solid #64748b; border-radius:3px; font-size:10px; font-weight:700;">✓</span>'
+    : '<span style="display:inline-block; width:14px; height:14px; background:transparent; border:1px solid #475569; border-radius:3px;"></span>';
+  const clickAttr = _admRO
+    ? ' title="Géré par Fabien — la coche apparaîtra une fois fait de son côté"'
+    : ' onclick="event.stopPropagation(); toggleActionStep(\'' + autre.id + '\',\'' + sh + '\',\'' + d.key + '\')" title="Coche croisée — s\'écrit sur la ligne de ' + r.nomAutre + '"';
+  const prov = ' <span onclick="event.stopPropagation(); goToLigneFromOp(\'' + autre.id + '\')" style="font-size:9px; color:#f472b6; cursor:pointer; text-decoration:underline;" title="Aller à la ligne de ' + r.nomAutre + '">↔ ' + (r.sens === 'sortie' ? 'sortie' : 'rentrée') + ' ' + r.nomAutre + '</span>';
+  return '<div class="pv-step-row"' + clickAttr
+    + ' style="display:flex; align-items:center; gap:6px; padding:3px 4px; margin:1px -4px; font-size:11px; color:' + (checked ? '#94a3b8' : '#64748b') + '; border-radius:3px; user-select:none; opacity:0.7;' + (_admRO ? '' : ' cursor:pointer;') + '"'
+    + (_admRO ? '' : ' onmouseover="this.style.background=\'#33415540\'" onmouseout="this.style.background=\'transparent\'"')
+    + '>' + box + '<span style="' + (checked ? 'text-decoration:line-through; color:#475569;' : '') + '">' + d.label + prov + (!checked ? stepBadgeAttente(d, st2.steps) : '') + stepBadgeAdmin(d) + '</span></div>';
 }
 // Rendu d'une étape d'OP dans la liste d'une ligne : grisée-mais-cliquable, « ← OP »
 // (mêmes gardes que l'ex-encadré : admin, verrou de dispatch, historique de prix figé).
@@ -19666,6 +19735,7 @@ function renderDashboard() {
     });
     let _opRowsVie = [];
     try { _opRowsVie = _vieLigneOpRows(a, sh); } catch (e) { console.warn('[VIE-DASH]', e); }
+    try { _opRowsVie = _opRowsVie.concat(_vieSubRows(a, sh)); } catch (e) { console.warn('[VIE-SUB]', e); }
     // ⛔ HORS STOCK (uniformisation jusqu'au bout — reprise Fabien 2026-08-06) : même
     // règle que la carte OP. Bloc grisé + bandeau quand le produit est hors stock chez
     // cette boutique (types où le travail présuppose du stock, comme le shunt), SAUF
@@ -19683,6 +19753,7 @@ function renderDashboard() {
     });
     const rows = _rowsSeq.map(r => {
       if (r.src === 'op') return _vieRenderOpRowDash(a, sh, r);
+      if (r.src === 'sub') return _vieRenderSubRowDash(a, sh, r);
       const d = r.def;
       const checked = st.steps && st.steps[d.key] === true;
       const box = checked
@@ -19786,7 +19857,15 @@ function renderDashboard() {
     const _bandeauHS = _horsStockIci
       ? `<div style="margin:2px 0 4px; padding:3px 6px; background:#33415530; border:1px dashed #47556960; border-radius:3px; font-size:9.5px; color:#94a3b8;">⛔ Hors stock à ${label} — étapes cochées automatiquement, rien à faire ici</div>`
       : '';
-    return `<div style="padding:6px 8px; background:${_horsStockIci ? '#0a0f1a' : '#1e293b'}; border:1px solid ${_horsStockIci ? '#334155' : col + '30'}; border-radius:4px;${_horsStockIci ? ' opacity:0.5;' : ''}">
+    // ✅ TOUT FAIT (suggestion Fabien 2026-08-06 18:18, cas PM100) : quand toute la vie
+    // affichée est cochée (étapes de la ligne ET étapes ← OP), le bloc se grise aussi —
+    // même signal que « hors stock » : rien à faire ici. Les coches restent cliquables
+    // (corriger reste possible).
+    const _toutFait = !_horsStockIci && _rowsSeq.length > 0 && _rowsSeq.every(r => r.src === 'op'
+      ? _getOpStepChecked(r.op, sh, r.def) === true
+      : !!(st && st.steps && st.steps[r.def.key] === true));
+    const _grise = _horsStockIci || _toutFait;
+    return `<div${_toutFait ? ' data-vie-fait="1"' : ''} style="padding:6px 8px; background:${_grise ? '#0a0f1a' : '#1e293b'}; border:1px solid ${_grise ? '#334155' : col + '30'}; border-radius:4px;${_grise ? ' opacity:0.55;' : ''}">
       ${header}
       ${_bandeauHS}
       ${rows}
@@ -24986,10 +25065,17 @@ function _pvCheckListWriteTargets(op, shop, def) {
 }
 
 // Applique un état cible à une étape d'unité (les toggles canoniques font le reste).
-function _pvCheckListApply(unit, shop, def, target, vieOp) {
+function _pvCheckListApply(unit, shop, def, target, vieOp, subA) {
   // Étape d'OP insérée dans la liste d'une ligne (vie unifiée, étape 3) : la coche
   // s'écrit sur l'OP via LE toggle canonique.
   if (vieOp) { toggleOpStep(vieOp.id, shop, def.key, target); return; }
+  // Étape « miroir de remplacement » (🔁 2026-08-06) : la coche s'écrit sur l'autre ligne.
+  if (subA) {
+    const _st = subA.etats && subA.etats[shop];
+    const _cur = !!(_st && _st.steps && _st.steps[def.key] === true);
+    if (_cur !== target) toggleActionStep(subA.id, shop, def.key);
+    return;
+  }
   if (unit.kind === 'action') {
     const st = unit.a.etats && unit.a.etats[shop];
     const cur = !!(st && st.steps && st.steps[def.key] === true);
@@ -25050,16 +25136,29 @@ function _pvCheckListModel() {
     if (u.kind === 'action') {
       let _extras = [];
       try { _extras = _vieLigneOpRows(u.a, s.shop); } catch (e) {}
+      try {
+        _extras = _extras.concat(_vieSubRows(u.a, s.shop)
+          .filter(x => !units.some(u2 => u2.kind === 'action' && u2.a.id === x.subA.id)));
+      } catch (e) {}
       if (_extras.length) {
         rows.forEach(r => { let p = 0; try { p = _viePhaseActionStep(u.a.type, r.def.key); } catch (e) {} r._phase = p || 4; });
         _extras.forEach(x => {
+          let row2;
+          if (x.src === 'sub') {
+            const _stS = ((x.subA.etats && x.subA.etats[s.shop]) || {}).steps || {};
+            const _ckS = !!(_stS[x.def.key] === true);
+            row2 = { def: x.def, checked: _ckS, status: statutEtape(x.def, _stS, _ckS),
+              writable: !(x.def.resp === 'admin' && !isAdmin()),
+              _subA: x.subA, _nomAutre: x.nomAutre, _sens: x.sens, _phase: x.phase || 4 };
+          } else {
           const _stO = ((x.op.etats && x.op.etats[s.shop]) || {}).steps || {};
           const _ck = _getOpStepChecked(x.op, s.shop, x.def) === true;
           const _hub = (typeof opDispatchHubForStep === 'function') ? opDispatchHubForStep(x.op, x.def) : null;
           const _lock = !!(_hub && s.shop !== _hub && !_ck && !_getOpStepChecked(x.op, _hub, x.def));
-          const row2 = { def: x.def, checked: _ck, status: statutEtape(x.def, _stO, _ck),
+          row2 = { def: x.def, checked: _ck, status: statutEtape(x.def, _stO, _ck),
             writable: !(x.def.resp === 'admin' && !isAdmin()) && !x.def._histGel && !_lock,
             _vieOp: x.op, _phase: x.phase || 4 };
+          }
           let at = 0;
           for (let i = 0; i < rows.length; i++) if ((rows[i]._phase || 4) <= row2._phase) at = i + 1;
           rows.splice(at, 0, row2);
@@ -25140,7 +25239,7 @@ function _pvCheckListRerender() {
   // Lignes maîtres « tout cocher » : mêmes libellés d'étape sur ≥ 2 unités, cochables.
   const byLabel = {};
   model.forEach((m, ui) => m.rows.forEach(r => {
-    if (!r.writable || r._vieOp) return; // les étapes « ← OP » insérées restent hors « tout cocher »
+    if (!r.writable || r._vieOp || r._subA) return; // étapes ← OP et ↔ remplacement : hors « tout cocher »
     if (!byLabel[r.def.label]) byLabel[r.def.label] = [];
     byLabel[r.def.label].push({ ui, key: r.def.key, checked: r.checked });
   }));
@@ -25173,8 +25272,9 @@ function _pvCheckListRerender() {
         const box2 = r.checked
           ? '<span style="display:inline-flex; align-items:center; justify-content:center; width:15px; height:15px; background:#22c55e; color:#0f172a; border:1px solid #22c55e; border-radius:3px; font-size:11px; font-weight:700;">✓</span>'
           : `<span style="display:inline-block; width:15px; height:15px; background:transparent; border:1px solid ${st === 'admin' ? '#47556960' : '#64748b'}; border-radius:3px;"></span>`;
-        const _vieMark = r._vieOp ? ' <span style="font-size:9px; color:#6366f1;" title="Étape de la carte OP — coche croisée">← OP</span>' : '';
-        return `<div ${clickable ? `data-clrow="${ui}" data-clkey="${esc(r.def.key)}" data-clsrc="${r._vieOp ? 'op' : 'own'}" style="cursor:pointer;` : `title="${st === 'admin' ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : r.def._histGel ? 'Historique — coche d’un prix précédent (conservée)' : 'Se coche depuis sa ligne d’origine'}" style="`} display:flex; align-items:center; gap:8px; padding:2px 4px; border-radius:3px;${r._vieOp ? ' opacity:0.75;' : ''}" ${clickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'"` : ''}>
+        const _vieMark = r._vieOp ? ' <span style="font-size:9px; color:#6366f1;" title="Étape de la carte OP — coche croisée">← OP</span>'
+          : r._subA ? ' <span style="font-size:9px; color:#f472b6;" title="Miroir de remplacement — coche croisée">↔ ' + (r._sens === 'sortie' ? 'sortie' : 'rentrée') + ' ' + esc(r._nomAutre || '') + '</span>' : '';
+        return `<div ${clickable ? `data-clrow="${ui}" data-clkey="${esc(r.def.key)}" data-clsrc="${r._vieOp ? 'op' : r._subA ? 'sub' : 'own'}" style="cursor:pointer;` : `title="${st === 'admin' ? 'Géré par Fabien — la coche apparaîtra une fois fait de son côté' : r.def._histGel ? 'Historique — coche d’un prix précédent (conservée)' : 'Se coche depuis sa ligne d’origine'}" style="`} display:flex; align-items:center; gap:8px; padding:2px 4px; border-radius:3px;${r._vieOp ? ' opacity:0.75;' : ''}" ${clickable ? `onmouseover="this.style.background='#33415540'" onmouseout="this.style.background='transparent'"` : ''}>
           ${box2}
           <span style="font-size:11.5px; color:${r.checked ? '#64748b' : (st === 'admin' ? '#94a3b8' : r._vieOp ? '#94a3b8' : '#e2e8f0')}; ${r.checked ? 'text-decoration:line-through;' : ''}">${esc(r.def.label)}</span>${_vieMark}
           ${badge}
@@ -25182,7 +25282,8 @@ function _pvCheckListRerender() {
       }).join('');
       const c = m.cpt;
       const cptTxt = `${c.faits}/${c.total}` + (c.attentes > 0 ? ` · ⏳${c.attentes}` : '') + (c.admin > 0 ? ` · 👤${c.admin}` : '');
-      return `<div style="margin-bottom:10px; padding:8px 10px; background:#1e293b; border:1px solid #33415540; border-radius:6px;">
+      const _unitFaite = m.rows.length > 0 && m.rows.every(r => r.checked);
+      return `<div${_unitFaite ? ' data-vie-fait="1"' : ''} style="margin-bottom:10px; padding:8px 10px; background:${_unitFaite ? '#151c2a' : '#1e293b'}; border:1px solid #33415540; border-radius:6px;${_unitFaite ? ' opacity:0.6;' : ''}">
         <div style="display:flex; align-items:baseline; gap:8px; margin-bottom:5px; flex-wrap:wrap;">
           <span style="font-size:12px; font-weight:700; color:#f1f5f9;">${esc(m.unit.label)}</span>
           <span style="font-size:9.5px; color:#64748b;">${esc(m.unit.sous)}</span>
@@ -25213,10 +25314,11 @@ function _pvCheckListRerender() {
       const model2 = _pvCheckListModel();
       const m = model2[parseInt(el.dataset.clrow)];
       if (!m) return;
-      const _srcOp = el.dataset.clsrc === 'op';
-      const r = m.rows.find(x => x.def.key === el.dataset.clkey && (!!x._vieOp) === _srcOp);
+      const _src = el.dataset.clsrc || 'own';
+      const r = m.rows.find(x => x.def.key === el.dataset.clkey
+        && (!!x._vieOp) === (_src === 'op') && (!!x._subA) === (_src === 'sub'));
       if (!r || !r.writable) return;
-      _pvCheckListApply(m.unit, _pvCheckListState.shop, r.def, !r.checked, r._vieOp);
+      _pvCheckListApply(m.unit, _pvCheckListState.shop, r.def, !r.checked, r._vieOp, r._subA);
       _pvCheckListRerender();
     }));
     box.querySelectorAll('[data-clmaster]').forEach(el => el.addEventListener('click', () => {
@@ -25227,7 +25329,7 @@ function _pvCheckListRerender() {
       arr.forEach(x => {
         const m = model2[x.ui];
         if (!m) return;
-        const r = m.rows.find(z => z.def.key === x.key && !z._vieOp);
+        const r = m.rows.find(z => z.def.key === x.key && !z._vieOp && !z._subA);
         if (r && r.writable && r.checked !== target) _pvCheckListApply(m.unit, _pvCheckListState.shop, r.def, target);
       });
       _pvCheckListRerender();
@@ -29142,7 +29244,13 @@ function _renderOpCardHtmlInner(op, options) {
     const _horsStockLigne = _absentShop
       ? `<div style="margin:2px 0 4px; padding:3px 6px; background:#33415530; border:1px dashed #47556960; border-radius:3px; font-size:9.5px; color:#94a3b8;">⛔ Hors stock à ${label} — étapes cochées automatiquement, rien à faire ici</div>`
       : '';
-    return `<div style="padding:6px 8px; background:${_absentShop ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_absentShop ? '#334155' : col + '30'}; border-radius:4px; ${_absentShop ? 'opacity:0.5;' : ''}">${header}${_horsStockLigne}${rows}</div>`;
+    // ✅ TOUT FAIT (2026-08-06, même règle que le dashboard) : toute la vie affichée
+    // cochée → bloc grisé, coches toujours cliquables.
+    const _toutFaitVie = !_absentShop && _vieRows.length > 0 && _vieRows.every(r => r.src === 'op'
+      ? _getOpStepChecked(op, sh, r.def) === true
+      : r.acts.every(a2 => { const s2 = a2.etats && a2.etats[sh]; return !!(s2 && s2.steps && s2.steps[r.def.key] === true); }));
+    const _griseOp = _absentShop || _toutFaitVie;
+    return `<div${_toutFaitVie ? ' data-vie-fait="1"' : ''} style="padding:6px 8px; background:${_griseOp ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_griseOp ? '#334155' : col + '30'}; border-radius:4px; ${_griseOp ? 'opacity:0.55;' : ''}">${header}${_horsStockLigne}${rows}</div>`;
   }).join('');
 
   // Panneau d'édition (si ouvert, et si l'édition est autorisée)
