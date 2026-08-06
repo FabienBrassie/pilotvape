@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-04 18:20</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-06 16:02</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -28292,7 +28292,18 @@ function _opProduitEcouleChezShop(op, sh) {
     });
   }
   const prod = g || baseKits.find(k => k.id === pid) || basePD.find(x => x.id === pid);
-  return prod ? isProductGoneFromShop(prod, sh) : false;
+  if (!prod) return false;
+  if (isProductGoneFromShop(prod, sh)) return true;
+  // 2026-08-04 (retour Fabien, carte Coolfire Z60 « ni grisée ni marquée hors stock ») :
+  // la sortie du cycle EN COURS faite chez elle vaut hors stock — MÊME quand la ligne
+  // n'est pas liée à l'OP (PR née d'un relevé : le non-lien est voulu, décision 15:44).
+  // Lignes OUVERTES seulement (leçon M100 : une vieille ligne close ne prouve rien),
+  // reprises fournisseur exclues ; stock 0 déclaré (swappyOff) vaut sortie faite.
+  return actions.some(a => a.type === 'SORTIR' && a.produitId === pid
+    && !a.annulee && !a._archived && !a.dateCloture && a.motifSortie !== 'REPRISE'
+    && !a.produitParfumId
+    && a.etats && a.etats[sh]
+    && (a.etats[sh].done === true || (a.etats[sh].steps && a.etats[sh].steps.swappyOff === true)));
 }
 
 // Les boutiques qui ont ENCORE du matériel à retirer sur cette OP : au moins une étape de
