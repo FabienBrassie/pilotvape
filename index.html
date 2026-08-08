@@ -220,7 +220,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-07 00:56</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-07 20:01</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -611,6 +611,7 @@ window.addEventListener('DOMContentLoaded', function() {
         <option value="">Toutes boutiques</option><option value="pessac">🏪 Pessac</option><option value="merignac">🏪 Mérignac</option><option value="langon">🏪 Langon</option>
       </select>
       <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
+      <button onclick="pvMrqOuvrirCouleurs()" title="🎨 Couleurs des marques : assigner une couleur à chaque marque (comme le tableur — César noir, Etasty orange…) ; elle teinte les flacons du plan des étagères, à l'écran et à l'impression." style="padding:6px 12px; font-size:11px; font-weight:700; background:#ec489915; color:#f9a8d4; border:1px solid #ec489940; border-radius:4px; cursor:pointer; white-space:nowrap;">🎨 Marques</button>
       <button onclick="pvOuvrirPointageEtageres()" title="Pointer, gamme par gamme et par boutique, si chaque liquide est posé sur les étagères : détecte les « à sortir » encore posés et les emplacements manquants." style="padding:6px 12px; font-size:11px; font-weight:700; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; cursor:pointer; white-space:nowrap;">📋 Pointage étagères</button>
       <button onclick="openVitrineDialogFromLiq()" title="Planche d'étiquettes étagère liquides (44 par feuille A4, blanc sur fond noir) : une étiquette par gamme+format filtrée, au prix du format" style="padding:6px 12px; font-size:11px; background:#38bdf8; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-weight:700; white-space:nowrap;">💧 Étiquettes…</button>
       <button onclick="const _ls=document.getElementById('liqSort'); if(_ls){_ls.value='testeurs'; renderLiqAll(); saveUiState();}" title="Vue 🧪 Testeurs : la malette réseau (sélection, numéros, affiche A5 du meuble de test)" style="padding:6px 9px; font-size:13px; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:4px; cursor:pointer; white-space:nowrap;">🧪</button>
@@ -3616,6 +3617,13 @@ const TESTEUR_TOTAL = 45;
 // Toutes les largeurs internes sont en MILLIMÈTRES ; l'affichage est en cm.
 const ETG_FLACON_MM = { '50mL': 32.5, '100mL': 41, '10mL': 20, '10mL_SDN': 20, '20mL': 25, '+150mL': 60 };
 function _etgFlaconMm(format) { return ETG_FLACON_MM[format] || 32.5; }
+// HAUTEURS des flacons par format (retour Fabien 2026-08-07 01:25 : un 10mL posé sur
+// l'étagère est PETIT — même proportion que le « 10 devant » qu'il a validée, ~42 %
+// d'un 50mL). Écran en px (le zoom ne joue que sur les largeurs), papier en mm.
+const ETG_FLACON_HPX = { '50mL': 68, '100mL': 76, '10mL': 29, '10mL_SDN': 29, '20mL': 42, '+150mL': 76 };
+const ETG_FLACON_HMM = { '50mL': 20, '100mL': 22, '10mL': 8.5, '10mL_SDN': 8.5, '20mL': 12, '+150mL': 22 };
+function _etgFlaconHpx(format) { return ETG_FLACON_HPX[format] || 68; }
+function _etgFlaconHmm(format) { return ETG_FLACON_HMM[format] || 20; }
 // LA GRILLE d'une zone (Fabien 2026-08-07 00:41 : « on ne place pas les blocs en
 // centimètres mais en emplacements de 50mL ») : positions et largeurs des blocs se
 // calent sur des emplacements entiers — 32,5 mm sur les étages, 41 mm (un 100mL)
@@ -3623,9 +3631,87 @@ function _etgFlaconMm(format) { return ETG_FLACON_MM[format] || 32.5; }
 function _etgGrilleMm(zone) { return zone === 'commode' ? ETG_FLACON_MM['100mL'] : ETG_FLACON_MM['50mL']; }
 // Ordre d'affichage des formats quand une gamme est GROUPÉE PAR PARFUM (100 → 50 → 10…).
 const ETG_MULTIFMT_ORDRE = ['100mL', '50mL', '20mL', '10mL', '10mL_SDN', '+150mL'];
+// ── 🎨 COULEUR PAR MARQUE (Fabien 2026-08-07 01:10, comme son tableur : César noir,
+//    Etasty orange…) : assignée depuis Base Liquides (bouton 🎨) ou le menu d'un bloc.
+//    Elle teinte les FLACONS (bouchon + contour), écran ET impression — la ligne du
+//    nom de gamme reste à la couleur du PROFIL (validé par Fabien). Collection
+//    synchronisée par id déterministe (slug de marque) ; seeds = ses deux exemples. ──
+let marquesLiq = []; // [{ id:'MRQ-<slug>', marque, couleur, _ts, _adminTs }]
+function _mrqSlug(m) { return String(m || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-'); }
+function _mrqCouleur(marque) {
+  const slug = _mrqSlug(marque);
+  if (!slug) return '';
+  const r = marquesLiq.find(x => x && x.id && !_deletedIds.has(x.id) && _mrqSlug(x.marque) === slug);
+  return (r && r.couleur) || '';
+}
+const MRQ_SEED_TS = '2026-08-07T00:00:00.000Z';
+function _mrqSeedDefaults() {
+  if (!isAdmin()) return false;
+  let chg = false;
+  [{ id: 'MRQ-cesar', marque: 'César', couleur: '#111111' }, { id: 'MRQ-etasty', marque: 'Etasty', couleur: '#f97316' }].forEach(sd => {
+    if (_deletedIds.has(sd.id) || marquesLiq.some(x => x && x.id === sd.id)) return;
+    marquesLiq.push(Object.assign({}, sd, { _ts: MRQ_SEED_TS, _adminTs: MRQ_SEED_TS }));
+    chg = true;
+  });
+  return chg;
+}
+function pvMrqSetCouleur(marque, couleur) {
+  if (!isAdmin() || !marque) return;
+  const slug = _mrqSlug(marque);
+  let r = marquesLiq.find(x => x && _mrqSlug(x.marque) === slug && !_deletedIds.has(x.id));
+  if (!r) { r = { id: 'MRQ-' + slug, marque: marque, couleur: '' }; marquesLiq.push(r); }
+  r.couleur = couleur || '';
+  _etgTouche(r);
+  logAction('Couleurs de marques', marque + ' → ' + (couleur || 'défaut (profil)'));
+  saveData();
+  const ov = document.getElementById('mrqOverlay');
+  if (ov) pvMrqRenderOverlay(); else renderLiqAll();
+}
+// La palette : toutes les marques actives de la base liquide, chacune son sélecteur.
+function pvMrqOuvrirCouleurs() {
+  if (!isAdmin()) { pvAlert('Les couleurs de marques sont gérées par Fabien.'); return; }
+  let ov = document.getElementById('mrqOverlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'mrqOverlay';
+  ov.style.cssText = 'position:fixed; inset:0; z-index:9998; background:#000a; display:flex; align-items:center; justify-content:center;';
+  ov.onclick = function(e) { if (e.target === ov) { ov.remove(); renderLiqAll(); } };
+  document.body.appendChild(ov);
+  pvMrqRenderOverlay();
+}
+function pvMrqRenderOverlay() {
+  const ov = document.getElementById('mrqOverlay'); if (!ov) return;
+  const marques = [];
+  const vues = new Set();
+  _etgGammesActives().forEach(g => {
+    const slug = _mrqSlug(g.marque);
+    if (!slug || vues.has(slug)) return;
+    vues.add(slug); marques.push(g.marque);
+  });
+  marques.sort((a, b) => a.localeCompare(b));
+  ov.innerHTML = `<div style="background:#0f172a; border:1px solid #475569; border-radius:8px; width:min(560px, 92vw); max-height:82vh; display:flex; flex-direction:column; padding:14px;" onclick="event.stopPropagation()">
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:4px;">
+      <span style="font-size:14px; font-weight:800; color:#e2e8f0;">🎨 Couleurs des marques</span>
+      <span style="font-size:10px; color:#64748b;">Comme ton tableur — la couleur teinte les flacons du plan (écran + impression). Sans couleur : celle du profil.</span>
+      <button onclick="document.getElementById('mrqOverlay').remove(); renderLiqAll();" style="margin-left:auto; padding:4px 10px; font-size:11px; background:none; color:#94a3b8; border:1px solid #47556960; border-radius:4px; cursor:pointer;">Fermer</button>
+    </div>
+    <div style="overflow:auto; display:grid; grid-template-columns:1fr 1fr; gap:4px 14px; padding-top:8px;">
+      ${marques.map(m => {
+        const c = _mrqCouleur(m);
+        const mEsc = m.replace(/\\/g, '').replace(/'/g, "\\'");
+        return `<div style="display:flex; align-items:center; gap:8px; padding:3px 6px; border:1px solid #33415550; border-radius:4px;">
+          <span style="width:14px; height:14px; border-radius:3px; background:${c || 'transparent'}; border:1px solid ${c ? c : '#475569'}; flex-shrink:0;"></span>
+          <b style="font-size:11px; color:#e2e8f0; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${m}</b>
+          <input type="color" value="${c || '#8b5cf6'}" onchange="pvMrqSetCouleur('${mEsc}', this.value)" style="width:30px; height:22px; padding:0; border:none; background:none; cursor:pointer;" title="Choisir la couleur de ${m.replace(/"/g, '&quot;')}">
+          ${c ? `<span onclick="pvMrqSetCouleur('${mEsc}', '')" style="cursor:pointer; color:#64748b; font-size:10px;" title="Revenir à la couleur du profil">✕</span>` : ''}
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
 // ⚠ SEED merge-safe : ids DÉTERMINISTES + _ts FIXE ANCIEN — un navigateur vierge
 // qui re-seed ne peut jamais écraser une modification réelle (son _ts est plus vieux).
-let etageresLiq = [];   // [{ id, shop, nom, profil, nbEtages, largCm, puffCm, commode, commodeCm, ordre, _ts, _adminTs }]
+let etageresLiq = [];   // [{ id, shop, nom, profil, nbEtages, largCm, puffEmpl (empl. 50mL), puffCote, ecartCm, rangee, commode, commodeCm, ordre, _ts, _adminTs }]
 let placementsLiq = []; // [{ id, etagereId, etage(1-based), zone:'liq'|'puff'|'commode', type:'gamme'|'produit'|'bloc', gammeId, prodType('kit'|'pd'), prodId, libelle, largCm, doubles:{parfumId:true}, retires:{parfumId:true}, ordre, _ts, _adminTs }]
 const ETG_SEED_TS = '2026-08-06T00:00:00.000Z'; // fixe : toute modif réelle gagne au merge
 const ETG_SEED = [
@@ -3636,20 +3722,20 @@ const ETG_SEED = [
   // fin de l'étagère 2 (même mur, Fabien 20:12) : 120 + 20 + 120 = 260 cm — écart réel
   // 20 cm (Fabien 00:41), AUCUN espace dessiné entre les cartes (les boutons/légendes
   // suffisent). Sur le mur : PRUDENT à gauche, RÉCRÉATIF (+ Puff) à droite → ordres.
-  { id: 'ETG-pessac-g1',   shop: 'pessac',   nom: 'Grande étagère 1', profil: 'RECREATIF', nbEtages: 3, largCm: 120, puffCm: 50, ecartCm: 0,  commode: true,  commodeCm: 260, ordre: 2, rangee: 1 },
-  { id: 'ETG-pessac-g2',   shop: 'pessac',   nom: 'Grande étagère 2', profil: 'PRUDENT',   nbEtages: 3, largCm: 120, puffCm: 0,  ecartCm: 20, commode: false, commodeCm: 0,   ordre: 1, rangee: 1 },
-  { id: 'ETG-pessac-g3',   shop: 'pessac',   nom: 'Grande étagère 3', profil: 'DECIDE',    nbEtages: 3, largCm: 120, puffCm: 0,  ecartCm: 0, commode: false, commodeCm: 0, ordre: 3, rangee: 2 },
+  { id: 'ETG-pessac-g1',   shop: 'pessac',   nom: 'Grande étagère 1', profil: 'RECREATIF', nbEtages: 3, largCm: 120, puffEmpl: 15, ecartCm: 0,  commode: true,  commodeCm: 260, ordre: 2, rangee: 1 },
+  { id: 'ETG-pessac-g2',   shop: 'pessac',   nom: 'Grande étagère 2', profil: 'PRUDENT',   nbEtages: 3, largCm: 120, puffEmpl: 0,  ecartCm: 20, commode: false, commodeCm: 0,   ordre: 1, rangee: 1 },
+  { id: 'ETG-pessac-g3',   shop: 'pessac',   nom: 'Grande étagère 3', profil: 'DECIDE',    nbEtages: 3, largCm: 120, puffEmpl: 0, ecartCm: 0, commode: false, commodeCm: 0, ordre: 3, rangee: 2 },
   // Mérignac — 2 grandes (120 cm) + 2 petites (90 cm) ; désormais les 100mL passent
   // sur les commodes comme à Pessac (décision Fabien 2026-08-06). Profils à poser par
   // Fabien (éditeur ⚙️) — seule l'étagère à zone Puff est pré-marquée récréative.
-  { id: 'ETG-merignac-g1', shop: 'merignac', nom: 'Grande étagère 1', profil: 'RECREATIF', nbEtages: 3, largCm: 120, puffCm: 50, ecartCm: 0,  commode: true,  commodeCm: 260, ordre: 2, rangee: 1 },
-  { id: 'ETG-merignac-g2', shop: 'merignac', nom: 'Grande étagère 2', profil: '',          nbEtages: 3, largCm: 120, puffCm: 0,  ecartCm: 20, commode: false, commodeCm: 0,   ordre: 1, rangee: 1 },
-  { id: 'ETG-merignac-p1', shop: 'merignac', nom: 'Petite étagère 1', profil: '',          nbEtages: 3, largCm: 90,  puffCm: 0,  ecartCm: 20, commode: false, commodeCm: 0,   ordre: 3, rangee: 2 },
-  { id: 'ETG-merignac-p2', shop: 'merignac', nom: 'Petite étagère 2', profil: '',          nbEtages: 3, largCm: 90,  puffCm: 0,  ecartCm: 0,  commode: false, commodeCm: 0,   ordre: 4, rangee: 2 },
+  { id: 'ETG-merignac-g1', shop: 'merignac', nom: 'Grande étagère 1', profil: 'RECREATIF', nbEtages: 3, largCm: 120, puffEmpl: 15, ecartCm: 0,  commode: true,  commodeCm: 260, ordre: 2, rangee: 1 },
+  { id: 'ETG-merignac-g2', shop: 'merignac', nom: 'Grande étagère 2', profil: '',          nbEtages: 3, largCm: 120, puffEmpl: 0,  ecartCm: 20, commode: false, commodeCm: 0,   ordre: 1, rangee: 1 },
+  { id: 'ETG-merignac-p1', shop: 'merignac', nom: 'Petite étagère 1', profil: '',          nbEtages: 3, largCm: 90,  puffEmpl: 0,  ecartCm: 20, commode: false, commodeCm: 0,   ordre: 3, rangee: 2 },
+  { id: 'ETG-merignac-p2', shop: 'merignac', nom: 'Petite étagère 2', profil: '',          nbEtages: 3, largCm: 90,  puffEmpl: 0,  ecartCm: 0,  commode: false, commodeCm: 0,   ordre: 4, rangee: 2 },
   // Langon — 1 étagère de 5 étages larges (500 cm, compte rond ≈ 152 flacons 50mL),
   // zone Puff de 75 cm/étage (l'occupation actuelle ≈ 23 flacons), pas de commode :
   // les 100mL (et certains 10mL) se posent directement sur les étages.
-  { id: 'ETG-langon-e1',   shop: 'langon',   nom: 'Étagère', profil: '', nbEtages: 5, largCm: 500, puffCm: 75, puffCote: 'gauche', ecartCm: 0, commode: false, commodeCm: 0, ordre: 1, rangee: 1 }
+  { id: 'ETG-langon-e1',   shop: 'langon',   nom: 'Étagère', profil: '', nbEtages: 5, largCm: 500, puffEmpl: 23, puffCote: 'gauche', ecartCm: 0, commode: false, commodeCm: 0, ordre: 1, rangee: 1 }
 ];
 // Seed idempotent et merge-safe : n'ajoute que les étagères ABSENTES et non
 // tombstonées, avec le _ts fixe ancien. Appelé à l'ouverture de la vue (admin).
@@ -3671,7 +3757,15 @@ function _etgMigrerCm() {
   if (!isAdmin()) return false;
   let chg = false;
   etageresLiq.forEach(e => {
-    if (!e || _deletedIds.has(e.id) || typeof e.largCm === 'number') return;
+    if (!e || _deletedIds.has(e.id)) return;
+    // zone Puff héritée en cm → EMPLACEMENTS (50→15, 75→23, sinon arrondi grille)
+    if (typeof e.puffEmpl !== 'number' && (typeof e.puffCm === 'number' || typeof e.puffCap === 'number')) {
+      const mapPE = { 50: 15, 75: 23 };
+      if (typeof e.puffCm === 'number') e.puffEmpl = mapPE[e.puffCm] !== undefined ? mapPE[e.puffCm] : Math.round((e.puffCm * 10) / ETG_FLACON_MM['50mL']);
+      else e.puffEmpl = Math.max(0, parseInt(e.puffCap, 10) || 0);
+      _etgTouche(e); chg = true;
+    }
+    if (typeof e.largCm === 'number') return;
     const map = { 37: 120, 28: 90, 152: 500 };
     e.largCm = map[e.cap] || Math.round((e.cap || 37) * 3.25);
     const mapP = { 15: 50, 23: 75 };
@@ -3779,7 +3873,7 @@ function _etgList(shop) {
     .sort((a, b) => (a.ordre || 0) - (b.ordre || 0) || String(a.id).localeCompare(String(b.id)));
 }
 function _etgById(id) { return etageresLiq.find(e => e && e.id === id && !_deletedIds.has(e.id)) || null; }
-// Les zones d'un étage donné : 'liq' (largCm - puffCm), 'puff' (puffCm) ; la commode
+// Les zones d'un étage donné : 'liq' (largCm − zone Puff), 'puff' (puffEmpl × 32,5 mm) ; la commode
 // est traitée comme la zone 'commode' de l'étage 0 (une seule bande par étagère).
 function _etgPlacements(etagereId, etage, zone) {
   return placementsLiq
@@ -3797,14 +3891,46 @@ function _etgPlacementsDeShop(shop) {
   const ids = new Set(_etgList(shop).map(e => e.id));
   return placementsLiq.filter(p => p && p.id && !_deletedIds.has(p.id) && ids.has(p.etagereId));
 }
-// Les parfums VISIBLES d'un placement gamme : vivants (pas SORTI), pas retirés de CE
-// plan ; chacun porte son flag doublé. L'ordre = l'ordre de la base (comme le mur FT).
+// La boutique d'un placement (via son étagère).
+function _etgShopDePlacement(pl) { const e = _etgById(pl.etagereId); return e ? e.shop : ''; }
+// Un parfum a-t-il sa place sur le plan de CETTE boutique ? (Fabien 2026-08-07 :
+// « à sortir, en tiroir ou sorti ne font pas partie de la gamme sur l'étagère ».)
+// Statut effectif via _ptgStatutEffectif (canonique du pointage : parfum sinon gamme) ;
+// tiroir / sortie faite via situationParfumChezShop (canonique par boutique).
+// PAS_RECU garde sa place : le plan est la cible, le flacon arrive.
+function _etgParfumSurPlan(g, p, shop) {
+  const cle = g.id + '|' + p.id + '|' + (shop || '');
+  const hit = _etgSurPlanCache.get(cle);
+  if (hit && hit.v === _etgCacheV) return hit.val;
+  let val = true;
+  const st = _ptgStatutEffectif(g, p);
+  if (st === 'SORTI' || st === 'A_SORTIR' || st === 'REPRISE') val = false;
+  else if (shop) {
+    const sit = situationParfumChezShop(g, p, shop);
+    if (sit === 'TIROIR' || sit === 'SORTIE_FAITE') val = false;
+  }
+  _etgSurPlanCache.set(cle, { v: _etgCacheV, val: val });
+  return val;
+}
+// Les parfums VISIBLES d'un placement gamme : réellement en linéaire chez la boutique
+// (_etgParfumSurPlan), pas retirés de CE plan ; chacun porte son flag doublé.
+// L'ordre = l'ordre de la base (comme le mur FT).
 function _etgParfumsDePlacement(pl) {
   const g = baseLiq.find(x => x.id === pl.gammeId);
   if (!g) return [];
+  const shop = _etgShopDePlacement(pl);
   return (g.parfums || [])
-    .filter(p => p.id && p.s !== 'SORTI' && !(pl.retires || {})[p.id])
+    .filter(p => p.id && !(pl.retires || {})[p.id] && _etgParfumSurPlan(g, p, shop))
     .map(p => ({ g, p, dbl: !!(pl.doubles || {})[p.id] }));
+}
+// Le NOMBRE de flacons d'un parfum sur un placement (Fabien 2026-08-07 02:30 :
+// « doubler » devient « le nombre que je veux ») — pl.doubles[pid] = N ; héritage :
+// true (ancien doublage) vaut 2 ; absent = 1.
+function _etgNbDe(pl, pid) {
+  const v = (pl.doubles || {})[pid];
+  if (v === true) return 2;
+  const n = parseInt(v, 10);
+  return (n >= 1) ? n : 1;
 }
 // Clé d'appariement d'un parfum entre formats (motif _testeurKeyDe : nom, insensible casse).
 function _etgClefParfum(p) { return String((p && p.n) || '').toLowerCase().replace(/\s*-\s*$/, '').trim(); }
@@ -3822,14 +3948,19 @@ function _etgFreresDeGamme(g) {
 // pl.rep10 fois, 3 par défaut) ; parfums appariés entre formats par leur nom ;
 // doubler/retirer se fait flacon par flacon (chaque déclinaison a son propre parfum).
 function _etgCellsGamme(pl) {
+  const hit = _etgCellsCache.get(pl.id);
+  if (hit && hit.v === _etgCacheV) return hit.cells;
   const cells = [];
-  const pousse = (g, p, dbl) => {
+  _etgCellsCache.set(pl.id, { v: _etgCacheV, cells: cells });
+  const shopCell = _etgShopDePlacement(pl);
+  const pousse = (g, p, nb) => {
     const mm = _etgFlaconMm(g.format);
-    cells.push({ g, p, fmt: g.format, mm });
-    if (dbl) cells.push({ g, p, fmt: g.format, mm, dbl: true });
+    // 🔟 10mL posé DEVANT ce flacon (pas de largeur en plus — il est devant, pas à côté)
+    const devant = !!(pl.devant10 || {})[p.id] && g.format !== '10mL' && g.format !== '10mL_SDN' && !!_etgDixDe(g, p, shopCell);
+    for (let i = 0; i < nb; i++) cells.push({ g, p, fmt: g.format, mm, devant, nb: (i === 0 && nb > 1) ? nb : 0 });
   };
   if (!pl.multiFmt) {
-    _etgParfumsDePlacement(pl).forEach(x => pousse(x.g, x.p, x.dbl));
+    _etgParfumsDePlacement(pl).forEach(x => pousse(x.g, x.p, _etgNbDe(pl, x.p.id)));
     return cells;
   }
   const anc = baseLiq.find(x => x.id === pl.gammeId);
@@ -3845,23 +3976,46 @@ function _etgCellsGamme(pl) {
   });
   ajouteParfums(anc); soeurs.forEach(g => { if (g.id !== anc.id) ajouteParfums(g); });
   const rep10 = Math.max(1, parseInt(pl.rep10, 10) || 3);
+  const shopPl = _etgShopDePlacement(pl);
   ordres.forEach(k => {
+    const famillesVues = new Set(); // une seule série par parfum et par FAMILLE de format
     soeurs.forEach(g => {
+      const fam = (g.format === '10mL_SDN') ? '10mL' : g.format;
+      if (famillesVues.has(fam)) return; // « Exotique » en 10mL ET 10mL SdN → une seule série
       const p = (g.parfums || []).find(x => x.id && x.s !== 'SORTI' && _etgClefParfum(x) === k);
       if (!p || (pl.retires || {})[p.id]) return;
-      const n = (g.format === '10mL' || g.format === '10mL_SDN') ? rep10 : 1;
-      for (let i = 0; i < n; i++) pousse(g, p, false);
-      if ((pl.doubles || {})[p.id]) pousse(g, p, false), cells[cells.length - 1].dbl = true;
+      if (!_etgParfumSurPlan(g, p, shopPl)) return; // à sortir / tiroir / sorti : pas de flacon sur le plan
+      famillesVues.add(fam);
+      const base = (fam === '10mL') ? rep10 : 1;
+      const nExpl = (pl.doubles || {})[p.id]; // choix explicite → il REMPLACE le socle
+      pousse(g, p, nExpl ? _etgNbDe(pl, p.id) : base);
     });
   });
   return cells;
 }
+// Le 10mL APPARIÉ d'un parfum (gamme sœur 10mL/10mL SdN, même nom, disponible sur le
+// plan de cette boutique) — pour le poser DEVANT son 50/100mL (Fabien 2026-08-07 01:15).
+function _etgDixDe(g, p, shop) {
+  const k = _etgClefParfum(p);
+  if (!k) return null;
+  const soeurs = _etgFreresDeGamme(g).filter(x => x.format === '10mL' || x.format === '10mL_SDN');
+  for (const g10 of soeurs) {
+    const p10 = (g10.parfums || []).find(x => x.id && x.s !== 'SORTI' && _etgClefParfum(x) === k);
+    if (p10 && _etgParfumSurPlan(g10, p10, shop)) return { g10: g10, p10: p10 };
+  }
+  return null;
+}
 // Les gammes COUVERTES par un placement (pour la couverture) : la gamme d'ancrage,
-// plus TOUTES ses sœurs quand le placement est groupé multi-format.
+// TOUTES ses sœurs quand groupé multi-format, et les gammes 10mL représentées par
+// des flacons posés DEVANT (devant10).
 function _etgGammesCouvertes(pl) {
   const anc = baseLiq.find(x => x.id === pl.gammeId);
   if (!anc) return [];
-  return pl.multiFmt ? _etgFreresDeGamme(anc).map(g => g.id) : [anc.id];
+  const ids = pl.multiFmt ? _etgFreresDeGamme(anc).map(g => g.id) : [anc.id];
+  if (pl.devant10 && Object.keys(pl.devant10).some(k => pl.devant10[k])) {
+    _etgFreresDeGamme(anc).filter(x => x.format === '10mL' || x.format === '10mL_SDN').forEach(g => { if (!ids.includes(g.id)) ids.push(g.id); });
+  }
+  return ids;
 }
 // LA largeur d'un placement EN MILLIMÈTRES (canonique : jauges, couverture,
 // impression). Gamme = la somme de ses cellules (chaque flacon à sa taille) ;
@@ -3879,15 +4033,32 @@ function _etgNbFlacons(pl) {
 }
 // Capacité d'une zone EN MILLIMÈTRES — 0 = zone absente.
 function _etgZoneCap(e, zone) {
-  if (zone === 'puff') return Math.max(0, (parseFloat(e.puffCm) || 0) * 10);
-  if (zone === 'commode') return e.commode ? Math.max(0, (parseFloat(e.commodeCm) || 0) * 10) : 0;
-  return Math.max(0, ((parseFloat(e.largCm) || 0) - (parseFloat(e.puffCm) || 0)) * 10);
+  // TOUTES les zones dérivent de la GRILLE (Fabien 2026-08-07 02:03 : plus de chute
+  // entre liquides et Puff) : l'étage = un nombre ENTIER d'emplacements (arrondi de
+  // largCm — 120 cm → 37), liquides = total − Puff (22 pleins), Puff = puffEmpl,
+  // ligne 100mL = arrondi en emplacements de 41 mm. La grille couvre 100 % des zones.
+  const g50 = ETG_FLACON_MM['50mL'];
+  const totEmpl = Math.max(0, Math.round(((parseFloat(e.largCm) || 0) * 10) / g50));
+  const puffEmpl = Math.min(totEmpl, Math.max(0, parseInt(e.puffEmpl, 10) || 0));
+  if (zone === 'puff') return puffEmpl * g50;
+  if (zone === 'commode') {
+    if (!e.commode) return 0;
+    const g100 = ETG_FLACON_MM['100mL'];
+    return Math.max(0, Math.round(((parseFloat(e.commodeCm) || 0) * 10) / g100)) * g100;
+  }
+  return (totEmpl - puffEmpl) * g50;
 }
 function _etgZoneUsed(etagereId, etage, zone) {
   return _etgPlacements(etagereId, etage, zone).reduce((s, p) => s + _etgLargeur(p), 0);
 }
 // Affichage d'une mesure en cm (entier, virgule française si décimale utile).
 function _etgCm(mm) { const c = mm / 10; const r = Math.round(c); return Math.abs(c - r) < 0.05 ? String(r) : c.toFixed(1).replace('.', ','); }
+// Une mesure exprimée EN EMPLACEMENTS de la zone (l'unité dans laquelle Fabien pense).
+function _etgEmpl(mm, zone) {
+  const v = mm / _etgGrilleMm(zone || 'liq');
+  const r = Math.round(v);
+  return Math.abs(v - r) < 0.05 ? String(r) : v.toFixed(1).replace('.', ',');
+}
 // Estimation « ~N flacons 50mL » d'une largeur en cm (info éditeur/en-têtes).
 function _etgEstimFlacons(cm) { return Math.round((cm * 10) / ETG_FLACON_MM['50mL']); }
 // ── Couverture de l'offre (le « chaque gamme, chaque parfum est présenté » de
@@ -3895,7 +4066,11 @@ function _etgEstimFlacons(cm) { return Math.round((cm * 10) / ETG_FLACON_MM['50m
 //    Mêmes exclusions de lignes placeholder que renderLiqAll. Le 10mL est signalé
 //    en « optionnel » (posé seulement dans certaines boutiques, dixit Fabien).
 function _etgGammesActives() {
-  return baseLiq.filter(g => g && g.id && g.statutVie !== 'SORTI'
+  // Une gamme À SORTIR, SORTIE ou en REPRISE n'est plus « à présenter » (Fabien
+  // 2026-08-07 01:30) : hors tiroir « À placer » ET hors compteur « non placées » —
+  // le pendant gamme de _etgParfumSurPlan.
+  return baseLiq.filter(g => g && g.id
+    && g.statutVie !== 'SORTI' && g.statutVie !== 'A_SORTIR' && g.statutVie !== 'REPRISE'
     && g.marque && g.gamme && !(g.marque === 'autre' && g.gamme.includes('PA +/-')));
 }
 function _etgCouverture(shop) {
@@ -3918,22 +4093,37 @@ function _etgCouverture(shop) {
 }
 // ── Écritures (admin seul ; _ts/_adminTs frais → propagation par merge) ──
 function _etgNow() { return new Date().toISOString(); }
-function _etgTouche(obj) { const n = _etgNow(); obj._ts = n; obj._adminTs = n; }
+let _etgCacheV = 0; // version des caches de rendu (perf) — bump à chaque mutation
+const _etgCellsCache = new Map();   // pl.id → { v, cells }
+const _etgSurPlanCache = new Map(); // gid|pid|shop → { v, val }
+function _etgTouche(obj) { const n = _etgNow(); obj._ts = n; obj._adminTs = n; _etgCacheV++; }
 // Réécrit l'ordre 0..n-1 d'une zone (motif testeurReorder).
 function _etgReecrireOrdres(etagereId, etage, zone) {
   _etgPlacements(etagereId, etage, zone).forEach((p, i) => {
     if (p.ordre !== i) { p.ordre = i; _etgTouche(p); }
   });
 }
-// Fin du contenu d'une zone en mm (position du bord droit du dernier bloc, trous compris).
-function _etgContenuFinMm(etagereId, etage, zone, sansPlid) {
+// Positions EFFECTIVES d'une zone : jamais de chevauchement — un bloc qui empiéterait
+// sur le précédent est POUSSÉ à droite (cascade), le dernier déborde de l'étagère au
+// besoin (Fabien 2026-08-07 : « les blocs se décalent et dépassent, pas de chevauchement »).
+// LA source commune du rendu, de l'aimant et de la fin de contenu.
+function _etgPositionsEffectives(etagereId, etage, zone, sansPlid) {
   let cur = 0;
+  const out = [];
   _etgPlacements(etagereId, etage, zone).forEach(p => {
     if (sansPlid && p.id === sansPlid) return;
-    const deb = (typeof p.posCm === 'number') ? p.posCm * 10 : cur;
-    cur = Math.max(cur, deb) + _etgLargeur(p);
+    const want = (typeof p.posCm === 'number') ? p.posCm * 10 : cur;
+    const deb = Math.max(want, cur);
+    const larg = _etgLargeur(p);
+    cur = deb + larg;
+    out.push({ p: p, deb: deb, fin: cur, larg: larg });
   });
-  return cur;
+  return out;
+}
+// Fin du contenu d'une zone en mm (bord droit du dernier bloc, poussées comprises).
+function _etgContenuFinMm(etagereId, etage, zone, sansPlid) {
+  const eff = _etgPositionsEffectives(etagereId, etage, zone, sansPlid);
+  return eff.length ? eff[eff.length - 1].fin : 0;
 }
 // Pose (création) d'un placement — gamme, produit ou bloc — à une position LIBRE
 // (posMm ; null = à la suite du contenu). Souplesse Fabien 2026-08-06 19:55 : le bloc
@@ -3958,10 +4148,18 @@ function _etgPlacerA(pl, etagereId, etage, zone, posMm) {
   const larg = _etgLargeur(pl);
   if (posMm == null || isNaN(posMm)) posMm = _etgContenuFinMm(etagereId, etage, zone, pl.id);
   const grille = _etgGrilleMm(zone);
-  posMm = Math.round(posMm / grille) * grille;            // calé sur les emplacements de la zone
-  posMm = Math.max(0, Math.min(posMm, Math.max(0, cap - larg)));
-  posMm = Math.floor((posMm + 0.01) / grille) * grille;   // le bornage reste sur la grille
-  pl.posCm = Math.round(posMm * 10) / 100; // précision 0,1 mm — la grille (32,5/41) tombe juste
+  // AIMANT : un bord de bloc voisin à ≤ 15 mm GAGNE sur le cran de grille (coller
+  // doit être facile, même quand le cran est plus proche) ; sinon, cran de grille.
+  let bordBest = null, dBord = 1e9;
+  _etgPositionsEffectives(etagereId, etage, zone, pl.id).forEach(x => {
+    [x.fin, x.deb - larg].forEach(c => {
+      const d = Math.abs(posMm - c);
+      if (c >= 0 && d < dBord) { bordBest = c; dBord = d; }
+    });
+  });
+  let best = (bordBest !== null && dBord <= 15) ? bordBest : Math.round(posMm / grille) * grille;
+  posMm = Math.max(0, Math.min(best, Math.max(0, cap - larg)));
+  pl.posCm = Math.round(posMm * 10) / 100; // précision 0,1 mm
   _etgTouche(pl);
   const _n = _etgNow();
   _etgPlacements(etagereId, etage, zone).forEach((p, i) => { if (p.ordre !== i) { p.ordre = i; p._ts = _n; p._adminTs = _n; } });
@@ -11361,6 +11559,7 @@ async function loadData() {
     if (localData.testeursLiq || remoteData.testeursLiq) remoteData.testeursLiq = _mergeArray(localData.testeursLiq || [], remoteData.testeursLiq || [], 'id');
     if (localData.etageresLiq || remoteData.etageresLiq) remoteData.etageresLiq = _mergeArray(localData.etageresLiq || [], remoteData.etageresLiq || [], 'id');
     if (localData.placementsLiq || remoteData.placementsLiq) remoteData.placementsLiq = _mergeArray(localData.placementsLiq || [], remoteData.placementsLiq || [], 'id');
+    if (localData.marquesLiq || remoteData.marquesLiq) remoteData.marquesLiq = _mergeArray(localData.marquesLiq || [], remoteData.marquesLiq || [], 'id');
     // Compteurs : max des deux
     if (typeof localData.nextActionId === 'number') remoteData.nextActionId = Math.max(remoteData.nextActionId || 0, localData.nextActionId);
     if (typeof localData.nextOpId === 'number') remoteData.nextOpId = Math.max(remoteData.nextOpId || 0, localData.nextOpId);
@@ -11390,6 +11589,7 @@ async function loadData() {
     const data = JSON.parse(saved);
     baseKits = data.baseKits || baseKits;
     baseLiq = data.baseLiq || baseLiq;
+    _liqNormaliserOrdresParfums(); // 🔀 l'ordre des parfums (champ ordre) re-trie le tableau
     baseLiq.forEach(g => ensureLiqModel(g));
     // ── Migration : dédoublonner les parfums par nom dans chaque gamme ──
     // Résout les doublons créés par l'ancien merge par nom (union-only)
@@ -11555,6 +11755,7 @@ async function loadData() {
     // 🗄️ Plan des étagères (2026-08-06) : chargé + tombstones filtrées
     etageresLiq = (Array.isArray(data.etageresLiq) ? data.etageresLiq : []).filter(x => x && x.id && !_deletedIds.has(x.id));
     placementsLiq = (Array.isArray(data.placementsLiq) ? data.placementsLiq : []).filter(x => x && x.id && !_deletedIds.has(x.id));
+    marquesLiq = (Array.isArray(data.marquesLiq) ? data.marquesLiq : []).filter(x => x && x.id && !_deletedIds.has(x.id));
     // Journal d'activité : fusionner les logs distants avec les logs locaux (dédoublonnage par ts+action+detail)
     if (Array.isArray(data.auditLog) && data.auditLog.length > 0) {
       const existingKeys = new Set(auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -12728,7 +12929,7 @@ async function forcerVersionAdminPartout() {
 // ailleurs = perte silencieuse de données. Désormais, UNE source de vérité.
 // Tout nouveau champ de données se déclare ICI et nulle part ailleurs.
 function buildPayload() {
-  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, pointagesEtagere, testeursLiq, etageresLiq, placementsLiq, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
+  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, pointagesEtagere, testeursLiq, etageresLiq, placementsLiq, marquesLiq, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
 }
 
 function saveData() {
@@ -13630,6 +13831,7 @@ async function _saveToSupabase(payload, _retryCount) {
       if (payload.testeursLiq || remote.testeursLiq) payload.testeursLiq = _mergeArray(payload.testeursLiq || [], remote.testeursLiq || [], 'id');
       if (payload.etageresLiq || remote.etageresLiq) payload.etageresLiq = _mergeArray(payload.etageresLiq || [], remote.etageresLiq || [], 'id');
       if (payload.placementsLiq || remote.placementsLiq) payload.placementsLiq = _mergeArray(payload.placementsLiq || [], remote.placementsLiq || [], 'id');
+      if (payload.marquesLiq || remote.marquesLiq) payload.marquesLiq = _mergeArray(payload.marquesLiq || [], remote.marquesLiq || [], 'id');
       // 4. Fusionner l'auditLog distant (dédoublonnage par ts+action+detail)
       if (Array.isArray(remote.auditLog) && remote.auditLog.length > 0) {
         const _logKeys = new Set(payload.auditLog.map(e => e.ts + '|' + e.action + '|' + e.detail));
@@ -13757,6 +13959,7 @@ async function _doSyncPoll() {
       const bk = baseKits.length, bl = baseLiq.length, bp = basePD.length;
       _mergeArray(baseKits, remote.baseKits, 'id');
       _mergeLiqDeep(baseLiq, remote.baseLiq);
+      if (_liqNormaliserOrdresParfums()) changed = true; // 🔀 ordre des parfums venu d'un autre poste
       _mergeArray(basePD, remote.basePD, 'id');
       _mergeArray(actions, remote.actions, 'id'); // nouvelles actions distantes
       _mergeArray(ops, remote.ops, 'id'); // nouvelles OPs distantes
@@ -13776,12 +13979,14 @@ async function _doSyncPoll() {
         testeursLiq = testeursLiq.filter(x => x && x.id && !_deletedIds.has(x.id));
         if (testeursLiq.length !== _prevTst) changed = true;
         // 🗄️ Plan des étagères (2026-08-06) : structure + placements vivent au poll aussi
-        const _prevEtg = etageresLiq.length + placementsLiq.length;
+        const _prevEtg = etageresLiq.length + placementsLiq.length + marquesLiq.length;
         if (Array.isArray(remote.etageresLiq)) _mergeArray(etageresLiq, remote.etageresLiq, 'id');
         if (Array.isArray(remote.placementsLiq)) _mergeArray(placementsLiq, remote.placementsLiq, 'id');
+        if (Array.isArray(remote.marquesLiq)) _mergeArray(marquesLiq, remote.marquesLiq, 'id');
         etageresLiq = etageresLiq.filter(x => x && x.id && !_deletedIds.has(x.id));
         placementsLiq = placementsLiq.filter(x => x && x.id && !_deletedIds.has(x.id));
-        if (etageresLiq.length + placementsLiq.length !== _prevEtg) changed = true;
+        marquesLiq = marquesLiq.filter(x => x && x.id && !_deletedIds.has(x.id));
+        if (etageresLiq.length + placementsLiq.length + marquesLiq.length !== _prevEtg) changed = true;
       }
       if (campagnes.length !== _prevCamp || propositions.length !== _prevProp || relevesPrix.length !== _prevRel) changed = true;
       if (baseKits.length !== bk || baseLiq.length !== bl || basePD.length !== bp) changed = true;
@@ -14778,6 +14983,7 @@ document.getElementById('importFile').addEventListener('change', async (e) => {
       if (!await pvConfirm(warn)) { e.target.value = ''; return; }
       baseKits = data.baseKits || baseKits;
       baseLiq = data.baseLiq || baseLiq;
+    _liqNormaliserOrdresParfums(); // 🔀 l'ordre des parfums (champ ordre) re-trie le tableau
       baseLiq.forEach(g => ensureLiqModel(g));
       baseLiq.forEach(g => {
         if (g.statutVie === 'OK') g.statutVie = 'DANS_OFFRE';
@@ -14822,6 +15028,7 @@ document.getElementById('importFile').addEventListener('change', async (e) => {
       if (Array.isArray(data.testeursLiq)) testeursLiq = data.testeursLiq;
       if (Array.isArray(data.etageresLiq)) etageresLiq = data.etageresLiq;
       if (Array.isArray(data.placementsLiq)) placementsLiq = data.placementsLiq;
+      if (Array.isArray(data.marquesLiq)) marquesLiq = data.marquesLiq;
       // Tombstones
       if (Array.isArray(data._deletedIds)) data._deletedIds.forEach(id => _deletedIds.add(id));
       if (Array.isArray(data._deletedParfumIds)) data._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
@@ -16870,6 +17077,84 @@ function liqGammeStatusColor(sv) {
 }
 const LIQ_GAMME_STATUT_LABELS = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", A_SORTIR:"À sortir", REPRISE:"📦 En reprise", SORTI:"Sorti" };
 
+// ── 🔀 ORDRE DES PARFUMS dans leur gamme (Fabien 2026-08-07 17:35) : drag & drop dans
+//    Base Liquides ; l'ordre du TABLEAU g.parfums EST l'ordre de toutes les surfaces
+//    (mur FT, blocs du plan d'étagères, impressions). La position du tableau ne survit
+//    PAS au merge (les parfums se mergent par id, chaque poste garde son ordre local) →
+//    on écrit un champ p.ordre (mergé champ à champ par _ts) et on RE-TRIE le tableau
+//    après chaque chargement/poll (_liqNormaliserOrdresParfums). Motif testeurReorder.
+function _liqNormaliserOrdresParfums() {
+  let chg = false;
+  baseLiq.forEach(g => {
+    const ps = g && g.parfums;
+    if (!ps || ps.length < 2 || !ps.some(p => typeof p.ordre === 'number')) return;
+    const avant = ps.map(p => p.id).join('|');
+    const idx = new Map(); ps.forEach((p, i) => idx.set(p, i));
+    ps.sort((a, b) => {
+      const oa = typeof a.ordre === 'number' ? a.ordre : idx.get(a) + 1e6;
+      const ob = typeof b.ordre === 'number' ? b.ordre : idx.get(b) + 1e6;
+      return (oa - ob) || (idx.get(a) - idx.get(b));
+    });
+    if (ps.map(p => p.id).join('|') !== avant) chg = true;
+  });
+  return chg;
+}
+let _liqPfDrag = null; // { gid, pi } pendant un glisser de parfum
+function pvLiqPfDragStart(ev, gid, pi) {
+  if (!isAdmin()) { ev.preventDefault(); return; }
+  _liqPfDrag = { gid: gid, pi: pi };
+  try { ev.dataTransfer.setData('text/plain', gid + ':' + pi); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
+  ev.stopPropagation();
+}
+function pvLiqPfDragOver(ev, gid) {
+  if (!_liqPfDrag || _liqPfDrag.gid !== gid) return; // le tri se fait DANS une gamme
+  ev.preventDefault(); ev.stopPropagation();
+  const r = ev.currentTarget;
+  if (r && !r._dndHl) { r._dndHl = r.style.boxShadow || ' '; r.style.boxShadow = 'inset 0 2px 0 #fde047'; }
+}
+function pvLiqPfDragLeave(ev) {
+  const r = ev.currentTarget;
+  if (r && r._dndHl !== undefined) { r.style.boxShadow = r._dndHl.trim(); delete r._dndHl; }
+}
+function pvLiqPfDrop(ev, gid, pi) {
+  ev.preventDefault(); ev.stopPropagation(); pvLiqPfDragLeave(ev);
+  if (!_liqPfDrag || _liqPfDrag.gid !== gid) { _liqPfDrag = null; return; }
+  const from = _liqPfDrag.pi; _liqPfDrag = null;
+  if (from === pi) return;
+  const g = baseLiq.find(x => x.id === gid); if (!g || !isAdmin()) return;
+  const ps = g.parfums || [];
+  if (from < 0 || from >= ps.length || pi < 0 || pi >= ps.length) return;
+  const moved = ps.splice(from, 1)[0];
+  ps.splice(pi, 0, moved);
+  const _n = new Date().toISOString();
+  ps.forEach((p, i) => { p.ordre = i; p._ts = _n; }); // _ts frais → l'ordre se propage par merge
+  g._ts = _n;
+  // ── Miroir de l'ORDRE vers les autres formats (demande Fabien 2026-08-07) : les gammes
+  // sœurs (même marque + même nom de gamme) réalignent leurs parfums COMMUNS (même nom,
+  // casse/espaces ignorés) sur ce nouvel ordre. Les parfums qui n'existent que dans un
+  // format GARDENT LEUR PLACE : seuls les communs permutent entre les positions qu'ils
+  // occupaient déjà. Automatique et silencieux, comme la liaison goût.
+  const _nk = function(s) { return String(s || '').trim().toLowerCase(); };
+  const _ordreSrc = new Map();
+  ps.forEach(function(p, i) { const k = _nk(p.n); if (k && !_ordreSrc.has(k)) _ordreSrc.set(k, i); });
+  baseLiq.forEach(function(l) {
+    if (l.id === g.id || l.marque !== g.marque || l.gamme !== g.gamme) return;
+    const arr = l.parfums || []; if (arr.length < 2) return;
+    const idxs = [], communs = [];
+    arr.forEach(function(p2, i) { const k = _nk(p2.n); if (k && _ordreSrc.has(k)) { idxs.push(i); communs.push(p2); } });
+    if (communs.length < 2) return;
+    const avant = arr.map(function(p2) { return p2.id; }).join('|');
+    communs.sort(function(a, b) { return _ordreSrc.get(_nk(a.n)) - _ordreSrc.get(_nk(b.n)); });
+    idxs.forEach(function(pos, j) { arr[pos] = communs[j]; });
+    if (arr.map(function(p2) { return p2.id; }).join('|') !== avant) {
+      arr.forEach(function(p2, i) { p2.ordre = i; p2._ts = _n; });
+      l._ts = _n;
+    }
+  });
+  logAction('Base liquide', 'Parfums réordonnés — ' + (g.marque || '') + ' ' + (g.gamme || '') + ' : ' + (moved.n || '?') + ' → position ' + (pi + 1));
+  saveData(); renderLiqAll();
+}
+function pvLiqPfDragEnd() { _liqPfDrag = null; }
 async function updateLiqField(id, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   console.log('[updateLiqField]', id, field, val);
@@ -16923,7 +17208,7 @@ async function updateLiqField(id, field, val) {
       }
     }
     g[field] = val;
-    if (field === 'statutVie') g._sTs = _now; // 2026-08-03 (cas Twenty) : horodatage DÉDIÉ au changement de statut — le _ts global bouge à chaque édition, il ne peut pas servir de preuve de « choix de statut manuel » (guérison-cascade + nouveaux cycles raisonnent sur _sTs)
+    if (field === 'statutVie') g._sTs = new Date().toISOString(); // 2026-08-03 (cas Twenty) — fix 2026-08-07 : _now n'existait pas ici (ReferenceError silencieuse depuis le 03/08 : _sTs jamais posé, fin de fonction jamais exécutée) : horodatage DÉDIÉ au changement de statut — le _ts global bouge à chaque édition, il ne peut pas servir de preuve de « choix de statut manuel » (guérison-cascade + nouveaux cycles raisonnent sur _sTs)
     // Si on change le rôle manuellement, s'assurer que roleCalc est à jour pour la détection d'override
     if (field === 'roleChoisi' && !g.roleCalc) {
       g.roleCalc = calcLiqRole(g.format, g.pa, g.pv);
@@ -16931,7 +17216,8 @@ async function updateLiqField(id, field, val) {
   }
   // Cascade profil : proposer d'appliquer à tous les formats de la même gamme
   if (field === 'profilChoisi' && g.gamme) {
-    const siblings = baseLiq.filter(l => l.id !== g.id && l.gamme === g.gamme && l.profilChoisi !== val);
+    // même MARQUE + même gamme (resserré 2026-08-07 — deux marques peuvent partager un nom de gamme)
+    const siblings = baseLiq.filter(l => l.id !== g.id && l.marque === g.marque && l.gamme === g.gamme && l.profilChoisi !== val);
     if (siblings.length > 0) {
       const profilLabel = val ? (PROFIL_LABELS[val] || val) : 'aucun';
       const fmtList = siblings.map(s => LIQ_FORMAT_LABELS[s.format] || s.format).join(', ');
@@ -16941,6 +17227,7 @@ async function updateLiqField(id, field, val) {
     }
   }
   // Cascade statut gamme → proposer d'appliquer aux parfums
+  let _okParfumsStatut = false;
   if (field === 'statutVie' && g.parfums && g.parfums.length > 0) {
     const _normalizedS = (s) => (!s || s === 'OK') ? 'DANS_OFFRE' : s;
     const diffParfums = g.parfums.filter(p => _normalizedS(p.s) !== val);
@@ -16948,9 +17235,32 @@ async function updateLiqField(id, field, val) {
       const statutLabel = LIQ_GAMME_STATUT_LABELS[val] || val;
       const nbDiff = diffParfums.length;
       const nbTotal = g.parfums.length;
-      if (await pvConfirm(`Passer la gamme ${g.gamme} en « ${statutLabel} ».\n\n${nbDiff} parfum${nbDiff > 1 ? 's' : ''} sur ${nbTotal} ${nbDiff > 1 ? 'ne sont' : 'n\'est'} pas encore « ${statutLabel} ».\nAppliquer ce statut à tous les parfums ?`)) {
+      _okParfumsStatut = await pvConfirm(`Passer la gamme ${g.gamme} en « ${statutLabel} ».\n\n${nbDiff} parfum${nbDiff > 1 ? 's' : ''} sur ${nbTotal} ${nbDiff > 1 ? 'ne sont' : 'n\'est'} pas encore « ${statutLabel} ».\nAppliquer ce statut à tous les parfums ?`);
+      if (_okParfumsStatut) {
         const _tsNow = new Date().toISOString();
         g.parfums.forEach(p => { p.s = val; p._ts = _tsNow; });
+      }
+    }
+  }
+  // ── Cascade STATUT → autres FORMATS de la même gamme (demande Fabien 2026-08-07 14:15,
+  //    motif de la cascade profil). REPRISE exclue : elle a son workflow dédié
+  //    (lancerReprise) — la brancher format par format serait hasardeux.
+  if (field === 'statutVie' && val !== 'REPRISE' && g.gamme) {
+    const sibsS = baseLiq.filter(l => l.id !== g.id && l.marque === g.marque && l.gamme === g.gamme && l.statutVie !== val);
+    if (sibsS.length > 0) {
+      const statutLabel2 = LIQ_GAMME_STATUT_LABELS[val] || val;
+      const fmtList2 = sibsS.map(x => LIQ_FORMAT_LABELS[x.format] || x.format).join(', ');
+      // aperçu HONNÊTE : les actions en cours que ce statut annulerait chez les sœurs
+      let _nbAnn = 0;
+      sibsS.forEach(x => { _nbAnn += _previewCancelledActions(x.id, 'liq', val).length; });
+      if (await pvConfirm(`Appliquer aussi « ${statutLabel2} » aux autres formats de ${g.gamme} ?\n(${fmtList2})${_nbAnn > 0 ? '\n⚠ ' + _nbAnn + ' action' + (_nbAnn > 1 ? 's' : '') + ' en cours ser' + (_nbAnn > 1 ? 'ont annulées' : 'a annulée') + ' chez ces formats.' : ''}`)) {
+        const _tsS = new Date().toISOString();
+        sibsS.forEach(x => {
+          x.statutVie = val; x._sTs = _tsS; x._ts = _tsS;
+          // même décision que pour la gamme cliquée : les parfums suivent si tu as dit oui
+          if (_okParfumsStatut && x.parfums) x.parfums.forEach(p => { p.s = val; p._ts = _tsS; });
+          syncLiqToPropLiq(x);
+        });
       }
     }
   }
@@ -16960,6 +17270,17 @@ async function updateLiqField(id, field, val) {
     if (diffParfums.length > 0 && await pvConfirm(`Appliquer le goût « ${val || 'aucun'} » aux ${diffParfums.length} parfum${diffParfums.length > 1 ? 's' : ''} de ${g.gamme} ?`)) {
       const _tsNow = new Date().toISOString();
       g.parfums.forEach(p => { p.ct = val; p._ts = _tsNow; });
+    }
+  }
+  // ── Cascade GOÛT → autres FORMATS de la même gamme (demande Fabien 2026-08-07 14:15)
+  if (field === 'ct' && g.gamme) {
+    const sibsCt = baseLiq.filter(l => l.id !== g.id && l.marque === g.marque && l.gamme === g.gamme && l.ct !== val);
+    if (sibsCt.length > 0) {
+      const fmtListCt = sibsCt.map(x => LIQ_FORMAT_LABELS[x.format] || x.format).join(', ');
+      if (await pvConfirm(`Appliquer le goût « ${val || 'aucun'} » aux autres formats de ${g.gamme} ?\n(${fmtListCt})`)) {
+        const _tsCt = new Date().toISOString();
+        sibsCt.forEach(x => { x.ct = val; x._ts = _tsCt; });
+      }
     }
   }
   // Sync statutVie → proposition liquide decision
@@ -17018,6 +17339,22 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
     }
     p[field] = val;
     if (field === 's') p._sTs = _now; // 2026-08-03 (cas Twenty) : horodatage DÉDIÉ au changement de statut — le _ts global bouge à chaque édition, il ne peut pas servir de preuve de « choix de statut manuel » (guérison-cascade + nouveaux cycles raisonnent sur _sTs)
+    // ── Liaison GOÛT entre formats (demande Fabien 2026-08-07, choix : automatique, en
+    // silence, goût uniquement) : le MÊME parfum (même nom) dans les gammes sœurs
+    // (même marque + même nom de gamme, autres formats) reçoit le même goût. Le travail
+    // n'est fait qu'une fois et reste cohérent sur tous les formats.
+    if (field === 'ct') {
+      const _nk = function(s) { return String(s || '').trim().toLowerCase(); };
+      const _pk = _nk(p.n);
+      if (_pk) {
+        baseLiq.forEach(function(l) {
+          if (l.id === g.id || l.marque !== g.marque || l.gamme !== g.gamme) return;
+          (l.parfums || []).forEach(function(p2) {
+            if (_nk(p2.n) === _pk && p2.ct !== val) { p2.ct = val; p2._ts = _now; l._ts = _now; }
+          });
+        });
+      }
+    }
   }
   // Mise à jour nbRefs
   g.nbRefs = g.parfums.filter(pf => pf.s !== 'SORTI').length;
@@ -17493,7 +17830,9 @@ function renderLiqGammeDetail(g) {
         const _pTint = _tintCols.length === 0 ? ''
           : _tintCols.length === 1 ? ` background:${_tintCols[0]}; border-radius:3px;`
           : ` background:linear-gradient(90deg, ${_tintCols[0]}, ${_tintCols[1]}); border-radius:3px;`;
-        html += `<div style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}${_pTint}">`;
+        const _pfDnd = isAdmin() ? `ondragover="pvLiqPfDragOver(event,'${g.id}')" ondragleave="pvLiqPfDragLeave(event)" ondrop="pvLiqPfDrop(event,'${g.id}',${pi})"` : '';
+        html += `<div ${_pfDnd} style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}${_pTint}">`;
+        if (isAdmin()) html += `<span draggable="true" ondragstart="pvLiqPfDragStart(event,'${g.id}',${pi})" ondragend="pvLiqPfDragEnd()" style="cursor:grab; color:#475569; font-size:10px; flex-shrink:0; padding:0 1px;" title="Glisser pour réordonner le parfum dans sa gamme — l'ordre vaut aussi pour le mur FT et les blocs du plan d'étagères">⠿</span>`;
         html += `<span style="width:2px; height:18px; background:${pSc}; border-radius:1px; flex-shrink:0;"></span>`;
         html += `<input value="${(p.n||'').replace(/"/g,'&quot;')}" onblur="updateLiqParfumField('${g.id}',${pi},'n',this.value)" style="flex:1; min-width:100px; padding:2px 4px; font-size:11px; background:#0f172a; border:1px solid #33415580; color:#cbd5e1; border-radius:2px;">`;
         html += _prBadge;
@@ -18002,7 +18341,11 @@ function _etgNomPlacement(pl) {
 // Drag & drop — sources : chip du tiroir (nouvelle gamme) ou bloc déjà posé.
 function pvEtgDragStartNew(ev, gammeId) {
   if (!_etgPeutEditer()) { ev.preventDefault(); return; }
-  _etgDrag = { kind: 'new', gammeId: gammeId, offMm: 0 }; // depuis le tiroir : le 1er parfum se cale au marqueur
+  // Largeur virtuelle du bloc (fantôme jaune pendant le drag — Fabien 13:58)
+  const _gN = baseLiq.find(x => x.id === gammeId);
+  const _shopN = _etgShopCourant();
+  const _largN = _gN ? (_gN.parfums || []).filter(p => p.id && _etgParfumSurPlan(_gN, p, _shopN)).length * _etgFlaconMm(_gN.format) : 0;
+  _etgDrag = { kind: 'new', gammeId: gammeId, offMm: 0, largMm: _largN }; // depuis le tiroir : le 1er parfum se cale au marqueur
   try { ev.dataTransfer.setData('text/plain', 'new:' + gammeId); ev.dataTransfer.effectAllowed = 'copy'; } catch (e) {}
 }
 function pvEtgDragStartMv(ev, plid) {
@@ -18011,7 +18354,7 @@ function pvEtgDragStartMv(ev, plid) {
   // pris au 1er parfum → le 1er parfum se cale au marqueur) : offset conservé au dépôt.
   let offMm = 0;
   try { offMm = (ev.clientX - ev.currentTarget.getBoundingClientRect().left) / _etgScale; } catch (e) {}
-  _etgDrag = { kind: 'mv', plid: plid, offMm: Math.max(0, offMm) };
+  _etgDrag = { kind: 'mv', plid: plid, offMm: Math.max(0, offMm), largMm: _etgLargeur(_etgPlacementById(plid)) };
   try { ev.dataTransfer.setData('text/plain', 'mv:' + plid); ev.dataTransfer.effectAllowed = 'move'; } catch (e) {}
   ev.stopPropagation();
 }
@@ -18028,7 +18371,7 @@ function pvEtgDragOver(ev, zone) {
     if (!ind) {
       ind = document.createElement('div');
       ind.className = 'etgDropInd';
-      ind.style.cssText = 'position:absolute; top:0; bottom:0; width:2px; background:#fde047; z-index:5; pointer-events:none; box-shadow:0 0 6px #fde047aa;';
+      ind.style.cssText = 'position:absolute; top:0; bottom:0; z-index:5; pointer-events:none; background:#fde04720; border-left:2px solid #fde047; border-right:1px dashed #fde04780; box-shadow:0 0 6px #fde04755;';
       t.appendChild(ind);
     }
     const rect = t.getBoundingClientRect();
@@ -18036,6 +18379,9 @@ function pvEtgDragOver(ev, zone) {
     const brut = (ev.clientX - rect.left) / _etgScale - ((_etgDrag && _etgDrag.offMm) || 0);
     const mm = Math.max(0, Math.round(brut / grille) * grille);
     ind.style.left = Math.round(mm * _etgScale) + 'px';
+    // le fantôme fait LA taille du bloc déplacé (bord gauche plein = point de pose)
+    const wMm = (_etgDrag && _etgDrag.largMm) || 0;
+    ind.style.width = wMm > 0 ? Math.max(4, Math.round(wMm * _etgScale)) + 'px' : '2px';
   } catch (e) {}
 }
 function pvEtgDragLeave(ev) {
@@ -18098,12 +18444,17 @@ function pvEtgMenuParfum(ev, plid, parfumId, gammeId) {
   const g = baseLiq.find(x => x.id === (gammeId || pl.gammeId));
   const p = g && (g.parfums || []).find(x => x.id === parfumId);
   if (!p) return;
-  const dbl = !!(pl.doubles || {})[parfumId];
+  const _est10M = (g.format === '10mL' || g.format === '10mL_SDN');
+  const nbCur = (pl.multiFmt && _est10M && !(pl.doubles || {})[parfumId]) ? Math.max(1, parseInt(pl.rep10, 10) || 3) : _etgNbDe(pl, parfumId);
+  const _shopM = _etgShopDePlacement(pl);
+  const _dixDispo = (g.format !== '10mL' && g.format !== '10mL_SDN') && !!_etgDixDe(g, p, _shopM);
+  const _dixActif = !!(pl.devant10 || {})[parfumId];
   const m = document.createElement('div');
   m.id = 'etgCellMenu';
   m.style.cssText = 'position:fixed; z-index:10000; background:#0f172a; border:1px solid #47556990; border-radius:6px; box-shadow:0 8px 24px #000a; padding:6px; display:flex; flex-direction:column; gap:4px; min-width:190px;';
   m.innerHTML = '<div style="font-size:10px; color:#94a3b8; padding:2px 4px;"><b style="color:#e2e8f0;">' + (p.n || '(sans nom)') + '</b> · ' + _etgNomGamme(g) + '</div>'
-    + '<button onclick="pvEtgToggleDouble(\'' + plid + '\',\'' + parfumId + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b40; border-radius:4px; cursor:pointer;">' + (dbl ? '↩️ Repasser à 1 flacon' : '×2 Doubler ce flacon') + '</button>'
+    + '<button onclick="pvEtgNbFlacons(\'' + plid + '\',\'' + parfumId + '\',\'' + g.id + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b40; border-radius:4px; cursor:pointer;">🔢 Nombre de flacons… <b>(actuellement ×' + nbCur + ')</b></button>'
+    + ((_dixDispo || _dixActif) ? '<button onclick="pvEtgToggleDevant10(\'' + plid + '\',\'' + parfumId + '\',\'' + g.id + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#06b6d415; color:#67e8f9; border:1px solid #06b6d440; border-radius:4px; cursor:pointer;">' + (_dixActif ? '🔟 Retirer le 10mL de devant' : '🔟 Mettre le 10mL de ce parfum DEVANT') + '</button>' : '')
     + '<button onclick="pvEtgToggleRetire(\'' + plid + '\',\'' + parfumId + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#ef444415; color:#f87171; border:1px solid #ef444440; border-radius:4px; cursor:pointer;">🚫 Ne pas présenter ce parfum ici</button>'
     + '<button onclick="pvEtgFermerMenu()" style="padding:3px 8px; font-size:10px; background:none; color:#64748b; border:none; cursor:pointer;">Fermer</button>';
   document.body.appendChild(m);
@@ -18133,9 +18484,17 @@ function pvEtgMenuBloc(ev, plid) {
       + '<button onclick="pvEtgLargeurProduit(\'' + plid + '\',1)" style="padding:2px 9px; font-size:11px; background:#33415530; color:#e2e8f0; border:1px solid #47556960; border-radius:4px; cursor:pointer;">+</button></div>'
       + '<div style="font-size:9px; color:#64748b; padding:0 4px;">Astuce : le bord droit du bloc s\'étire aussi à la souris (calé sur les emplacements).</div>';
   } else {
-    const _nbSoeurs = _etgFreresDeGamme(baseLiq.find(function(x) { return x.id === pl.gammeId; })).length;
+    const _gM = baseLiq.find(function(x) { return x.id === pl.gammeId; });
+    const _nbSoeurs = _etgFreresDeGamme(_gM).length;
+    if (_gM) {
+      const _mEsc = String(_gM.marque || '').replace(/\\/g, '').replace(/'/g, "\\'");
+      inner += '<div style="display:flex; gap:6px; align-items:center; padding:0 4px;"><span style="font-size:10px; color:#94a3b8;">🎨 Couleur de la marque <b style="color:#e2e8f0;">' + (_gM.marque || '') + '</b> :</span>'
+        + '<input type="color" value="' + (_mrqCouleur(_gM.marque) || '#8b5cf6') + '" onchange="pvMrqSetCouleur(\'' + _mEsc + '\', this.value)" onclick="event.stopPropagation()" style="width:30px; height:22px; padding:0; border:none; background:none; cursor:pointer;">'
+        + (_mrqCouleur(_gM.marque) ? '<span onclick="event.stopPropagation(); pvMrqSetCouleur(\'' + _mEsc + '\', \'\')" style="cursor:pointer; color:#64748b; font-size:10px;" title="Revenir à la couleur du profil">✕</span>' : '') + '</div>';
+    }
     inner += '<button onclick="pvEtgToggleMultiFmt(\'' + plid + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; cursor:pointer;">'
       + (pl.multiFmt ? '↩️ Dégrouper (revenir au format seul)' : '🧬 Grouper les formats par parfum' + (_nbSoeurs > 1 ? ' (' + _nbSoeurs + ' formats)' : '')) + '</button>';
+    inner += '<button onclick="pvEtgEtiquetteGamme(event, \'' + plid + '\'); pvEtgFermerMenu();" style="padding:5px 8px; font-size:11px; text-align:left; background:#38bdf815; color:#7dd3fc; border:1px solid #38bdf840; border-radius:4px; cursor:pointer;">🏷️ Étiquettes de la gamme' + ((pl.devant10 && Object.keys(pl.devant10).some(function(k) { return pl.devant10[k]; })) ? ' + 10mL devant' : '') + '</button>';
     if (pl.multiFmt) {
       inner += '<div style="display:flex; gap:4px; align-items:center; padding:0 4px;"><span style="font-size:10px; color:#94a3b8;">10mL par parfum : <b style="color:#e2e8f0;">×' + (Math.max(1, parseInt(pl.rep10, 10) || 3)) + '</b></span>'
         + '<button onclick="pvEtgRep10(\'' + plid + '\',-1)" style="padding:2px 9px; font-size:11px; background:#33415530; color:#e2e8f0; border:1px solid #47556960; border-radius:4px; cursor:pointer;">−</button>'
@@ -18153,15 +18512,42 @@ function pvEtgMenuBloc(ev, plid) {
   m.style.left = x + 'px'; m.style.top = y + 'px';
   setTimeout(function() { document.addEventListener('click', pvEtgFermerMenu, { once: true }); }, 0);
 }
-function pvEtgToggleDouble(plid, parfumId) {
+// 🔢 Le NOMBRE de flacons d'un parfum (Fabien 2026-08-07 02:30 — remplace le ×2) :
+// saisie libre ≥ 1, puis proposition d'appliquer LE MÊME nombre à toute la gamme.
+function pvEtgNbFlacons(plid, parfumId, gammeId) {
   pvEtgFermerMenu();
   const pl = _etgPlacementById(plid); if (!pl || !_etgPeutEditer()) return;
+  const g = baseLiq.find(x => x.id === (gammeId || pl.gammeId)); if (!g) return;
+  const p = (g.parfums || []).find(x => x.id === parfumId); if (!p) return;
+  const _est10 = (g.format === '10mL' || g.format === '10mL_SDN');
+  const socle = (pl.multiFmt && _est10) ? Math.max(1, parseInt(pl.rep10, 10) || 3) : 1;
+  const cur = (pl.doubles || {})[parfumId] ? _etgNbDe(pl, parfumId) : socle;
+  const saisie = parseInt(prompt('Nombre de flacons pour « ' + (p.n || '?') + ' » :', String(cur)), 10);
+  if (isNaN(saisie) || saisie < 1 || saisie === cur) return;
   pl.doubles = pl.doubles || {};
-  pl.doubles[parfumId] = !pl.doubles[parfumId];
-  if (!pl.doubles[parfumId]) delete pl.doubles[parfumId];
+  // en mode 🧬, le choix explicite REMPLACE le socle ; revenir au socle = retaper sa valeur
+  if (saisie === socle && socle > 1) delete pl.doubles[parfumId];
+  else if (saisie === 1 && socle === 1) delete pl.doubles[parfumId];
+  else pl.doubles[parfumId] = saisie;
   _etgTouche(pl);
-  logAction('Plan étagères', (pl.doubles && pl.doubles[parfumId] ? 'Parfum doublé ×2' : 'Parfum dédoublé') + ' — ' + _etgNomPlacement(pl));
+  logAction('Plan étagères', 'Parfum ×' + saisie + ' — ' + (p.n || '?') + ' (' + _etgNomGamme(g) + ')');
   saveData(); renderLiqAll();
+  const shop = _etgShopDePlacement(pl);
+  const effDe = function(x) { return (pl.doubles || {})[x.id] ? _etgNbDe(pl, x.id) : socle; }; // nombre EFFECTIF (socle compris)
+  const autres = (g.parfums || []).filter(x => x.id && x.id !== parfumId && x.s !== 'SORTI'
+    && !(pl.retires || {})[x.id] && _etgParfumSurPlan(g, x, shop) && effDe(x) !== saisie);
+  if (!autres.length) return;
+  pvConfirm('Mettre aussi ×' + saisie + ' flacons pour les ' + autres.length + ' autres parfums de ' + _etgNomGamme(g) + ' ?',
+  { ok: 'Oui, toute la gamme', cancel: 'Non, juste celui-là' }).then(function(ok) {
+    if (!ok) return;
+    autres.forEach(function(x) {
+      if ((saisie === socle && socle > 1) || (saisie === 1 && socle === 1)) delete pl.doubles[x.id];
+      else pl.doubles[x.id] = saisie;
+    });
+    _etgTouche(pl);
+    logAction('Plan étagères', 'Gamme ×' + saisie + ' flacons — ' + _etgNomGamme(g) + ' (' + autres.length + ' parfums en plus)');
+    saveData(); renderLiqAll();
+  });
 }
 function pvEtgToggleRetire(plid, parfumId) {
   pvEtgFermerMenu();
@@ -18173,6 +18559,65 @@ function pvEtgToggleRetire(plid, parfumId) {
   saveData(); renderLiqAll();
 }
 function pvEtgRemettreParfum(plid, parfumId) { pvEtgToggleRetire(plid, parfumId); }
+// 🏷️ Étiquettes liquides d'une gamme posée (Fabien 2026-08-07 01:32) : ouvre LE dialogue
+// canonique (openVitrineDialog type ÉTAGÈRE, celui du bouton 💧) pré-rempli avec cette
+// gamme — et ses formats sœurs si le bloc est groupé 🧬. Accessible à tous (les
+// boutiques impriment leurs étiquettes).
+function pvEtgEtiquetteGamme(ev, plid) {
+  if (ev) ev.stopPropagation();
+  const pl = _etgPlacementById(plid); if (!pl || pl.type !== 'gamme') return;
+  const g = baseLiq.find(x => x.id === pl.gammeId); if (!g) return;
+  const gammes = pl.multiFmt ? _etgFreresDeGamme(g).slice() : [g];
+  // 🔟 Des 10mL posés DEVANT ? Leurs gammes ont AUSSI leur étiquette (Fabien 02:12) —
+  // chaque parfum « devant » actif ajoute sa gamme 10mL appariée (dédoublonnée).
+  const shop = _etgShopDePlacement(pl);
+  const vus = new Set(gammes.map(x => x.id));
+  const freres = _etgFreresDeGamme(g);
+  Object.keys(pl.devant10 || {}).forEach(pid => {
+    if (!(pl.devant10 || {})[pid]) return;
+    for (const gg of freres) {
+      const p = (gg.parfums || []).find(x => x.id === pid);
+      if (!p) continue;
+      const m = _etgDixDe(gg, p, shop);
+      if (m && !vus.has(m.g10.id)) { vus.add(m.g10.id); gammes.push(m.g10); }
+      break;
+    }
+  });
+  openVitrineDialog(gammes.map(x => _vitrineItemFromLiq(x)), { type: 'ETAGERE' });
+}
+// 🔟 Mettre/retirer le 10mL DEVANT un flacon (Fabien 2026-08-07 01:15) — puis proposer
+// d'étendre à tous les autres parfums de la gamme qui ont leur 10mL disponible.
+function pvEtgToggleDevant10(plid, parfumId, gammeId) {
+  pvEtgFermerMenu();
+  const pl = _etgPlacementById(plid); if (!pl || !_etgPeutEditer()) return;
+  const g = baseLiq.find(x => x.id === (gammeId || pl.gammeId)); if (!g) return;
+  const p = (g.parfums || []).find(x => x.id === parfumId); if (!p) return;
+  const shop = _etgShopDePlacement(pl);
+  pl.devant10 = pl.devant10 || {};
+  const activer = !pl.devant10[parfumId];
+  if (activer) {
+    if (!_etgDixDe(g, p, shop)) { pvAlert('Pas de 10mL disponible pour « ' + (p.n || '?') + ' » (même parfum, gamme 10mL, présent chez ' + (SHOP_LABELS[shop] || shop) + ').'); return; }
+    pl.devant10[parfumId] = true;
+  } else delete pl.devant10[parfumId];
+  _etgTouche(pl);
+  logAction('Plan étagères', (activer ? '10mL posé devant' : '10mL retiré de devant') + ' — ' + (p.n || '?') + ' (' + _etgNomGamme(g) + ')');
+  saveData(); renderLiqAll();
+  // Étendre aux AUTRES parfums de la gamme (10mL dispo, pas encore dans l'état visé)
+  const autres = (g.parfums || []).filter(x => x.id && x.id !== parfumId && x.s !== 'SORTI'
+    && !(pl.retires || {})[x.id] && _etgParfumSurPlan(g, x, shop)
+    && !!pl.devant10[x.id] !== activer && (!activer || _etgDixDe(g, x, shop)));
+  if (!autres.length) return;
+  pvConfirm(activer
+    ? 'Mettre aussi le 10mL devant les ' + autres.length + ' autres parfums de ' + _etgNomGamme(g) + ' qui ont leur 10mL disponible ?'
+    : 'Retirer aussi le 10mL de devant pour les ' + autres.length + ' autres parfums de ' + _etgNomGamme(g) + ' ?',
+  { ok: 'Oui, toute la gamme', cancel: 'Non, juste celui-là' }).then(function(ok) {
+    if (!ok) return;
+    autres.forEach(function(x) { if (activer) pl.devant10[x.id] = true; else delete pl.devant10[x.id]; });
+    _etgTouche(pl);
+    logAction('Plan étagères', (activer ? '10mL devant' : '10mL retirés') + ' pour toute la gamme ' + _etgNomGamme(g) + ' (' + autres.length + ' parfums en plus)');
+    saveData(); renderLiqAll();
+  });
+}
 // 🧬 Grouper/dégrouper les formats d'une gamme PAR PARFUM (demande Fabien 00:41 :
 // « un parfum 100mL, à côté le même en 50mL, à côté 3×10mL — et pareil pour chaque
 // parfum de la gamme »). Le bloc couvre alors TOUTES les gammes sœurs (couverture).
@@ -18312,7 +18757,7 @@ function pvEtgRenderEditeur() {
       <label style="font-size:9px; color:#64748b;" title="Les étagères de même rangée s'affichent CÔTE À CÔTE dans la vue">Rangée<input type="number" min="1" max="9" value="${_etgRangee(e)}" onchange="pvEtgEditChamp('${e.id}','rangee',this.value)" style="${inS}"></label>
       <label style="font-size:9px; color:#64748b;" title="Écart réel (cm) entre cette étagère et la suivante de la rangée — compté dans la ligne 100mL continue">Écart (cm)<input type="number" min="0" step="5" value="${_etgEcart(e)}" onchange="pvEtgEditChamp('${e.id}','ecartCm',this.value)" style="${inS}"></label>
       <label style="font-size:9px; color:#64748b;" title="Largeur réelle d'un étage en cm (zone Puff comprise) — ~${_etgEstimFlacons(e.largCm || 0)} flacons 50mL">Largeur (cm)<input type="number" min="10" step="5" value="${e.largCm || 0}" onchange="pvEtgEditChamp('${e.id}','largCm',this.value)" style="${inS}"></label>
-      <label style="font-size:9px; color:#64748b;" title="Largeur réservée aux Puffs par étage, en cm (0 = pas de zone Puff) + côté de la zone">Zone Puff (cm)<div style="display:flex; gap:3px;"><input type="number" min="0" step="5" value="${e.puffCm || 0}" onchange="pvEtgEditChamp('${e.id}','puffCm',this.value)" style="${inS}"><select onchange="pvEtgEditChamp('${e.id}','puffCote',this.value)" style="${inS}" ${(e.puffCm || 0) > 0 ? '' : 'disabled'}><option value="droite" ${_etgPuffCote(e) === 'droite' ? 'selected' : ''}>droite</option><option value="gauche" ${_etgPuffCote(e) === 'gauche' ? 'selected' : ''}>gauche</option></select></div></label>
+      <label style="font-size:9px; color:#64748b;" title="Zone Puff par étage, en EMPLACEMENTS de 50mL (0 = pas de zone) — collée aux liquides, alignée sur la grille + côté de la zone">Zone Puff (empl.)<div style="display:flex; gap:3px;"><input type="number" min="0" step="1" value="${e.puffEmpl || 0}" onchange="pvEtgEditChamp('${e.id}','puffEmpl',this.value)" style="${inS}"><select onchange="pvEtgEditChamp('${e.id}','puffCote',this.value)" style="${inS}" ${(e.puffEmpl || 0) > 0 ? '' : 'disabled'}><option value="droite" ${_etgPuffCote(e) === 'droite' ? 'selected' : ''}>droite</option><option value="gauche" ${_etgPuffCote(e) === 'gauche' ? 'selected' : ''}>gauche</option></select></div></label>
       <label style="font-size:9px; color:#64748b;" title="LA ligne des 100mL de la RANGÉE (une seule bande continue sous les étagères côte à côte) — cochée sur l'étagère porteuse, largeur = toute la rangée">Ligne 100mL (cm)<div style="display:flex; gap:4px; align-items:center;"><input type="checkbox" ${e.commode ? 'checked' : ''} onchange="pvEtgEditChamp('${e.id}','commode',this.checked)"><input type="number" min="0" step="5" value="${e.commodeCm || 0}" onchange="pvEtgEditChamp('${e.id}','commodeCm',this.value)" style="${inS}" ${e.commode ? '' : 'disabled'}></div></label>
       <button onclick="pvEtgSupprimerEtagere('${e.id}')" title="Supprimer cette étagère${nbPl ? ' (' + nbPl + ' bloc(s) posés dessus seront retirés du plan)' : ''}" style="padding:4px; font-size:12px; background:#ef444415; color:#f87171; border:1px solid #ef444440; border-radius:4px; cursor:pointer;">🗑</button>
     </div>`;
@@ -18352,7 +18797,7 @@ function pvEtgEditChamp(id, champ, val) {
 function pvEtgAjouterEtagere() {
   if (!_etgPeutEditer()) return;
   const sh = _etgShopCourant();
-  const e = { id: 'ETG-' + sh + '-' + Date.now().toString(36), shop: sh, nom: 'Nouvelle étagère', profil: '', nbEtages: 3, largCm: 120, puffCm: 0, commode: false, commodeCm: 0, ordre: _etgList(sh).length + 1 };
+  const e = { id: 'ETG-' + sh + '-' + Date.now().toString(36), shop: sh, nom: 'Nouvelle étagère', profil: '', nbEtages: 3, largCm: 120, puffEmpl: 0, ecartCm: 0, commode: false, commodeCm: 0, ordre: _etgList(sh).length + 1 };
   _etgTouche(e);
   etageresLiq.push(e);
   logAction('Plan étagères', 'Étagère ajoutée chez ' + (SHOP_LABELS[sh] || sh));
@@ -18381,9 +18826,11 @@ function pvEtgSupprimerEtagere(id) {
 // Base Liquides s'appliquent ici : tiroir filtré + flacons surlignés sur les étagères.
 let _etgScale = 0.62;          // pixels par MILLIMÈTRE réel (boutons 🔍 : proportions constantes)
 let _etgScrolls = {};          // scrollLeft par rangée — restauré après chaque redessin (fix 2026-08-07 : étirer un bloc renvoyait la vue à gauche)
-let _etgTriTiroir = 'az';      // tri du tiroir « À placer » : 'az' | 'mml' (marge/mL, demande Fabien)
+let _etgTriTiroir = 'mml';     // tri du tiroir « À placer » : marge/mL PAR DÉFAUT (Fabien 02:02), ou 'az'
 let _etgProfilTiroir = '';     // filtre profil propre au tiroir (demande Fabien)
 function pvEtgZoom(d) { _etgScale = Math.max(0.35, Math.min(1.2, _etgScale + d)); renderLiqAll(); }
+let _etgVueBloc = false;       // 🧱 vue Blocs : un rectangle par gamme, sans les parfums individuels (Fabien 01:55)
+function pvEtgVueBloc() { _etgVueBloc = !_etgVueBloc; renderLiqAll(); }
 function pvEtgTriTiroir(v) { _etgTriTiroir = v; renderLiqAll(); }
 function pvEtgProfilTiroir(v) { _etgProfilTiroir = v; renderLiqAll(); }
 function _etgPx(mm) { return Math.max(6, Math.round(mm * _etgScale)); }
@@ -18392,14 +18839,16 @@ function _etgFlaconHtml(nom, pcol, opts) {
   opts = opts || {};
   const h = opts.h || 68;
   const wpx = opts.wpx || _etgPx(32.5);
+  const fond = opts.fill || pcol; // intérieur : couleur de MARQUE en opacité faible ; cadre/bouchon : PROFIL
   const hl = opts.hl ? 'box-shadow:0 0 0 2px #fde047; z-index:1;' : '';
-  return `<div ${opts.click || ''} style="width:${wpx - 2}px; height:${h}px; margin:0 1px; flex-shrink:0; position:relative; border-radius:4px 4px 1px 1px; background:linear-gradient(180deg, ${pcol}55 0, ${pcol}55 7px, ${pcol}16 7px); border:1px solid ${pcol}55; ${hl} ${opts.click ? 'cursor:pointer;' : ''} overflow:hidden;" title="${(opts.title || nom || '').replace(/"/g, '&quot;')}">
-    <span style="position:absolute; inset:8px 0 1px; display:flex; align-items:center; justify-content:center; writing-mode:vertical-rl; transform:rotate(180deg); font-size:${wpx >= 16 ? 8 : 7}px; line-height:1; color:#e2e8f0; white-space:nowrap; overflow:hidden;">${nom || ''}</span>
-    ${opts.dbl ? '<span style="position:absolute; top:0; right:0; font-size:6px; font-weight:800; color:#fbbf24; background:#0f172acc; border-radius:0 0 0 3px; padding:0 2px;">×2</span>' : ''}
+  return `<div ${opts.click || ''} style="width:${wpx - 2}px; height:${h}px; margin:0 1px; flex-shrink:0; position:relative; border-radius:4px 4px 1px 1px; background:linear-gradient(180deg, ${pcol} 0, ${pcol} ${h >= 50 ? 7 : 4}px, ${fond}2e ${h >= 50 ? 7 : 4}px); border:1px solid ${pcol}88; ${hl} ${opts.click ? 'cursor:pointer;' : ''} overflow:hidden;" title="${(opts.title || nom || '').replace(/"/g, '&quot;')}">
+    <span style="position:absolute; inset:${h >= 50 ? 8 : 5}px 0 1px; display:flex; align-items:center; justify-content:center; writing-mode:vertical-rl; transform:rotate(180deg); font-size:${h < 40 ? 6 : (wpx >= 16 ? 8 : 7)}px; line-height:1; color:#e2e8f0; white-space:nowrap; overflow:hidden;">${nom || ''}</span>
+    ${opts.nb > 1 ? '<span style="position:absolute; top:0; right:0; font-size:6px; font-weight:800; color:#fbbf24; background:#0f172acc; border-radius:0 0 0 3px; padding:0 2px;">×' + opts.nb + '</span>' : ''}
+    ${opts.devant ? `<span style="position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:${Math.max(8, _etgPx(20) - 4)}px; height:42%; background:#0f172aee; border:1px solid ${pcol}; border-bottom:none; border-radius:2px 2px 0 0; z-index:2; display:flex; align-items:center; justify-content:center; font-size:6px; font-weight:800; color:#e2e8f0;" title="10mL du même parfum posé DEVANT ce flacon">10</span>` : ''}
   </div>`;
 }
 // Un GROUPE posé (gamme, produit ou bloc libre) : ses flacons côte à côte + son nom dessous.
-function _etgRenderGroupe(pl, admin, ctx) {
+function _etgRenderGroupe(pl, admin, ctx, leftPx) {
   const w = _etgLargeur(pl);
   const search = (ctx && ctx.search) || '';
   const drag = admin ? `draggable="true" ondragstart="pvEtgDragStartMv(event,'${pl.id}')" ondragend="pvEtgDragEnd()"` : '';
@@ -18412,15 +18861,46 @@ function _etgRenderGroupe(pl, admin, ctx) {
       label = '(gamme disparue)'; pcol = '#ef4444';
     } else {
       pcol = PROFIL_COLORS[g.profilChoisi] || '#64748b';
+      const mcol = _mrqCouleur(g.marque) || pcol; // 🎨 la couleur de la MARQUE teinte les flacons
       const gMatch = search && _etgNomGamme(g).toLowerCase().includes(search);
+      if (_etgVueBloc) {
+        // 🧱 vue Blocs : le bloc de la gamme, sans les parfums individuels
+        const _cellsG = _etgCellsGamme(pl);
+        const _hlB = search && (gMatch || _cellsG.some(function(c) { return (c.p.n || '').toLowerCase().includes(search); }));
+        if (_hlB && ctx) ctx.nbHl += 1;
+        cells = `<div ${admin ? `onclick="pvEtgMenuBloc(event,'${pl.id}')"` : ''} style="flex:1; min-width:0; height:68px; margin:0 1px; border-radius:4px 4px 1px 1px; background:linear-gradient(180deg, ${pcol} 0, ${pcol} 7px, ${mcol}2e 7px); border:1px solid ${pcol}88; ${_hlB ? 'box-shadow:0 0 0 2px #fde047;' : ''} display:flex; align-items:center; justify-content:center; overflow:hidden; ${admin ? 'cursor:pointer;' : ''}" title="${_etgNomGamme(g).replace(/"/g, '&quot;')} — ${_cellsG.length} flacon${_cellsG.length > 1 ? 's' : ''} · ${_etgCm(w)} cm"><span style="font-size:9px; font-weight:700; color:#e2e8f0; text-align:center; line-height:1.15; overflow:hidden;">${_etgNomGamme(g)}<br><span style="font-weight:400; color:#94a3b8; font-size:8px;">${_cellsG.length} flacons</span><br><span style="font-size:8px;"><b style="color:#4ade80;">${(typeof g.pv === 'number' && g.pv > 0) ? g.pv.toFixed(2) + '€' : ''}</b>${_testeurMargeMl(g, null) > 0 ? ` <span style="font-weight:400; color:#67e8f9;">· ${_testeurMargeMl(g, null).toFixed(2)}€/mL</span>` : ''}</span></span></div>`;
+      } else {
+      // Arrondi CUMULÉ (retour Fabien 2026-08-07 19:04 : « en fin de gamme le trait en bas
+      // dépasse ») : arrondir chaque flacon séparément perdait une fraction de pixel par
+      // flacon — sur une gamme longue (10mL en série), la barre du bas (largeur juste)
+      // dépassait du dernier flacon. Ici chaque flacon = différence des positions
+      // cumulées arrondies → les flacons remplissent EXACTEMENT la largeur du bloc.
+      let _cumMm = 0, _cumPx = 0;
       _etgCellsGamme(pl).forEach(function(c) {
         const hl = search && (gMatch || (c.p.n || '').toLowerCase().includes(search));
         if (hl && ctx) ctx.nbHl += 1;
         const click = admin ? `onclick="pvEtgMenuParfum(event,'${pl.id}','${c.p.id}','${c.g.id}')"` : '';
-        const t = (c.p.n || '(sans nom)') + ' — ' + _etgNomGamme(c.g) + ' ' + (LIQ_FORMAT_LABELS[c.fmt] || '') + (c.dbl ? ' · doublé ×2' : '') + (admin ? ' (clic : ×2 / non présenté)' : '');
-        cells += _etgFlaconHtml(c.p.n || '', pcol, { click: click, title: t, hl: hl, wpx: _etgPx(c.mm), dbl: c.dbl });
+        const t = (c.p.n || '(sans nom)') + ' — ' + _etgNomGamme(c.g) + ' ' + (LIQ_FORMAT_LABELS[c.fmt] || '') + (c.nb > 1 ? ' · ×' + c.nb : '') + (admin ? ' (clic : nombre de flacons / non présenté)' : '');
+        _cumMm += c.mm;
+        const _finPx = Math.round(_cumMm * _etgScale);
+        const _wCell = Math.max(3, _finPx - _cumPx);
+        _cumPx = _finPx;
+        cells += _etgFlaconHtml(c.p.n || '', pcol, { click: click, title: t + (c.devant ? ' · 10mL devant' : ''), hl: hl, wpx: _wCell, h: _etgFlaconHpx(c.fmt), nb: c.nb, devant: c.devant, fill: mcol });
       });
+      }
       label = (pl.multiFmt ? '🧬 ' : '') + _etgNomGamme(g) + ' <span style="opacity:0.6; font-weight:400;">' + (pl.multiFmt ? 'formats groupés' : (LIQ_FORMAT_LABELS[g.format] || '')) + '</span>';
+      // Prix + 🏷️ étiquettes SOUS le nom de la gamme (Fabien 2026-08-07 01:32) —
+      // multi-format : le prix de chaque format en infobulle, celui de l'ancrage affiché.
+      const _soeursPrix = pl.multiFmt ? _etgFreresDeGamme(g) : [g];
+      const _prixTitre = _soeursPrix.filter(x => typeof x.pv === 'number' && x.pv > 0).map(x => (LIQ_FORMAT_LABELS[x.format] || x.format) + ' : ' + x.pv.toFixed(2) + '€').join(' · ');
+      const _mmlG = _testeurMargeMl(g, null); // marge/mL de la gamme (canonique, demande Fabien 02:18)
+      retiresHtml = `<div style="display:flex; align-items:center; justify-content:space-between; gap:3px; padding:1px 2px; overflow:hidden;">
+        <span style="display:inline-flex; align-items:baseline; gap:4px; min-width:0; overflow:hidden;">
+          <b style="font-size:8px; color:#4ade80; white-space:nowrap;" title="${_prixTitre.replace(/"/g, '&quot;')}">${(typeof g.pv === 'number' && g.pv > 0) ? g.pv.toFixed(2) + '€' : ''}${pl.multiFmt && _soeursPrix.length > 1 ? '<span style=\"color:#64748b; font-weight:400;\">…</span>' : ''}</b>
+          ${_mmlG > 0 ? `<span style="font-size:7px; color:#67e8f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="Marge par mL (prix de la gamme)">${_mmlG.toFixed(2)}€/mL</span>` : ''}
+        </span>
+        <span onclick="pvEtgEtiquetteGamme(event,'${pl.id}')" style="cursor:pointer; font-size:9px; padding:0 3px; border:1px solid #38bdf860; background:#38bdf812; border-radius:3px; flex-shrink:0;" title="🏷️ Étiquettes étagère de ${_etgNomGamme(g).replace(/"/g, '&quot;')}${pl.multiFmt ? ' (tous les formats du bloc)' : ''}${pl.devant10 && Object.keys(pl.devant10).some(function(k) { return pl.devant10[k]; }) ? ' + les 10mL posés devant' : ''} — ouvre le dialogue d'étiquettes liquides">🏷️</span>
+      </div>` + retiresHtml;
       const _gRetires = pl.multiFmt ? _etgFreresDeGamme(g) : [g];
       const retires = [];
       _gRetires.forEach(function(gg) { (gg.parfums || []).forEach(function(p) { if (p.id && p.s !== 'SORTI' && (pl.retires || {})[p.id]) retires.push(p); }); });
@@ -18442,40 +18922,62 @@ function _etgRenderGroupe(pl, admin, ctx) {
   const wpx = Math.max(8, _etgPx(w)); // largeur RÉELLE verrouillée : le libellé ne pousse jamais le bloc
   const menuClick = admin ? `onclick="pvEtgMenuBloc(event,'${pl.id}')"` : '';
   const poignee = (admin && pl.type !== 'gamme') ? `<div onmousedown="pvEtgResizeStart(event,'${pl.id}')" draggable="false" style="position:absolute; top:0; bottom:0; right:-3px; width:7px; cursor:ew-resize; z-index:3;" title="Étirer le bloc (calé sur les emplacements)"></div>` : '';
-  return `<div ${drag} ${drop} style="position:relative; display:inline-flex; flex-direction:column; flex-shrink:0; width:${wpx}px; ${admin ? 'cursor:grab;' : ''}">${poignee}
-    <div style="display:flex; align-items:flex-end;">${cells}</div>
-    <div ${menuClick} style="margin:1px 1px 0; border-top:2px solid ${pcol}; background:${pcol}18; border-radius:0 0 3px 3px; padding:1px 3px; font-size:8px; font-weight:700; color:#e2e8f0; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ${admin ? 'cursor:pointer;' : ''}" title="${(pl.type === 'gamme' ? label.replace(/<[^>]*>/g, '') : _etgNomPlacement(pl)).replace(/"/g, '&quot;')} — ${_etgCm(w)} cm${pl.type === 'gamme' ? ' · ' + _etgNbFlacons(pl) + ' flacon' + (_etgNbFlacons(pl) > 1 ? 's' : '') : ''}${admin ? ' — glisser (⠿) pour déplacer, cliquer pour les options' : ''}">${admin ? '<span style="color:#64748b;">⠿</span> ' : ''}${label}</div>
-    ${retiresHtml}
+  // Position ABSOLUE dans la zone (Fabien 01:55 : un bloc trop grand DÉBORDE, la
+  // structure de l'étagère et la cloison Puff ne bougent JAMAIS).
+  const posStyle = (typeof leftPx === 'number') ? `position:absolute; left:${leftPx}px; top:0; z-index:1;` : 'position:relative;';
+  // En vue 🧱 Blocs, TOUT est sur le rectangle (nom, flacons, prix, marge) —
+  // pas de barre ni de ligne sous le bloc (Fabien 02:25).
+  const barre = (_etgVueBloc && pl.type === 'gamme') ? '' : `<div ${menuClick} style="margin:1px 1px 0; border-top:2px solid ${pcol}; background:${pcol}18; border-radius:0 0 3px 3px; padding:1px 3px; font-size:8px; font-weight:700; color:#e2e8f0; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ${admin ? 'cursor:pointer;' : ''}" title="${(pl.type === 'gamme' ? label.replace(/<[^>]*>/g, '') : _etgNomPlacement(pl)).replace(/"/g, '&quot;')} — ${_etgCm(w)} cm${pl.type === 'gamme' ? ' · ' + _etgNbFlacons(pl) + ' flacon' + (_etgNbFlacons(pl) > 1 ? 's' : '') : ''}${admin ? ' — glisser (⠿) pour déplacer, cliquer pour les options' : ''}">${admin ? '<span style="color:#64748b;">⠿</span> ' : ''}${label}</div>` + retiresHtml;
+  return `<div ${drag} ${drop} style="${posStyle} display:inline-flex; flex-direction:column; flex-shrink:0; width:${wpx}px; ${admin ? 'cursor:grab;' : ''}">${poignee}
+    <div style="display:flex; align-items:flex-end; height:78px;">${cells}</div>
+    ${barre}
   </div>`;
 }
 // Les emplacements LIBRES d'une zone : des rectangles vides en pointillés.
-function _etgLibresHtml(mm) {
+function _etgLibresHtml(mm, zone) {
   if (mm < 5) return '';
-  // rectangles fantômes à la taille d'un 50mL, dernier tronqué — proportions réelles
+  // rectangles fantômes à la taille du flacon DE LA ZONE (100mL sur la ligne des 100mL)
   let h = '', reste = mm;
-  const w50 = ETG_FLACON_MM['50mL'];
+  const w50 = _etgGrilleMm(zone || 'liq');
+  const hpx = zone === 'commode' ? _etgFlaconHpx('100mL') : _etgFlaconHpx('50mL');
   while (reste >= 5) {
     const wmm = Math.min(w50, reste);
-    h += `<div style="width:${Math.max(3, _etgPx(wmm) - 2)}px; height:68px; margin:0 1px; flex-shrink:0; border-radius:4px 4px 1px 1px; border:1px dashed #33415570;"></div>`;
+    h += `<div style="width:${Math.max(3, _etgPx(wmm) - 2)}px; height:${hpx}px; margin:0 1px; flex-shrink:0; border-radius:4px 4px 1px 1px; border:1px dashed #47556990; background:#1e293b28;"></div>`;
     reste -= wmm;
   }
   const wtot = Math.max(4, _etgPx(mm));
-  const lbl = _etgCm(mm) + ' cm libres (~' + _etgEstimFlacons(mm / 10) + ' × 50mL)';
+  const lbl = _etgEmpl(mm, zone) + ' empl. libres (' + _etgCm(mm) + ' cm)';
   return `<div style="display:inline-flex; flex-direction:column; flex-shrink:0; width:${wtot}px; opacity:0.7;" title="${lbl}"><div style="display:flex;">${h}</div>${wtot >= 52 ? `<div style="margin-top:1px; padding:1px 2px; font-size:7px; color:#475569; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${lbl}</div>` : `<div style="height:9px;"></div>`}</div>`;
 }
 // Contenu d'une zone avec les TROUS LIBRES entre les blocs (positions posCm) : le
 // bloc s'affiche là où il a été posé, les espaces vides restent des espaces vides.
 function _etgRenderZoneContenu(e, etage, zone, admin, ctx) {
   const cap = _etgZoneCap(e, zone);
-  let cur = 0, html = '';
-  _etgPlacements(e.id, etage, zone).forEach(function(p) {
-    const deb = (typeof p.posCm === 'number') ? p.posCm * 10 : cur;
-    const gap = deb - cur;
-    if (gap > 5) html += _etgLibresHtml(gap);
-    cur = Math.max(cur, deb) + _etgLargeur(p);
-    html += _etgRenderGroupe(p, admin, ctx);
+  const grille = _etgGrilleMm(zone);
+  const hz = zone === 'commode' ? _etgFlaconHpx('100mL') : _etgFlaconHpx('50mL');
+  const pas = grille * _etgScale; // largeur d'un emplacement à l'écran (px, décimales ok)
+  let html = '';
+  // Grille de FOND en UN SEUL élément (dégradé répété au pas de la grille — perf) :
+  // les emplacements vides restent toujours visibles sous les blocs.
+  html += `<div style="position:absolute; left:0; top:${78 - hz}px; width:${Math.round(Math.floor(cap / grille + 0.001) * pas)}px; height:${hz}px; border-top:1px dashed #47556955; background:repeating-linear-gradient(90deg, #1e293b1f 0px, #1e293b1f ${(pas - 1).toFixed(2)}px, #47556958 ${(pas - 1).toFixed(2)}px, #47556958 ${pas.toFixed(2)}px);"></div>`;
+  // Trait de MILIEU (Fabien 2026-08-07 14:50) : repère gauche/droite de la zone liquides
+  // (la zone Puff ne compte pas — elle a sa propre zone) ; sous les blocs, au-dessus de la grille.
+  if (zone === 'liq' && cap > 0) {
+    html += `<div style="position:absolute; left:${Math.round((cap / 2) * _etgScale)}px; top:0; bottom:0; border-left:2px dashed #eab30880; z-index:0; pointer-events:none;" title="Milieu de l'étagère (zone liquides, hors Puff)"><span style="position:absolute; top:-1px; left:-5px; font-size:7px; color:#eab308;">½</span></div>`;
+  }
+  // Sens du DÉBORDEMENT (Fabien 2026-08-07 02:10) : hors de l'étagère, JAMAIS sur le
+  // coin Puff — une zone dont le bord droit touche le Puff (liquides avec Puff à droite,
+  // ou zone Puff à gauche dont le bord droit touche les liquides) évacue son excédent
+  // par la GAUCHE (hors étagère) ; sinon le débordement à droite est déjà hors étagère.
+  const eff = _etgPositionsEffectives(e.id, etage, zone);
+  const finTot = eff.length ? eff[eff.length - 1].fin : 0;
+  const cote = _etgPuffCote(e);
+  const puffLa = _etgZoneCap(e, 'puff') > 0;
+  const versGauche = (zone === 'liq' && puffLa && cote === 'droite') || (zone === 'puff' && cote === 'gauche');
+  const dec = versGauche ? Math.max(0, finTot - cap) : 0;
+  eff.forEach(function(x) {
+    html += _etgRenderGroupe(x.p, admin, ctx, Math.round((x.deb - dec) * _etgScale));
   });
-  if (cap - cur > 5) html += _etgLibresHtml(cap - cur);
   return html;
 }
 // UNE PLANCHE (un étage) : zone liquides + zone Puff sur la même planche, séparées
@@ -18487,24 +18989,26 @@ function _etgRenderEtage(e, etage, admin, ctx) {
   const dropP = admin ? `ondragover="pvEtgDragOver(event,'puff')" ondragleave="pvEtgDragLeave(event)" ondrop="pvEtgDrop(event,'${e.id}',${etage},'puff')"` : '';
   const jc = function(u, c) { return u > c ? '#ef4444' : (u === c && c > 0 ? '#4ade80' : '#64748b'); };
   // Zone liquides et zone Puff, assemblées selon le CÔTÉ du puff (gauche à Langon).
-  const zoneLiq = `<div ${dropL} style="position:relative; display:flex; align-items:flex-end; min-width:${Math.max(_etgPx(capL), 40)}px;">${_etgRenderZoneContenu(e, etage, 'liq', admin, ctx)}</div>`;
-  const cloison = `<div style="width:3px; align-self:stretch; background:#d946ef60; margin:0 3px; border-radius:2px;" title="cloison zone Puff"></div>`;
-  const zonePuff = capP > 0 ? `<div ${dropP} style="position:relative; display:flex; align-items:flex-end; background:#d946ef12; border:1px solid #d946ef30; border-bottom:none; border-radius:4px 4px 0 0; min-width:${Math.max(_etgPx(capP), 40)}px;">${_etgRenderZoneContenu(e, etage, 'puff', admin, ctx)}</div>` : '';
+  const zoneLiq = `<div ${dropL} style="position:relative; width:${Math.max(_etgPx(capL), 40)}px; height:108px; flex-shrink:0; overflow:visible;">${_etgRenderZoneContenu(e, etage, 'liq', admin, ctx)}</div>`;
+  const cloison = `<div style="width:2px; align-self:stretch; background:#d946ef70; border-radius:1px;" title="cloison zone Puff — collée aux liquides"></div>`;
+  const zonePuff = capP > 0 ? `<div ${dropP} style="position:relative; width:${Math.max(_etgPx(capP), 40)}px; height:108px; flex-shrink:0; overflow:visible; background:#d946ef12; border:1px solid #d946ef30; border-bottom:none; border-radius:4px 4px 0 0;">${_etgRenderZoneContenu(e, etage, 'puff', admin, ctx)}</div>` : '';
   const btnPuff = (capP > 0 && admin) ? `<div style="display:flex; flex-direction:column; gap:2px; padding:0 4px; align-self:center;"><button onclick="pvEtgOuvrirPicker('${e.id}',${etage},'puff')" style="padding:1px 5px; font-size:8px; background:#d946ef15; color:#e879f9; border:1px solid #d946ef45; border-radius:3px; cursor:pointer; white-space:nowrap;" title="Poser un puff / produit (Base Kits + Base PD) en zone Puff">➕</button></div>` : '';
   const btnBloc = admin ? `<div style="padding:0 4px; align-self:center;"><button onclick="pvEtgAjouterBloc('${e.id}',${etage},'liq')" style="padding:1px 5px; font-size:8px; background:#eab30810; color:#fde047; border:1px solid #eab30840; border-radius:3px; cursor:pointer; white-space:nowrap;" title="Bloc libre (ex : Liquide du moment)">📝</button></div>` : '';
-  const contenu = _etgPuffCote(e) === 'gauche'
-    ? zonePuff + btnPuff + (capP > 0 ? cloison : '') + zoneLiq + btnBloc
-    : zoneLiq + (capP > 0 ? cloison : '') + zonePuff + btnPuff + btnBloc;
+  // Le ➕ puff vit DU CÔTÉ des puffs (Fabien 13:34 : à gauche à Langon) — toujours
+  // À L'EXTÉRIEUR des zones, jamais entre elles (la cloison ne bouge pas).
+  const contenu = (_etgPuffCote(e) === 'gauche'
+    ? btnPuff + zonePuff + (capP > 0 ? cloison : '') + zoneLiq + btnBloc
+    : zoneLiq + (capP > 0 ? cloison : '') + zonePuff + btnPuff + btnBloc);
   // ⚠ pas de scroll ICI : c'est l'ÉTAGÈRE entière qui défile (retour Fabien 20:05),
   // la colonne de jauges reste collée à gauche (sticky).
   let h = `<div style="display:flex; gap:6px; align-items:flex-start; width:max-content; min-width:100%;">
     <div style="flex-shrink:0; width:44px; text-align:right; padding-top:18px; position:sticky; left:0; z-index:2; background:#0f172a;">
       <div style="font-size:9px; font-weight:700; color:#94a3b8;">Ét. ${etage}</div>
-      <div style="font-size:8px; color:${jc(usedL, capL)};" title="${_etgCm(usedL)} cm occupés / ${_etgCm(capL)} cm">${_etgCm(usedL)}/${_etgCm(capL)}</div>
-      ${capP > 0 ? `<div style="font-size:8px; color:${usedP > capP ? '#ef4444' : '#e879f9'};" title="zone Puff : ${_etgCm(usedP)} cm / ${_etgCm(capP)} cm">🚬 ${_etgCm(usedP)}/${_etgCm(capP)}</div>` : ''}
-      ${usedL > capL ? `<div style="font-size:8px; color:#ef4444; font-weight:800;">⚠ +${_etgCm(usedL - capL)} cm</div>` : ''}
+      <div style="font-size:8px; color:${jc(usedL, capL)};" title="${_etgEmpl(usedL, 'liq')} / ${_etgEmpl(capL, 'liq')} emplacements de 50mL (${_etgCm(usedL)} / ${_etgCm(capL)} cm)">${_etgEmpl(usedL, 'liq')}/${_etgEmpl(capL, 'liq')}</div>
+      ${capP > 0 ? `<div style="font-size:8px; color:${usedP > capP ? '#ef4444' : '#e879f9'};" title="zone Puff : ${_etgEmpl(usedP, 'puff')} / ${_etgEmpl(capP, 'puff')} emplacements (${_etgCm(usedP)} / ${_etgCm(capP)} cm)">🚬 ${_etgEmpl(usedP, 'puff')}/${_etgEmpl(capP, 'puff')}</div>` : ''}
+      ${usedL > capL ? `<div style="font-size:8px; color:#ef4444; font-weight:800;">⚠ +${_etgEmpl(usedL - capL, 'liq')} empl.</div>` : ''}
     </div>
-    <div style="display:flex; align-items:flex-end; min-height:80px; padding:2px 0 0; border-bottom:5px solid #64748b55; border-radius:0 0 2px 2px;">
+    <div style="display:flex; align-items:flex-start; padding:2px 0 0; border-bottom:5px solid #64748b55; border-radius:0 0 2px 2px;">
       ${contenu}
     </div>
   </div>`;
@@ -18518,10 +19022,10 @@ function _etgRenderCommode(e, admin, ctx) {
   return `<div style="display:flex; gap:6px; align-items:flex-start; margin-top:2px; width:max-content; min-width:100%;">
     <div style="flex-shrink:0; width:44px; text-align:right; padding-top:16px; position:sticky; left:0; z-index:2; background:#0f172a;">
       <div style="font-size:8px; font-weight:700; color:#f9a8d4;" title="La ligne des 100mL — une seule bande continue sous toute la rangée (même mur)">🛋️ 100mL</div>
-      <div style="font-size:8px; color:${used > cap ? '#ef4444' : '#64748b'};" title="${_etgCm(used)} cm / ${_etgCm(cap)} cm">${_etgCm(used)}/${_etgCm(cap)}</div>
+      <div style="font-size:8px; color:${used > cap ? '#ef4444' : '#64748b'};" title="${_etgEmpl(used, 'commode')} / ${_etgEmpl(cap, 'commode')} emplacements de 100mL (${_etgCm(used)} / ${_etgCm(cap)} cm)">${_etgEmpl(used, 'commode')}/${_etgEmpl(cap, 'commode')}</div>
     </div>
     <div>
-      <div ${drop} style="position:relative; display:flex; align-items:flex-end; min-height:76px; padding:2px 0 0; background:#ec489905; border-bottom:5px solid #ec489935; border-radius:0 0 2px 2px; min-width:${Math.max(_etgPx(cap), 40)}px;">
+      <div ${drop} style="position:relative; width:${Math.max(_etgPx(cap), 40)}px; height:108px; overflow:visible; padding:2px 0 0; background:#ec489905; border-bottom:5px solid #ec489935; border-radius:0 0 2px 2px;">
         ${_etgRenderZoneContenu(e, 1, 'commode', admin, ctx)}
       </div>
       ${admin ? `<div style="margin-top:2px;"><button onclick="pvEtgAjouterBloc('${e.id}',1,'commode')" style="padding:1px 5px; font-size:8px; background:#eab30810; color:#fde047; border:1px solid #eab30840; border-radius:3px; cursor:pointer;" title="Bloc libre sur la ligne des 100mL (ex : Liquide du moment) — déplaçable où tu veux ensuite">📝 bloc</button></div>` : ''}
@@ -18529,10 +19033,12 @@ function _etgRenderCommode(e, admin, ctx) {
   </div>`;
 }
 function renderVueEtageres() {
+  _etgCacheV++; // caches de rendu frais (les statuts de la base peuvent avoir changé ailleurs)
   let _chg = _etgSeedDefaults();                    // pré-remplissage 3 boutiques (idempotent, merge-safe)
   if (_etgRafraichirSeedsIntacts()) _chg = true;    // seeds jamais édités → nouvelles valeurs par défaut (cm, rangées, commodes)
   if (_etgMigrerCm()) _chg = true;                  // migration douce emplacements → cm (une fois, après le rafraîchissement)
   if (_etgFusionnerCommodes()) _chg = true;         // UNE ligne 100mL continue par rangée (même mur)
+  if (_mrqSeedDefaults()) _chg = true;              // 🎨 couleurs de marques (exemples de Fabien : César, Etasty)
   if (_chg) saveData();
   const admin = _etgPeutEditer();
   const sh = _etgShopCourant();
@@ -18543,6 +19049,7 @@ function renderVueEtageres() {
   const search = (document.getElementById('liqSearch') ? document.getElementById('liqSearch').value : '').toLowerCase().trim();
   const fFormat = document.getElementById('liqFilterFormat') ? document.getElementById('liqFilterFormat').value : '';
   const fProfil = document.getElementById('liqFilterProfil') ? document.getElementById('liqFilterProfil').value : '';
+  const fRole = document.getElementById('liqFilterRole') ? document.getElementById('liqFilterRole').value : '';
   const ctx = { search: search, nbHl: 0 };
   let totUsed = 0, totCap = 0;
   etgs.forEach(function(e) {
@@ -18564,7 +19071,7 @@ function renderVueEtageres() {
       <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:#1e293b60; position:sticky; left:0; z-index:3; max-width:calc(100vw - 360px);">
         <b style="font-size:12px; color:#e2e8f0;">${e.nom || '?'}</b>
         ${e.profil ? `<span style="font-size:9px; font-weight:700; color:${pcol}; border:1px solid ${pcol}60; background:${pcol}12; padding:1px 6px; border-radius:3px;">${PROFIL_LABELS[e.profil] || e.profil}</span>` : ''}
-        <span style="font-size:9px; color:#64748b;">${e.nbEtages} étage${(e.nbEtages || 1) > 1 ? 's' : ''} × ${e.largCm || 0} cm (~${_etgEstimFlacons(e.largCm || 0)} flacons 50mL)${(e.puffCm || 0) > 0 ? ' · zone Puff ' + e.puffCm + ' cm' : ''}${e.commode ? ' · porte la ligne 100mL de la rangée (' + (e.commodeCm || 0) + ' cm)' : ''}</span>
+        <span style="font-size:9px; color:#64748b;">${e.nbEtages} étage${(e.nbEtages || 1) > 1 ? 's' : ''} × ${e.largCm || 0} cm (~${_etgEstimFlacons(e.largCm || 0)} flacons 50mL)${(e.puffEmpl || 0) > 0 ? ' · zone Puff ' + e.puffEmpl + ' × 50mL' : ''}${e.commode ? ' · porte la ligne 100mL de la rangée (' + (e.commodeCm || 0) + ' cm)' : ''}</span>
         <span style="margin-left:auto; font-size:10px; font-weight:700; color:${eUsed > eCap ? '#ef4444' : '#94a3b8'};">${_etgCm(eUsed)}/${_etgCm(eCap)} cm</span>
       </div>
       <div style="padding:8px 10px 10px;"><div style="display:flex; flex-direction:column; gap:8px; width:max-content; min-width:100%;">`;
@@ -18593,6 +19100,7 @@ function renderVueEtageres() {
     <span style="display:inline-flex; gap:3px; align-items:center;" title="Taille des flacons à l'écran">
       <button onclick="pvEtgZoom(-0.12)" style="padding:2px 7px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556950; border-radius:3px; cursor:pointer;">🔍−</button>
       <button onclick="pvEtgZoom(0.12)" style="padding:2px 7px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556950; border-radius:3px; cursor:pointer;">🔍+</button>
+      <button onclick="pvEtgVueBloc()" style="padding:2px 8px; font-size:10px; font-weight:700; background:${_etgVueBloc ? '#8b5cf622' : 'none'}; color:${_etgVueBloc ? '#c4b5fd' : '#94a3b8'}; border:1px solid ${_etgVueBloc ? '#8b5cf670' : '#47556950'}; border-radius:3px; cursor:pointer;" title="${_etgVueBloc ? 'Revenir aux parfums individuels' : 'Vue Blocs : un rectangle par gamme, sans les parfums individuels'}">${_etgVueBloc ? '🍾 Parfums' : '🧱 Blocs'}</button>
     </span>
     <span style="margin-left:auto; display:inline-flex; gap:6px;">
       ${admin ? `<button onclick="pvEtgOuvrirEditeur()" style="padding:5px 10px; font-size:11px; background:#33415530; color:#94a3b8; border:1px solid #47556960; border-radius:4px; cursor:pointer;" title="Structure : étagères, étages, capacités, zone Puff, commode">⚙️ Étagères</button>` : ''}
@@ -18600,21 +19108,25 @@ function renderVueEtageres() {
     </span>
   </div>`;
   html += admin
-    ? `<div style="font-size:10px; color:#64748b; margin-bottom:8px;"><b style="color:#94a3b8;">Glisse une gamme</b> du tiroir de droite sur une planche — un rectangle = un flacon. <b style="color:#94a3b8;">Clique un flacon</b> : ×2 doubler / ne pas présenter ici. Attrape le <b style="color:#94a3b8;">nom de la gamme</b> (⠿) pour déplacer le bloc. La 🔎 recherche et les filtres du bandeau du haut filtrent le tiroir et surlignent les flacons.</div>`
+    ? `<div style="font-size:10px; color:#64748b; margin-bottom:8px;"><b style="color:#94a3b8;">Glisse une gamme</b> du tiroir de droite sur une planche — un rectangle = un flacon. <b style="color:#94a3b8;">Clique un flacon</b> : nombre de flacons (×N) / 10mL devant / ne pas présenter ici. Attrape le <b style="color:#94a3b8;">nom de la gamme</b> (⠿) pour déplacer le bloc. La 🔎 recherche et les filtres du bandeau du haut filtrent le tiroir et surlignent les flacons.</div>`
     : `<div style="font-size:10px; color:#64748b; margin-bottom:8px;">Le plan est fait par Fabien — ici tu le consultes et tu l'imprimes (🖨️). La 🔎 recherche du bandeau surligne les flacons.</div>`;
   html += `<div style="display:flex; gap:10px; align-items:flex-start;">`;
   html += `<div style="flex:1; display:flex; flex-direction:column; gap:10px; min-width:0;">`;
   if (!etgs.length) html += `<div style="font-size:11px; color:#64748b; padding:12px;">Aucune étagère chez ${SHOP_LABELS[sh]}${admin ? ' — ⚙️ Étagères pour en ajouter.' : '.'}</div>`;
   html += corps + `</div>`;
   // Colonne de droite : tiroir « à placer » (admin, filtré par 🔎/format/profil) + couverture
-  html += `<div style="width:290px; flex-shrink:0; display:flex; flex-direction:column; gap:8px;">`;
+  // Colonne collante (Fabien 02:00) : le tiroir suit le défilement vertical — visible
+  // même en travaillant sur la dernière étagère ; ascenseur interne s'il est trop haut.
+  // top = hauteur du header collant (+ la barre de filtres sticky-sub) — sinon le tiroir
+  // se colle DERRIÈRE le header et semble disparaître (retour Fabien 14:05).
+  html += `<div style="width:290px; flex-shrink:0; display:flex; flex-direction:column; gap:8px; position:sticky; top:calc(var(--sticky-top-h, 90px) + 56px); align-self:flex-start; max-height:calc(100vh - var(--sticky-top-h, 90px) - 70px); overflow-y:auto;">`;
   if (admin) {
     const ordreFormats = ['50mL', '100mL', '10mL', '10mL_SDN', '20mL', '+150mL'];
     const parFmt = couv.parFormat;
     let nbFiltres = 0;
     html += `<div style="border:1px solid #33415580; border-radius:8px; padding:8px;">
       <div style="font-size:11px; font-weight:800; color:#e2e8f0; margin-bottom:2px;">📥 À placer chez ${SHOP_LABELS[sh]}</div>
-      <div style="font-size:8px; color:#64748b; margin-bottom:4px;">Filtré aussi par la 🔎 recherche et le filtre Format du bandeau du haut.</div>
+      <div style="font-size:8px; color:#64748b; margin-bottom:4px;">Filtré aussi par la 🔎 recherche et les filtres Format / Rôle du bandeau du haut.</div>
       <div style="display:flex; gap:4px; margin-bottom:4px;">
         <select onchange="pvEtgProfilTiroir(this.value)" style="flex:1; padding:3px 4px; font-size:9px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px;" title="Filtrer le tiroir par profil">
           <option value="">Tous profils</option>
@@ -18630,6 +19142,7 @@ function renderVueEtageres() {
       if (fFormat && fFormat !== fmt) return;
       let gs = (parFmt[fmt] || []).filter(function(g) {
         if (fProfil && g.profilChoisi !== fProfil) return false;
+        if (fRole && g.roleChoisi !== fRole) return false; // filtre Rôle du bandeau (retour Fabien 01:27)
         if (_etgProfilTiroir && g.profilChoisi !== _etgProfilTiroir) return false;
         if (search && !(_etgNomGamme(g).toLowerCase().includes(search) || (g.parfums || []).some(function(p) { return (p.n || '').toLowerCase().includes(search); }))) { nbFiltres++; return false; }
         return true;
@@ -18646,14 +19159,14 @@ function renderVueEtageres() {
         const _mml = _testeurMargeMl(g, null);
         const pasIci = (g.parfums || []).length > 0 && !(g.parfums || []).some(function(p) { return isLiqParfumPresentAtShop(g, p, sh); });
         html += `<div draggable="true" ondragstart="pvEtgDragStartNew(event,'${g.id}')" ondragend="pvEtgDragEnd()" style="display:flex; align-items:center; gap:5px; padding:3px 6px; margin:2px 0; background:#1e293b; border:1px solid #33415560; border-left:3px solid ${PROFIL_COLORS[g.profilChoisi] || '#64748b'}; border-radius:3px; cursor:grab; font-size:9px;" title="Glisser sur une planche">
-          <span style="color:#64748b;">⠿</span><b style="color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${_etgNomGamme(g)}</b>
+          <span style="color:#64748b;">⠿</span>${_mrqCouleur(g.marque) ? `<span style="width:8px; height:8px; border-radius:2px; background:${_mrqCouleur(g.marque)}; flex-shrink:0;" title="Couleur de la marque"></span>` : ''}<b style="color:#e2e8f0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${_etgNomGamme(g)}</b>
           <span style="margin-left:auto; color:#64748b; flex-shrink:0;">${n} parfum${n > 1 ? 's' : ''}</span>
           ${_mml > 0 ? `<span style="color:#4ade80; flex-shrink:0;" title="Marge par mL (prix de la gamme)">${_mml.toFixed(2)}€/mL</span>` : ''}
           ${pasIci ? '<span style="color:#f59e0b; flex-shrink:0;" title="Aucun parfum présent chez cette boutique (base) — à placer quand même si l\'offre doit y être">⏳</span>' : ''}
         </div>`;
       });
     });
-    if (vide) html += (search || fFormat || fProfil)
+    if (vide) html += (search || fFormat || fProfil || fRole || _etgProfilTiroir)
       ? `<div style="font-size:10px; color:#64748b;">Rien à placer avec ces filtres${couv.nonPlacees.length ? ' (' + couv.nonPlacees.length + ' gamme(s) à placer au total — vide la 🔎 recherche/les filtres pour tout voir)' : ''}.</div>`
       : `<div style="font-size:10px; color:#4ade80;">✓ Toutes les gammes actives sont posées sur ce plan.</div>`;
     html += `</div>`;
@@ -18687,80 +19200,158 @@ function pvEtgImprimerPlan(shop) {
   // Une CELLULE par flacon : nom du parfum en vertical ; parfum doublé = cellule
   // double largeur marquée ×2 ; produit/bloc = cellule large avec le libellé à plat.
   // colspan = MILLIMÈTRES réels arrondis → les proportions du papier sont celles du magasin
-  const cellHtml = function(txt, spanMm, cls, sub) {
-    return '<td class="c ' + (cls || '') + '" colspan="' + Math.max(1, Math.round(spanMm || 32.5)) + '"><div class="v">' + _esc(txt) + (sub ? '<span class="x2">×2</span>' : '') + '</div></td>';
+  const cellHtml = function(txt, spanMm, cls, nb, coul, devant, hMm) {
+    const st = ' style="height:' + (hMm || 20) + 'mm;' + (coul ? ' background:' + coul + '26;' : '') + '"';
+    return '<td class="c ' + (cls || '') + '" colspan="' + Math.max(1, Math.round(spanMm || 32.5)) + '"><div class="b"' + st + '><div class="v">' + _esc(txt) + (nb > 1 ? '<span class="x2">×' + nb + '</span>' : '') + '</div>' + (devant ? '<span class="dv">10</span>' : '') + '</div></td>';
   };
   let sheets = '';
   etgs.forEach(function(e) {
     const capTot = Math.max(1, parseFloat(e.largCm) || 1);
-    // Construit les cellules d'une zone AVEC les trous libres (positions posCm réelles).
-    const zoneCells = function(etage, zone, cls) {
+    // Une ZONE (liquides / puff / commode) : ses cellules et ses libellés de gammes,
+    // en POURCENTAGES EXACTS de la zone (fix 2026-08-07 : les colspans arrondis du
+    // tableau décalaient la ligne des noms dès qu'un parfum était multiplié ×N).
+    const zoneDiv = function(etage, zone, cls) {
       const cap = _etgZoneCap(e, zone);
-      let cur = 0, cells = '';
-      const grp = [];
+      let cur = 0;
+      const cellules = [], grp = [];
       _etgPlacements(e.id, etage, zone).forEach(function(pl) {
         const deb = (typeof pl.posCm === 'number') ? pl.posCm * 10 : cur;
-        const gap = deb - cur;
-        if (gap > 5) { cells += '<td class="c free ' + cls + '" colspan="' + Math.round(gap) + '"><div class="v">' + _etgCm(gap) + ' cm libres</div></td>'; grp.push({ w: gap, label: '', cls: cls }); }
+        const gap = Math.max(0, deb - cur);
+        if (gap > 5) { cellules.push({ libre: gap }); grp.push({ w: gap, label: '' }); }
         cur = Math.max(cur, deb);
         const w = _etgLargeur(pl);
         if (pl.type === 'gamme') {
           const g = baseLiq.find(function(x) { return x.id === pl.gammeId; });
-          _etgCellsGamme(pl).forEach(function(c) { cells += cellHtml(c.p.n || '', c.mm, cls, c.dbl); });
-          grp.push({ w: w, label: (g ? _etgNomGamme(g) : '?') + (pl.multiFmt ? ' (formats groupés)' : ''), cls: cls });
+          const coulM = g ? _mrqCouleur(g.marque) : '';
+          const coulP = g ? (PROFIL_COLORS[g.profilChoisi] || '') : '';
+          _etgCellsGamme(pl).forEach(function(c) { cellules.push({ txt: c.p.n || '', mm: c.mm, nb: c.nb, devant: c.devant, coul: coulM, pc: coulP, hMm: _etgFlaconHmm(c.fmt) }); });
+          grp.push({ w: w, label: (g ? _etgNomGamme(g) : '?') + (pl.multiFmt ? ' (formats groupés)' : ''), pc: coulP });
         } else {
-          cells += cellHtml((pl.type === 'bloc' ? '📝 ' : '') + _etgNomPlacement(pl), w, cls + ' lib');
-          grp.push({ w: w, label: '', cls: cls });
+          cellules.push({ txt: (pl.type === 'bloc' ? '📝 ' : '') + _etgNomPlacement(pl), mm: w, lib: true, hMm: zone === 'commode' ? 22 : 20 });
+          grp.push({ w: w, label: '' });
         }
         cur += w;
       });
-      if (cap - cur > 5) { cells += '<td class="c free ' + cls + '" colspan="' + Math.round(cap - cur) + '"><div class="v">' + _etgCm(cap - cur) + ' cm libres</div></td>'; grp.push({ w: cap - cur, label: '', cls: cls }); }
-      return { cells: cells, grp: grp, wMm: Math.max(cap, cur), cap: cap, used: _etgZoneUsed(e.id, etage, zone) };
+      if (cap - cur > 5) { cellules.push({ libre: cap - cur }); grp.push({ w: cap - cur, label: '' }); }
+      const tot = Math.max(cap, cur);
+      const pct = function(mm) { return ((mm / tot) * 100).toFixed(3) + '%'; };
+      let rc = '', maxNom = 0;
+      cellules.forEach(function(c) {
+        if (c.libre !== undefined) { rc += '<div class="c free" style="width:' + pct(c.libre) + '"><div class="b" style="height:calc(' + (zone === 'commode' ? 22 : 20) + 'mm * var(--hk,1)); border-style:dashed;"><div class="v">' + _etgCm(c.libre) + ' cm libres</div></div></div>'; return; }
+        if (!c.lib) maxNom = Math.max(maxNom, String(c.txt || '').length);
+        const st = 'height:calc(' + (c.hMm || 20) + 'mm * var(--hk,1));' + (c.coul ? ' background:' + c.coul + '33;' : '') + (c.pc ? ' border-color:' + c.pc + ';' : '');
+        rc += '<div class="c' + (c.lib ? ' lib' : '') + '" style="width:' + pct(c.mm) + '"><div class="b" style="' + st + '"><div class="v">' + _esc(c.txt) + (c.nb > 1 ? '<span class="x2">×' + c.nb + '</span>' : '') + '</div>' + (c.devant ? '<span class="dv">10</span>' : '') + '</div></div>';
+      });
+      let rg = '';
+      grp.forEach(function(gr) { rg += '<div class="g" style="width:' + pct(gr.w) + (gr.pc ? '; background:' + gr.pc + '1f; border-color:' + gr.pc + '; border-top:2pt solid ' + gr.pc + ';' : '') + '">' + _esc(gr.label) + '</div>'; });
+      return { html: '<div class="zw ' + (cls || '') + '" style="width:__W__">' + (cls === 'puff' ? '<div class="ztag">PUFF</div>' : '') + '<div class="row">' + rc + '</div><div class="grow">' + rg + '</div></div>', wMm: tot, cap: cap, used: _etgZoneUsed(e.id, etage, zone), maxNom: maxNom };
     };
-    let bandes = '';
+    // On collecte les bandes (étages + ligne 100mL) AVANT de composer les feuilles :
+    // si le mur est trop long pour une page (Langon 500 cm), on le découpe en
+    // N pages A4 paysage à poser CÔTE À CÔTE — les écritures restent lisibles.
+    const bandesArr = [];
     for (let et = 1; et <= (e.nbEtages || 1); et++) {
-      const zl = zoneCells(et, 'liq', '');
-      const zp = _etgZoneCap(e, 'puff') > 0 ? zoneCells(et, 'puff', 'puff') : null;
-      // ordre des zones sur la bande = côté réel de la zone Puff (gauche à Langon)
+      const zl = zoneDiv(et, 'liq', '');
+      const zp = _etgZoneCap(e, 'puff') > 0 ? zoneDiv(et, 'puff', 'puff') : null;
       const gauche = zp && _etgPuffCote(e) === 'gauche';
-      const cells = gauche ? (zp.cells + zl.cells) : (zl.cells + (zp ? zp.cells : ''));
-      const grp = gauche ? zp.grp.concat(zl.grp) : zl.grp.concat(zp ? zp.grp : []);
-      const groupes = grp.map(function(gr) { return '<td colspan="' + Math.max(1, Math.round(gr.w)) + '" class="g' + (gr.cls && gr.cls.indexOf('puff') >= 0 ? ' puff' : '') + '">' + _esc(gr.label) + '</td>'; }).join('');
       const totW = zl.wMm + (zp ? zp.wMm : 0);
-      bandes += '<div class="et"><div class="etlab">Étage ' + et
-        + (zp ? ' <span class="pufflab">· zone Puff à ' + (gauche ? 'gauche' : 'droite') + ' (' + _etgCm(zp.cap) + ' cm)</span>' : '')
-        + (zl.used > zl.cap ? ' <span class="over">⚠ dépasse de ' + _etgCm(zl.used - zl.cap) + ' cm</span>' : '') + '</div>'
-        + '<table style="--n:' + Math.max(Math.round(totW), 1) + '"><tr>' + cells + '</tr><tr>' + groupes + '</tr></table></div>';
+      const wPct = function(z) { return ((z.wMm / totW) * 100).toFixed(3) + '%'; };
+      const zoneL = zl.html.replace('__W__', wPct(zl));
+      const zoneP = zp ? zp.html.replace('__W__', wPct(zp)) : '';
+      const midPct = totW > 0 ? (((gauche && zp ? zp.wMm : 0) + zl.cap / 2) / totW) * 100 : 50;
+      bandesArr.push({
+        label: 'Étage ' + et
+          + (zp ? ' <span class="pufflab">· zone Puff à ' + (gauche ? 'gauche' : 'droite') + ' (' + _etgCm(zp.cap) + ' cm)</span>' : '')
+          + (zl.used > zl.cap ? ' <span class="over">⚠ dépasse de ' + _etgCm(zl.used - zl.cap) + ' cm</span>' : ''),
+        inner: '<div class="mid" style="left:' + midPct.toFixed(2) + '%"></div>' + (gauche ? zoneP + zoneL : zoneL + zoneP),
+        tot: totW,
+        maxNom: Math.max(zl.maxNom, zp ? zp.maxNom : 0)
+      });
     }
-    // bande commode (100mL)
     if (e.commode) {
-      const zc = zoneCells(1, 'commode', 'com');
-      if (zc.grp.length) bandes += '<div class="et"><div class="etlab">Ligne 100mL — toute la rangée (sous les étagères côte à côte)' + (zc.used > zc.cap ? ' <span class="over">⚠ dépasse de ' + _etgCm(zc.used - zc.cap) + ' cm</span>' : '') + '</div>'
-        + '<table style="--n:' + Math.max(Math.round(zc.wMm), 1) + '"><tr>' + zc.cells + '</tr><tr>' + zc.grp.map(function(gr) { return '<td colspan="' + Math.max(1, Math.round(gr.w)) + '" class="g">' + _esc(gr.label) + '</td>'; }).join('') + '</tr></table></div>';
+      const zc = zoneDiv(1, 'commode', 'com');
+      bandesArr.push({
+        label: 'Ligne 100mL — toute la rangée (sous les étagères côte à côte)' + (zc.used > zc.cap ? ' <span class="over">⚠ dépasse de ' + _etgCm(zc.used - zc.cap) + ' cm</span>' : ''),
+        inner: zc.html.replace('__W__', '100%'),
+        tot: zc.wMm,
+        maxNom: zc.maxNom,
+        commode: true
+      });
     }
+    // Découpage : au-delà de ~260 cm par page, plusieurs pages CÔTE À CÔTE — mais le
+    // nombre de pages est décidé par les ÉTAGES seuls (le vrai mur). Fix 2026-08-07
+    // (retour Fabien, PDF Pessac « nul ») : la ligne 100mL (260 cm + dépassement)
+    // forçait toute l'étagère en 2 pages → étages de 120 cm coupés en deux, flacons
+    // géants. Désormais une ligne 100mL trop longue se découpe TOUTE SEULE en
+    // tronçons EMPILÉS sous les étages, sans toucher à la mise en page des étages.
+    const PAGE_MM = 281; // largeur utile A4 paysage (297 − 2×8 mm de marges)
+    const etagesMm = bandesArr.reduce(function(m, b) { return b.commode ? m : Math.max(m, b.tot); }, 1);
+    const pagesN = Math.max(1, Math.ceil(etagesMm / 2600));
+    bandesArr.forEach(function(b) { b.seg = b.commode ? Math.max(1, Math.ceil(b.tot / (pagesN * 2600))) : 1; });
+    // TOUT doit tenir sur UNE page, ligne des noms comprise : hauteur de bande adaptée
+    // au nombre de bandes affichées (tronçons de la ligne 100mL compris), avec de la
+    // marge pour le « Ajuster à la page » du navigateur qui peut agrandir de quelques %.
+    const nbB = bandesArr.reduce(function(s, b) { return s + b.seg; }, 0);
+    const rowHmm = Math.max(12, Math.min(23, Math.floor(165 / nbB) - 12));
+    const hK = rowHmm / 23;
     const _voisines = etgs.filter(function(x) { return x.id !== e.id && _etgRangee(x) === _etgRangee(e); }).map(function(x) { return x.nom || '?'; });
-    sheets += '<div class="sheet"><div class="head"><b>' + _esc(SHOP_LABELS[shop] || shop) + ' — ' + _esc(e.nom || '?') + '</b>'
-      + (_voisines.length ? '<span class="prof">côte à côte avec ' + _esc(_voisines.join(' + ')) + '</span>' : '')
-      + (e.profil ? '<span class="prof">' + _esc(PROFIL_LABELS[e.profil] || e.profil) + '</span>' : '')
-      + '<span class="meta">' + capTot + ' cm / étage (~' + _etgEstimFlacons(capTot) + ' flacons 50mL) · échelle réelle · imprimé le ' + dateStr + '</span></div>' + bandes + '</div>';
+    for (let pg = 0; pg < pagesN; pg++) {
+      let bd = '';
+      bandesArr.forEach(function(b) {
+        // Taille de police : largeur IMPRIMÉE d'un emplacement 50mL, PLAFONNÉE par le
+        // nom de parfum le plus long de la bande (fix 2026-08-07 : noms tronqués).
+        const larg = b.seg > 1 ? b.seg : pagesN;
+        const slotPt = 32.5 * ((PAGE_MM * larg) / b.tot) * 2.83465;
+        const fsNom = b.maxNom > 0 ? (rowHmm - 2) / (0.17 * b.maxNom) : 99;
+        const fsv = Math.max(4.5, Math.min(9.5, Math.min(slotPt * 0.68, fsNom)));
+        const fsg = Math.max(6.5, Math.min(11, fsv + 1.5));
+        const vars = '--fsv:' + fsv.toFixed(1) + 'pt; --fsg:' + fsg.toFixed(1) + 'pt; --rowh:' + (rowHmm + 1) + 'mm; --hk:' + hK.toFixed(3) + ';';
+        for (let sg = 0; sg < b.seg; sg++) {
+          const lbl = b.label + (b.seg > 1 ? ' <span class="seglab">· tronçon ' + (sg + 1) + '/' + b.seg + (sg < b.seg - 1 ? ' (la suite continue en dessous)' : ' (fin)') + '</span>' : '');
+          const wPctBande = (b.seg > 1 ? b.seg : pagesN) * 100;
+          const decal = (b.seg > 1 ? sg : pg) * 100;
+          bd += '<div class="et"><div class="etlab">' + lbl + '</div>'
+            + '<div class="clip"><div class="bande" style="width:' + wPctBande + '%; margin-left:-' + decal + '%; ' + vars + '">'
+            + b.inner + '</div></div></div>';
+        }
+      });
+      const part = pagesN > 1
+        ? '<span class="part">' + (pagesN === 2 ? (pg === 0 ? '◀ partie GAUCHE (page 1/2)' : 'partie DROITE (page 2/2) ▶') : 'partie ' + (pg + 1) + '/' + pagesN) + '</span>'
+        : '';
+      sheets += '<div class="sheet"><div class="head"><b>' + _esc(SHOP_LABELS[shop] || shop) + ' — ' + _esc(e.nom || '?') + '</b>' + part
+        + (_voisines.length ? '<span class="prof">côte à côte avec ' + _esc(_voisines.join(' + ')) + '</span>' : '')
+        + (e.profil ? '<span class="prof">' + _esc(PROFIL_LABELS[e.profil] || e.profil) + '</span>' : '')
+        + '<span class="meta">' + capTot + ' cm / étage (~' + _etgEstimFlacons(capTot) + ' flacons 50mL) · échelle réelle · imprimé le ' + dateStr + '</span></div>' + bd + '</div>';
+    }
   });
   const w = window.open('', '_blank');
   if (!w) { pvAlert('Le navigateur a bloqué la fenêtre d\'impression — autorise les pop-ups pour PilotVape.'); return; }
   w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Plan étagères — ' + _esc(SHOP_LABELS[shop] || shop) + '</title><style>'
     + '@page { size: A4 landscape; margin: 8mm; }'
+    + '* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }'
     + 'body { font-family: -apple-system, "Segoe UI", Arial, sans-serif; color:#111; margin:0; }'
-    + '.sheet { page-break-after: always; padding: 4mm 0; }'
-    + '.head { display:flex; align-items:baseline; gap:10px; border-bottom:2px solid #111; padding-bottom:3mm; margin-bottom:3mm; }'
-    + '.head b { font-size:16pt; } .prof { font-size:10pt; border:1px solid #555; border-radius:3px; padding:0 6px; } .meta { margin-left:auto; font-size:8pt; color:#555; }'
-    + '.et { margin-bottom: 4mm; } .etlab { font-size:9pt; font-weight:700; margin-bottom:1mm; } .pufflab { font-weight:400; color:#a21caf; } .over { color:#b91c1c; }'
-    + 'table { border-collapse: collapse; table-layout: fixed; width: 100%; }'
-    + 'td.c { border:0.5pt solid #777; height: 22mm; width: calc(100% / var(--n)); padding:0; vertical-align:bottom; overflow:hidden; }'
-    + 'td.c .v { writing-mode: vertical-rl; transform: rotate(180deg); font-size:6.5pt; line-height:1.05; padding:1mm 0; max-height:21mm; margin:0 auto; overflow:hidden; white-space:nowrap; }'
-    + 'td.c .x2 { display:block; writing-mode:horizontal-tb; font-weight:800; font-size:7pt; }'
-    + 'td.c.puff { background:#f5d0fe66; } td.c.com { background:#fbcfe855; } td.c.lib { background:#e5e7eb; } td.c.lib .v { writing-mode:horizontal-tb; transform:none; font-size:7pt; white-space:normal; }'
-    + 'td.c.free { background:repeating-linear-gradient(45deg,#fff,#fff 4px,#f3f4f6 4px,#f3f4f6 8px); } td.c.free .v { writing-mode:horizontal-tb; transform:none; color:#9ca3af; font-size:6pt; white-space:normal; }'
-    + 'td.g { border:0.5pt solid #777; border-top:1.5pt solid #111; font-size:7pt; font-weight:700; text-align:center; padding:0.6mm 0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }'
-    + 'td.g.puff { background:#f5d0fe99; }'
+    + '.sheet { page-break-after: always; padding: 1.5mm 0; }'
+    + '.head { display:flex; align-items:baseline; gap:10px; border-bottom:2px solid #111; padding-bottom:1.5mm; margin-bottom:2mm; white-space:nowrap; }'
+    + '.head b { font-size:14pt; } .part { font-size:10pt; font-weight:800; color:#b45309; border:1.5pt solid #b45309; border-radius:3px; padding:0 8px; white-space:nowrap; } .prof { font-size:9pt; border:1px solid #555; border-radius:3px; padding:0 6px; } .meta { margin-left:auto; font-size:7.5pt; color:#555; overflow:hidden; text-overflow:ellipsis; }'
+    + '.et { margin-bottom: 2.5mm; } .etlab { font-size:9pt; font-weight:700; margin-bottom:0.8mm; } .pufflab { font-weight:400; color:#a21caf; } .over { color:#b91c1c; } .seglab { font-weight:700; color:#b45309; }'
+    + '.clip { overflow:hidden; }'
+    + '.bande { position:relative; display:flex; align-items:flex-end; }'
+    + '.bande .mid { position:absolute; top:0; bottom:0; border-left:0.7pt dashed #b45309; z-index:3; }'
+    + '.zw { box-sizing:border-box; }'
+    + '.zw.puff { position:relative; background:#fae8ff; border:1.2pt solid #c026d3; border-bottom:none; border-radius:1.5pt 1.5pt 0 0; }'
+    + '.zw.puff .ztag { position:absolute; top:-3.4mm; left:1mm; font-size:6pt; font-weight:800; color:#a21caf; letter-spacing:0.5pt; }'
+    + '.zw.com { background:#fdf2f8; border-top:0.8pt solid #ec4899; }'
+    + '.row { display:flex; align-items:flex-end; height:var(--rowh, 23mm); }'
+    + '.c { box-sizing:border-box; overflow:visible; display:flex; align-items:flex-end; justify-content:stretch; }'
+    + '.c .b { position:relative; width:100%; border:0.5pt solid #777; border-radius:1pt 1pt 0 0; overflow:hidden; display:flex; align-items:center; justify-content:center; box-sizing:border-box; }'
+    + '.c .dv { position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:58%; height:40%; border:0.6pt solid #333; border-bottom:none; background:#fff; font-size:5pt; font-weight:700; display:flex; align-items:center; justify-content:center; border-radius:1pt 1pt 0 0; }'
+    + '.c .v { writing-mode: vertical-rl; transform: rotate(180deg); font-size:var(--fsv,6.5pt); line-height:1.05; padding:0.5mm 0; max-height:calc(var(--rowh, 23mm) - 2mm); margin:0 auto; overflow:hidden; white-space:nowrap; }'
+    + '.c .x2 { display:block; writing-mode:horizontal-tb; font-weight:800; font-size:calc(var(--fsv,6.5pt) + 0.5pt); }'
+    + '.c.lib .b { background:#e5e7eb; } .c.lib .v { writing-mode:horizontal-tb; transform:none; font-size:var(--fsg,7pt); white-space:normal; }'
+    + '.c.free .b { background:repeating-linear-gradient(45deg,#fff,#fff 4px,#f3f4f6 4px,#f3f4f6 8px); } .c.free .v { writing-mode:horizontal-tb; transform:none; color:#9ca3af; font-size:var(--fsv,6pt); white-space:normal; }'
+    + '.grow { display:flex; border-top:1.5pt solid #111; }'
+    + '.g { box-sizing:border-box; border:0.5pt solid #777; border-top:none; font-size:var(--fsg,7pt); font-weight:700; text-align:center; padding:0.4mm 0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }'
+    + '.zw.puff .g { background:#f5d0fe99; }'
     + '</style></head><body>' + sheets + '</body></html>');
   w.document.close();
   setTimeout(function() { try { w.print(); } catch (e) {} }, 400);
