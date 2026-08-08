@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-08 19:28</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-09 00:31</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -19183,13 +19183,115 @@ function pvEtgVueBloc() { _etgVueBloc = !_etgVueBloc; renderLiqAll(); }
 function pvEtgTriTiroir(v) { _etgTriTiroir = v; renderLiqAll(); }
 function pvEtgProfilTiroir(v) { _etgProfilTiroir = v; renderLiqAll(); }
 function _etgPx(mm) { return Math.max(6, Math.round(mm * _etgScale)); }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 🧭 VIE COMMERCIALE SUR LE PLAN (2026-08-08, demande Fabien : « voir les
+// concernés par les nouveautés, à rentrer, OP etc. ») — le plan montre QUI est
+// touché par le flux commercial de LA BOUTIQUE AFFICHÉE :
+//   · chips colorées sur chaque bloc (les couleurs OFFICIELLES des OP —
+//     OP_TYPE_META — + ↑ vert « à rentrer » / ↓ rouge « à sortir »),
+//   · liseré coloré sur le flacon quand la ligne vise CE parfum précis,
+//   · légende cliquable dans le bandeau : cliquer un statut ESTOMPE tout le
+//     reste du plan (les concernés ressortent), re-cliquer enlève le filtre.
+// Sources (lecture seule, canoniques existantes) : actions RENTRER/SORTIR
+// liquides ouvertes chez la boutique (etats[shop] présent et pas done),
+// OP ouvertes (isOpOuverte, non archivées) dont produitIds vise une gamme
+// liquide. L'impression papier reste VIERGE de tout ça (plan physique).
+// Perf (leçon ⑨ du plan) : une seule passe actions+ops par rendu, cache
+// versionné par _etgCacheV et par boutique.
+// ═══════════════════════════════════════════════════════════════════════════
+let _etgVieFiltre = ''; // clé de légende active ('' = pas de filtre) — RENTRER | SORTIR | type d'OP
+function pvEtgVieFiltre(k) { _etgVieFiltre = (_etgVieFiltre === k) ? '' : k; renderLiqAll(); }
+let _etgVieCache = { v: -1, sh: '', map: null };
+function _etgVieShop(sh) {
+  if (_etgVieCache.v === _etgCacheV && _etgVieCache.sh === sh && _etgVieCache.map) return _etgVieCache.map;
+  const map = new Map(); // gammeId → { ops:{type:nb}, opParfums:{parfumId:Set(types)}, rentrer:Set, sortir:Set, rentrerGamme, sortirGamme }
+  const entree = function(gid) {
+    let e = map.get(gid);
+    if (!e) { e = { ops: {}, opParfums: {}, rentrer: new Set(), sortir: new Set(), rentrerGamme: false, sortirGamme: false }; map.set(gid, e); }
+    return e;
+  };
+  // Lignes À rentrer / À sortir OUVERTES chez cette boutique (par parfum depuis 2026-07-21)
+  actions.forEach(function(a) {
+    if (!a || a.annulee || a.produitType !== 'liq' || !a.produitId) return;
+    if (a.type !== 'RENTRER' && a.type !== 'SORTIR') return;
+    const st = a.etats && a.etats[sh];
+    if (!st || st.done === true) return; // la boutique n'est pas concernée, ou a déjà fini
+    const e = entree(a.produitId);
+    if (a.produitParfumId) (a.type === 'RENTRER' ? e.rentrer : e.sortir).add(a.produitParfumId);
+    else if (a.type === 'RENTRER') e.rentrerGamme = true;
+    else e.sortirGamme = true;
+  });
+  // OP ouvertes visant une gamme liquide
+  const _liqIds = new Set(baseLiq.map(function(g) { return g.id; }));
+  ops.forEach(function(op) {
+    if (!op || op._archived || op.annulee || !isOpOuverte(op)) return;
+    if (op.etats && !op.etats[sh]) return; // OP qui ne concerne pas cette boutique
+    if (!OP_TYPE_META[op.type]) return;
+    const pids = Array.isArray(op.produitIds) ? op.produitIds : (op.produitId ? [op.produitId] : []);
+    const parfums = Array.isArray(op.produitParfumIds) ? op.produitParfumIds : (op.produitParfumId ? [op.produitParfumId] : []);
+    pids.forEach(function(gid) {
+      if (!_liqIds.has(gid)) return;
+      const e = entree(gid);
+      e.ops[op.type] = (e.ops[op.type] || 0) + 1;
+      parfums.forEach(function(pid) { (e.opParfums[pid] = e.opParfums[pid] || new Set()).add(op.type); });
+    });
+  });
+  _etgVieCache = { v: _etgCacheV, sh: sh, map: map };
+  return map;
+}
+// La vie d'un BLOC posé : l'ancre + ses frères de formats si bloc 🧬 groupé.
+function _etgVieDeBloc(pl, g, map) {
+  if (!map || !g) return null;
+  const gammes = [g];
+  if (pl && pl.multiFmt) _etgFreresDeGamme(g).forEach(function(x) { if (x && x.id !== g.id) gammes.push(x); });
+  let vie = null;
+  gammes.forEach(function(gg) {
+    const e = map.get(gg.id);
+    if (!e) return;
+    if (!vie) vie = { ops: {}, opParfums: {}, rentrer: new Set(), sortir: new Set(), rentrerGamme: false, sortirGamme: false };
+    Object.keys(e.ops).forEach(function(t) { vie.ops[t] = (vie.ops[t] || 0) + e.ops[t]; });
+    Object.keys(e.opParfums).forEach(function(pid) { vie.opParfums[pid] = e.opParfums[pid]; });
+    e.rentrer.forEach(function(pid) { vie.rentrer.add(pid); });
+    e.sortir.forEach(function(pid) { vie.sortir.add(pid); });
+    vie.rentrerGamme = vie.rentrerGamme || e.rentrerGamme;
+    vie.sortirGamme = vie.sortirGamme || e.sortirGamme;
+  });
+  return vie;
+}
+// Libellés courts des chips (couleur = celle de l'OP dans toute l'app)
+const _ETG_VIE_COURT = { PRIX_ROUGE: 'PR', NATIONALE: 'NAT', NOUVEAUTE: '🆕', EXCLU: 'EXCLU', LIQUIDE_DU_MOMENT: 'LDM', COUP: '⚡' };
+function _etgVieChipsHtml(vie) {
+  if (!vie) return '';
+  const chips = [];
+  const nR = vie.rentrer.size + (vie.rentrerGamme ? 1 : 0);
+  const nS = vie.sortir.size + (vie.sortirGamme ? 1 : 0);
+  const chip = function(txt, col, titre) {
+    return '<span style="font-size:7px; font-weight:800; color:' + col + '; background:' + col + '1c; border:1px solid ' + col + '55; border-radius:3px; padding:0 3px; white-space:nowrap;" title="' + titre.replace(/"/g, '&quot;') + '">' + txt + '</span>';
+  };
+  if (nR) chips.push(chip('↑' + (vie.rentrer.size > 1 ? vie.rentrer.size : ''), '#22c55e', 'À RENTRER chez cette boutique' + (vie.rentrer.size ? ' — ' + vie.rentrer.size + ' parfum(s), liseré vert sur les flacons visés' : '')));
+  if (nS) chips.push(chip('↓' + (vie.sortir.size > 1 ? vie.sortir.size : ''), '#ef4444', 'À SORTIR chez cette boutique' + (vie.sortir.size ? ' — ' + vie.sortir.size + ' parfum(s)' : '')));
+  Object.keys(vie.ops).forEach(function(t) {
+    const m = OP_TYPE_META[t];
+    if (m) chips.push(chip(_ETG_VIE_COURT[t] || t, m.color, 'OP ' + m.label + ' en cours' + (vie.ops[t] > 1 ? ' (×' + vie.ops[t] + ')' : '')));
+  });
+  return chips.length ? '<span style="display:inline-flex; gap:2px; align-items:center;">' + chips.join('') + '</span>' : '';
+}
+function _etgVieMatchFiltre(vie) {
+  if (!_etgVieFiltre) return true;
+  if (!vie) return false;
+  if (_etgVieFiltre === 'RENTRER') return vie.rentrer.size > 0 || vie.rentrerGamme;
+  if (_etgVieFiltre === 'SORTIR') return vie.sortir.size > 0 || vie.sortirGamme;
+  return !!vie.ops[_etgVieFiltre];
+}
 // Un flacon (rectangle « bouteille » : bouchon + corps, nom vertical).
 function _etgFlaconHtml(nom, pcol, opts) {
   opts = opts || {};
   const h = opts.h || 68;
   const wpx = opts.wpx || _etgPx(32.5);
   const fond = opts.fill || pcol; // intérieur : couleur de MARQUE en opacité faible ; cadre/bouchon : PROFIL
-  const hl = opts.hl ? 'box-shadow:0 0 0 2px #fde047; z-index:1;' : '';
+  // Liseré : la 🔎 recherche (jaune) prime ; sinon la vie commerciale (🧭 2026-08-08)
+  const hl = opts.hl ? 'box-shadow:0 0 0 2px #fde047; z-index:1;' : (opts.vieCol ? 'box-shadow:0 0 0 2px ' + opts.vieCol + '; z-index:1;' : '');
   return `<div ${opts.click || ''} style="width:${wpx - 2}px; height:${h}px; margin:0 1px; flex-shrink:0; position:relative; border-radius:4px 4px 1px 1px; background:linear-gradient(180deg, ${pcol} 0, ${pcol} ${h >= 50 ? 7 : 4}px, ${fond}2e ${h >= 50 ? 7 : 4}px); border:1px solid ${pcol}88; ${hl} ${opts.click ? 'cursor:pointer;' : ''} overflow:hidden;" title="${(opts.title || nom || '').replace(/"/g, '&quot;')}">
     <span style="position:absolute; inset:${h >= 50 ? 8 : 5}px 0 1px; display:flex; align-items:center; justify-content:center; writing-mode:vertical-rl; transform:rotate(180deg); font-size:${h < 40 ? 6 : (wpx >= 16 ? 8 : 7)}px; line-height:1; color:#e2e8f0; white-space:nowrap; overflow:hidden;">${nom || ''}</span>
     ${opts.nb > 1 ? '<span style="position:absolute; top:0; right:0; font-size:6px; font-weight:800; color:#fbbf24; background:#0f172acc; border-radius:0 0 0 3px; padding:0 2px;">×' + opts.nb + '</span>' : ''}
@@ -19203,6 +19305,7 @@ function _etgRenderGroupe(pl, admin, ctx, leftPx) {
   const drag = admin ? `draggable="true" ondragstart="pvEtgDragStartMv(event,'${pl.id}')" ondragend="pvEtgDragEnd()"` : '';
   const drop = ''; // le dépôt se gère au niveau de la ZONE (position libre au point de lâcher)
   let cells = '', label = '', pcol = '#64748b', retiresHtml = '';
+  let _vieOuter = null; // 🧭 vie commerciale du bloc (rempli dans la branche gamme)
   if (pl.type === 'gamme') {
     const g = baseLiq.find(function(x) { return x.id === pl.gammeId; });
     if (!g) {
@@ -19212,12 +19315,16 @@ function _etgRenderGroupe(pl, admin, ctx, leftPx) {
       pcol = PROFIL_COLORS[g.profilChoisi] || '#64748b';
       const mcol = _mrqCouleur(g.marque) || pcol; // 🎨 la couleur de la MARQUE teinte les flacons
       const gMatch = search && _etgNomGamme(g).toLowerCase().includes(search);
+      // 🧭 vie commerciale du bloc (chips + liserés + filtre légende) — 2026-08-08
+      const _vie = (ctx && ctx.sh) ? _etgVieDeBloc(pl, g, _etgVieShop(ctx.sh)) : null;
+      const _vieChips = _etgVieChipsHtml(_vie);
+      _vieOuter = _vie; // pour l'estompage du bloc quand un filtre de légende est actif
       if (_etgVueBloc) {
         // 🧱 vue Blocs : le bloc de la gamme, sans les parfums individuels
         const _cellsG = _etgCellsGamme(pl);
         const _hlB = search && (gMatch || _cellsG.some(function(c) { return (c.p.n || '').toLowerCase().includes(search); }));
         if (_hlB && ctx) ctx.nbHl += 1;
-        cells = `<div ${admin ? `onclick="pvEtgMenuBloc(event,'${pl.id}')"` : ''} style="flex:1; min-width:0; height:68px; margin:0 1px; border-radius:4px 4px 1px 1px; background:linear-gradient(180deg, ${pcol} 0, ${pcol} 7px, ${mcol}2e 7px); border:1px solid ${pcol}88; ${_hlB ? 'box-shadow:0 0 0 2px #fde047;' : ''} display:flex; align-items:center; justify-content:center; overflow:hidden; ${admin ? 'cursor:pointer;' : ''}" title="${_etgNomGamme(g).replace(/"/g, '&quot;')} — ${_cellsG.length} flacon${_cellsG.length > 1 ? 's' : ''} · ${_etgCm(w)} cm"><span style="font-size:9px; font-weight:700; color:#e2e8f0; text-align:center; line-height:1.15; overflow:hidden;">${_etgNomGamme(g)}<br><span style="font-weight:400; color:#94a3b8; font-size:8px;">${_cellsG.length} flacons</span><br><span style="font-size:8px;"><b style="color:#4ade80;">${(typeof g.pv === 'number' && g.pv > 0) ? g.pv.toFixed(2) + '€' : ''}</b>${_testeurMargeMl(g, null) > 0 ? ` <span style="font-weight:400; color:#67e8f9;">· ${_testeurMargeMl(g, null).toFixed(2)}€/mL</span>` : ''}</span></span></div>`;
+        cells = `<div ${admin ? `onclick="pvEtgMenuBloc(event,'${pl.id}')"` : ''} style="flex:1; min-width:0; height:68px; margin:0 1px; border-radius:4px 4px 1px 1px; background:linear-gradient(180deg, ${pcol} 0, ${pcol} 7px, ${mcol}2e 7px); border:1px solid ${pcol}88; ${_hlB ? 'box-shadow:0 0 0 2px #fde047;' : ''} display:flex; align-items:center; justify-content:center; overflow:hidden; ${admin ? 'cursor:pointer;' : ''}" title="${_etgNomGamme(g).replace(/"/g, '&quot;')} — ${_cellsG.length} flacon${_cellsG.length > 1 ? 's' : ''} · ${_etgCm(w)} cm"><span style="font-size:9px; font-weight:700; color:#e2e8f0; text-align:center; line-height:1.15; overflow:hidden;">${_etgNomGamme(g)}<br><span style="font-weight:400; color:#94a3b8; font-size:8px;">${_cellsG.length} flacons</span><br><span style="font-size:8px;"><b style="color:#4ade80;">${(typeof g.pv === 'number' && g.pv > 0) ? g.pv.toFixed(2) + '€' : ''}</b>${_testeurMargeMl(g, null) > 0 ? ` <span style="font-weight:400; color:#67e8f9;">· ${_testeurMargeMl(g, null).toFixed(2)}€/mL</span>` : ''}</span>${_vieChips ? '<br>' + _vieChips : ''}</span></div>`;
       } else {
       // Arrondi CUMULÉ (retour Fabien 2026-08-07 19:04 : « en fin de gamme le trait en bas
       // dépasse ») : arrondir chaque flacon séparément perdait une fraction de pixel par
@@ -19229,12 +19336,24 @@ function _etgRenderGroupe(pl, admin, ctx, leftPx) {
         const hl = search && (gMatch || (c.p.n || '').toLowerCase().includes(search));
         if (hl && ctx) ctx.nbHl += 1;
         const click = admin ? `onclick="pvEtgMenuParfum(event,'${pl.id}','${c.p.id}','${c.g.id}')"` : '';
-        const t = (c.p.n || '(sans nom)') + ' — ' + _etgNomGamme(c.g) + ' ' + (LIQ_FORMAT_LABELS[c.fmt] || '') + (c.nb > 1 ? ' · ×' + c.nb : '') + (admin ? ' (clic : nombre de flacons / non présenté)' : '');
+        // 🧭 liseré vie (2026-08-08) : la ligne vise CE parfum précis — à rentrer vert,
+        // à sortir rouge, OP à sa couleur officielle. La 🔎 recherche (jaune) prime.
+        let _vieCol = '', _vieTxt = '';
+        if (_vie) {
+          if (_vie.rentrer.has(c.p.id)) { _vieCol = '#22c55e'; _vieTxt = 'À RENTRER chez cette boutique'; }
+          else if (_vie.sortir.has(c.p.id)) { _vieCol = '#ef4444'; _vieTxt = 'À SORTIR chez cette boutique'; }
+          else if (_vie.opParfums[c.p.id]) {
+            const _t1 = Array.from(_vie.opParfums[c.p.id])[0];
+            const _m1 = OP_TYPE_META[_t1];
+            if (_m1) { _vieCol = _m1.color; _vieTxt = 'OP ' + _m1.label + ' en cours sur ce parfum'; }
+          }
+        }
+        const t = (c.p.n || '(sans nom)') + ' — ' + _etgNomGamme(c.g) + ' ' + (LIQ_FORMAT_LABELS[c.fmt] || '') + (c.nb > 1 ? ' · ×' + c.nb : '') + (_vieTxt ? ' · ' + _vieTxt : '') + (admin ? ' (clic : nombre de flacons / non présenté)' : '');
         _cumMm += c.mm;
         const _finPx = Math.round(_cumMm * _etgScale);
         const _wCell = Math.max(3, _finPx - _cumPx);
         _cumPx = _finPx;
-        cells += _etgFlaconHtml(c.p.n || '', pcol, { click: click, title: t + (c.devant ? ' · 10mL devant' : ''), hl: hl, wpx: _wCell, h: _etgFlaconHpx(c.fmt), nb: c.nb, devant: c.devant, fill: mcol });
+        cells += _etgFlaconHtml(c.p.n || '', pcol, { click: click, title: t + (c.devant ? ' · 10mL devant' : ''), hl: hl, vieCol: _vieCol, wpx: _wCell, h: _etgFlaconHpx(c.fmt), nb: c.nb, devant: c.devant, fill: mcol });
       });
       }
       label = (pl.multiFmt ? '🧬 ' : '') + _etgNomGamme(g) + ' <span style="opacity:0.6; font-weight:400;">' + (pl.multiFmt ? 'formats groupés' : (LIQ_FORMAT_LABELS[g.format] || '')) + '</span>';
@@ -19248,6 +19367,7 @@ function _etgRenderGroupe(pl, admin, ctx, leftPx) {
           <b style="font-size:8px; color:#4ade80; white-space:nowrap;" title="${_prixTitre.replace(/"/g, '&quot;')}">${(typeof g.pv === 'number' && g.pv > 0) ? g.pv.toFixed(2) + '€' : ''}${pl.multiFmt && _soeursPrix.length > 1 ? '<span style=\"color:#64748b; font-weight:400;\">…</span>' : ''}</b>
           ${_mmlG > 0 ? `<span style="font-size:7px; color:#67e8f9; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="Marge par mL (prix de la gamme)">${_mmlG.toFixed(2)}€/mL</span>` : ''}
         </span>
+        ${_vieChips}
         <span onclick="pvEtgEtiquetteGamme(event,'${pl.id}')" style="cursor:pointer; font-size:9px; padding:0 3px; border:1px solid #38bdf860; background:#38bdf812; border-radius:3px; flex-shrink:0;" title="🏷️ Étiquettes étagère de ${_etgNomGamme(g).replace(/"/g, '&quot;')}${pl.multiFmt ? ' (tous les formats du bloc)' : ''}${pl.devant10 && Object.keys(pl.devant10).some(function(k) { return pl.devant10[k]; }) ? ' + les 10mL posés devant' : ''} — ouvre le dialogue d'étiquettes liquides">🏷️</span>
       </div>` + retiresHtml;
       const _gRetires = pl.multiFmt ? _etgFreresDeGamme(g) : [g];
@@ -19274,10 +19394,12 @@ function _etgRenderGroupe(pl, admin, ctx, leftPx) {
   // Position ABSOLUE dans la zone (Fabien 01:55 : un bloc trop grand DÉBORDE, la
   // structure de l'étagère et la cloison Puff ne bougent JAMAIS).
   const posStyle = (typeof leftPx === 'number') ? `position:absolute; left:${leftPx}px; top:0; z-index:1;` : 'position:relative;';
+  // 🧭 filtre de légende actif → les blocs NON concernés s'estompent, les concernés ressortent
+  const _estompe = (_etgVieFiltre && !_etgVieMatchFiltre(_vieOuter)) ? ' opacity:0.25; filter:saturate(0.4);' : '';
   // En vue 🧱 Blocs, TOUT est sur le rectangle (nom, flacons, prix, marge) —
   // pas de barre ni de ligne sous le bloc (Fabien 02:25).
   const barre = (_etgVueBloc && pl.type === 'gamme') ? '' : `<div ${menuClick} style="margin:1px 1px 0; border-top:2px solid ${pcol}; background:${pcol}18; border-radius:0 0 3px 3px; padding:1px 3px; font-size:8px; font-weight:700; color:#e2e8f0; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; ${admin ? 'cursor:pointer;' : ''}" title="${(pl.type === 'gamme' ? label.replace(/<[^>]*>/g, '') : _etgNomPlacement(pl)).replace(/"/g, '&quot;')} — ${_etgCm(w)} cm${pl.type === 'gamme' ? ' · ' + _etgNbFlacons(pl) + ' flacon' + (_etgNbFlacons(pl) > 1 ? 's' : '') : ''}${admin ? ' — glisser (⠿) pour déplacer, cliquer pour les options' : ''}">${admin ? '<span style="color:#64748b;">⠿</span> ' : ''}${label}</div>` + retiresHtml;
-  return `<div ${drag} ${drop} style="${posStyle} display:inline-flex; flex-direction:column; flex-shrink:0; width:${wpx}px; ${admin ? 'cursor:grab;' : ''}">${poignee}
+  return `<div ${drag} ${drop} style="${posStyle}${_estompe} display:inline-flex; flex-direction:column; flex-shrink:0; width:${wpx}px; ${admin ? 'cursor:grab;' : ''}">${poignee}
     <div style="display:flex; align-items:flex-end; height:78px;">${cells}</div>
     ${barre}
   </div>`;
@@ -19399,7 +19521,7 @@ function renderVueEtageres() {
   const fFormat = document.getElementById('liqFilterFormat') ? document.getElementById('liqFilterFormat').value : '';
   const fProfil = document.getElementById('liqFilterProfil') ? document.getElementById('liqFilterProfil').value : '';
   const fRole = document.getElementById('liqFilterRole') ? document.getElementById('liqFilterRole').value : '';
-  const ctx = { search: search, nbHl: 0 };
+  const ctx = { search: search, nbHl: 0, sh: sh }; // sh : la vie commerciale du plan est celle de LA boutique affichée (🧭 2026-08-08)
   let totUsed = 0, totCap = 0;
   etgs.forEach(function(e) {
     for (let et = 1; et <= (e.nbEtages || 1); et++) {
@@ -19407,6 +19529,27 @@ function renderVueEtageres() {
       totCap += _etgZoneCap(e, 'liq') + _etgZoneCap(e, 'puff');
     }
   });
+  // 🧭 Légende « vie commerciale » (2026-08-08) : combien de BLOCS POSÉS chez cette
+  // boutique sont concernés par chaque statut — cliquable (estompe le reste du plan).
+  const _vieMapSh = _etgVieShop(sh);
+  const _etgIdsSh = new Set(etgs.map(function(e) { return e.id; }));
+  const _vieCounts = {};
+  placementsLiq.forEach(function(pl) {
+    if (!pl || pl.type !== 'gamme' || _deletedIds.has(pl.id) || !_etgIdsSh.has(pl.etagereId)) return;
+    const g = baseLiq.find(function(x) { return x.id === pl.gammeId; });
+    const v = _etgVieDeBloc(pl, g, _vieMapSh);
+    if (!v) return;
+    if (v.rentrer.size || v.rentrerGamme) _vieCounts['RENTRER'] = (_vieCounts['RENTRER'] || 0) + 1;
+    if (v.sortir.size || v.sortirGamme) _vieCounts['SORTIR'] = (_vieCounts['SORTIR'] || 0) + 1;
+    Object.keys(v.ops).forEach(function(t) { _vieCounts[t] = (_vieCounts[t] || 0) + 1; });
+  });
+  if (_etgVieFiltre && !_vieCounts[_etgVieFiltre]) _etgVieFiltre = ''; // filtre orphelin (données changées) → on l'enlève
+  const _vieLegendDefs = [['RENTRER', '↑ À rentrer', '#22c55e'], ['SORTIR', '↓ À sortir', '#ef4444']]
+    .concat(OP_TYPES.map(function(t) { return [t.key, (_ETG_VIE_COURT[t.key] === '🆕' ? '🆕 ' : '') + t.label, t.color]; }));
+  const _vieLegendHtml = _vieLegendDefs.filter(function(d) { return _vieCounts[d[0]]; }).map(function(d) {
+    const actif = _etgVieFiltre === d[0];
+    return `<button onclick="pvEtgVieFiltre('${d[0]}')" style="padding:2px 7px; font-size:9px; font-weight:${actif ? 800 : 600}; background:${actif ? d[2] + '2e' : d[2] + '10'}; color:${d[2]}; border:1px solid ${d[2]}${actif ? '' : '45'}; border-radius:3px; cursor:pointer;" title="${_vieCounts[d[0]]} bloc${_vieCounts[d[0]] > 1 ? 's' : ''} concerné${_vieCounts[d[0]] > 1 ? 's' : ''} chez ${SHOP_LABELS[sh]} — cliquer pour ${actif ? 'enlever le filtre' : 'estomper le reste du plan'}">${d[1]} ${_vieCounts[d[0]]}</button>`;
+  }).join('');
   // ⚠ le rendu des étagères se fait AVANT le bandeau (le compteur de surlignés en a besoin)
   let corps = '';
   // Rangées (Fabien 2026-08-06 19:47) : étagères de même rangée côte à côte
@@ -19451,6 +19594,7 @@ function renderVueEtageres() {
       <button onclick="pvEtgZoom(0.12)" style="padding:2px 7px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556950; border-radius:3px; cursor:pointer;">🔍+</button>
       <button onclick="pvEtgVueBloc()" style="padding:2px 8px; font-size:10px; font-weight:700; background:${_etgVueBloc ? '#8b5cf622' : 'none'}; color:${_etgVueBloc ? '#c4b5fd' : '#94a3b8'}; border:1px solid ${_etgVueBloc ? '#8b5cf670' : '#47556950'}; border-radius:3px; cursor:pointer;" title="${_etgVueBloc ? 'Revenir aux parfums individuels' : 'Vue Blocs : un rectangle par gamme, sans les parfums individuels'}">${_etgVueBloc ? '🍾 Parfums' : '🧱 Blocs'}</button>
     </span>
+    ${_vieLegendHtml ? `<span style="display:inline-flex; gap:4px; align-items:center; flex-wrap:wrap;" title="Vie commerciale chez ${SHOP_LABELS[sh]} : qui est concerné par quoi, sur ce plan">${_vieLegendHtml}</span>` : ''}
     <span style="margin-left:auto; display:inline-flex; gap:6px;">
       ${admin ? `<button onclick="pvEtgOuvrirEditeur()" style="padding:5px 10px; font-size:11px; background:#33415530; color:#94a3b8; border:1px solid #47556960; border-radius:4px; cursor:pointer;" title="Structure : étagères, étages, capacités, zone Puff, commode">⚙️ Étagères</button>` : ''}
       <button onclick="pvEtgImprimerPlan('${sh}')" style="padding:5px 14px; font-size:11px; font-weight:700; background:#f59e0b18; color:#fbbf24; border:1px solid #f59e0b60; border-radius:4px; cursor:pointer;" title="Le plan simple à donner aux équipes : une feuille par étagère, étage par étage">🖨️ Imprimer le plan</button>
