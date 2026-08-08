@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-08 18:20</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-08 19:28</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3548,6 +3548,12 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
   if (!op.progress) op.progress = { global: {} };
   if (!op.progress.global) op.progress.global = {};
   op.progress.global[stepKey] = !!checked;
+  // ── Horodatage par coche (fix 2026-08-08, coches Amont pas synchronisées) ──
+  // Sans timestamp, la fusion entre postes ne peut pas trancher qui a la version
+  // la plus récente : le bloc Amont n'était fusionné NULLE PART (cf. _mergeGlobalProgress).
+  const _gNowIso = new Date().toISOString();
+  if (!op.progress._globalTs) op.progress._globalTs = {};
+  op.progress._globalTs[stepKey] = _gNowIso;
 
   // Propagation campagne : si l'OP fait partie d'une campagne, synchroniser le même
   // step global sur toutes les autres OPs de la campagne qui possèdent un step
@@ -3566,6 +3572,8 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
       const byKey = sibDefs.find(d => d.key === stepKey);
       if (byKey) {
         sib.progress.global[stepKey] = !!checked;
+        if (!sib.progress._globalTs) sib.progress._globalTs = {};
+        sib.progress._globalTs[stepKey] = _gNowIso; // fix 2026-08-08 : la propagation campagne s'horodate aussi
         // Chantier synchro 2026-07-18 : la propagation n'est plus INVISIBLE — tracée au journal.
         logAction('Étape globale propagée (campagne)', (checked ? '✓' : '✕') + ' ' + _logStepLabel(stepKey, sib) + ' sur ' + _logOpLabel(sib.id) + ' (depuis ' + _logOpLabel(op.id) + ')');
         return;
@@ -3575,6 +3583,8 @@ function toggleOpGlobalStep(opId, stepKey, checked) {
         const byLabel = sibDefs.find(d => d.label === srcLabel);
         if (byLabel) {
           sib.progress.global[byLabel.key] = !!checked;
+          if (!sib.progress._globalTs) sib.progress._globalTs = {};
+          sib.progress._globalTs[byLabel.key] = _gNowIso; // fix 2026-08-08 : idem par libellé
           logAction('Étape globale propagée (campagne)', (checked ? '✓' : '✕') + ' « ' + srcLabel + ' » sur ' + _logOpLabel(sib.id) + ' (depuis ' + _logOpLabel(op.id) + ', correspondance par libellé)');
         }
       }
@@ -4746,6 +4756,8 @@ function ensureOpSteps(op) {
   if (!op.progress.global || typeof op.progress.global !== 'object') op.progress.global = {};
   gdefs.forEach(d => { if (typeof op.progress.global[d.key] !== 'boolean') op.progress.global[d.key] = false; });
   Object.keys(op.progress.global).forEach(k => { if (!gdefs.some(d => d.key === k)) delete op.progress.global[k]; });
+  // fix 2026-08-08 : ménage miroir des horodatages de coches Amont (_globalTs suit global)
+  if (op.progress._globalTs) Object.keys(op.progress._globalTs).forEach(k => { if (!gdefs.some(d => d.key === k)) delete op.progress._globalTs[k]; });
 }
 
 // Steps de « fin d'OP » : SORTIR d'un COUP et désinstallation.
@@ -13410,6 +13422,50 @@ function _mergeStepsForItem(localItem, remoteItem) {
   return changed;
 }
 
+// ── Fusion du bloc AMONT (op.progress.global) — TROU BOUCHÉ le 2026-08-08 ──
+// Découverte (cas Fabien : « à Mérignac j'ai galéré à les synchroniser, et Langon a
+// les coches pas cochées ») : les coches Amont n'étaient fusionnées NULLE PART.
+// _mergeAdminFields skippe exprès `progress` (voulu pour les champs racine), et
+// _mergeStepsForItem ne traite que etats[shop] — résultat : chaque poste gardait SA
+// version du bloc Amont pour toujours, et le serveur portait celle du DERNIER poste
+// qui écrivait. Aucune ligne internet n'y pouvait rien.
+// Sémantique identique aux steps par boutique : timestamp PAR COCHE
+// (progress._globalTs, posé par toggleOpGlobalStep), le plus récent gagne ; à
+// égalité — notamment les coches d'AVANT ce fix, sans timestamp — « true gagne
+// sur false » (règle métier §9 du 2026-05-18) : les coches existantes de Fabien
+// se propagent d'elles-mêmes aux postes qui les affichaient décochées.
+function _mergeGlobalProgress(localOp, remoteOp) {
+  const rp = remoteOp && remoteOp.progress;
+  if (!rp || !rp.global || typeof rp.global !== 'object') return 0;
+  if (!localOp.progress) localOp.progress = { global: {} };
+  if (!localOp.progress.global || typeof localOp.progress.global !== 'object') localOp.progress.global = {};
+  const lp = localOp.progress;
+  const lTs = lp._globalTs || {};
+  const rTs = rp._globalTs || {};
+  let changed = 0;
+  Object.keys(rp.global).forEach(k => {
+    if (typeof rp.global[k] !== 'boolean') return;
+    const localTs = lTs[k] || '';
+    const remoteTs = rTs[k] || '';
+    if (localTs === remoteTs) {
+      // Égalité (le plus souvent : aucun timestamp des deux côtés, coches d'avant le fix)
+      if (rp.global[k] === true && lp.global[k] !== true) {
+        lp.global[k] = true;
+        if (remoteTs) { if (!lp._globalTs) lp._globalTs = {}; lp._globalTs[k] = remoteTs; }
+        changed++;
+      }
+      return;
+    }
+    if (remoteTs > localTs) {
+      if (lp.global[k] !== rp.global[k]) { lp.global[k] = rp.global[k]; changed++; }
+      if (!lp._globalTs) lp._globalTs = {};
+      lp._globalTs[k] = remoteTs;
+    }
+  });
+  if (changed > 0) console.log('[MERGE-AMONT] ' + changed + ' coche(s) Amont adoptée(s) sur', localOp.id);
+  return changed;
+}
+
 function _mergeEtats(localActions, remoteActions) {
   if (!remoteActions || !Array.isArray(remoteActions)) return localActions;
   // Filtrer les actions supprimées (tombstones) de la base avant de commencer
@@ -13585,6 +13641,9 @@ function _mergeOpEtats(localOps, remoteOps) {
     // Verrouille les dates/produits/nom validés par l'admin contre tout écrasement
     // par un save boutique. Cf. _mergeAdminFields et _saveToSupabase.
     _mergeAdminFields(op, remote, 'id');
+    // Bloc Amont (fix 2026-08-08) : fusion dédiée, AVANT le garde-fou etats —
+    // une OP sans etats a quand même des coches Amont à fusionner.
+    _mergeGlobalProgress(op, remote);
     if (!remote.etats) return;
     _mergeStepsForItem(op, remote);
   });
