@@ -220,7 +220,8 @@ window.addEventListener('DOMContentLoaded', function() {
     <button onclick="forcerVersionAdminPartout()" class="btn-danger" title="ACTION LOURDE : force ta version actuelle (dates, OPs, actions) sur toutes les boutiques. À n'utiliser que si le point de synchro est vert.">🔒 Forcer ma version</button>
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-07 20:01</span>
+    <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-08 18:20</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2041,6 +2042,24 @@ let _savePending = false;
 let _saveTimer = null;
 let _saveInFlight = null; // Promise du save en cours (verrou anti-race-condition)
 
+// ── Poll léger + présence des postes (2026-08-08, synchro lente à Mérignac) ──
+// Le serveur version 2026-08-08 offre GET /meta (« du nouveau ? » en quelques octets)
+// et mémorise la PRÉSENCE des postes (qui est en ligne, dernier envoi, ping).
+// _workerV3 : null = pas encore testé · true = serveur à jour · false = à redéployer
+// (dans ce cas, tout retombe sur le comportement historique — rien ne casse).
+let _workerV3 = null;
+let _lastFullReadJson = null; // dernière lecture COMPLÈTE du serveur (données en JSON brut)
+let _lastFullReadAt = null;   // updated_at de cette lecture (ou de NOTRE dernière écriture)
+let _presenceDistante = {};   // fiches de présence reçues du serveur
+let _presenceRecueA = 0;      // Date.now() LOCAL à la réception (pour vieillir sans dériver)
+let _serveurNowMs = 0;        // horloge SERVEUR à la réception (jamais celle des postes)
+let _dernierPingMs = null;    // durée du dernier GET /meta (le « ping » du poste)
+let _posteId = localStorage.getItem('pv_poste_id') || '';
+if (!_posteId) {
+  _posteId = 'P-' + Math.random().toString(36).slice(2, 8);
+  try { localStorage.setItem('pv_poste_id', _posteId); } catch (e) {}
+}
+
 // --- ACTIONS DASHBOARD ---
 // Chaque action concerne un produit et a un état indépendant par shop
 const SHOPS = ['pessac', 'merignac', 'langon'];
@@ -3164,10 +3183,14 @@ function computeOpShopStepDefs(op, shop) {
 // domicile (le clic écrit via toggleActionStep, LE toggle canonique de la
 // ligne), les compteurs d'OP existants ne comptent QUE les étapes de l'OP —
 // rien ne bouge côté données, merge, cascades.
-// La chaîne de vie canonique (phases) — ORDRE ÉNONCÉ PAR FABIEN (2026-08-04 17:30) :
-// 1 commande · 2 réception · 3 étiquette IMPRIMÉE · 4 prix modifié Swappy ·
-// 5 pose/installation (étiquette posée + produit installé) · 6 sortie (réappro
-// coupée, désactivé) · 7 fin/désinstallation.
+// La chaîne de vie canonique (phases) — ORDRE ÉNONCÉ PAR FABIEN (2026-08-04 17:30,
+// précisé le 2026-08-08 : « installer le produit c'est l'étape finale, les étapes plv
+// sont avant l'install du produit ») :
+// 1 commande · 2 réception (et saisie en stock si commande gérée par Fabien) ·
+// 3 préparation des pièces (étiquette IMPRIMÉE, testeur REMPLI) · 4 prix modifié
+// Swappy · 5 pose des PIÈCES PLV/testeurs · 5.5 installation du PRODUIT ·
+// 5.8 étiquettes POSÉES (on étiquette le produit une fois posé) · 6 sortie
+// (réappro coupée, désactivé) · 7 fin/désinstallation.
 // ═══════════════════════════════════════════════════════════════════════════
 // Clé de base d'une étape : sans le suffixe de génération de prix (« swappy@2 » → « swappy »).
 function _vieCleBase(k) { return String(k || '').replace(/@\d+$/, ''); }
@@ -3176,8 +3199,13 @@ function _viePhaseActionStep(type, key) {
   if (key === 'recu' || key === 'recu_retro') return 2;
   if (key === 'etiquette') return 3; // imprimée
   if (key === 'swappy') return 4;
-  if (key === 'rayon') return 5; // étiquette changée en rayon = pose
-  if (key === 'installe' || key === 'pose' || key === 'monte' || key === 'testeur_fait') return 5;
+  if (key === 'rayon') return 5.8; // étiquette changée en rayon : APRÈS l'installation (on étiquette ce qui est posé)
+  // 2026-08-08 (retour Fabien, cas Mini Meuble : « installer le produit c'est l'étape
+  // finale, les étapes plv sont avant l'install du produit ») : pose des PIÈCES
+  // PLV/testeurs (5) → installation du PRODUIT (5.5) → étiquettes POSÉES (5.8, spéc
+  // du 04/08 : on étiquette le produit une fois posé).
+  if (key === 'installe' || key === 'pose') return 5.5; // installation du produit
+  if (key === 'monte' || key === 'testeur_fait') return 5;
   if (type === 'SORTIR' || type === 'RETRO_ENVOI' || type === 'RETRO_RECEPTION') return 6; // vendu, swappyOff, reprise…
   return 4;
 }
@@ -3186,12 +3214,28 @@ function _viePhaseActionStep(type, key) {
 // on ne réordonne JAMAIS les defs — on ne fait qu'insérer entre elles).
 function _viePhaseDef(def, op) {
   const kind = def.kind, k = _vieCleBase(def.key); // une génération de prix garde la phase de sa clé de base
+  // 2026-08-08 (retour Fabien, capture Mini Meuble : « ① Commande saisie » rendue AVANT
+  // « ① Reçu ») : quand la commande est gérée par Fabien, la SAISIE en stock vient APRÈS
+  // la réception (règle métier 2026-07-11, condKey → recu) → phase 2 (le tri stable garde
+  // recu devant, l'ordre du maillon fait foi à égalité).
+  if (def.actionStep === 'commande' && def.condKey && /recu$/.test(def.condKey)) return 2;
   if (def.actionStep) return _viePhaseActionStep(kind === 'coup_sortir' ? 'SORTIR' : 'RENTRER', def.actionStep);
-  if (kind === 'prod') return k === 'prod_commandee' ? 1 : 2;
+  if (kind === 'prod') return k === 'prod_commandee' ? (def.condKey === 'prod_recue' ? 2 : 1) : 2;
   if (/^plv_.+_recue$/.test(k)) return 2;
+  if (/^plv_.+_remplie$/.test(k)) return 3; // remplir un testeur = préparer la pièce (comme imprimer) — 2026-08-08
   if (/^plv_.+_imprimee$/.test(k) || k === 'pr_etiquette' || k === 'etiq_nvx_imprimee') return 3; // imprimer
   if (k === 'swappy' || k === 'pr_swappy') return 4; // prix en caisse
-  if (/^plv_.+_posee$/.test(k) || k === 'pr_posee' || k === 'etiq_nvx_posee') return 5; // poser (étiquette ET produit)
+  if (/^plv_.+_posee$/.test(k)) {
+    // 2026-08-08 (retour Fabien, cas Mini Meuble) : pose des PIÈCES PLV/testeurs (5) →
+    // installation du PRODUIT (5.5) → étiquettes POSÉES (5.8 — on étiquette le produit
+    // une fois posé, spéc 04/08). « Les étapes plv sont avant l'install du produit. »
+    const _pcId = k.slice(4, -6);
+    const _pc = op && (op.pieces || []).find(pp => pp.id === _pcId);
+    if (_pc && typeof pieceEstProduit === 'function' && pieceEstProduit(_pc)) return 5.5;
+    if (_pc && _pc.type && String(_pc.type).indexOf('ETIQUETTE') === 0) return 5.8;
+    return 5;
+  }
+  if (k === 'pr_posee' || k === 'etiq_nvx_posee') return 5.8; // étiquette posée : après l'installation du produit
   if (kind === 'tiroir') return 7; // remettre le prix normal du tiroir : tout à la fin
   if (kind === 'desinstall') return 7;
   return 0;
@@ -13068,6 +13112,14 @@ function expliquerSyncDot() {
       + ' en ' + (_dernierEnvoi.ms / 1000).toFixed(1) + ' s, à ' + _fmtHeure(_dernierEnvoi.quand)
       + (_conflitsSession ? '\n⚔️ ' + _conflitsSession + ' conflit(s) de fusion depuis l\'ouverture (normal si plusieurs postes cochent en même temps)' : '');
   }
+  // 2026-08-08 : renvois vers l'état des boutiques (admin) / rappel de déploiement
+  if (typeof isAdmin === 'function' && isAdmin()) {
+    if (_workerV3 === true) {
+      explication += '\n\n📡 L\'état de connexion des boutiques est dans les pastilles PES · MÉR · LAN à côté de ce point (clique dessus pour le détail par boutique).';
+    } else if (_workerV3 === false) {
+      explication += '\n\n🔧 SERVEUR À REDÉPLOYER (guide DEPLOIEMENT_WORKER.md) pour activer : envois compressés, poll léger, état de connexion des boutiques, fichiers joints.';
+    }
+  }
   _pvModal('<div style="color:#f59e0b; font-weight:700; font-size:14px; margin-bottom:8px;">' + titre + '</div>'
     + (explication + '\n\n— Dernier envoi réussi : ' + _fmtHeure(_lastSyncWriteOk)
     + '\n— Dernière réception : ' + _fmtHeure(_lastSyncReadOk)),
@@ -13099,13 +13151,29 @@ function expliquerSyncDot() {
 // Sert à distinguer « le serveur est en panne » (toutes les boutiques) d'un « CE réseau
 // bloque le domaine » (une seule boutique).
 async function pvTesterSync() {
+  // 2026-08-08 : sur le serveur à jour, on mesure D'ABORD le ping (GET /meta, quelques
+  // octets) PUIS le téléchargement complet — pour distinguer « la ligne répond lentement »
+  // (ping haut) de « la ligne répond vite mais a peu de débit » (cas ADSL : ping court,
+  // téléchargement long). Deux maux, deux remèdes.
+  let _pingTxt = '';
+  if (_workerV3 !== false) {
+    try {
+      await _syncReadMeta();
+      if (typeof _dernierPingMs === 'number') _pingTxt = '\n🏓 Réponse du serveur (ping) : ' + (_dernierPingMs / 1000).toFixed(1) + ' s.';
+    } catch (e) { /* vieux serveur ou réseau — le test complet ci-dessous tranche */ }
+  }
   const _t0 = Date.now();
   let verdict;
   try {
     const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', { method: 'GET', cache: 'no-store', headers: _syncHeaders() }, 12000);
     const _ms = Date.now() - _t0;
     if (res.ok) {
-      verdict = '🟢 Serveur JOIGNABLE en ' + (_ms / 1000).toFixed(1) + ' s.' + (_ms > 5000 ? '\n\n⚠️ C\'est LENT : la connexion internet de ce poste rame (wifi faible, box saturée). La synchro marche mais peut traîner.' : '\n\nLa connexion est bonne. Si le point restait rouge, clique « 🔄 Relancer la synchro ».');
+      verdict = '🟢 Serveur JOIGNABLE — téléchargement complet en ' + (_ms / 1000).toFixed(1) + ' s.' + _pingTxt
+        + (_ms > 5000
+          ? ((_pingTxt && _dernierPingMs < 2000)
+            ? '\n\n⚠️ Le serveur répond vite mais le DÉBIT de la ligne est faible (ADSL, wifi chargé). Bonne nouvelle : depuis la version du 2026-08-08, ce poste ne re-télécharge le paquet complet que quand il y a du nouveau.'
+            : '\n\n⚠️ C\'est LENT : la connexion internet de ce poste rame (wifi faible, box saturée). La synchro marche mais peut traîner.')
+          : '\n\nLa connexion est bonne. Si le point restait rouge, clique « 🔄 Relancer la synchro ».');
     } else {
       verdict = '🟠 Le serveur répond mais refuse (code ' + res.status + ').\n\nMontre ce code à Fabien — c\'est un problème de configuration, pas de réseau.';
     }
@@ -13117,6 +13185,103 @@ async function pvTesterSync() {
       : '🔴 Connexion BLOQUÉE (' + (e && e.message ? e.message : 'erreur réseau') + ').\n\nSi les autres boutiques synchronisent normalement, c\'est CE réseau qui bloque le domaine du serveur (pilotvape-sync.pilotvape.workers.dev). À vérifier sur place :\n• antivirus / « protection web » du poste\n• contrôle parental ou filtre de la box (Orange/SFR bloquent parfois les domaines *.workers.dev)\n• DNS de la box → essayer 1.1.1.1 ou 8.8.8.8\n• test rapide : ouvrir le partage de connexion du téléphone (4G) et recharger la page — si le point passe au vert, c\'est bien la box.';
   }
   pvAlert(verdict, '🩺 Test de connexion');
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 📡 ÉTAT DE CONNEXION DES BOUTIQUES (2026-08-08)
+// Demande de Fabien : « l'état de connexion des boutiques à côté de mon
+// synchro à moi ». Chaque poste s'annonce au serveur (avec chaque envoi de
+// données + un battement de cœur toutes les 5 min tant que la page est
+// ouverte) ; le serveur tamponne l'heure de passage avec SA PROPRE horloge
+// (règle maison : jamais l'horloge d'un poste). Côté admin : une pastille
+// par boutique — 🟢 en ligne (< 7 min), 🟡 vue récemment (< 30 min),
+// ○ plus vue. 🐢 = dernier envoi > 10 s (poste lent). Clic = détail par
+// boutique (dernier envoi Ko/durée, compressé ?, ping, conflits, version)
+// → diagnostiquer Mérignac depuis Pessac sans se déplacer.
+// ═══════════════════════════════════════════════════════════════
+function _pvPresenceParShop() {
+  // Pour chaque boutique : la fiche la plus récemment vue parmi ses postes.
+  // Les postes admin sont regroupés à part (clé _admin).
+  const parShop = {};
+  Object.keys(_presenceDistante || {}).forEach(pid => {
+    const p = _presenceDistante[pid];
+    if (!p || !p.vu) return;
+    const cle = (p.role === 'admin') ? '_admin' : (p.shop || '_inconnu');
+    if (!parShop[cle] || String(p.vu) > String(parShop[cle].vu)) parShop[cle] = p;
+  });
+  return parShop;
+}
+function _pvAgeMs(p) {
+  // Âge d'une fiche : (horloge serveur à la réception − tampon serveur `vu`)
+  // + le temps écoulé LOCALEMENT depuis la réception. Aucune comparaison
+  // directe horloge poste ↔ horloge serveur → insensible aux pendules fausses.
+  if (!p || !p.vu || !_serveurNowMs) return null;
+  return Math.max(0, (_serveurNowMs - Date.parse(p.vu)) + (Date.now() - _presenceRecueA));
+}
+function _pvAgeLisible(ms) {
+  if (ms === null) return 'jamais vue';
+  if (ms < 60000) return 'à l\'instant';
+  const min = Math.round(ms / 60000);
+  if (min < 60) return 'il y a ' + min + ' min';
+  const h = Math.floor(min / 60);
+  if (h < 24) return 'il y a ' + h + ' h' + (min % 60 ? String(min % 60).padStart(2, '0') : '');
+  return 'il y a ' + Math.floor(h / 24) + ' j';
+}
+function _updatePresenceChips() {
+  const el = document.getElementById('shopsDots');
+  if (!el) return;
+  // Réservé à l'admin (c'est SON tableau de bord de synchro) ; rien tant que
+  // le serveur n'est pas à jour — pas de pastilles menteuses.
+  if (!(typeof isAdmin === 'function' && isAdmin()) || _workerV3 !== true) { el.style.display = 'none'; return; }
+  const parShop = _pvPresenceParShop();
+  const abrege = { pessac: 'PES', merignac: 'MÉR', langon: 'LAN' };
+  el.innerHTML = SHOPS.map(shop => {
+    const p = parShop[shop];
+    const age = _pvAgeMs(p);
+    let coul, icone;
+    if (age !== null && age < 7 * 60000) { coul = '#4ade80'; icone = '●'; }        // en ligne
+    else if (age !== null && age < 30 * 60000) { coul = '#fcd34d'; icone = '●'; }  // vue récemment
+    else { coul = '#475569'; icone = '○'; }                                        // plus vue
+    const lente = p && p.envoi && typeof p.envoi.s === 'number' && p.envoi.s > 10;
+    return '<span style="color:' + coul + ';">' + icone + '</span>'
+      + '<span style="color:' + (SHOP_COLORS[shop] || '#94a3b8') + '; margin:0 6px 0 2px;">' + (abrege[shop] || shop) + (lente ? '🐢' : '') + '</span>';
+  }).join('');
+  el.style.display = '';
+}
+setInterval(_updatePresenceChips, 30000); // vieillir les pastilles même sans nouveau poll
+
+function expliquerPresence() {
+  const parShop = _pvPresenceParShop();
+  const lignes = SHOPS.map(shop => {
+    const p = parShop[shop];
+    const age = _pvAgeMs(p);
+    let etat;
+    if (age !== null && age < 7 * 60000) etat = '🟢 en ligne';
+    else if (age !== null && age < 30 * 60000) etat = '🟡 vue ' + _pvAgeLisible(age);
+    else if (age !== null) etat = '○ vue ' + _pvAgeLisible(age);
+    else etat = '○ jamais vue (page pas encore ouverte là-bas avec la version du jour ?)';
+    let detail = '';
+    if (p) {
+      const dEnvoi = p.envoi
+        ? ('dernier envoi : ' + p.envoi.ko + ' Ko en ' + p.envoi.s + ' s ' + (p.envoi.gz ? '(compressé ✓)' : '(NON compressé ⚠️ — serveur à redéployer ?)'))
+        : 'aucun envoi depuis l\'ouverture de sa page';
+      const dPing = (typeof p.ping === 'number') ? 'ping ' + (p.ping / 1000).toFixed(1) + ' s' : '';
+      const dConf = p.conflits ? '⚔️ ' + p.conflits + ' conflit(s) de fusion' : '';
+      detail = [dEnvoi, dPing, dConf, p.v || ''].filter(Boolean).join(' · ');
+    }
+    return '<div style="padding:8px 4px; border-bottom:1px solid #1e293b;">'
+      + '<div style="font-weight:700; color:' + (SHOP_COLORS[shop] || '#e2e8f0') + ';">' + (SHOP_LABELS[shop] || shop) + ' — ' + etat + '</div>'
+      + (detail ? '<div style="font-size:11px; color:#94a3b8; margin-top:2px;">' + detail + '</div>' : '')
+      + '</div>';
+  }).join('');
+  const pAdmin = parShop['_admin'];
+  const ligneAdmin = pAdmin
+    ? '<div style="padding:8px 4px; font-size:11px; color:#64748b;">Poste admin : vu ' + _pvAgeLisible(_pvAgeMs(pAdmin)) + (pAdmin.v ? ' · ' + pAdmin.v : '') + '</div>'
+    : '';
+  _pvModal('<div style="font-weight:700; font-size:14px; margin-bottom:8px;">📡 État de connexion des boutiques</div>'
+    + '<div style="font-size:11px; color:#64748b; margin-bottom:6px;">Heures tamponnées par le serveur (fiable même si la pendule d\'un poste est fausse). Un poste s\'annonce à chaque envoi de données et toutes les 5 minutes tant que sa page est ouverte. 🟢 en ligne · 🟡 vue il y a moins de 30 min · ○ plus vue · 🐢 envois lents (&gt; 10 s).</div>'
+    + lignes + ligneAdmin,
+    [{ label: 'Fermer' }], function() {});
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -13704,8 +13869,84 @@ function _fetchAvecTimeout(url, options, timeoutMs) {
 async function _syncRead() {
   const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/data', { method: 'GET', cache: 'no-store', headers: _syncHeaders() });
   if (!res.ok) throw new Error('Sync read ' + res.status);
-  return await res.json(); // { data, updated_at }
+  const j = await res.json(); // { data, updated_at } (+ now, presence si serveur 2026-08-08)
+  // ── Cache de lecture (2026-08-08, ADSL Mérignac) : on garde une copie de la dernière
+  // lecture complète. Si le serveur n'a pas bougé (vérifié par GET /meta), les envois
+  // suivants la réutilisent au lieu de re-télécharger tout le paquet.
+  try {
+    if (j && j.data) {
+      _lastFullReadJson = JSON.stringify(j.data);
+      _lastFullReadAt = j.updated_at || null;
+    }
+    if (j && j.presence) _integrerPresence(j.presence, j.now);
+  } catch (e) { /* le cache est un confort, jamais bloquant */ }
+  return j;
 }
+
+// ── GET /meta : « du nouveau ? » en quelques octets (2026-08-08) ──
+// Sert au poll léger, au chemin rapide d'envoi et au ping. Sur le VIEUX serveur la
+// route n'existe pas (404) → on le note une fois et tout retombe sur l'historique.
+async function _syncReadMeta() {
+  const _t0 = Date.now();
+  const res = await _fetchAvecTimeout(SYNC_WORKER_URL + '/meta', { method: 'GET', cache: 'no-store', headers: _syncHeaders() }, 10000);
+  if (res.status === 404) {
+    if (_workerV3 !== false) console.warn('[SYNC] Serveur sans /meta — à redéployer pour activer poll léger + présence (guide DEPLOIEMENT_WORKER.md)');
+    _workerV3 = false;
+    throw new Error('meta-404');
+  }
+  if (!res.ok) throw new Error('Sync meta ' + res.status);
+  _dernierPingMs = Date.now() - _t0;
+  const j = await res.json(); // { updated_at, now, presence }
+  const _premiereFois = _workerV3 !== true;
+  _workerV3 = true;
+  if (j && j.presence) _integrerPresence(j.presence, j.now);
+  if (_premiereFois) setTimeout(_pvBattementCoeur, 1500); // serveur à jour détecté → s'annoncer tout de suite
+  return j;
+}
+
+// ── Intégrer les fiches de présence reçues du serveur ──
+// Les heures (`vu`) sont tamponnées par le SERVEUR ; pour les vieillir sans dépendre
+// de l'horloge du poste, on retient le couple (horloge serveur, Date.now() local).
+function _integrerPresence(presence, nowIso) {
+  if (!presence || typeof presence !== 'object') return;
+  _presenceDistante = presence;
+  _presenceRecueA = Date.now();
+  _serveurNowMs = nowIso ? Date.parse(nowIso) : (_serveurNowMs || Date.now());
+  if (typeof _updatePresenceChips === 'function') _updatePresenceChips();
+}
+
+// ── La fiche de présence de CE poste (envoyée au serveur) ──
+function _pvPresenceInfo() {
+  const fiche = {
+    id: _posteId,
+    role: (typeof isAdmin === 'function' && isAdmin()) ? 'admin' : 'boutique',
+    shop: (typeof currentShop !== 'undefined' && currentShop) || '',
+    v: ((document.getElementById('appVersionTag') || {}).textContent || '').trim(),
+    conflits: (typeof _conflitsSession === 'number') ? _conflitsSession : 0
+  };
+  if (typeof _dernierPingMs === 'number') fiche.ping = _dernierPingMs;
+  if (typeof _dernierEnvoi !== 'undefined' && _dernierEnvoi) {
+    fiche.envoi = { ko: _dernierEnvoi.envoyeKo, s: Math.round(_dernierEnvoi.ms / 100) / 10, gz: !!_dernierEnvoi.gzip };
+  }
+  return fiche;
+}
+
+// ── Battement de cœur (2026-08-08) : un poste ouvert mais inactif s'annonce quand
+// même toutes les 5 min — sinon une boutique qui ne coche rien paraîtrait « plus vue ».
+// Économe : sauté si un envoi complet est parti il y a moins de 4 min (la présence a
+// déjà voyagé avec), sauté si l'onglet est caché, jamais sur le vieux serveur.
+async function _pvBattementCoeur() {
+  if (_workerV3 !== true) return;
+  if (document.visibilityState !== 'visible') return;
+  if (_lastSyncWriteOk && (Date.now() - _lastSyncWriteOk.getTime()) < 4 * 60 * 1000) return;
+  try {
+    await _fetchAvecTimeout(SYNC_WORKER_URL + '/presence', {
+      method: 'PUT', headers: _syncHeaders(),
+      body: JSON.stringify({ poste: _pvPresenceInfo() })
+    }, 10000);
+  } catch (e) { /* silencieux — le prochain battement retentera */ }
+}
+setInterval(_pvBattementCoeur, 5 * 60 * 1000);
 
 // ── Écrire les données vers le Worker Cloudflare ──
 // baseUpdatedAt (chantier C) : le tampon qu'on avait LU avant de fusionner. Le serveur
@@ -13723,6 +13964,13 @@ let _conflitsSession = 0;   // nb de 409 depuis l'ouverture (voir _saveToSupabas
 async function _syncWrite(payload, baseUpdatedAt) {
   const headers = _syncHeaders();
   if (baseUpdatedAt) headers['X-Base-Updated-At'] = baseUpdatedAt;
+  // ── Présence (2026-08-08) : la fiche du poste voyage dans un en-tête avec l'envoi —
+  // aucune requête ni écriture serveur en plus. SEULEMENT si le serveur est à jour :
+  // un en-tête inconnu du vieux Worker ferait échouer la pré-vérification CORS du
+  // navigateur (leçon du hotfix du 03/08 sur X-Pv-Gzip).
+  if (_workerV3 === true) {
+    try { headers['X-Pv-Poste'] = encodeURIComponent(JSON.stringify(_pvPresenceInfo())); } catch (e) {}
+  }
   const jsonBody = JSON.stringify({ data: payload });
   let body = jsonBody, gz = false;
   if (_gzipUploadOk !== false && typeof CompressionStream === 'function') {
@@ -13804,7 +14052,21 @@ async function _saveToSupabase(payload, _retryCount) {
       if (Array.isArray(payload.propositionsPD)) payload.propositionsPD.forEach(_stampAdmin);
     }
     // ── Merge-on-save : lire l'état distant, fusionner, puis écrire ──
-    const remoteResult = await _syncRead();
+    // Chemin RAPIDE (2026-08-08, ADSL Mérignac) : si le serveur n'a pas bougé depuis
+    // notre dernière lecture complète, on réutilise cette lecture (GET /meta = quelques
+    // octets) au lieu de re-télécharger tout le paquet. SANS risque d'écrasement : si un
+    // autre poste écrit entre ce contrôle et notre envoi, le serveur répond 409 et on
+    // refusionne — la protection existante (chantier C) joue exactement comme avant.
+    let remoteResult = null;
+    if (_workerV3 === true && _lastFullReadJson && _lastFullReadAt) {
+      try {
+        const _m = await _syncReadMeta();
+        if (_m && _m.updated_at && _m.updated_at === _lastFullReadAt) {
+          remoteResult = { data: JSON.parse(_lastFullReadJson), updated_at: _lastFullReadAt };
+        }
+      } catch (e) { /* on retombe sur la lecture complète */ }
+    }
+    if (!remoteResult) remoteResult = await _syncRead();
     const _baseUpdatedAt = remoteResult ? remoteResult.updated_at : null; // pour la détection de conflit (chantier C)
     if (remoteResult && remoteResult.data) {
       const remote = remoteResult.data;
@@ -13850,7 +14112,16 @@ async function _saveToSupabase(payload, _retryCount) {
       if (typeof remote.nextCampagneId === 'number') payload.nextCampagneId = Math.max(payload.nextCampagneId || 0, remote.nextCampagneId);
     }
     // Écrire les données fusionnées
-    await _syncWrite(payload, _baseUpdatedAt);
+    const _resEcriture = await _syncWrite(payload, _baseUpdatedAt);
+    // Après une écriture réussie, le serveur contient EXACTEMENT ce qu'on vient d'envoyer :
+    // on met le cache à jour → les envois suivants prennent aussi le chemin rapide, et le
+    // prochain poll sait que la dernière écriture était la nôtre (pas de re-téléchargement).
+    try {
+      if (_resEcriture && _resEcriture.updated_at) {
+        _lastFullReadJson = JSON.stringify(payload);
+        _lastFullReadAt = _resEcriture.updated_at;
+      }
+    } catch (e) { /* cache de confort, jamais bloquant */ }
     _syncOk = true; _savePending = false;
     // Indicateur honnête (chantier B, allégé 23:14) : le point vert du header suffit dans le
     // cas normal — aucun message. On ne signale que le retour après une panne.
@@ -13930,6 +14201,25 @@ async function _doSyncPoll() {
     return;
   }
   try {
+    // ── Poll LÉGER (2026-08-08, ADSL Mérignac) : demander d'abord « du nouveau ? » via
+    // GET /meta (quelques octets). Le téléchargement complet du paquet n'a lieu que si le
+    // timestamp serveur a changé — et pas quand la dernière écriture était LA NÔTRE.
+    // Vieux serveur (404) → on retombe une fois pour toutes sur la lecture complète.
+    if (_workerV3 !== false) {
+      let _m = null;
+      try {
+        _m = await _syncReadMeta();
+      } catch (e) {
+        if (_workerV3 !== false) return; // souci réseau — le prochain poll réessaiera
+        // _workerV3 === false : vieux serveur détecté à l'instant → lecture complète ci-dessous
+      }
+      if (_m) {
+        _lastSyncReadOk = new Date();
+        if (!_m.updated_at) return; // serveur vide (premier lancement)
+        if (_lastSyncTimestamp && _m.updated_at <= _lastSyncTimestamp) return; // rien de nouveau
+        if (_lastFullReadAt && _m.updated_at === _lastFullReadAt) { _lastSyncTimestamp = _m.updated_at; return; } // la dernière écriture, c'était nous
+      }
+    }
     const remoteResult = await _syncRead();
     _lastSyncReadOk = new Date(); // pour le détail de l'indicateur de synchro (chantier B)
     if (!remoteResult || !remoteResult.data) return;
