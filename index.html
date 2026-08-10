@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-10 15:19</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-10 15:36</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -2876,12 +2876,63 @@ function _opTiroirPrixRestant(op, sh) {
   const st = op.etats && op.etats[sh];
   return !(st && st.steps && st.steps.tiroir_prix_normal === true);
 }
+// 🗄️ Les parfums du périmètre de l'OP gardés en tiroir chez cette boutique — la
+// GRANULARITÉ RÉELLE (cas Evolution « le M », 2026-08-10 : le K en tiroir à Langon
+// faisait apparaître l'étape tiroir sur la carte du M, sans dire de qui elle parlait).
+// Retour : { parfums: [objets parfum CC], produitEntier: bool } — produitEntier pour
+// les kits/PD (pas de parfums) et pour une gamme marquée CC en bloc.
+function _opTiroirParfumsCC(op, sh) {
+  const vide = { parfums: [], produitEntier: false };
+  if (!op || !sh) return vide;
+  const pid = (op.produitIds || [])[0];
+  if (!pid) return vide;
+  const g = baseLiq.find(l => l.id === pid);
+  if (g) {
+    if (estCommandeClient(g, sh)) return { parfums: [], produitEntier: true };
+    const pfIds = op.produitParfumId ? [op.produitParfumId]
+      : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+    const _pfs = pfIds ? (g.parfums || []).filter(p => pfIds.includes(p.id)) : (g.parfums || []);
+    return { parfums: _pfs.filter(p => estCommandeClient(p, sh)), produitEntier: false };
+  }
+  const prod = baseKits.find(k => k.id === pid) || basePD.find(x => x.id === pid);
+  return { parfums: [], produitEntier: !!(prod && estCommandeClient(prod, sh)) };
+}
+// Le tiroir couvre-t-il TOUT le périmètre de l'OP chez cette boutique ? Sert au
+// « sans objet » de la carte PR : réappro/désactivation ne sautent que si PLUS RIEN
+// n'est à sortir ici — couverture PARTIELLE (le K oui, le M non) = les autres parfums
+// gardent leur sortie Swappy, on ne masque rien.
+function _opTiroirCouvreToutPourShop(op, sh) {
+  if (!_opTiroirPrixPourShop(op, sh)) return false;
+  const cc = _opTiroirParfumsCC(op, sh);
+  if (cc.produitEntier) return true;
+  const pid = (op.produitIds || [])[0];
+  const g = baseLiq.find(l => l.id === pid);
+  if (!g) return false;
+  const pfIds = op.produitParfumId ? [op.produitParfumId]
+    : (Array.isArray(op.produitParfumIds) && op.produitParfumIds.length ? op.produitParfumIds : null);
+  const _actifs = (pfIds ? (g.parfums || []).filter(p => pfIds.includes(p.id)) : (g.parfums || []))
+    .filter(p => p.s !== 'SORTI');
+  return _actifs.length > 0 && _actifs.every(p => estCommandeClient(p, sh));
+}
 function _maillonTiroirPrixNormal(op, shop, defs) {
   if (!_opTiroirPrixPourShop(op, shop)) return;
   const _pn = (typeof op.prixAvantRouge === 'number' && op.prixAvantRouge > 0)
     ? ' (' + op.prixAvantRouge.toFixed(2).replace('.', ',') + ' €)' : '';
-  defs.push({ key: 'tiroir_prix_normal', kind: 'tiroir', nat: 'imm',
-    label: '🗄️ Réf gardée en tiroir : remettre le prix normal' + _pn + ' sur Swappy' });
+  // 🗄️ Granularité (2026-08-10, cas Evolution « le M ») : si le tiroir ne concerne que
+  // CERTAINS parfums du périmètre, le libellé les NOMME et l'étape porte leur liste
+  // (tiroirParfumIds) — les lignes des parfums non concernés ne l'affichent pas
+  // (filtre dans _vieLigneOpRows). Couverture totale : libellé historique inchangé.
+  const _cc = _opTiroirParfumsCC(op, shop);
+  const d = { key: 'tiroir_prix_normal', kind: 'tiroir', nat: 'imm',
+    label: '🗄️ Réf gardée en tiroir : remettre le prix normal' + _pn + ' sur Swappy' };
+  if (!_cc.produitEntier && _cc.parfums.length) {
+    d.tiroirParfumIds = _cc.parfums.map(p => p.id);
+    if (!_opTiroirCouvreToutPourShop(op, shop)) {
+      const _noms = _cc.parfums.map(p => p.n || '(sans nom)').join(', ');
+      d.label = '🗄️ ' + _noms + ' gardé' + (_cc.parfums.length > 1 ? 's' : '') + ' en tiroir : remettre le prix normal' + _pn + ' sur Swappy';
+    }
+  }
+  defs.push(d);
 }
 
 // Non-COUP avec commanderProduits (sans rentrerActionId fanfare). COUP : rentrer_*/sortir_* plus bas (avec PR entre les deux).
@@ -3365,7 +3416,10 @@ function _vieOpShopRows(op, sh) {
   // bandeau 🗄️ du bloc explique pourquoi (rows._tiroirSansObjet). AUCUNE donnée touchée :
   // la ligne du dashboard garde sa vie chez elle (autres parfums / autres boutiques).
   rows._tiroirSansObjet = 0;
-  if (extras.length && typeof _opTiroirPrixPourShop === 'function' && _opTiroirPrixPourShop(op, sh)) {
+  // 2026-08-10 (cas Evolution « le M ») : le masquage exige la couverture TOTALE du
+  // périmètre par le tiroir — si seul le K est en tiroir, le M a toujours sa sortie
+  // Swappy à faire : on ne masque rien (le bandeau « SAUF » de la ligne joue).
+  if (extras.length && typeof _opTiroirCouvreToutPourShop === 'function' && _opTiroirCouvreToutPourShop(op, sh)) {
     extras = extras.filter(x => {
       const _estSortieSwappy = x.acts && x.acts[0] && x.acts[0].type === 'SORTIR'
         && (x.def.key === 'vendu' || x.def.key === 'swappyOff');
@@ -3491,6 +3545,14 @@ function _vieLigneOpRows(a, sh) {
     computeOpShopStepDefs(op, sh).forEach(d => {
       if (_DK.includes(d.kind)) return;
       if (_mirKeys.has(d.key)) return;
+      // 🗄️ DOCTRINE TIROIR (Fabien, 2026-08-10 : « les tiroirs doivent disparaître des
+      // À sortir et passer en remettre normal ; les à sortir doivent être à sortir ») :
+      // l'étape « remettre le prix normal » ne s'insère dans AUCUNE ligne du dashboard.
+      // Elle vit à ses deux domiciles : la carte OP (qui NOMME les parfums concernés) et
+      // la card « Prix à modifier ». Côté À sortir : un parfum en tiroir chez une
+      // boutique a ses coches court-circuitées (_courtCircuiterTiroirSortir) — sa ligne
+      // disparaît de chez elle, celles qui restent sont de VRAIS à sortir.
+      if (d.kind === 'tiroir') return;
       let p = 0;
       try { p = _viePhaseDef(d, op); } catch (e) {}
       out.push({ src: 'op', def: d, op: op, phase: p || 4 });
