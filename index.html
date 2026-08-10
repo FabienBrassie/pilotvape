@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-09 00:31</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-10 15:19</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3328,6 +3328,25 @@ function _vieOpLignesRows(op, defs) {
       });
     }));
   } catch (e) {}
+  // 🧹 Anti-doublon INTER-LIGNES (2026-08-10, cas KungFruits : DEUX lignes À sortir
+  // ouvertes pour le même produit — un groupe de lignes + une ligne isolée — inséraient
+  // CHACUNE « Réappro coupée » et « Désactivé » : le même travail réel affiché deux fois).
+  // Une seule entrée par étape et par type de ligne ; les lignes fusionnent (acts unis),
+  // la coche écrit déjà sur TOUTES les lignes de l'entrée (vieToggleLigneStep).
+  // Les entrées de substitution (nomAutre) restent distinctes : autre produit, autre travail.
+  const _fusion = [];
+  out.forEach(r => {
+    const cible = !r.nomAutre && _fusion.find(x => !x.nomAutre
+      && x.def.key === r.def.key && x.phase === r.phase
+      && x.acts && r.acts && x.acts[0] && r.acts[0] && x.acts[0].type === r.acts[0].type);
+    if (cible) {
+      r.acts.forEach(a2 => { if (!cible.acts.some(a3 => a3.id === a2.id)) cible.acts.push(a2); });
+      return;
+    }
+    _fusion.push(r);
+  });
+  out.length = 0;
+  Array.prototype.push.apply(out, _fusion);
   out.sort((a, b) => a.phase - b.phase);
   return out;
 }
@@ -3339,6 +3358,21 @@ function _vieOpShopRows(op, sh) {
   const rows = defs.map(d => ({ src: 'op', def: d }));
   let extras = [];
   try { extras = _vieOpLignesRows(op, defs); } catch (e) { console.warn('[VIE-UNIFIEE] extras KO', e); }
+  // 🗄️ TIROIR (2026-08-10, décision Fabien : « tiroir = je ne coupe pas la réappro et je ne
+  // désactive pas, c'est sans objet ; en revanche je remets le prix initial ») : chez une
+  // boutique qui garde la réf en tiroir, les étapes de sortie Swappy insérées depuis le
+  // dashboard (« Réappro coupée », « Désactivé ») SORTENT de la vie de la carte — le
+  // bandeau 🗄️ du bloc explique pourquoi (rows._tiroirSansObjet). AUCUNE donnée touchée :
+  // la ligne du dashboard garde sa vie chez elle (autres parfums / autres boutiques).
+  rows._tiroirSansObjet = 0;
+  if (extras.length && typeof _opTiroirPrixPourShop === 'function' && _opTiroirPrixPourShop(op, sh)) {
+    extras = extras.filter(x => {
+      const _estSortieSwappy = x.acts && x.acts[0] && x.acts[0].type === 'SORTIR'
+        && (x.def.key === 'vendu' || x.def.key === 'swappyOff');
+      if (_estSortieSwappy) { rows._tiroirSansObjet++; return false; }
+      return true;
+    });
+  }
   if (!extras.length) return rows;
   const ph = [];
   defs.forEach((d, i) => {
@@ -23908,6 +23942,12 @@ function renderDashboard() {
     if (!(typeof op.prixRouge === 'number' && op.prixRouge > 0)) return false;
     if (op.prixActionId && prix.some(a => a.id === op.prixActionId)) return false;
     return _shsPrix.some(sh => {
+      // 🗄️ TIROIR (2026-08-10, demande Fabien : « dans les boutiques concernées, ça doit
+      // apparaître dans Prix à modifier pour cause de mise en tiroir : remettre le prix
+      // initial ») : tant que « remettre le prix normal » reste à faire chez une boutique
+      // qui garde la réf en tiroir, l'OP entre dans la card — AVANT les exclusions
+      // écoulée/épuisée (c'est justement l'étape qui survit à l'écoulement).
+      if (typeof _opTiroirPrixRestant === 'function' && _opTiroirPrixRestant(op, sh)) return true;
       if (typeof _opProduitEcouleChezShop === 'function' && _opProduitEcouleChezShop(op, sh)) return false;
       if (typeof _opPrEpuiseePourShop === 'function' && _opPrEpuiseePourShop(op, sh)) return false;
       const _clesPR = new Set(_clesEtapesEtiquettePR(op));
@@ -23918,9 +23958,9 @@ function renderDashboard() {
   });
   const _nbPrixTotal = prixAffich.length + opsPrixARefaire.length;
   const prixInner = (prix.length === 0 && opsPrixARefaire.length === 0) ? emptyState('— ajoute un relevé concurrent dans l\'onglet Relevés prix') : (_bulkEtiqBtn + renderGroupedActionCards(prix)
-    + (opsPrixARefaire.length ? `<div style="font-size:9px; color:#fca5a5; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Prix rouges d'OP : étiquette à (ré)imprimer / poser, prix ou promo à (re)passer en caisse — les coches se font sur la carte OP">🏷️ Prix rouges — étiquette / caisse à refaire</div>` + opsPrixARefaire.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : ''));
+    + (opsPrixARefaire.length ? `<div style="font-size:9px; color:#fca5a5; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Prix rouges d'OP : étiquette à (ré)imprimer / poser, prix ou promo à (re)passer en caisse — et 🗄️ prix initial à remettre quand la réf est gardée en tiroir. Les coches se font sur la carte OP">🏷️ Prix rouges — étiquette / caisse à refaire · 🗄️ prix initial à remettre (réf en tiroir)</div>` + opsPrixARefaire.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : ''));
   const prixBlock    = block('prix', 'Prix à modifier', '#f59e0b', _nbPrixTotal, prixInner,
-    'Prix de BASE à changer (relevés concurrents) + prix rouges d\'OP dont l\'étiquette / la caisse restent à faire. Déplier → cocher par boutique.');
+    'Prix de BASE à changer (relevés concurrents) + prix rouges d\'OP dont l\'étiquette / la caisse restent à faire + 🗄️ prix initial à remettre chez une boutique qui garde la réf en tiroir. Déplier → cocher par boutique.');
   // --- Opérations en cours ---
   // Rassemble toutes les OP non-terminées (à venir, imminentes, en cours).
   // Groupées par statut temporel, chaque groupe avec sous-header. Terminées exclues.
@@ -31510,13 +31550,18 @@ function _renderOpCardHtmlInner(op, options) {
     const _horsStockLigne = _absentShop
       ? `<div style="margin:2px 0 4px; padding:3px 6px; background:#33415530; border:1px dashed #47556960; border-radius:3px; font-size:9.5px; color:#94a3b8;">⛔ Hors stock à ${label} — étapes cochées automatiquement, rien à faire ici</div>`
       : '';
+    // 🗄️ TIROIR (2026-08-10, décision Fabien) : des étapes de sortie Swappy ont été
+    // retirées de la vie affichée chez cette boutique (réf gardée en tiroir) → on le DIT.
+    const _tiroirLigne = (!_absentShop && _vieAll._tiroirSansObjet > 0)
+      ? `<div style="margin:2px 0 4px; padding:3px 6px; background:#0e749018; border:1px dashed #06b6d450; border-radius:3px; font-size:9.5px; color:#67e8f9;">🗄️ Réf gardée en tiroir à ${label} — réappro / désactivation Swappy <b>sans objet</b> (la réf reste commandable) ; il reste : <b>remettre le prix normal</b></div>`
+      : '';
     // ✅ TOUT FAIT (2026-08-06, même règle que le dashboard) : toute la vie affichée
     // cochée → bloc grisé, coches toujours cliquables.
     const _toutFaitVie = !_absentShop && _vieRows.length > 0 && _vieRows.every(r => r.src === 'op'
       ? _getOpStepChecked(op, sh, r.def) === true
       : r.acts.every(a2 => { const s2 = a2.etats && a2.etats[sh]; return !!(s2 && s2.steps && s2.steps[r.def.key] === true); }));
     const _griseOp = _absentShop || _toutFaitVie;
-    return `<div${_toutFaitVie ? ' data-vie-fait="1"' : ''} style="padding:6px 8px; background:${_griseOp ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_griseOp ? '#334155' : col + '30'}; border-radius:4px; ${_griseOp ? 'opacity:0.55;' : ''}">${header}${_horsStockLigne}${rows}</div>`;
+    return `<div${_toutFaitVie ? ' data-vie-fait="1"' : ''} style="padding:6px 8px; background:${_griseOp ? '#0a0f1a' : '#0f172a'}; border:1px solid ${_griseOp ? '#334155' : col + '30'}; border-radius:4px; ${_griseOp ? 'opacity:0.55;' : ''}">${header}${_horsStockLigne}${_tiroirLigne}${rows}</div>`;
   }).join('');
 
   // Panneau d'édition (si ouvert, et si l'édition est autorisée)
