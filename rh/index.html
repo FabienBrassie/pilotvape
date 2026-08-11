@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-08-11 16:32 — Maladies : la ligne « ➕ Déclarer / ajouter une absence » (congé, maladie, école…) est remontée EN TÊTE du panneau 🏖 Absences, visible sur tous les onglets (elle était enterrée en bas de l'Historique) ; et le COMPTE BOUTIQUE peut désormais déclarer un arrêt maladie depuis 📋 Demandes (part en validation chez l'admin, badge « 🏬 déclaré par la boutique »). -->
 <!-- v 2026-07-28 19:36 — 🏖 Absences : onglets Historique et Heures sup repliés par salarié (une ligne de synthèse — totaux annuels, nb d'absences/demandes, « X en attente » — détail au clic ▸/▾, comme les Écarts de pause). L'onglet « À valider » reste déplié : c'est de l'action, pas de l'archive. -->
 <!-- v 2026-07-28 18:47 — 📚 Formation : « ⏳ +X j vs attendu » affiché sur les blocs du planning (Semaine + Mon planning), dans le récap du panneau, sur la carte et dans Mon espace du salarié — fin réelle de l'étape en cours comparée à la fin attendue de cette même étape. Visible seulement s'il y a du retard. -->
 <!-- v 2026-07-28 18:31 — 📚 Formation : barre fine « attendu » sous chaque frise (Liquides 2 sem ½ → Matériel 2 sem ½ → Vente 1 sem ½ → Perf. 1 sem ½ depuis le début du parcours) pour comparer d'un coup d'œil le réel et le normal attendu — panneau ET Mon espace, légende sous la frise, dates au survol. -->
@@ -2532,6 +2533,14 @@ function renderAbs(){
    S.boutiques.map(b=>'<button class="bchip '+b.id+(absSel.has(b.id)?' on':'')+'" onclick="togAbsB(\''+b.id+'\')">'+b.nom+'</button>').join('')+
    '<div class="seg">'+[['valider','⏳ À valider'+(_nAtt?' ('+_nAtt+')':'')],['hsup','⏱ Heures sup'],['histo','🗂 Historique']].map(x=>'<button class="'+(absTab===x[0]?'on':'')+'" onclick="setAbsTab(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div>'+
    '<button class="act grey" style="margin-left:auto" onclick="$(\'abspanel\').style.display=\'none\'">Fermer</button></div>';
+  // ── Déclarer / ajouter une absence : TOUJOURS visible en tête, quel que soit l'onglet
+  // (Fabien 2026-07-28 : la ligne d'ajout était enterrée en bas de l'onglet Historique — introuvable)
+  h+='<div class="addrow">➕ <select id="ab-type"><option value="conge">🏖 Congé</option><option value="maladie">🤒 Maladie</option><option value="ecole">🎓 École (alternant)</option><option value="ent">🏭 Entreprise (alternant, planning 35h)</option></select>'+
+   '<select id="ab-emp">'+S.employees.filter(x=>x.actif).map(x=>'<option value="'+x.id+'">'+esc(x.nom)+'</option>').join('')+'</select>'+
+   'du <input type="date" id="ab-du"> au <input type="date" id="ab-au">'+
+   '<select id="ab-st"><option value="attente">en attente</option><option value="accepte">accepté</option></select>'+
+   '<input id="ab-note" placeholder="Note (optionnel)" style="width:150px">'+
+   '<button class="act" onclick="addAbs()">Ajouter</button></div>';
   // ═══ ONGLET « À VALIDER » ═══
   if(absTab==='valider'){
   // ---- incohérences détectées sur les absences existantes ----
@@ -2597,7 +2606,7 @@ function renderAbs(){
   if(mlatt.length){
     h+='<div class="mhead">🤒 Maladies à valider ('+mlatt.length+')</div>';
     for(const m of mlatt){const e=emp(m.empId);
-      h+='<div class="datecard" style="border-left:4px solid var(--orange)"><div class="dbadge"><b>'+(+m.du.slice(8,10))+'</b><span>'+DAYJ[wdOf(m.du)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(m.du)+' → '+fmtFR(m.au)+' · <b>'+nbJours(m.du,m.au)+' j</b></span>'+(m.parResp&&emp(m.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(m.parResp).nom)+'</span>':'')+(m.note?'<span class="small">« '+esc(m.note)+' »</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptMl('+m.id+')">✓ Accepter</button> <button class="act red" onclick="refuseMl('+m.id+')">✗ Refuser</button></span></div></div></div>';
+      h+='<div class="datecard" style="border-left:4px solid var(--orange)"><div class="dbadge"><b>'+(+m.du.slice(8,10))+'</b><span>'+DAYJ[wdOf(m.du)]+'</span></div><div style="flex:1;min-width:0"><div class="brow"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="chipb" style="color:var(--'+e.b+')">'+bout(e.b).nom+'</span><span>'+fmtFR(m.du)+' → '+fmtFR(m.au)+' · <b>'+nbJours(m.du,m.au)+' j</b></span>'+(m.parResp&&emp(m.parResp)?'<span class="modif" style="background:#7c3aed">🛡️ déclaré par '+esc(emp(m.parResp).nom)+'</span>':'')+(m.parBoutique?'<span class="modif" style="background:#0891b2">🏬 déclaré par la boutique</span>':'')+(m.note?'<span class="small">« '+esc(m.note)+' »</span>':'')+'<span style="margin-left:auto"><button class="act green" onclick="acceptMl('+m.id+')">✓ Accepter</button> <button class="act red" onclick="refuseMl('+m.id+')">✗ Refuser</button></span></div></div></div>';
     }
   }
   if(!probs.length&&!att.length&&!hsatt.length&&!mlatt.length)h+='<div class="small" style="padding:10px 4px">✓ Rien à valider pour le moment.</div>';
@@ -2674,14 +2683,7 @@ function renderAbs(){
     }
     h+='</div>';
   }
-  // ---- ajout ----
-  h+='<div class="addrow">➕ <select id="ab-type"><option value="conge">🏖 Congé</option><option value="maladie">🤒 Maladie</option><option value="ecole">🎓 École (alternant)</option><option value="ent">🏭 Entreprise (alternant, planning 35h)</option></select>'+
-   '<select id="ab-emp">'+S.employees.filter(x=>x.actif).map(x=>'<option value="'+x.id+'">'+esc(x.nom)+'</option>').join('')+'</select>'+
-   'du <input type="date" id="ab-du"> au <input type="date" id="ab-au">'+
-   '<select id="ab-st"><option value="attente">en attente</option><option value="accepte">accepté</option></select>'+
-   '<input id="ab-note" placeholder="Note (optionnel)" style="width:150px">'+
-   '<button class="act" onclick="addAbs()">Ajouter</button></div>';
-  } // ── fin onglet HISTORIQUE ──
+  } // ── fin onglet HISTORIQUE ── (la ligne d'ajout vit désormais en tête du panneau, tous onglets)
   $('abspanel').innerHTML=h;
 }
 function addAbs(){
@@ -4236,6 +4238,17 @@ function _formCard(f){
 
 // Vue "Demandes en cours" — boutique (toute la boutique) ou salarié (les siennes), lecture seule
 function togReq(){const el=$('reqpanel');const show=el.style.display!=='block';el.style.display=show?'block':'none';if(show)renderReq();}
+function bqDeclMaladie(){
+  if(!(ROLE&&ROLE.type==='boutique'))return;
+  const empId=$('bq-ml-emp')&&$('bq-ml-emp').value,du=$('bq-ml-du')&&$('bq-ml-du').value,au=($('bq-ml-au')&&$('bq-ml-au').value)||du;
+  const eSel=S.employees.find(x=>String(x.id)===String(empId));
+  if(!eSel||!du||au<du){alert('Choisis le salarié et des dates valides.');return;}
+  const note=($('bq-ml-note')&&$('bq-ml-note').value.trim())||'';
+  S.maladies=S.maladies||[];
+  S.maladies.push({id:Date.now(),empId:eSel.id,du,au,note,statut:'attente',parBoutique:ROLE.b,_ts:NOW()});
+  save();renderReq();
+  const msg=$('bq-ml-msg');if(msg){msg.style.display='';msg.textContent='✓ Arrêt maladie déclaré pour '+eSel.nom+' ('+fmtFR(du)+' → '+fmtFR(au)+') — en attente de validation par l\'admin.';}
+}
 function renderReq(){
   let scopeEmp; let titre;
   if(ROLE&&ROLE.type==='boutique'){scopeEmp=e=>e.b===ROLE.b;titre='🏬 '+bout(ROLE.b).nom+' — demandes en cours';}
@@ -4244,6 +4257,18 @@ function renderReq(){
   const cg=S.conges.filter(c=>c.statut==='attente'&&emp(c.empId)&&scopeEmp(emp(c.empId))).sort((a,b)=>a.du<b.du?-1:1);
   const hs=(S.hsdemandes||[]).filter(x=>x.statut==='attente'&&emp(x.empId)&&scopeEmp(emp(x.empId))).sort((a,b)=>a.date<b.date?-1:1);
   let h='<div class="phead"><h2>'+titre+'</h2><button class="act grey" style="margin-left:auto" onclick="$(\'reqpanel\').style.display=\'none\'">Fermer</button></div>';
+  // ── Déclaration d'arrêt maladie par le COMPTE BOUTIQUE (Fabien 2026-07-28 : « en tant que
+  // boutique au moins, je ne peux pas déclarer une maladie ? ») — part en validation chez l'admin,
+  // comme les déclarations des responsables. Le compte boutique reste en lecture pour tout le reste.
+  if(ROLE&&ROLE.type==='boutique'){
+    h+='<div class="mhead">🤒 Déclarer un arrêt maladie</div>';
+    h+='<div class="addrow"><select id="bq-ml-emp">'+S.employees.filter(e=>e.actif&&e.b===ROLE.b).map(e=>'<option value="'+e.id+'">'+esc(e.nom)+'</option>').join('')+'</select>'+
+      ' du <input type="date" id="bq-ml-du" value="'+todayISO()+'"> au <input type="date" id="bq-ml-au">'+
+      ' <input id="bq-ml-note" placeholder="Précision (optionnel)" style="width:150px">'+
+      ' <button class="act green" onclick="bqDeclMaladie()">Déclarer</button>'+
+      '<span class="small" style="color:var(--mut)">— part en validation chez l\'admin</span></div>';
+    h+='<div class="aline blue" id="bq-ml-msg" style="display:none;margin-bottom:8px"></div>';
+  }
   h+='<div class="mhead">🏖 Congés en attente ('+cg.length+')</div>';
   if(!cg.length)h+='<div class="small">Aucune.</div>';
   for(const c of cg){const e=emp(c.empId);
