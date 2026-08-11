@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-08-11 16:38 — Présence : les ABSENCES (maladie, congé accepté, école) priment désormais sur les exceptions du jour — une maladie déclarée efface bien les blocs même si la journée avait été modifiée à la main (ou portait un retard / une pause pointée). Pour faire revenir quelqu'un de marqué malade : raccourcir la maladie, pas redessiner par-dessus. -->
 <!-- v 2026-08-11 16:32 — Maladies : la ligne « ➕ Déclarer / ajouter une absence » (congé, maladie, école…) est remontée EN TÊTE du panneau 🏖 Absences, visible sur tous les onglets (elle était enterrée en bas de l'Historique) ; et le COMPTE BOUTIQUE peut désormais déclarer un arrêt maladie depuis 📋 Demandes (part en validation chez l'admin, badge « 🏬 déclaré par la boutique »). -->
 <!-- v 2026-07-28 19:36 — 🏖 Absences : onglets Historique et Heures sup repliés par salarié (une ligne de synthèse — totaux annuels, nb d'absences/demandes, « X en attente » — détail au clic ▸/▾, comme les Écarts de pause). L'onglet « À valider » reste déplié : c'est de l'action, pas de l'archive. -->
 <!-- v 2026-07-28 18:47 — 📚 Formation : « ⏳ +X j vs attendu » affiché sur les blocs du planning (Semaine + Mon planning), dans le récap du panneau, sur la carte et dans Mon espace du salarié — fin réelle de l'étape en cours comparée à la fin attendue de cette même étape. Visible seulement s'il y a du retard. -->
@@ -1236,15 +1237,20 @@ function presence(e,iso){
   if(!e.actif||!inEmploi(e,iso))return{st:'off',b:e.b};
   const day=dayPat(e,iso);
   const ex=S.exceptions.find(x=>x.empId===e.id&&x.date===iso);
+  // Les ABSENCES priment sur les exceptions du jour (bug Fabien 2026-08-11 : maladie déclarée mais
+  // les blocs restaient affichés dès que la journée avait été modifiée à la main / retard appliqué /
+  // pause pointée — l'exception court-circuitait le test maladie). Règle métier : pour faire revenir
+  // quelqu'un de marqué malade, on raccourcit la MALADIE (la donnée) — on ne redessine pas par-dessus.
+  const _ab=(ex&&ex.b)||(day?day.b:e.b);
+  if(S.maladies.some(m=>m.empId===e.id&&iso>=m.du&&iso<=m.au&&m.statut!=='attente'&&m.statut!=='refuse'))return{st:'maladie',b:_ab};
+  if((S.ecoles||[]).some(x=>x.empId===e.id&&iso>=x.du&&iso<=x.au))return{st:'ecole',b:_ab};
+  if(S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='accepte'))return{st:'conge',b:_ab};
   if(ex){
     if(ex.s==='R')return{st:'repos',b:day?day.b:e.b,ex:true,note:ex.note};
     const xb=ex.b||(day?day.b:e.b);
     return{st:'present',b:xb,blocks:(ex.blocks||[]).map(bl=>[bl[0],bl[1],bl[2]||xb,bl[3]?1:0,bl[4]||0]),ex:true,note:ex.note};
   }
   if(!day)return{st:'repos',b:e.b};
-  if(S.maladies.some(m=>m.empId===e.id&&iso>=m.du&&iso<=m.au&&m.statut!=='attente'&&m.statut!=='refuse'))return{st:'maladie',b:day.b};
-  if((S.ecoles||[]).some(x=>x.empId===e.id&&iso>=x.du&&iso<=x.au))return{st:'ecole',b:day.b};
-  if(S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='accepte'))return{st:'conge',b:day.b};
   const pend=S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='attente');
   return{st:'present',b:day.b,blocks:day.blocks.map(bl=>[bl[0],bl[1],bl[2]||day.b,0]),pend};
 }
