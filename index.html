@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 18:25</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 18:43</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -18397,23 +18397,34 @@ function _testeurUniques() {
       return (oa - ob) || (a.pos - b.pos);
     });
 }
-// LE PLAN DE NUMÉROTATION (canonique — 2026-08-13, retour Fabien : « il y a deux n°15 »).
-// Les départs de zone ne sont PLUS figés : chaque zone occupe max(quota, occupés)
-// emplacements et la suivante démarre JUSTE APRÈS. Un dépassement (goût changé de
-// catégorie → 15 Fruité Frais) décale donc Fruité à 16, etc., et l'Extra suit à la fin.
+// LE PLAN DE NUMÉROTATION (canonique — 2026-08-13, retour Fabien : « il y a deux n°15 »
+// puis « le 30 est de trop, sinon ça fait 46 »). Les départs de zone ne sont PLUS figés :
+// chaque zone occupe max(quota, occupés) emplacements et la suivante démarre JUSTE APRÈS.
+// Un dépassement (15 Fruité Frais) décale donc Fruité à 16, etc. — MAIS la malette fait
+// 45 places PHYSIQUES : le total du plan ne dépasse JAMAIS 45. Un débordement dans une
+// zone consomme les places LIBRES des autres zones (jamais des occupées), en rognant à
+// partir de la dernière zone du plan (Gourmand → Menthe → …). L'Extra suit à la fin.
 // Jamais deux fois le même numéro. Utilisé par : la vue, l'affiche A5, les cartes de
 // travail, les emprunts — ne JAMAIS recalculer un numéro à la main (règle 8).
 function _testeurZoneLayout() {
   const uniques = _testeurUniques();
   const out = [];
-  let start = 1;
   TESTEUR_ZONES.forEach(z => {
     const entries = uniques.filter(e => e.zone === z.key);
     const souple = typeof z.quota !== 'number';
     const slots = souple ? entries.length : Math.max(z.quota, entries.length);
-    out.push({ key: z.key, meta: z, entries: entries, start: start, slots: slots, souple: souple });
-    start += slots;
+    out.push({ key: z.key, meta: z, entries: entries, start: 0, slots: slots, souple: souple });
   });
+  // Plafond global 45 sur le plan : rogner les places libres, de la fin vers le début.
+  const plan = out.filter(zl => !zl.souple);
+  let excess = plan.reduce(function (s, zl) { return s + zl.slots; }, 0) - TESTEUR_TOTAL;
+  for (let i = plan.length - 1; i >= 0 && excess > 0; i--) {
+    const zl = plan[i];
+    const cut = Math.min(excess, zl.slots - zl.entries.length);
+    if (cut > 0) { zl.slots -= cut; excess -= cut; }
+  }
+  let start = 1;
+  out.forEach(zl => { zl.start = start; start += zl.slots; });
   return out;
 }
 // Numéro d'emplacement d'une entrée précise (par id) — via LE plan de numérotation.
