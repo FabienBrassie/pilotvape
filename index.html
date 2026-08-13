@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 17:12</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 18:25</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4496,6 +4496,13 @@ function toggleTesteur(gId, parfumId) {
     const zoneCount = entries.filter(e => e.zone === zone).length;
     if (typeof zMeta.quota === 'number' && zoneCount >= zMeta.quota) {
       pvAlert('Zone ' + zMeta.label + ' pleine (' + zoneCount + '/' + zMeta.quota + ').\nRetire d\'abord un testeur de cette zone (vue 🧪 Testeurs de Base Liquides).');
+      return;
+    }
+    // Plafond GLOBAL 45 (2026-08-13, rappel Fabien) : un dépassement de zone (goût qui a
+    // changé de catégorie) consomme des places — la malette physique n'en a que 45.
+    const _totalPlanAjout = _testeurUniques().filter(e => e.zone && e.zone !== 'EXTRA').length;
+    if (_totalPlanAjout >= TESTEUR_TOTAL) {
+      pvAlert('La malette est pleine : ' + _totalPlanAjout + '/' + TESTEUR_TOTAL + ' emplacements du plan occupés (dépassements compris).\nRetire d\'abord un testeur — vue 🧪 Testeurs.');
       return;
     }
     const t = { id: 'TST-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), gammeId: gId, parfumId: parfumId, _ts: _now, _adminTs: _now };
@@ -18390,16 +18397,43 @@ function _testeurUniques() {
       return (oa - ob) || (a.pos - b.pos);
     });
 }
+// LE PLAN DE NUMÉROTATION (canonique — 2026-08-13, retour Fabien : « il y a deux n°15 »).
+// Les départs de zone ne sont PLUS figés : chaque zone occupe max(quota, occupés)
+// emplacements et la suivante démarre JUSTE APRÈS. Un dépassement (goût changé de
+// catégorie → 15 Fruité Frais) décale donc Fruité à 16, etc., et l'Extra suit à la fin.
+// Jamais deux fois le même numéro. Utilisé par : la vue, l'affiche A5, les cartes de
+// travail, les emprunts — ne JAMAIS recalculer un numéro à la main (règle 8).
+function _testeurZoneLayout() {
+  const uniques = _testeurUniques();
+  const out = [];
+  let start = 1;
+  TESTEUR_ZONES.forEach(z => {
+    const entries = uniques.filter(e => e.zone === z.key);
+    const souple = typeof z.quota !== 'number';
+    const slots = souple ? entries.length : Math.max(z.quota, entries.length);
+    out.push({ key: z.key, meta: z, entries: entries, start: start, slots: slots, souple: souple });
+    start += slots;
+  });
+  return out;
+}
+// Numéro d'emplacement d'une entrée précise (par id) — via LE plan de numérotation.
+function _testeurNumDe(tid) {
+  const lay = _testeurZoneLayout();
+  for (const zl of lay) {
+    const i = zl.entries.findIndex(e => e.t.id === tid);
+    if (i >= 0) return zl.start + i;
+  }
+  return null;
+}
 // Les EMPRUNTS (canonique) : jus présents À LA FOIS dans une zone du plan ET en Extra —
 // le flacon est PRIS à son emplacement normal le temps de l'évènementiel. Retourne
-// { clé → { planNum, extraNum } } (numéros d'emplacement des deux côtés).
+// { clé → { planNum, extraNum } } (numéros du plan de numérotation dynamique).
 function _testeurEmprunts() {
-  const uniques = _testeurUniques();
   const parCle = {};
-  TESTEUR_ZONES.forEach(z => {
-    uniques.filter(e => e.zone === z.key).forEach((e, i) => {
+  _testeurZoneLayout().forEach(zl => {
+    zl.entries.forEach((e, i) => {
       const s = (parCle[e.key] = parCle[e.key] || {});
-      if (z.key === 'EXTRA') s.extraNum = z.start + i; else s.planNum = z.start + i;
+      if (zl.key === 'EXTRA') s.extraNum = zl.start + i; else s.planNum = zl.start + i;
     });
   });
   const out = {};
@@ -18565,20 +18599,22 @@ function renderVueTesteurs() {
   // Blocs de zone sur 2 colonnes qui occupent TOUTE la largeur de la fenêtre
   // (demande Fabien 2026-08-03, précisée 15:50 : pleine largeur, toujours 2 par ligne).
   html += `<div style="display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; align-items:start;">`;
-  TESTEUR_ZONES.forEach(z => {
-    const zEntries = uniques.filter(e => e.zone === z.key);
-    const _souple = typeof z.quota !== 'number'; // EXTRA : événementiel, sans quota
+  // Numérotation DYNAMIQUE (2026-08-13, retour Fabien « deux n°15 ») : les départs de zone
+  // viennent du plan de numérotation canonique — un dépassement décale les zones suivantes.
+  _testeurZoneLayout().forEach(zl => {
+    const z = zl.meta;
+    const zEntries = zl.entries;
+    const _souple = zl.souple; // EXTRA : événementiel, sans quota
     const over = !_souple && zEntries.length > z.quota;
     html += `<div style="background:#0f172a; border:1px solid ${z.color}40; border-radius:6px; overflow:hidden;">`;
     html += `<div style="display:flex; gap:8px; align-items:center; padding:4px 10px; background:${z.color}22;">
       <span style="font-size:11px; font-weight:800; color:${z.color}; letter-spacing:1px; padding:1px 8px; background:${z.color}; color:#fff; border-radius:3px;">${z.label}</span>
       <span style="font-size:10px; font-weight:700; color:${over ? '#ef4444' : '#e2e8f0'};">${_souple ? zEntries.length : zEntries.length + '/' + z.quota}</span>
-      <span style="font-size:9px; color:#64748b;">${_souple ? 'événementiel · sans quota · emplacements ' + String(z.start).padStart(2, '0') + '+' : 'emplacements ' + String(z.start).padStart(2, '0') + ' → ' + String(z.start + z.quota - 1).padStart(2, '0')}</span>
-      ${over ? `<span style="font-size:9px; color:#ef4444; font-weight:700;">⚠ dépassement — un goût a changé de catégorie : retire ${zEntries.length - z.quota} testeur${zEntries.length - z.quota > 1 ? 's' : ''}</span>` : ''}
+      <span style="font-size:9px; color:#64748b;">${_souple ? 'événementiel · sans quota · emplacements ' + String(zl.start).padStart(2, '0') + '+' : 'emplacements ' + String(zl.start).padStart(2, '0') + ' → ' + String(zl.start + zl.slots - 1).padStart(2, '0')}</span>
+      ${over ? `<span style="font-size:9px; color:#ef4444; font-weight:700;">⚠ dépassement — un goût a changé de catégorie : retire ${zEntries.length - z.quota} testeur${zEntries.length - z.quota > 1 ? 's' : ''} (les zones suivantes sont décalées)</span>` : ''}
     </div>`;
-    const _nbSlots = _souple ? zEntries.length : Math.max(z.quota, zEntries.length);
-    for (let i = 0; i < _nbSlots; i++) {
-      html += _slotRow(z.start + i, zEntries[i] || null, z.color, z.key, i);
+    for (let i = 0; i < zl.slots; i++) {
+      html += _slotRow(zl.start + i, zEntries[i] || null, z.color, z.key, i);
     }
     if (_souple && zEntries.length === 0) {
       html += `<div style="padding:6px 10px; font-size:10px; color:#64748b; font-style:italic;">Aucun testeur événementiel — alimenté par les OP (pièce « Testeur (malette) ») ou l'ajout ci-dessous.</div>`;
@@ -18637,8 +18673,10 @@ function _renderTesteurActionCard(a, fShop) {
   const nom = (p && p.n) || a._parfumNom || '?';
   const marque = g ? (g.marque || '') : '';
   const zMeta = TESTEUR_ZONE_META[a.testeurZone] || null;
-  const numTxt = (zMeta && typeof a.testeurOrdre === 'number')
-    ? `<span style="font-size:9px; padding:1px 5px; background:${zMeta.color}; color:#fff; border-radius:2px; font-weight:800;" title="Emplacement dans la malette">${String(zMeta.start + a.testeurOrdre).padStart(2, '0')}</span>` : '';
+  // Numéro via LE plan de numérotation dynamique (2026-08-13) — plus jamais le start figé.
+  const _zlCard = zMeta ? _testeurZoneLayout().find(x => x.key === a.testeurZone) : null;
+  const numTxt = (_zlCard && typeof a.testeurOrdre === 'number')
+    ? `<span style="font-size:9px; padding:1px 5px; background:${zMeta.color}; color:#fff; border-radius:2px; font-weight:800;" title="Emplacement dans la malette">${String(_zlCard.start + a.testeurOrdre).padStart(2, '0')}</span>` : '';
   const zoneChip = zMeta ? `<span style="font-size:8.5px; padding:1px 5px; background:${zMeta.color}22; color:${zMeta.color}; border:1px solid ${zMeta.color}60; border-radius:2px; font-weight:700;">${zMeta.label}</span>` : '';
   let libelle;
   if (a.testeurOp === 'REMPLACER') libelle = `Remplacer le testeur <b>${a.testeurAncienNom || '?'}</b>${a.testeurAncienMarque ? ` <span style="color:#64748b; font-size:9.5px;">(${a.testeurAncienMarque})</span>` : ''} par <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
@@ -18704,34 +18742,35 @@ async function pvImprimerAfficheTesteurs() {
   const MX = 34;                 // marge horizontale
   const colW = (W - 2 * MX) / 3;
   const headH = 15;
-  const zonesAff = TESTEUR_ZONES.filter(z => (typeof z.quota === 'number') || uniques.some(e => e.zone === z.key));
+  // Numérotation DYNAMIQUE (2026-08-13) : même plan que la vue (_testeurZoneLayout) —
+  // un dépassement décale les zones suivantes, jamais deux fois le même numéro.
+  const zonesAff = _testeurZoneLayout().filter(zl => !zl.souple || zl.entries.length > 0);
   let _totalRows = 0;
-  zonesAff.forEach(z => {
-    const n = (typeof z.quota === 'number') ? Math.max(z.quota, uniques.filter(e => e.zone === z.key).length) : uniques.filter(e => e.zone === z.key).length;
-    _totalRows += Math.ceil(Math.max(n, 1) / 3);
+  zonesAff.forEach(zl => {
+    _totalRows += Math.ceil(Math.max(zl.slots, 1) / 3);
   });
   const _availH = y - 24 - zonesAff.length * 26; // 26 ≈ bandeau + respirations par zone
   const rowH = Math.min(20.5, Math.max(12.5, _availH / Math.max(_totalRows, 1)));
 
-  zonesAff.forEach(z => {
+  zonesAff.forEach(zl => {
+    const z = zl.meta;
     const zc = _hex(z.color);
-    const zEntries = uniques.filter(e => e.zone === z.key);
+    const zEntries = zl.entries;
     // Bandeau de zone (pill colorée, texte blanc)
     y -= headH + 5;
     const zlW = bold.widthOfTextAtSize(z.label, 10.5) + 16;
     page.drawRectangle({ x: MX, y: y, width: zlW, height: headH, color: zc, borderColor: zc, borderWidth: 0 });
     page.drawText(z.label, { x: MX + 8, y: y + 4, size: 10.5, font: bold, color: PDFLib.rgb(1, 1, 1) });
     y -= 4;
-    // Slots numérotés, 3 par ligne (quota fixe → dépassements affichés quand même ;
-    // zone souple = juste ce qu'elle contient)
-    const nbSlots = (typeof z.quota === 'number') ? Math.max(z.quota, zEntries.length) : zEntries.length;
+    // Slots numérotés, 3 par ligne (départs DYNAMIQUES — plan de numérotation canonique)
+    const nbSlots = zl.slots;
     const rows = Math.ceil(nbSlots / 3);
     for (let r = 0; r < rows; r++) {
       y -= rowH;
       for (let c = 0; c < 3; c++) {
         const i = r * 3 + c;
         if (i >= nbSlots) continue;
-        const num = z.start + i;
+        const num = zl.start + i;
         const e = zEntries[i] || null;
         const x0 = MX + c * colW;
         // Badge numéro (carré arrondi zone)
