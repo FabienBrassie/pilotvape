@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 16:54</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 17:12</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -19807,14 +19807,26 @@ function pvEtgImprimerPlan(shop) {
     // tableau décalaient la ligne des noms dès qu'un parfum était multiplié ×N).
     const zoneDiv = function(etage, zone, cls) {
       const cap = _etgZoneCap(e, zone);
-      let cur = 0;
+      // MÊMES positions que l'écran (fix 2026-08-13, retour Fabien Mérignac : « ça ne
+      // correspond pas au plan ») : positions EFFECTIVES (cascade anti-chevauchement)
+      // + évacuation du débordement par le BOUT LIBRE (dec) — le papier relisait les
+      // posCm bruts → espace « libre » fantôme à gauche et blocs débordant sur le Puff.
+      const eff = _etgPositionsEffectives(e.id, etage, zone);
+      const finTot = eff.length ? eff[eff.length - 1].fin : 0;
+      const coteP = _etgPuffCote(e);
+      const puffLa = _etgZoneCap(e, 'puff') > 0;
+      const versGauche = (zone === 'liq' && puffLa && coteP === 'droite') || (zone === 'puff' && coteP === 'gauche');
+      const dec = versGauche ? Math.max(0, finTot - cap) : 0;
+      const min0 = Math.min(0, eff.length ? eff[0].deb - dec : 0);
+      let cur = min0;
       const cellules = [], grp = [];
-      _etgPlacements(e.id, etage, zone).forEach(function(pl) {
-        const deb = (typeof pl.posCm === 'number') ? pl.posCm * 10 : cur;
+      eff.forEach(function(x) {
+        const pl = x.p;
+        const deb = x.deb - dec;
         const gap = Math.max(0, deb - cur);
         if (gap > 5) { cellules.push({ libre: gap }); grp.push({ w: gap, label: '' }); }
         cur = Math.max(cur, deb);
-        const w = _etgLargeur(pl);
+        const w = x.larg;
         if (pl.type === 'gamme') {
           const g = baseLiq.find(function(x) { return x.id === pl.gammeId; });
           const coulM = g ? _mrqCouleur(g.marque) : '';
@@ -19828,7 +19840,7 @@ function pvEtgImprimerPlan(shop) {
         cur += w;
       });
       if (cap - cur > 5) { cellules.push({ libre: cap - cur }); grp.push({ w: cap - cur, label: '' }); }
-      const tot = Math.max(cap, cur);
+      const tot = Math.max(cap, cur) - min0; // min0 < 0 = débordement évacué hors étagère à gauche
       const pct = function(mm) { return ((mm / tot) * 100).toFixed(3) + '%'; };
       let rc = '', maxNom = 0;
       cellules.forEach(function(c) {
