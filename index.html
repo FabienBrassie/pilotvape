@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 18:43</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 18:53</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4377,7 +4377,7 @@ function estTesteur(g, p) {
 }
 // ── Lignes de travail malette (2026-08-03, demande Fabien : « les testeurs, lorsqu'ils
 // seront modifiés, dans À installer ») : chaque changement de malette crée une action
-// TESTEUR (1 étape par boutique) — INSTALLER / RETIRER / REMPLACER (retrait + ajout dans
+// TESTEUR (1 étape par boutique) — INSTALLER / RETIRER / REMPLACER / DEPLACER (retrait + ajout dans
 // la MÊME zone = un seul geste : le nouveau prend l'emplacement du sortant).
 function _testeurActionOuverte(filtre) {
   return actions.find(a => a.type === 'TESTEUR' && !a.annulee && !a.dateCloture && !a._archived && !_deletedIds.has(a.id) && filtre(a));
@@ -5211,7 +5211,7 @@ const ACTION_STEPS = {
                   { key: 'installe',  label: 'Installé en rayon', nat: 'cond', condKey: 'recu', condLabel: 'après réception' }],
   MISE_EN_PLACE: [{ key: 'monte',     label: 'Monté sur le mur', nat: 'imm' }],
   // 🧪 Changement de malette de testeurs (2026-08-03) : une seule étape par boutique —
-  // le libellé est spécialisé par getActionSteps selon testeurOp (INSTALLER/RETIRER/REMPLACER).
+  // le libellé est spécialisé par getActionSteps selon testeurOp (INSTALLER/RETIRER/REMPLACER/DEPLACER).
   TESTEUR:       [{ key: 'testeur_fait', label: 'Malette mise à jour', nat: 'imm' }],
   // Ordre canonique de la vie (Fabien, 2026-08-04) : imprimer → prix Swappy → poser
   // en rayon. Clés inchangées (coches préservées), seul l'ordre d'affichage change.
@@ -5826,6 +5826,7 @@ function getActionSteps(typeOrAction) {
       if (_tOp === 'INSTALLER') _tSt.label = 'Testeur installé dans la malette';
       else if (_tOp === 'RETIRER') _tSt.label = 'Testeur retiré de la malette';
       else if (_tOp === 'REMPLACER') _tSt.label = 'Ancien testeur retiré, nouveau installé';
+      else if (_tOp === 'DEPLACER') _tSt.label = 'Testeur déplacé au bon emplacement';
     }
   }
   // Commande gérée par l'admin (feature 2026-06-18) : la boutique ne commande pas. Le bon ordre
@@ -18464,15 +18465,38 @@ function testeurReorder(zoneKey, fromIdx, toIdx) {
   toIdx = Math.max(0, Math.min(toIdx, zList.length - 1));
   if (fromIdx === toIdx) return;
   const moved = zList.splice(fromIdx, 1)[0];
+  // Numéro PHYSIQUE actuel du déplacé (avant réécriture) — pour la ligne boutique.
+  const _ancienNum = _testeurNumDe(moved.t.id);
   zList.splice(toIdx, 0, moved);
   const _now = new Date().toISOString();
   // Réécrit l'ordre 0..n-1 de la zone ; _ts/_adminTs frais → l'ordre se propage par merge.
   zList.forEach((e, i) => {
     if (e.t.ordre !== i) { e.t.ordre = i; e.t._ts = _now; e.t._adminTs = _now; }
   });
+  // ── Lignes de travail (2026-08-13, retour Fabien : « j'ai bougé le 12 au 10 et
+  // aucune indication sur le dashboard ») ──
+  // 1) Toute ligne TESTEUR ouverte de la zone suit son parfum : son testeurOrdre est
+  //    réaligné — ou posé s'il manquait (INSTALLER simple) : la carte affiche alors le
+  //    numéro cible via LE plan — jamais un numéro figé.
+  zList.forEach((e, i) => {
+    const aOuv = _testeurActionOuverte(x => x.produitId === e.g.id && x.produitParfumId === e.p.id && x.testeurZone === zoneKey);
+    if (aOuv && aOuv.testeurOrdre !== i) { aOuv.testeurOrdre = i; aOuv._ts = _now; }
+  });
+  // 2) Le parfum DÉPLACÉ : s'il n'a pas déjà une ligne ouverte (installation en cours →
+  //    la boutique posera directement au bon endroit), on crée la ligne « Déplacer ».
+  const _aMoved = _testeurActionOuverte(x => x.produitId === moved.g.id && x.produitParfumId === moved.p.id);
+  if (!_aMoved) {
+    _testeurCreerAction(moved.g, moved.p, 'DEPLACER', { testeurZone: zoneKey, testeurOrdre: toIdx, testeurAncienNum: _ancienNum });
+  } else if (_aMoved.testeurOp === 'DEPLACER' && !_testeurActionCochee(_aMoved)) {
+    // Re-déplacé avant que les boutiques n'aient bougé : la ligne suit (testeurOrdre déjà
+    // réaligné au 1). Revenu à son emplacement d'origine → la ligne n'a plus lieu d'être.
+    const _numApres = _testeurNumDe(moved.t.id);
+    if (typeof _aMoved.testeurAncienNum === 'number' && _numApres === _aMoved.testeurAncienNum) { _aMoved.annulee = true; _aMoved._ts = _now; }
+  }
   logAction('Testeurs réordonnés', (TESTEUR_ZONE_META[zoneKey] ? TESTEUR_ZONE_META[zoneKey].label : zoneKey) + ' : ' + (moved.p.n || '?') + ' → emplacement ' + (toIdx + 1));
   saveData();
   renderLiqAll();
+  try { if (typeof renderDashboard === 'function') renderDashboard(); } catch (e) {}
 }
 function pvTesteurDragStart(ev, zone, idx) {
   if (!isAdmin()) { ev.preventDefault(); return; }
@@ -18693,6 +18717,10 @@ function _renderTesteurActionCard(a, fShop) {
   if (a.testeurOp === 'REMPLACER') libelle = `Remplacer le testeur <b>${a.testeurAncienNom || '?'}</b>${a.testeurAncienMarque ? ` <span style="color:#64748b; font-size:9.5px;">(${a.testeurAncienMarque})</span>` : ''} par <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
   else if (a.testeurOp === 'RETIRER' && typeof a.testeurRemiseEmpl === 'number') libelle = `Remettre le testeur <b>${nom}</b> à son emplacement <b>${String(a.testeurRemiseEmpl).padStart(2, '0')}</b> <span style="color:#64748b; font-size:9.5px;">(fin d'évènementiel — ${marque} ${g ? g.gamme || '' : ''})</span>`;
   else if (a.testeurOp === 'RETIRER') libelle = `Retirer le testeur <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
+  else if (a.testeurOp === 'DEPLACER') {
+    const _numCible = (_zlCard && typeof a.testeurOrdre === 'number') ? String(_zlCard.start + a.testeurOrdre).padStart(2, '0') : '?';
+    libelle = `Déplacer le testeur <b>${nom}</b> de l'emplacement <b>${typeof a.testeurAncienNum === 'number' ? String(a.testeurAncienNum).padStart(2, '0') : '?'}</b> à l'emplacement <b>${_numCible}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''} — les testeurs entre les deux glissent d'un cran)</span>`;
+  }
   else libelle = `Installer le testeur <b>${nom}</b> <span style="color:#64748b; font-size:9.5px;">(${marque} ${g ? g.gamme || '' : ''})</span>`;
   const shs = fShop ? [fShop] : SHOPS;
   const coches = shs.map(sh => {
