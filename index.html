@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-10 16:57</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-13 16:54</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4148,7 +4148,10 @@ function _etgCellsGamme(pl) {
 function _etgDixDe(g, p, shop) {
   const k = _etgClefParfum(p);
   if (!k) return null;
-  const soeurs = _etgFreresDeGamme(g).filter(x => x.format === '10mL' || x.format === '10mL_SDN');
+  // 🔟 devant = 10mL CLASSIQUES uniquement (Fabien 2026-08-13) : les Sels de Nicotine
+  // (10mL_SDN) ne vont jamais « devant » — ils restent des gammes à part entière,
+  // à placer où on veut sur le plan.
+  const soeurs = _etgFreresDeGamme(g).filter(x => x.format === '10mL');
   for (const g10 of soeurs) {
     const p10 = (g10.parfums || []).find(x => x.id && x.s !== 'SORTI' && _etgClefParfum(x) === k);
     if (p10 && _etgParfumSurPlan(g10, p10, shop)) return { g10: g10, p10: p10 };
@@ -4163,7 +4166,10 @@ function _etgGammesCouvertes(pl) {
   if (!anc) return [];
   const ids = pl.multiFmt ? _etgFreresDeGamme(anc).map(g => g.id) : [anc.id];
   if (pl.devant10 && Object.keys(pl.devant10).some(k => pl.devant10[k])) {
-    _etgFreresDeGamme(anc).filter(x => x.format === '10mL' || x.format === '10mL_SDN').forEach(g => { if (!ids.includes(g.id)) ids.push(g.id); });
+    // Seuls les 10mL CLASSIQUES sont représentés par les « devant » — les SdN ne sont
+    // JAMAIS couverts par un devant : ils restent disponibles dans le tiroir « à placer »
+    // (Fabien 2026-08-13 : les SdN disparaissaient du choix des liquides à placer).
+    _etgFreresDeGamme(anc).filter(x => x.format === '10mL').forEach(g => { if (!ids.includes(g.id)) ids.push(g.id); });
   }
   return ids;
 }
