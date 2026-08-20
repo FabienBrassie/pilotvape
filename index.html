@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-20 17:42</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-20 18:29</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -1414,15 +1414,38 @@ const STATUT_HINTS = {
   FIN_DE_VIE: "Le produit part : on prépare sa sortie, il s'écoule."
 };
 function statutTitleAttr(s) { return STATUT_HINTS[s] ? ' title="' + STATUT_HINTS[s].replace(/"/g, '&quot;') + '"' : ''; }
-const STATUT_ARRETE_COULEUR = '#a855f7';
+// Identité visuelle d'ARRÊTÉ (choix Fabien 2026-08-20, après la capture du mur) :
+// base ARDOISE neutre + PASTILLE CERCLÉE DE ROUGE. L'aplat rouge reste réservé à
+// « À sortir » : ici c'est le CONTOUR qui est rouge, jamais le fond.
+const STATUT_ARRETE_COULEUR = '#94a3b8';  // base neutre : barre de carte, teinte de ligne, tri
+const STATUT_ARRETE_ANNEAU  = '#ef4444';  // l'anneau rouge — LE signal
+const STATUT_ARRETE_FOND    = '#1e293b';
+const STATUT_ARRETE_TEXTE   = '#fca5a5';
+// LA pastille « arrêté » — une seule vérité pour toutes les surfaces (règle 8).
+// Style CSS d'une puce de statut : ARRÊTÉ = fond sombre CERCLÉ DE ROUGE ; les autres statuts
+// gardent leur couleur en fond léger. Sert partout où une puce de statut est fabriquée à la main.
+function statutChipCss(sv, col, taille, radius) {
+  if (sv === 'ARRETE') {
+    return 'font-size:' + taille + '; padding:0 4px; background:' + STATUT_ARRETE_FOND + '; color:' + STATUT_ARRETE_TEXTE
+      + '; border:1.5px solid ' + STATUT_ARRETE_ANNEAU + '; border-radius:9px; font-weight:800; white-space:nowrap;';
+  }
+  return 'font-size:' + taille + '; padding:0 4px; background:' + col + '22; color:' + col
+    + '; border:1px solid ' + col + '70; border-radius:' + (radius || '3px') + '; font-weight:700; white-space:nowrap;';
+}
+function pastilleArreteHtml(txt, taille) {
+  return '<span style="font-size:' + (taille || '8px') + '; font-weight:800; color:' + STATUT_ARRETE_TEXTE
+    + '; background:' + STATUT_ARRETE_FOND + '; padding:0 5px; border:1.5px solid ' + STATUT_ARRETE_ANNEAU
+    + '; border-radius:9px; white-space:nowrap; letter-spacing:0.2px; display:inline-block;"'
+    + ' title="Arrêté en centrale — plus commandable, on écoule le stock">' + (txt || '🛑 Arrêté') + '</span>';
+}
 // LA raison + le badge affichés dans « Besoins à combler », quel que soit le type de produit
 function besoinRaisonDe(sv) {
-  if (sv === 'ARRETE') return { txt: 'Arrêté en centrale — trouver un remplaçant', badge: '🛑 ARRÊTÉ', col: '#a855f7' };
+  if (sv === 'ARRETE') return { txt: 'Arrêté en centrale — trouver un remplaçant', badge: '🛑 ARRÊTÉ', col: '#ef4444' };
   if (sv === 'FIN_DE_VIE') return { txt: 'Fin de vie — trouver un remplaçant', badge: 'FIN DE VIE', col: '#f59e0b' };
   return { txt: 'À remplacer — trouver un remplaçant', badge: 'À REMPLACER', col: '#ef4444' };
 }
 function badgeStatutEcoulementHtml(sv) {
-  if (sv === 'ARRETE') return '<span style="font-size:9px; font-weight:700; padding:1px 6px; background:' + STATUT_ARRETE_COULEUR + '25; color:#d8b4fe; border:1px solid ' + STATUT_ARRETE_COULEUR + '60; border-radius:3px; white-space:nowrap;" title="Arrêté en centrale — plus commandable, on écoule le stock">🛑 Arrêté</span>';
+  if (sv === 'ARRETE') return pastilleArreteHtml('🛑 Arrêté', '9px');
   if (sv === 'FIN_DE_VIE') return '<span style="font-size:9px; font-weight:700; padding:1px 6px; background:#78350f40; color:#fbbf24; border:1px solid #f59e0b50; border-radius:3px; white-space:nowrap;">☠️ Fin de vie</span>';
   return '';
 }
@@ -16461,7 +16484,7 @@ function renderKitCard(k) {
 }
 
 function kitStatusColorMap(sv) {
-  return { DANS_OFFRE:'#64748b', A_RENTRER:'#22c55e', EN_ATTENTE:'#eab308', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', ARRETE:'#a855f7', A_SORTIR:'#ef4444', REPRISE:'#0ea5e9', SORTI:'#475569' }[sv] || '#64748b';
+  return { DANS_OFFRE:'#64748b', A_RENTRER:'#22c55e', EN_ATTENTE:'#eab308', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', ARRETE:'#94a3b8', A_SORTIR:'#ef4444', REPRISE:'#0ea5e9', SORTI:'#475569' }[sv] || '#64748b';
 }
 
 function renderRoleSelect(k) {
@@ -16520,7 +16543,7 @@ function renderKitMiniCard(k, showControls, large) {
   const nameSize = large ? '14px' : '11px';
   const priceSize = large ? '12px' : '10px';
   const margeSize = large ? '12px' : '10px';
-  const sortantBg = k.statutVie === 'A_SORTIR' ? ' background:color-mix(in srgb, #ef4444 8%, transparent);' : (k.statutVie === 'ARRETE' ? ' background:color-mix(in srgb, #a855f7 12%, transparent);' : (k.statutVie === 'FIN_DE_VIE' ? ' background:color-mix(in srgb, #f59e0b 10%, transparent);' : ''));
+  const sortantBg = k.statutVie === 'A_SORTIR' ? ' background:color-mix(in srgb, #ef4444 8%, transparent);' : (k.statutVie === 'ARRETE' ? ' background:color-mix(in srgb, #94a3b8 10%, transparent);' : (k.statutVie === 'FIN_DE_VIE' ? ' background:color-mix(in srgb, #f59e0b 10%, transparent);' : ''));
   const isEnAttente = k.statutVie === 'EN_ATTENTE';
   const enAttenteStyle = isEnAttente ? ' opacity:0.55; filter:saturate(0.55);' : '';
   const priceChips = (typeof renderKitPriceHistoryChips === 'function') ? renderKitPriceHistoryChips(k, large ? 'md' : 'sm') : '';
@@ -16537,7 +16560,7 @@ function renderKitMiniCard(k, showControls, large) {
         <span style="font-size:${priceSize}; color:#94a3b8; white-space:nowrap;">€${k.pa.toFixed(0)} → €${k.pv.toFixed(0)}</span>
         <span style="font-size:${margeSize}; font-weight:600; color:#22c55e; white-space:nowrap;">+€${k.marge.toFixed(0)}</span>
         ${isCaseOverride ? '<span style="font-size:8px; padding:0 3px; background:#ef444420; color:#ef4444; border-radius:2px;">forcé</span>' : ''}
-        ${svLbl && !isEnAttente ? `<span style="font-size:${large ? '10px' : '8px'}; font-weight:600; color:${sc};">${svLbl}</span>` : ''}
+        ${svLbl && !isEnAttente ? (k.statutVie === 'ARRETE' ? pastilleArreteHtml(svLbl, large ? '10px' : '8px') : `<span style="font-size:${large ? '10px' : '8px'}; font-weight:600; color:${sc};">${svLbl}</span>`) : ''}
         ${(() => {
           const _sub = computeSubstitutionPair(k.id);
           if (!_sub) return '';
@@ -16732,7 +16755,7 @@ function renderStatutMultiSelect(filterName) {
     ? ['DANS_OFFRE','A_RENTRER','A_REMPLACER','FIN_DE_VIE','ARRETE','A_SORTIR','REPRISE','SORTI']
     : ['DANS_OFFRE','A_RENTRER','EN_ATTENTE','A_REMPLACER','FIN_DE_VIE','ARRETE','A_SORTIR','REPRISE','SORTI'];
   const labels = { DANS_OFFRE:"Dans l'offre", A_RENTRER:"À rentrer", EN_ATTENTE:"En attente", A_REMPLACER:"À remplacer", FIN_DE_VIE:"Fin de vie", ARRETE:"🛑 Arrêté", A_SORTIR:"À sortir", REPRISE:"📦 En reprise", SORTI:"Sorti" };
-  const statusColors = { DANS_OFFRE:'#22c55e', A_RENTRER:'#3b82f6', EN_ATTENTE:'#6366f1', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', ARRETE:'#a855f7', A_SORTIR:'#ef4444', REPRISE:'#0ea5e9', SORTI:'#64748b' };
+  const statusColors = { DANS_OFFRE:'#22c55e', A_RENTRER:'#3b82f6', EN_ATTENTE:'#6366f1', A_REMPLACER:'#f97316', FIN_DE_VIE:'#f59e0b', ARRETE:'#94a3b8', A_SORTIR:'#ef4444', REPRISE:'#0ea5e9', SORTI:'#64748b' };
 
   const tags = arr.length === 0
     ? '<span style="color:#94a3b8; font-size:10px;">Tous statuts</span>'
@@ -16909,8 +16932,10 @@ function renderKits() {
       const dimStyle = isEnAttente ? ' opacity:0.5; filter:saturate(0.5);' : '';
       const svCellStyle = isEnAttente
         ? `font-size:9px; color:${sc}; font-weight:700; background:#0f172a; border:1px solid ${sc}80; padding:1px 4px; border-radius:3px; text-align:center;`
-        : `font-size:9px; color:${sc}; font-weight:600;`;
-      const rowBg = k.statutVie === "A_SORTIR" ? " background:color-mix(in srgb, #ef4444 8%, transparent);" : (k.statutVie === "ARRETE" ? " background:color-mix(in srgb, #a855f7 12%, transparent);" : (k.statutVie === "FIN_DE_VIE" ? " background:color-mix(in srgb, #f59e0b 10%, transparent);" : ""));
+        : (k.statutVie === 'ARRETE'
+            ? `font-size:9px; font-weight:800; color:${STATUT_ARRETE_TEXTE}; background:${STATUT_ARRETE_FOND}; border:1.5px solid ${STATUT_ARRETE_ANNEAU}; padding:0 4px; border-radius:9px; text-align:center;`
+            : `font-size:9px; color:${sc}; font-weight:600;`);
+      const rowBg = k.statutVie === "A_SORTIR" ? " background:color-mix(in srgb, #ef4444 8%, transparent);" : (k.statutVie === "ARRETE" ? " background:color-mix(in srgb, #94a3b8 10%, transparent);" : (k.statutVie === "FIN_DE_VIE" ? " background:color-mix(in srgb, #f59e0b 10%, transparent);" : ""));
       const excluBadgeInline = k.exclusifCigusto
         ? ` <span style="font-size:8px; padding:0 4px; background:#64748b30; color:#cbd5e1; border:1px solid #64748b; border-radius:2px; font-weight:700; letter-spacing:0.5px; vertical-align:middle;" title="Exclusif Cigusto — pas relevable chez les concurrents">EXCLU</span>`
         : '';
@@ -17207,7 +17232,7 @@ function renderKits() {
           const _arretes = finDeVie.filter(k => k.statutVie === 'ARRETE');
           if (finDeVie.length > 0 && aSortir.length === 0) {
             // Un ARRÊTÉ prime sur un fin de vie : c'est le plus urgent à repourvoir.
-            if (_arretes.length > 0) { sortantBannerLabel = '🛑 Arrêté'; sortantBannerColor = '#a855f7'; }
+            if (_arretes.length > 0) { sortantBannerLabel = '🛑 Arrêté'; sortantBannerColor = '#ef4444'; }
             else { sortantBannerLabel = '⏳ Fin de vie'; sortantBannerColor = '#f59e0b'; }
           }
 
@@ -18094,7 +18119,7 @@ function renderLiqGammeCard(g, showDetail) {
   });
   const isExpanded = isLiqExpanded('liq-detail-' + g.id);
   const margePct = g.pv > 0 ? ((g.marge / g.pv) * 100).toFixed(0) : '—';
-  const sortantBg = g.statutVie === 'A_SORTIR' ? ' background:color-mix(in srgb, #ef4444 6%, transparent);' : (g.statutVie === 'ARRETE' ? ' background:color-mix(in srgb, #a855f7 10%, transparent);' : (g.statutVie === 'FIN_DE_VIE' ? ' background:color-mix(in srgb, #f59e0b 8%, transparent);' : ''));
+  const sortantBg = g.statutVie === 'A_SORTIR' ? ' background:color-mix(in srgb, #ef4444 6%, transparent);' : (g.statutVie === 'ARRETE' ? ' background:color-mix(in srgb, #94a3b8 9%, transparent);' : (g.statutVie === 'FIN_DE_VIE' ? ' background:color-mix(in srgb, #f59e0b 8%, transparent);' : ''));
 
   const expandedBorder = isExpanded ? ' border:1px solid #475569; border-radius:4px; margin-bottom:4px; box-shadow:0 0 6px #47556930;' : '';
   let html = `<div style="overflow:hidden;${sortantBg}${expandedBorder}" data-liq-id="${g.id}">`;
@@ -18114,12 +18139,12 @@ function renderLiqGammeCard(g, showDetail) {
     var _nsc = liqGammeStatusColor(_ns);
     if (g.statutVie === _ns) {
       // Gamme entière dans ce statut
-      _cardParfumBadge += ' <span style="font-size:7px; padding:0 3px; background:' + _nsc + '22; color:' + _nsc + '; border:1px solid ' + _nsc + '70; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;">gamme ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
+      _cardParfumBadge += ' <span style="' + statutChipCss(_ns, _nsc, '7px', '2px') + ' flex-shrink:0;">gamme ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
       return;
     }
     var _nsP = (g.parfums || []).filter(function(p) { return p.s === _ns; });
     if (_nsP.length > 0) {
-      _cardParfumBadge += ' <span style="font-size:7px; padding:0 3px; background:' + _nsc + '22; color:' + _nsc + '; border:1px solid ' + _nsc + '70; border-radius:2px; font-weight:700; white-space:nowrap; flex-shrink:0;">' + _nsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
+      _cardParfumBadge += ' <span style="' + statutChipCss(_ns, _nsc, '7px', '2px') + ' flex-shrink:0;">' + _nsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_ns]||_ns).toLowerCase() + '</span>';
     }
   });
   // 🧪 Malette de testeurs (2026-08-03) : nombre de parfums de cette gamme dans la malette,
@@ -19497,7 +19522,7 @@ function _etgVieChipsHtml(vie) {
   if (nR) chips.push(chip('↑' + (vie.rentrer.size > 1 ? vie.rentrer.size : ''), '#22c55e', 'À RENTRER chez cette boutique' + (vie.rentrer.size ? ' — ' + vie.rentrer.size + ' parfum(s), liseré vert sur les flacons visés' : '')));
   if (nS) chips.push(chip('↓' + (vie.sortir.size > 1 ? vie.sortir.size : ''), '#ef4444', 'À SORTIR chez cette boutique' + (vie.sortir.size ? ' — ' + vie.sortir.size + ' parfum(s)' : '')));
   const nA = (vie.arrete ? vie.arrete.size : 0) + (vie.arreteGamme ? 1 : 0);
-  if (nA) chips.push(chip('🛑' + (vie.arrete.size > 1 ? vie.arrete.size : ''), '#a855f7', 'ARRÊTÉ en centrale — plus commandable, on écoule le stock' + (vie.arrete.size ? ' — ' + vie.arrete.size + ' parfum(s)' : '')));
+  if (nA) chips.push('<span style="font-size:7px; font-weight:800; color:' + STATUT_ARRETE_TEXTE + '; background:' + STATUT_ARRETE_FOND + '; border:1.5px solid ' + STATUT_ARRETE_ANNEAU + '; border-radius:6px; padding:0 3px; white-space:nowrap;" title="ARRÊTÉ en centrale — plus commandable, on écoule le stock' + (vie.arrete.size ? ' — ' + vie.arrete.size + ' parfum(s), contour rouge en pointillés sur les flacons visés' : '') + '">🛑' + (vie.arrete.size > 1 ? vie.arrete.size : '') + '</span>');
   Object.keys(vie.ops).forEach(function(t) {
     const m = OP_TYPE_META[t];
     if (m) chips.push(chip(_ETG_VIE_COURT[t] || t, m.color, 'OP ' + m.label + ' en cours' + (vie.ops[t] > 1 ? ' (×' + vie.ops[t] + ')' : '')));
@@ -19519,7 +19544,12 @@ function _etgFlaconHtml(nom, pcol, opts) {
   const wpx = opts.wpx || _etgPx(32.5);
   const fond = opts.fill || pcol; // intérieur : couleur de MARQUE en opacité faible ; cadre/bouchon : PROFIL
   // Liseré : la 🔎 recherche (jaune) prime ; sinon la vie commerciale (🧭 2026-08-08)
-  const hl = opts.hl ? 'box-shadow:0 0 0 2px #fde047; z-index:1;' : (opts.vieCol ? 'box-shadow:0 0 0 2px ' + opts.vieCol + '; z-index:1;' : '');
+  const hl = opts.hl ? 'box-shadow:0 0 0 2px #fde047; z-index:1;'
+    : (opts.vieCol
+        ? (opts.vieDash
+            ? 'outline:2px dashed ' + opts.vieCol + '; outline-offset:-1px; z-index:1;'  // 🛑 arrêté = contour EN POINTILLÉS
+            : 'box-shadow:0 0 0 2px ' + opts.vieCol + '; z-index:1;')
+        : '');
   return `<div ${opts.click || ''} style="width:${wpx - 2}px; height:${h}px; margin:0 1px; flex-shrink:0; position:relative; border-radius:4px 4px 1px 1px; background:linear-gradient(180deg, ${pcol} 0, ${pcol} ${h >= 50 ? 7 : 4}px, ${fond}2e ${h >= 50 ? 7 : 4}px); border:1px solid ${pcol}88; ${hl} ${opts.click ? 'cursor:pointer;' : ''} overflow:hidden;" title="${(opts.title || nom || '').replace(/"/g, '&quot;')}">
     <span style="position:absolute; inset:${h >= 50 ? 8 : 5}px 0 1px; display:flex; align-items:center; justify-content:center; writing-mode:vertical-rl; transform:rotate(180deg); font-size:${h < 40 ? 6 : (wpx >= 16 ? 8 : 7)}px; line-height:1; color:#e2e8f0; white-space:nowrap; overflow:hidden;">${nom || ''}</span>
     ${opts.nb > 1 ? '<span style="position:absolute; top:0; right:0; font-size:6px; font-weight:800; color:#fbbf24; background:#0f172acc; border-radius:0 0 0 3px; padding:0 2px;">×' + opts.nb + '</span>' : ''}
@@ -19566,11 +19596,11 @@ function _etgRenderGroupe(pl, admin, ctx, leftPx) {
         const click = admin ? `onclick="pvEtgMenuParfum(event,'${pl.id}','${c.p.id}','${c.g.id}')"` : '';
         // 🧭 liseré vie (2026-08-08) : la ligne vise CE parfum précis — à rentrer vert,
         // à sortir rouge, OP à sa couleur officielle. La 🔎 recherche (jaune) prime.
-        let _vieCol = '', _vieTxt = '';
+        let _vieCol = '', _vieTxt = '', _vieDash = false;
         if (_vie) {
           if (_vie.rentrer.has(c.p.id)) { _vieCol = '#22c55e'; _vieTxt = 'À RENTRER chez cette boutique'; }
           else if (_vie.sortir.has(c.p.id)) { _vieCol = '#ef4444'; _vieTxt = 'À SORTIR chez cette boutique'; }
-          else if ((_vie.arrete && _vie.arrete.has(c.p.id)) || (_vie.arreteGamme && c.g && c.g.statutVie === 'ARRETE')) { _vieCol = '#a855f7'; _vieTxt = '🛑 ARRÊTÉ en centrale — plus commandable, on écoule le stock'; }
+          else if ((_vie.arrete && _vie.arrete.has(c.p.id)) || (_vie.arreteGamme && c.g && c.g.statutVie === 'ARRETE')) { _vieCol = STATUT_ARRETE_ANNEAU; _vieDash = true; _vieTxt = '🛑 ARRÊTÉ en centrale — plus commandable, on écoule le stock (contour en POINTILLÉS ; le contour rouge PLEIN, lui, veut dire « à sortir »)'; }
           else if (_vie.opParfums[c.p.id]) {
             const _t1 = Array.from(_vie.opParfums[c.p.id])[0];
             const _m1 = OP_TYPE_META[_t1];
@@ -19582,7 +19612,7 @@ function _etgRenderGroupe(pl, admin, ctx, leftPx) {
         const _finPx = Math.round(_cumMm * _etgScale);
         const _wCell = Math.max(3, _finPx - _cumPx);
         _cumPx = _finPx;
-        cells += _etgFlaconHtml(c.p.n || '', pcol, { click: click, title: t + (c.devant ? ' · 10mL devant' : ''), hl: hl, vieCol: _vieCol, wpx: _wCell, h: _etgFlaconHpx(c.fmt), nb: c.nb, devant: c.devant, fill: mcol });
+        cells += _etgFlaconHtml(c.p.n || '', pcol, { click: click, title: t + (c.devant ? ' · 10mL devant' : ''), hl: hl, vieCol: _vieCol, vieDash: _vieDash, wpx: _wCell, h: _etgFlaconHpx(c.fmt), nb: c.nb, devant: c.devant, fill: mcol });
       });
       }
       label = (pl.multiFmt ? '🧬 ' : '') + _etgNomGamme(g) + ' <span style="opacity:0.6; font-weight:400;">' + (pl.multiFmt ? 'formats groupés' : (LIQ_FORMAT_LABELS[g.format] || '')) + '</span>';
@@ -19774,7 +19804,7 @@ function renderVueEtageres() {
     Object.keys(v.ops).forEach(function(t) { _vieCounts[t] = (_vieCounts[t] || 0) + 1; });
   });
   if (_etgVieFiltre && !_vieCounts[_etgVieFiltre]) _etgVieFiltre = ''; // filtre orphelin (données changées) → on l'enlève
-  const _vieLegendDefs = [['RENTRER', '↑ À rentrer', '#22c55e'], ['SORTIR', '↓ À sortir', '#ef4444'], ['ARRETE', '🛑 Arrêté', '#a855f7']]
+  const _vieLegendDefs = [['RENTRER', '↑ À rentrer', '#22c55e'], ['SORTIR', '↓ À sortir', '#ef4444'], ['ARRETE', '🛑 Arrêté', '#ef4444']]
     .concat(OP_TYPES.map(function(t) { return [t.key, (_ETG_VIE_COURT[t.key] === '🆕' ? '🆕 ' : '') + t.label, t.color]; }));
   const _vieLegendHtml = _vieLegendDefs.filter(function(d) { return _vieCounts[d[0]]; }).map(function(d) {
     const actif = _etgVieFiltre === d[0];
@@ -20473,12 +20503,12 @@ function renderLiqAll() {
           _listNotable.forEach(function(_lns) {
             var _lnsc = liqGammeStatusColor(_lns);
             if (g.statutVie === _lns) {
-              _parfumFilterBadge += ' <span style="font-size:8px; padding:0 4px; background:' + _lnsc + '22; color:' + _lnsc + '; border:1px solid ' + _lnsc + '70; border-radius:3px; font-weight:700; white-space:nowrap;">gamme ' + (LIQ_GAMME_STATUT_LABELS[_lns]||_lns).toLowerCase() + '</span>';
+              _parfumFilterBadge += ' <span style="' + statutChipCss(_lns, _lnsc, '8px') + '">gamme ' + (LIQ_GAMME_STATUT_LABELS[_lns]||_lns).toLowerCase() + '</span>';
               return;
             }
             var _lnsP = (g.parfums || []).filter(function(p) { return p.s === _lns; });
             if (_lnsP.length > 0) {
-              _parfumFilterBadge += ' <span style="font-size:8px; padding:0 4px; background:' + _lnsc + '22; color:' + _lnsc + '; border:1px solid ' + _lnsc + '70; border-radius:3px; font-weight:700; white-space:nowrap;">' + _lnsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_lns]||_lns).toLowerCase() + '</span>';
+              _parfumFilterBadge += ' <span style="' + statutChipCss(_lns, _lnsc, '8px') + '">' + _lnsP.length + 'p ' + (LIQ_GAMME_STATUT_LABELS[_lns]||_lns).toLowerCase() + '</span>';
             }
           });
           html += `<div style="${rowStyle}" onclick="toggleLiqSection('liq-detail-${g.id}');">
@@ -20494,7 +20524,7 @@ function renderLiqAll() {
             <div style="font-size:9px; color:#94a3b8; text-align:center;">${(g.parfums||[]).filter(p=>p.s!=='SORTI').length}</div>
             <div style="font-size:8px; text-align:center; font-weight:700; color:${_profColor};">${g.profilChoisi ? PROFIL_SHORT[g.profilChoisi] : '—'}</div>
             <div style="font-size:9px; color:${_roleColor};" title="${_isRoleOverride ? 'Override — barème: '+(LIQ_ROLE_LABELS[_roleCalcLive2]||'?') : ''}">${g.roleChoisi === 'COUP' ? '<span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;">⚡ One-shot</span>' : (roleLbl + (_isRoleOverride?'*':''))}</div>
-            <div style="font-size:9px; color:${sc}; font-weight:600;">${LIQ_GAMME_STATUT_LABELS[g.statutVie]||g.statutVie}</div>
+            <div style="${g.statutVie === 'ARRETE' ? statutChipCss('ARRETE', sc, '9px') + ' text-align:center;' : `font-size:9px; color:${sc}; font-weight:600;`}">${LIQ_GAMME_STATUT_LABELS[g.statutVie]||g.statutVie}</div>
           </div>`;
 
           // Inline detail panel if expanded
@@ -20735,7 +20765,7 @@ function renderLiqAll() {
             <div style="font-size:9px; color:#94a3b8; text-align:center;">${(g.parfums||[]).filter(p=>p.s!=='SORTI').length}</div>
             <div style="font-size:8px; text-align:center; font-weight:700; color:${_profColor2};">${g.profilChoisi ? PROFIL_SHORT[g.profilChoisi] : '—'}</div>
             <div style="font-size:9px; color:${_roleColor};" title="${_isRoleOverride ? 'Override — barème: '+(LIQ_ROLE_LABELS[_roleCalcLive3]||'?') : ''}">${g.roleChoisi === 'COUP' ? '<span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;">⚡ One-shot</span>' : (roleLbl + (_isRoleOverride?'*':''))}</div>
-            <div style="font-size:9px; color:${sc}; font-weight:600;">${LIQ_GAMME_STATUT_LABELS[g.statutVie]||g.statutVie}</div>
+            <div style="${g.statutVie === 'ARRETE' ? statutChipCss('ARRETE', sc, '9px') + ' text-align:center;' : `font-size:9px; color:${sc}; font-weight:600;`}">${LIQ_GAMME_STATUT_LABELS[g.statutVie]||g.statutVie}</div>
           </div>`;
 
           if (isLiqExpanded('liq-detail-' + g.id)) {
@@ -24476,7 +24506,7 @@ function renderDashboard() {
       color = '#ef4444';
     } else if (k.statutVie === 'ARRETE') {
       raison = 'Arrêté en centrale — plus commandable, trouver un remplaçant';
-      color = '#a855f7';
+      color = '#ef4444';
     } else if (k.statutVie === 'FIN_DE_VIE') {
       raison = 'Fin de vie';
       color = '#f59e0b';
@@ -35358,8 +35388,10 @@ function renderBasePD() {
     const dimStyle = isEnAttente ? ' opacity:0.5; filter:saturate(0.5);' : '';
     const svCellStyle = isEnAttente
       ? 'font-size:9px; color:' + sc + '; font-weight:700; background:#0f172a; border:1px solid ' + sc + '80; padding:1px 4px; border-radius:3px; text-align:center;'
-      : 'font-size:9px; color:' + sc + '; font-weight:600;';
-    const rowBg = pd.statutVie === 'A_SORTIR' ? ' background:color-mix(in srgb, #ef4444 8%, transparent);' : (pd.statutVie === 'ARRETE' ? ' background:color-mix(in srgb, #a855f7 12%, transparent);' : (pd.statutVie === 'FIN_DE_VIE' ? ' background:color-mix(in srgb, #f59e0b 10%, transparent);' : ''));
+      : (pd.statutVie === 'ARRETE'
+          ? 'font-size:9px; font-weight:800; color:' + STATUT_ARRETE_TEXTE + '; background:' + STATUT_ARRETE_FOND + '; border:1.5px solid ' + STATUT_ARRETE_ANNEAU + '; padding:0 4px; border-radius:9px; text-align:center;'
+          : 'font-size:9px; color:' + sc + '; font-weight:600;');
+    const rowBg = pd.statutVie === 'A_SORTIR' ? ' background:color-mix(in srgb, #ef4444 8%, transparent);' : (pd.statutVie === 'ARRETE' ? ' background:color-mix(in srgb, #94a3b8 10%, transparent);' : (pd.statutVie === 'FIN_DE_VIE' ? ' background:color-mix(in srgb, #f59e0b 10%, transparent);' : ''));
     const oneShotBadge = pd.oneShot
       ? ' <span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;" title="One-shot">⚡ One-shot</span>'
       : '';
