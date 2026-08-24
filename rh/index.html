@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-08-24 16:58 — 🍽️ Tolérance de pause : un dépassement de MOINS DE 3 MINUTES est désormais sans objet — il n'est plus déduit des heures (plus de bloc rouge sur le planning) et ne sort plus nulle part : récap paie, texte comptable, CSV, Journal RH, badge de la semaine, marqueurs des vues Mois / 3 boutiques. Il reste visible, marqué « toléré », dans 🍽️ Écarts de pause et dans Mon espace du salarié — la vérité du pointage est conservée, c'est juste la paperasse qui disparaît. À partir de 3 min, rien ne change. Seuil unique : PAUSE_TOLERANCE_MIN. -->
 <!-- v 2026-08-24 16:01 — 🚫 ABSENCE INJUSTIFIÉE : nouveau type d'absence (ni congé, ni maladie, ni école) — le salarié devait travailler, il n'est pas venu et n'a pas de justificatif. Se déclare dans 🏖 Absences, au clic sur le bandeau événements, ou depuis le 📒 Journal RH (type « Absence injustifiée », qui crée la vraie absence du jour). Le salarié disparaît du planning ce jour-là, les heures prévues ne sont NI travaillées NI payées : elles sortent du décompte de la semaine (badge rouge 🚫), du récap paie, du CSV, du texte comptable et du bilan annuel, toujours avec la mention « non rémunéré ». Un simple retard reste un retard (Journal RH, en minutes). Bouton « 🤒 justifié » pour requalifier en maladie/congé si le justificatif arrive après coup. -->
 <!-- v 2026-08-11 16:38 — Présence : les ABSENCES (maladie, congé accepté, école) priment désormais sur les exceptions du jour — une maladie déclarée efface bien les blocs même si la journée avait été modifiée à la main (ou portait un retard / une pause pointée). Pour faire revenir quelqu'un de marqué malade : raccourcir la maladie, pas redessiner par-dessus. -->
 <!-- v 2026-08-11 16:32 — Maladies : la ligne « ➕ Déclarer / ajouter une absence » (congé, maladie, école…) est remontée EN TÊTE du panneau 🏖 Absences, visible sur tous les onglets (elle était enterrée en bas de l'Historique) ; et le COMPTE BOUTIQUE peut désormais déclarer un arrêt maladie depuis 📋 Demandes (part en validation chez l'admin, badge « 🏬 déclaré par la boutique »). -->
@@ -3588,14 +3589,14 @@ function renderHSPanel(){
     const dm=pauseDepassMin(rec);
     h+='<div class="small">Pause pointée : <b>'+fmtH(rec.dep)+' → '+fmtH(rec.ret)+'</b> ('+fmtDur(t2m(rec.ret)-t2m(rec.dep))+')'+
       (rec.prevDu?' — prévue '+fmtH(rec.prevDu)+'-'+fmtH(rec.prevAu):' — aucune pause prévue au planning')+
-      (dm>0?' · <b style="color:#dc2626">+'+fmtDur(dm)+' de dépassement</b>':' · dans les clous ✓')+'</div>';
+      (dm>0?' · <b style="color:#dc2626">+'+fmtDur(dm)+' de dépassement</b>':pauseToleree(rec)?' · +'+fmtMin(pauseToleree(rec))+' <span style="color:var(--mut)">toléré (rien de déduit)</span> ✓':' · dans les clous ✓')+'</div>';
     if(canPauseEdit(rec))h+='<div class="row" style="margin-top:4px"><button class="mini" onclick="editPause('+rec.id+')">✎ Corriger</button><button class="mini ghost" onclick="delPause('+rec.id+')">🗑 Annuler</button></div>';
   }else if(rec){
     h+='<div class="small">🟠 En pause depuis <b>'+fmtH(rec.dep)+'</b>'+(rec.prevDu?' (prévue '+fmtH(rec.prevDu)+'-'+fmtH(rec.prevAu)+')':'')+'.</div>';
     h+='<div class="row" style="margin-top:6px"><button class="act green" onclick="pointerRetour('+rec.id+');renderHSPanel()">▶️ Retour en poste — pointer '+fmtH(nowHM())+'</button></div>';
   }else if(hsDate===todayISO()){
     h+='<div class="row" style="margin-top:2px"><button class="act" onclick="hsPointerPause()">⏸️ Départ en pause — pointer '+fmtH(nowHM())+'</button></div>';
-    h+='<div class="small" style="color:var(--mut);margin-top:4px">L\'heure enregistrée est celle du clic. Au retour, re-clique sur le jour (ou sur ⏸️ en haut) puis « Retour en poste ». Le planning se recale tout seul sur la pause réelle ; un dépassement s\'affiche en rouge comme un retard.</div>';
+    h+='<div class="small" style="color:var(--mut);margin-top:4px">L\'heure enregistrée est celle du clic. Au retour, re-clique sur le jour (ou sur ⏸️ en haut) puis « Retour en poste ». Le planning se recale tout seul sur la pause réelle ; un dépassement de '+PAUSE_TOLERANCE_MIN+' min ou plus s\'affiche en rouge comme un retard (en dessous, c\'est toléré).</div>';
   }else{
     h+='<div class="small" style="color:var(--mut)">Le pointage se fait le jour même (l\'heure est celle du clic).'+((resp||isAdmin())?' Pour une saisie a posteriori (oubli), passe par 🍽️ Écarts de pause.':'')+'</div>';
   }
@@ -3734,9 +3735,21 @@ function delRetard(id){
 // prévu vs réel est conservé pour le récap des écarts (🍽️), le Journal RH et la paie.
 function pauseOf(empId,iso){return (S.pauses||[]).find(p=>p.empId===empId&&p.date===iso);}
 function nowHM(){const d=new Date();return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');}
-function pauseDepassMin(rec){if(!rec||!rec.ret)return 0;
+// TOLÉRANCE (Fabien 2026-08-24) : un dépassement de pause de MOINS DE 3 MINUTES est du bruit de
+// pointage (le temps de cliquer, de finir de servir un client). En dessous du seuil il est SANS
+// OBJET : ni déduit des heures, ni remonté nulle part (récap paie, texte comptable, CSV, Journal
+// RH, badge de semaine, marqueurs des vues). Il reste VISIBLE là où on regarde la vérité du
+// pointage — 🍽️ Écarts de pause et Mon espace — mentionné « toléré », pour ne rien cacher au
+// salarié ni à toi. 3 min compte, 1 et 2 min sont tolérées.
+const PAUSE_TOLERANCE_MIN=3;
+// Dépassement BRUT (pointé − prévu), sans tolérance : la vérité du pointage.
+function pauseDepassBrut(rec){if(!rec||!rec.ret)return 0;
   const planned=(rec.prevDu&&rec.prevAu)?Math.max(0,t2m(rec.prevAu)-t2m(rec.prevDu)):0;
   return Math.max(0,(t2m(rec.ret)-t2m(rec.dep))-planned);}
+// Dépassement RETENU = LA canonique (tout compteur, toute déduction, tout affichage passe par elle).
+function pauseDepassMin(rec){const d=pauseDepassBrut(rec);return d<PAUSE_TOLERANCE_MIN?0:d;}
+// Vrai quand un dépassement existe mais reste sous le seuil (pour l'écrire « toléré »).
+function pauseToleree(rec){const d=pauseDepassBrut(rec);return d>0&&d<PAUSE_TOLERANCE_MIN?d:0;}
 // Trou le plus proche d'une heure de référence parmi des blocs (triés ou non)
 function _gapNear(blocks,refMin){
   const bl=blocks.slice().sort((a,b)=>t2m(a[0])-t2m(b[0]));
@@ -3791,7 +3804,8 @@ function _applyPauseBlocks(blocks,rec){
   if(planned>0){const g=_gapNear(bl,dep);if(g)bl=_fillGap(bl,g[0],g[1]);}
   const gEnd=Math.min(dep+planned,1440);
   if(gEnd>dep)bl=_carve(bl,dep,gEnd);
-  if(ret>gEnd)bl=_markPause(bl,gEnd,ret);
+  // sous la tolérance : aucun bloc rouge → les minutes restent du temps de travail (rien de déduit)
+  if(ret>gEnd&&pauseDepassMin(rec)>0)bl=_markPause(bl,gEnd,ret);
   sortBlocks(bl);
   return bl;
 }
@@ -3829,8 +3843,8 @@ function pointerRetour(recId){
   const e=emp(rec.empId);
   if(e)rebuildDayRetards(e,rec.date);else save();
   render();
-  const dm=pauseDepassMin(rec);
-  setSave('▶️ Retour pointé à '+fmtH(now)+(dm>0?' — +'+fmtMin(dm)+' au-delà de la pause prévue':''));
+  const dm=pauseDepassMin(rec),tol=pauseToleree(rec);
+  setSave('▶️ Retour pointé à '+fmtH(now)+(dm>0?' — +'+fmtMin(dm)+' au-delà de la pause prévue':tol?' — +'+fmtMin(tol)+' toléré (rien de déduit)':''));
 }
 // --- Corrections (admin, ou responsable pour sa boutique) ---
 function canPauseEdit(rec){if(isAdmin())return true;if(!isResp())return false;
@@ -3925,7 +3939,7 @@ function renderPausePanel(){
   let h='<div class="phead"><h2>🍽️ Écarts de pause</h2>'+
     '<button class="nav" onclick="pauseNav(-1)">◀</button><b style="min-width:120px;text-align:center">'+mlabel+'</b><button class="nav" onclick="pauseNav(1)">▶</button>'+
     '<button class="act grey" style="margin-left:auto" onclick="$(\'pausepanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Pauses pointées (heure réelle au clic) comparées à la pause prévue au planning. Le planning se recale tout seul sur la pause réelle ; un <b style="color:#dc2626">dépassement</b> s\'affiche en rouge et est déjà déduit des heures. Sert à vérifier que les pauses prévues collent au terrain.</div>';
+  h+='<div class="small" style="margin-bottom:8px;color:var(--mut)">Pauses pointées (heure réelle au clic) comparées à la pause prévue au planning. Le planning se recale tout seul sur la pause réelle ; un <b style="color:#dc2626">dépassement</b> s\'affiche en rouge et est déjà déduit des heures. <b>Tolérance : en dessous de '+PAUSE_TOLERANCE_MIN+' minutes, le dépassement est sans objet</b> — rien n\'est déduit et il ne sort ni en paie, ni au Journal RH ; il reste noté « toléré » ici. Sert à vérifier que les pauses prévues collent au terrain.</div>';
   // saisie manuelle (oubli de pointage)
   const addEmps=S.employees.filter(e=>e.actif&&(!myB||e.b===myB));
   h+='<div class="addrow">➕ <select id="pz-emp">'+addEmps.map(e=>'<option value="'+e.id+'">'+esc(e.nom)+'</option>').join('')+'</select>'+
@@ -3960,7 +3974,7 @@ function renderPausePanel(){
           '<span class="small" style="width:130px">prévu : '+(x.prevDu?fmtH(x.prevDu)+'-'+fmtH(x.prevAu):'<i>aucune pause</i>')+'</span>'+
           '<span class="small" style="width:150px">pointé : <b>'+fmtH(x.dep)+' → '+(x.ret?fmtH(x.ret):'…')+'</b></span>'+
           (x.ret?'<span class="small" style="width:56px">'+fmtDur(t2m(x.ret)-t2m(x.dep))+'</span>':'<span class="small" style="color:#d97706;font-weight:700">en cours</span>')+
-          (x.ret?(dm>0?'<span style="color:#dc2626;font-weight:800;width:64px">+'+fmtDur(dm)+'</span>':'<span style="color:var(--green);font-weight:700;width:64px">✓</span>'):'')+
+          (x.ret?(dm>0?'<span style="color:#dc2626;font-weight:800;width:64px">+'+fmtDur(dm)+'</span>':(pauseToleree(x)?'<span class="small" style="color:var(--mut);font-weight:700;width:64px" title="Dépassement inférieur à la tolérance de '+PAUSE_TOLERANCE_MIN+' min : rien n\'est déduit, rien ne sort en paie">✓ +'+fmtMin(pauseToleree(x))+' toléré</span>':'<span style="color:var(--green);font-weight:700;width:64px">✓</span>')):'')+
           (x.parResp?'<span class="small" title="pointé / saisi par le responsable">🛡️</span>':'')+(x.manuel?'<span class="small" title="saisie manuelle a posteriori">✍️</span>':'')+
           (canPauseEdit(x)?'<span style="margin-left:auto;white-space:nowrap"><button class="mini" title="Corriger les heures" onclick="editPause('+x.id+')">✎</button> <button class="mini ghost" title="Annuler ce pointage — remet le planning comme prévu" onclick="delPause('+x.id+')">🗑</button></span>':'')+
           '</div>';
@@ -4754,7 +4768,7 @@ function renderMine(){
       h+='<div class="brow" style="padding-left:6px"><span>🍽️</span><span>'+fmtFR(x.date)+'</span>'+
         '<span class="small">'+fmtH(x.dep)+' → '+(x.ret?fmtH(x.ret)+' ('+fmtDur(t2m(x.ret)-t2m(x.dep))+')':'<b style="color:#d97706">en cours</b>')+'</span>'+
         '<span class="small" style="color:var(--mut)">'+(x.prevDu?'prévue '+fmtH(x.prevDu)+'-'+fmtH(x.prevAu):'aucune pause prévue')+'</span>'+
-        (x.ret?(dm>0?'<span class="small" style="color:#dc2626;font-weight:700">+'+fmtDur(dm)+' dépassement (déduit)</span>':'<span class="small" style="color:var(--green);font-weight:700">✓</span>'):'')+
+        (x.ret?(dm>0?'<span class="small" style="color:#dc2626;font-weight:700">+'+fmtDur(dm)+' dépassement (déduit)</span>':(pauseToleree(x)?'<span class="small" style="color:var(--mut);font-weight:700" title="Moins de '+PAUSE_TOLERANCE_MIN+' min : toléré, rien n\'est déduit">✓ +'+fmtMin(pauseToleree(x))+' toléré</span>':'<span class="small" style="color:var(--green);font-weight:700">✓</span>')):'')+
         (x.parResp?'<span class="small" title="pointé par le responsable">🛡️</span>':'')+'</div>';}
     h+='<div class="small" style="color:var(--mut);margin:2px 0 6px">Pointage : clique sur ⏸️ en haut (aujourd\'hui) ou sur le jour dans la vue Semaine. L\'heure enregistrée est celle du clic.</div>';}
   // 3-ter) MA FORMATION (transparence : étapes, dates et verdicts — les commentaires restent côté encadrement)
