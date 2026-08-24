@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-20 18:50</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-24 16:11</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3823,14 +3823,17 @@ const TESTEUR_TOTAL = 45;
 //     puff pioché dans Base PD/Kits ; bloc libre « liquide du moment »).
 // Merge : _mergeArray par id + tombstones _deletedIds (motif testeursLiq), aux
 // mêmes 6 sites + poll. Admin édite, boutiques consultent et impriment.
-// ── PROPORTIONS RÉELLES (mesures Fabien 2026-08-06 19:40) ──
-// Étage de grande étagère = 120 cm · petite = 90 cm · Langon = 500 cm (compte rond,
-// ~152 flacons 50mL). Largeur des flacons : 50mL = 32,5 mm (« entre 30 et 35 », et
-// 120/3,25 ≈ 37, 90/3,25 ≈ 28 — ça retombe sur ses comptes), 100mL = 41 mm,
-// 10mL = 20 mm. 20mL (25 mm) et +150mL (60 mm) = ESTIMATIONS à faire confirmer.
+// ── PROPORTIONS RÉELLES ──
+// Étage de grande étagère = 120 cm · petite = 90 cm · Langon = 500 cm.
+// 50mL = 34 mm et 100mL = 43 mm : MESURÉS par Fabien le 2026-08-24 (10 flacons
+// collés = 34 cm / 43 cm — le PAS consommé en rayon, bouchons/étiquettes compris ;
+// les anciens 32,5 et 41 mm venaient d'un calage sur des comptages estimés du 06/08
+// et mettaient trop de flacons par étage + décalaient tout vers la droite, milieu
+// compris). 10mL = 20 mm, 20mL = 25 mm, +150mL = 60 mm = encore des ESTIMATIONS
+// (recaler UNIQUEMENT sur mesure « 10 flacons collés », jamais sur un comptage).
 // Toutes les largeurs internes sont en MILLIMÈTRES ; l'affichage est en cm.
-const ETG_FLACON_MM = { '50mL': 32.5, '100mL': 41, '10mL': 20, '10mL_SDN': 20, '20mL': 25, '+150mL': 60 };
-function _etgFlaconMm(format) { return ETG_FLACON_MM[format] || 32.5; }
+const ETG_FLACON_MM = { '50mL': 34, '100mL': 43, '10mL': 20, '10mL_SDN': 20, '20mL': 25, '+150mL': 60 };
+function _etgFlaconMm(format) { return ETG_FLACON_MM[format] || 34; }
 // HAUTEURS des flacons par format (retour Fabien 2026-08-07 01:25 : un 10mL posé sur
 // l'étagère est PETIT — même proportion que le « 10 devant » qu'il a validée, ~42 %
 // d'un 50mL). Écran en px (le zoom ne joue que sur les largeurs), papier en mm.
@@ -3840,7 +3843,7 @@ function _etgFlaconHpx(format) { return ETG_FLACON_HPX[format] || 68; }
 function _etgFlaconHmm(format) { return ETG_FLACON_HMM[format] || 20; }
 // LA GRILLE d'une zone (Fabien 2026-08-07 00:41 : « on ne place pas les blocs en
 // centimètres mais en emplacements de 50mL ») : positions et largeurs des blocs se
-// calent sur des emplacements entiers — 32,5 mm sur les étages, 41 mm (un 100mL)
+// calent sur des emplacements entiers — 34 mm (un 50mL) sur les étages, 43 mm (un 100mL)
 // sur la ligne des 100mL.
 function _etgGrilleMm(zone) { return zone === 'commode' ? ETG_FLACON_MM['100mL'] : ETG_FLACON_MM['50mL']; }
 // Ordre d'affichage des formats quand une gamme est GROUPÉE PAR PARFUM (100 → 50 → 10…).
@@ -4087,7 +4090,7 @@ function _etgList(shop) {
     .sort((a, b) => (a.ordre || 0) - (b.ordre || 0) || String(a.id).localeCompare(String(b.id)));
 }
 function _etgById(id) { return etageresLiq.find(e => e && e.id === id && !_deletedIds.has(e.id)) || null; }
-// Les zones d'un étage donné : 'liq' (largCm − zone Puff), 'puff' (puffEmpl × 32,5 mm) ; la commode
+// Les zones d'un étage donné : 'liq' (largCm − zone Puff), 'puff' (puffEmpl × 34 mm) ; la commode
 // est traitée comme la zone 'commode' de l'étage 0 (une seule bande par étagère).
 function _etgPlacements(etagereId, etage, zone) {
   return placementsLiq
@@ -4256,7 +4259,7 @@ function _etgZoneCap(e, zone) {
   // TOUTES les zones dérivent de la GRILLE (Fabien 2026-08-07 02:03 : plus de chute
   // entre liquides et Puff) : l'étage = un nombre ENTIER d'emplacements (arrondi de
   // largCm — 120 cm → 37), liquides = total − Puff (22 pleins), Puff = puffEmpl,
-  // ligne 100mL = arrondi en emplacements de 41 mm. La grille couvre 100 % des zones.
+  // ligne 100mL = arrondi en emplacements de 43 mm. La grille couvre 100 % des zones.
   const g50 = ETG_FLACON_MM['50mL'];
   const totEmpl = Math.max(0, Math.round(((parseFloat(e.largCm) || 0) * 10) / g50));
   const puffEmpl = Math.min(totEmpl, Math.max(0, parseInt(e.puffEmpl, 10) || 0));
@@ -19556,7 +19559,7 @@ function _etgVieMatchFiltre(vie) {
 function _etgFlaconHtml(nom, pcol, opts) {
   opts = opts || {};
   const h = opts.h || 68;
-  const wpx = opts.wpx || _etgPx(32.5);
+  const wpx = opts.wpx || _etgPx(_etgFlaconMm('50mL'));
   const fond = opts.fill || pcol; // intérieur : couleur de MARQUE en opacité faible ; cadre/bouchon : PROFIL
   // Liseré : la 🔎 recherche (jaune) prime ; sinon la vie commerciale (🧭 2026-08-08)
   const hl = opts.hl ? 'box-shadow:0 0 0 2px #fde047; z-index:1;'
@@ -19970,7 +19973,7 @@ function pvEtgImprimerPlan(shop) {
   // colspan = MILLIMÈTRES réels arrondis → les proportions du papier sont celles du magasin
   const cellHtml = function(txt, spanMm, cls, nb, coul, devant, hMm) {
     const st = ' style="height:' + (hMm || 20) + 'mm;' + (coul ? ' background:' + coul + '26;' : '') + '"';
-    return '<td class="c ' + (cls || '') + '" colspan="' + Math.max(1, Math.round(spanMm || 32.5)) + '"><div class="b"' + st + '><div class="v">' + _esc(txt) + (nb > 1 ? '<span class="x2">×' + nb + '</span>' : '') + '</div>' + (devant ? '<span class="dv">10</span>' : '') + '</div></td>';
+    return '<td class="c ' + (cls || '') + '" colspan="' + Math.max(1, Math.round(spanMm || 34)) + '"><div class="b"' + st + '><div class="v">' + _esc(txt) + (nb > 1 ? '<span class="x2">×' + nb + '</span>' : '') + '</div>' + (devant ? '<span class="dv">10</span>' : '') + '</div></td>';
   };
   let sheets = '';
   etgs.forEach(function(e) {
@@ -20081,7 +20084,7 @@ function pvEtgImprimerPlan(shop) {
         // Taille de police : largeur IMPRIMÉE d'un emplacement 50mL, PLAFONNÉE par le
         // nom de parfum le plus long de la bande (fix 2026-08-07 : noms tronqués).
         const larg = b.seg > 1 ? b.seg : pagesN;
-        const slotPt = 32.5 * ((PAGE_MM * larg) / b.tot) * 2.83465;
+        const slotPt = _etgFlaconMm('50mL') * ((PAGE_MM * larg) / b.tot) * 2.83465;
         const fsNom = b.maxNom > 0 ? (rowHmm - 2) / (0.17 * b.maxNom) : 99;
         const fsv = Math.max(4.5, Math.min(9.5, Math.min(slotPt * 0.68, fsNom)));
         const fsg = Math.max(6.5, Math.min(11, fsv + 1.5));

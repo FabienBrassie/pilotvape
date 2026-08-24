@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-08-24 16:01 — 🚫 ABSENCE INJUSTIFIÉE : nouveau type d'absence (ni congé, ni maladie, ni école) — le salarié devait travailler, il n'est pas venu et n'a pas de justificatif. Se déclare dans 🏖 Absences, au clic sur le bandeau événements, ou depuis le 📒 Journal RH (type « Absence injustifiée », qui crée la vraie absence du jour). Le salarié disparaît du planning ce jour-là, les heures prévues ne sont NI travaillées NI payées : elles sortent du décompte de la semaine (badge rouge 🚫), du récap paie, du CSV, du texte comptable et du bilan annuel, toujours avec la mention « non rémunéré ». Un simple retard reste un retard (Journal RH, en minutes). Bouton « 🤒 justifié » pour requalifier en maladie/congé si le justificatif arrive après coup. -->
 <!-- v 2026-08-11 16:38 — Présence : les ABSENCES (maladie, congé accepté, école) priment désormais sur les exceptions du jour — une maladie déclarée efface bien les blocs même si la journée avait été modifiée à la main (ou portait un retard / une pause pointée). Pour faire revenir quelqu'un de marqué malade : raccourcir la maladie, pas redessiner par-dessus. -->
 <!-- v 2026-08-11 16:32 — Maladies : la ligne « ➕ Déclarer / ajouter une absence » (congé, maladie, école…) est remontée EN TÊTE du panneau 🏖 Absences, visible sur tous les onglets (elle était enterrée en bas de l'Historique) ; et le COMPTE BOUTIQUE peut désormais déclarer un arrêt maladie depuis 📋 Demandes (part en validation chez l'admin, badge « 🏬 déclaré par la boutique »). -->
 <!-- v 2026-07-28 19:36 — 🏖 Absences : onglets Historique et Heures sup repliés par salarié (une ligne de synthèse — totaux annuels, nb d'absences/demandes, « X en attente » — détail au clic ▸/▾, comme les Écarts de pause). L'onglet « À valider » reste déplié : c'est de l'action, pas de l'archive. -->
@@ -68,6 +69,7 @@ main{padding:12px 16px;max-width:1400px;margin:0 auto}
 .mtag{font-weight:800;font-size:10px;padding:0 3px;border-radius:4px}
 .mtag.O{color:#2563eb}.mtag.F{color:#ea7317}.mtag.J{color:#16a34a}.mtag.Mil{color:#64748b}
 .mtag.Repos{color:var(--mut)}.mtag.Cg{color:#caa204}.mtag.Mal{color:#dc2626}.mtag.Ec{color:#ea7317}.mtag.Aut{color:var(--mut)}
+.mtag.AbsInj{color:#fff;background:#7f1d1d;padding:0 4px}
 .mtag.HS{color:#0891b2}
 .sgrid{display:grid;grid-template-columns:78px repeat(7,1fr)}
 .scorner{background:var(--bg);border-bottom:1px solid var(--line)}
@@ -98,6 +100,7 @@ main{padding:12px 16px;max-width:1400px;margin:0 auto}
 .evc.conge{background:#f4c20d;color:#3a2c00}
 .evc.attente{background:#f4c20d;color:#3a2c00;opacity:.7;border:1px dashed #7a5c00}
 .evc.maladie{background:#dc2626;color:#fff}
+.evc.absinj{background:#7f1d1d;color:#fff;border:1px solid #fca5a5}
 .evc.echange{background:#0ea5a4;color:#fff}
 .evc.ecole{background:#ea7317;color:#fff}
 .evc.ent{background:#0891b2;color:#fff}
@@ -409,7 +412,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
     <span id="weeklabel"></span>
     <span id="weekrel" class="weekrel"></span>
     <input type="date" id="goto" style="width:130px" onchange="if(this.value){curMonday=monday(this.value);render()}">
-    <button id="setbtn" class="adminonly" onclick="togAbs()" title="Absences : congés, maladies">🏖</button>
+    <button id="setbtn" class="adminonly" onclick="togAbs()" title="Absences : congés, maladies, absences injustifiées">🏖</button>
     <button id="setbtn" class="respok" onclick="togJournal()" title="Journal RH — problèmes : erreurs, retards, comportement, sanctions…">📒</button>
     <button id="setbtn" class="adminonly" onclick="togFeries()" title="Fériés & dimanches ouverts">🎌</button>
     <button id="setbtn" class="adminonly" onclick="togAssist()" title="Assistant d'optimisation">🪄</button>
@@ -546,6 +549,7 @@ conges: [
   {id:14,empId:'adrien',    du:'2026-06-08', au:'2026-06-13', statut:'accepte', note:''}
 ],
 maladies: [],
+absinj: [],        // 🚫 absences injustifiées (ni congé, ni maladie, ni école) — jours NON payés
 overrides: [],
 feries: [
   {date:'2026-01-01', nom:"1er de l'an",          b:{P:'Fermé',M:'Fermé',L:'Fermé'}, t:{}},
@@ -915,7 +919,7 @@ function weekBs(e,mon){
 function weekAvail(e,mon){
   let tot=0,av=0;
   for(let i=0;i<7;i++){const iso=addD(mon,i);if(!inEmploi(e,iso))continue;const day=dayPat(e,iso);if(!day)continue;tot++;
-    const p=presence(e,iso);if(p.st!=='conge'&&p.st!=='maladie'&&p.st!=='ecole'&&p.st!=='off')av++}
+    const p=presence(e,iso);if(p.st!=='conge'&&p.st!=='maladie'&&p.st!=='absinj'&&p.st!=='ecole'&&p.st!=='off')av++}
   return tot?av/tot:0;
 }
 // Effectif d'une semaine : chaque boutique doit pouvoir tenir à 2 (HS possibles).
@@ -967,7 +971,7 @@ function availDay(bId,iso){
   for(const e of S.employees.filter(x=>x.actif)){
     if(!(bId in weekBs(e,mon)))continue;
     const p=presence(e,iso);
-    if(p.st==='conge'||p.st==='maladie'||p.st==='ecole'||p.st==='off')continue;
+    if(p.st==='conge'||p.st==='maladie'||p.st==='absinj'||p.st==='ecole'||p.st==='off')continue;
     n++;
   }
   return n;
@@ -1020,8 +1024,8 @@ function mergeData(L,R){
   }
   L.hsdemandes=L.hsdemandes.filter(x=>{const tk=L.tomb['hs|'+x.id];return !(tk&&tk>((x&&x._ts)||''))});
   // congés / maladies / pauses pointées (par numéro, suppressions mémorisées)
-  for(const arr of ['conges','maladies','ecoles','entreprises','pauses','formations']){
-    const pre={conges:'cg|',maladies:'ml|',ecoles:'ec|',entreprises:'en|',pauses:'pz|',formations:'fo|'}[arr];
+  for(const arr of ['conges','maladies','absinj','ecoles','entreprises','pauses','formations']){
+    const pre={conges:'cg|',maladies:'ml|',absinj:'ai|',ecoles:'ec|',entreprises:'en|',pauses:'pz|',formations:'fo|'}[arr];
     L[arr]=L[arr]||[];
     for(const r of R[arr]||[]){
       if(L.tomb[pre+r.id]&&L.tomb[pre+r.id]>ts(r))continue;
@@ -1111,6 +1115,14 @@ function weekCountedMin(e,mon){let t=0;for(let i=0;i<7;i++){const iso=addD(mon,i
   else if(p.st==='ecole')t+=(e.ecoleMin||420);
   else if(p.st==='repos')t+=ferieChomePay(e,iso);} // férié chômé sur un jour travaillé = payé même en repos
   return t;}
+// ===== 🚫 ABSENCE INJUSTIFIÉE — fonctions canoniques (règle 8 : un seul endroit qui sait compter) =====
+// Le symétrique "à la journée" du retard non rattrapé : le salarié devait travailler, il n'est pas
+// venu et n'a pas de justificatif → heures NON travaillées et NON rémunérées (elles ne sont donc
+// jamais créditées par weekCountedMin, qui n'accorde des heures qu'aux absences PAYÉES).
+function absInjOf(eid,iso){return (S.absinj||[]).find(a=>a.empId===eid&&iso>=a.du&&iso<=a.au);}
+function absInjDays(e,days){return days.filter(d=>presence(e,d).st==='absinj');}      // jours réellement concernés
+function absInjByDay(e,days){const w={};for(const d of absInjDays(e,days)){const m=plannedDayMin(e,d);if(m>0)w[d]=m;}return w;}
+function absInjMin(e,days){return absInjDays(e,days).reduce((t,d)=>t+plannedDayMin(e,d),0);}
 function NOW(){return new Date().toISOString()}
 let testMode=false;try{testMode=localStorage.getItem('gestionrh-test')==='1'}catch(e){}
 function isLive(iso){return testMode||!S.goLive||iso>=S.goLive;}
@@ -1204,7 +1216,7 @@ function migrate(S){
     S._patchModeEntreprise=true;
   }
   S.feries.forEach(f=>{if(!f.gmaps)f.gmaps={}});
-  if(!S.bilanHist)S.bilanHist={}; // historique hors-outil saisi depuis l'Excel, par année : {year:{empId:{hs,fer,dim,conge,maladie,ecole}}}
+  if(!S.bilanHist)S.bilanHist={}; // historique hors-outil saisi depuis l'Excel, par année : {year:{empId:{hs,fer,dim,conge,maladie,ecole,absinj}}}
   const _LEGAL=/an|p[âa]que|travail|victoire|ascension|pentec|national|assomption|toussaint|armistice|no[ëe]l|r[ée]veillon/i;
   S.feries.forEach(f=>{if(f.type===undefined)f.type=(wdOf(f.date)!==7&&_LEGAL.test(f.nom))?'ferie':'special';});
   S.version=3;
@@ -1243,6 +1255,10 @@ function presence(e,iso){
   // quelqu'un de marqué malade, on raccourcit la MALADIE (la donnée) — on ne redessine pas par-dessus.
   const _ab=(ex&&ex.b)||(day?day.b:e.b);
   if(S.maladies.some(m=>m.empId===e.id&&iso>=m.du&&iso<=m.au&&m.statut!=='attente'&&m.statut!=='refuse'))return{st:'maladie',b:_ab};
+  // 🚫 ABSENCE INJUSTIFIÉE : ne vaut que sur un jour où le salarié DEVAIT travailler (sinon c'est
+  // son repos — on n'affiche rien). Jour non travaillé et NON PAYÉ (aucun crédit d'heures).
+  {const _ai=(S.absinj||[]).find(a=>a.empId===e.id&&iso>=a.du&&iso<=a.au);
+   if(_ai&&(ex?(ex.s!=='R'):!!day))return{st:'absinj',b:_ab,note:_ai.note};}
   if((S.ecoles||[]).some(x=>x.empId===e.id&&iso>=x.du&&iso<=x.au))return{st:'ecole',b:_ab};
   if(S.conges.some(c=>c.empId===e.id&&iso>=c.du&&iso<=c.au&&c.statut==='accepte'))return{st:'conge',b:_ab};
   if(ex){
@@ -1383,6 +1399,7 @@ function dayTag(e,iso,bId){
   if(p.st==='off')return null;
   if(p.st==='conge')return{t:'Congé',c:'Cg'};
   if(p.st==='maladie')return{t:'Mal.',c:'Mal'};
+  if(p.st==='absinj')return{t:'🚫 Abs. inj.',c:'AbsInj'};
   if(p.st==='ecole')return{t:'École',c:'Ec'};
   if(p.st==='repos')return{t:'Repos',c:'Repos'};
   const mine=(p.blocks||[]).filter(bl=>bl[2]===bId);
@@ -1672,7 +1689,7 @@ function renderMineWeek(){
     const mb=myBof(d),p=presence(me,d);
     let accent='',tag;
     if(mb.length){tag=mb.map(b=>'<span class="chipb" style="color:var(--'+b+')">📍 '+esc(bout(b).nom)+'</span>').join(' + ');accent='box-shadow:inset 0 -4px 0 var(--'+mb[0]+')';}
-    else tag='<span class="fer">'+(p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='ecole'?'🎓 école':p.st==='off'?'—':'repos')+'</span>';
+    else tag='<span class="fer">'+(p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='absinj'?'🚫 absence injustifiée':p.st==='ecole'?'🎓 école':p.st==='off'?'—':'repos')+'</span>';
     hh+='<div class="dayhead'+(d===today?' today':'')+(isLive(d)?'':' pre')+'" style="'+accent+'"><b>'+DAYJ[wdOf(d)]+' '+(+d.slice(8,10))+'</b><span class="fer">'+tag+'</span></div>';
   }
   $('calhead').innerHTML=hh;
@@ -1993,6 +2010,8 @@ function dayEvents(d,b){
     if(cg)entry={cls:cg.statut==='accepte'?'conge':'attente',txt:'🏖 '+e.nom+(cg.statut==='attente'?' ?':''),st:liseré,b:e.b,jump:{t:'conge',id:cg.id,emp:e.id},detail:esc(e.nom)+' — Congé '+(cg.statut==='accepte'?'accepté':'en attente')+' '+periodeTxt(cg.du,cg.au)+' ('+nbJours(cg.du,cg.au)+' j)'+(cg.note?' · « '+esc(cg.note)+' »':'')};
     const ml=S.maladies.find(m=>m.empId===e.id&&d>=m.du&&d<=m.au&&m.statut!=='attente');
     if(ml)entry={cls:'maladie',txt:'🤒 '+e.nom,st:liseré,b:e.b,jump:{t:'maladie',id:ml.id,emp:e.id},detail:esc(e.nom)+' — Arrêt maladie '+periodeTxt(ml.du,ml.au)+' ('+nbJours(ml.du,ml.au)+' j)'+(ml.note?' · '+esc(ml.note):'')};
+    const ai=(S.absinj||[]).find(a=>a.empId===e.id&&d>=a.du&&d<=a.au);
+    if(ai&&presence(e,d).st==='absinj')entry={cls:'absinj',txt:'🚫 '+e.nom,st:liseré,b:e.b,jump:{t:'absinj',id:ai.id,emp:e.id},detail:esc(e.nom)+' — Absence injustifiée '+periodeTxt(ai.du,ai.au)+' — heures non travaillées, non rémunérées'+(ai.note?' · « '+esc(ai.note)+' »':'')};
     const ec=(S.ecoles||[]).find(x=>x.empId===e.id&&d>=x.du&&d<=x.au);
     if(ec)entry={cls:'ecole',txt:'🎓 '+e.nom,st:liseré,b:e.b,jump:{t:'ecole',id:ec.id,emp:e.id},detail:esc(e.nom)+' — École '+periodeTxt(ec.du,ec.au)};
     const en2=(S.entreprises||[]).find(x=>x.empId===e.id&&d>=x.du&&d<=x.au);
@@ -2049,21 +2068,21 @@ function openEvEd(iso){
   if(evs.length){h+='<table style="margin-bottom:8px"><tr><th>Type</th><th>Libellé</th><th>Du</th><th>Au</th><th>Boutique</th><th></th></tr>';
     for(const ev of evs)h+='<tr><td>'+esc(ev.type)+'</td><td>'+esc(ev.label)+'</td><td>'+fmtFR(ev.du)+'</td><td>'+fmtFR(ev.au)+'</td><td>'+(ev.b==='ALL'?'Toutes':bout(ev.b).nom)+'</td><td><button class="mini" onclick="delEvent('+ev.id+')">🗑</button></td></tr>';
     h+='</table>';}
-  h+='<div class="row"><select id="ev-type" onchange="evTypeChg()"><option value="OP">OP</option><option value="EVT">Événement</option><option value="FERIE">Jour férié / ouverture excep.</option><option value="CONGE">Congé (accepté)</option><option value="MALADIE">Maladie</option><option value="ECOLE">🎓 École (alternant)</option><option value="ENT">🏭 Entreprise (alternant)</option></select>'+
+  h+='<div class="row"><select id="ev-type" onchange="evTypeChg()"><option value="OP">OP</option><option value="EVT">Événement</option><option value="FERIE">Jour férié / ouverture excep.</option><option value="CONGE">Congé (accepté)</option><option value="MALADIE">Maladie</option><option value="ABSINJ">🚫 Absence injustifiée</option><option value="ECOLE">🎓 École (alternant)</option><option value="ENT">🏭 Entreprise (alternant)</option></select>'+
    '<select id="ev-emp" style="display:none">'+S.employees.filter(x=>x.actif).map(x=>'<option value="'+x.id+'">'+esc(x.nom)+'</option>').join('')+'</select>'+
    '<input id="ev-label" placeholder="Libellé (ex : OP Prix rouge kits)" style="width:200px">'+
    'du <input type="date" id="ev-du" value="'+iso+'"> au <input type="date" id="ev-au" value="'+iso+'">'+
    '<select id="ev-b"><option value="ALL">Toutes boutiques</option>'+S.boutiques.map(b=>'<option value="'+b.id+'" '+(b.id===curB?'selected':'')+'>'+b.nom+'</option>').join('')+'</select>'+
    '<button class="act green" onclick="addEvent()">Ajouter</button>'+
    '<button class="act grey" onclick="$(\'evpanel\').style.display=\'none\'">Fermer</button></div>'+
-   '<div class="small">Tout est connecté dans les deux sens : un <b>jour férié</b> créé ici va dans l\'onglet 🎌 (et inversement), un <b>congé</b> ou une <b>maladie</b> vont dans les données congés/maladies — le salarié disparaît du planning sur la période. OP et Événement restent des repères d\'affichage. Liaison automatique PilotVape → planning : plus tard.</div>';
+   '<div class="small">Tout est connecté dans les deux sens : un <b>jour férié</b> créé ici va dans l\'onglet 🎌 (et inversement), un <b>congé</b>, une <b>maladie</b> ou une <b>absence injustifiée</b> vont dans les données d\'absences — le salarié disparaît du planning sur la période (l\'absence injustifiée n\'est pas payée). OP et Événement restent des repères d\'affichage. Liaison automatique PilotVape → planning : plus tard.</div>';
   el.innerHTML=h;el.style.display='block';
   uiEV=iso;saveUI();
 }
 function evTypeChg(){
   const t=$('ev-type').value;
-  $('ev-emp').style.display=(t==='CONGE'||t==='MALADIE'||t==='ECOLE'||t==='ENT')?'':'none';
-  $('ev-label').placeholder=t==='FERIE'?'Nom (ex : Dimanche ouvert, Pentecôte)':t==='CONGE'?'Note (optionnel)':t==='MALADIE'?'Motif (optionnel)':'Libellé (ex : OP Prix rouge kits)';
+  $('ev-emp').style.display=(t==='CONGE'||t==='MALADIE'||t==='ABSINJ'||t==='ECOLE'||t==='ENT')?'':'none';
+  $('ev-label').placeholder=t==='FERIE'?'Nom (ex : Dimanche ouvert, Pentecôte)':t==='CONGE'?'Note (optionnel)':t==='MALADIE'?'Motif (optionnel)':t==='ABSINJ'?'Motif constaté (ex : avion raté, pas prévenu)':'Libellé (ex : OP Prix rouge kits)';
 }
 function addEvent(){
   const t=$('ev-type').value;
@@ -2090,6 +2109,11 @@ function addEvent(){
   }
   if(t==='MALADIE'){
     S.maladies.push({id:Date.now(),empId:$('ev-emp').value,du,au,note:label,_ts:NOW()});
+    $('evpanel').style.display='none';save();render();return;
+  }
+  if(t==='ABSINJ'){
+    S.absinj=S.absinj||[];
+    S.absinj.push({id:Date.now(),empId:$('ev-emp').value,du,au,note:label,_ts:NOW()});
     $('evpanel').style.display='none';save();render();return;
   }
   if(t==='ECOLE'){
@@ -2195,7 +2219,7 @@ function renderAlerts(days){
     let cur=null;
     for(const d of days){
       if(!isLive(d)){cur=null;continue;}
-      const abs=S.employees.filter(e=>e.actif&&e.b===b.id&&(()=>{const p=presence(e,d);return p.st==='conge'||p.st==='maladie'||p.st==='ecole'})());
+      const abs=S.employees.filter(e=>e.actif&&e.b===b.id&&(()=>{const p=presence(e,d);return p.st==='conge'||p.st==='maladie'||p.st==='absinj'||p.st==='ecole'})());
       const key=abs.map(e=>e.nom).sort().join(', ');
       if(abs.length>=2){
         if(cur&&cur.key===key&&cur.au===addD(d,-1))cur.au=d;
@@ -2382,6 +2406,7 @@ function checkAbsence(empId,du,au,kind){
   if(chev(S.conges,'congé')&&kind!=='conge')out.push({sev:'warn',txt:'Chevauche un congé déjà saisi.'});
   if(chev(S.maladies,'maladie')&&kind!=='maladie')out.push({sev:'warn',txt:'Chevauche une absence maladie.'});
   if(chev(S.ecoles||[],'école')&&kind!=='ecole')out.push({sev:'warn',txt:'Chevauche une période d\'école.'});
+  if(chev(S.absinj||[],'absence injustifiée')&&kind!=='absinj')out.push({sev:'warn',txt:'Chevauche une absence injustifiée déjà saisie.'});
   // 2bis) congés de COLLÈGUES de la même boutique qui chevauchent (concurrence sur les mêmes dates)
   if(kind==='conge'){
     const rivals=S.conges.filter(o=>o.empId!==empId&&o.statut!=='refuse'&&o.du<=au&&o.au>=du&&emp(o.empId)&&emp(o.empId).b===e.b);
@@ -2423,6 +2448,7 @@ function cgEditor(c){
 }
 function jumpAbs(t,id,empId){
   if(!isAdmin())return;
+  if(t==='absinj')absTab='histo';
   const e=emp(empId);
   if(e&&!absSel.has(e.b)){absSel.add(e.b);absSaveF()}
   if(t==='ent')absType='ALL';else absType='ALL';
@@ -2486,11 +2512,11 @@ function startEditRow(t,id){editRow={t,id};editCgId=null;renderAbs();
   setTimeout(()=>{const r=$('rowedit-'+t+'-'+id);if(r)r.scrollIntoView({behavior:'smooth',block:'center'})},40);}
 function cancelEditRow(){editRow=null;renderAbs()}
 function saveEditRow(t,id){
-  const arr=t==='maladie'?S.maladies:t==='ecole'?S.ecoles:S.entreprises;
+  const arr=t==='maladie'?S.maladies:t==='absinj'?(S.absinj=S.absinj||[]):t==='ecole'?S.ecoles:S.entreprises;
   const r=arr.find(x=>x.id===id);if(!r)return;
   const du=$('rwe-du-'+t+'-'+id).value,au=$('rwe-au-'+t+'-'+id).value||du;
   if(!du||au<du){alert('Dates invalides');return}
-  if(t!=='maladie'){ // maladie subie : pas de contrôle de couverture
+  if(t!=='maladie'&&t!=='absinj'){ // maladie subie / absence injustifiée constatée : pas de contrôle de couverture
     const checks=checkAbsence(r.empId,du,au,t);
     const blk=checks.filter(x=>x.sev==='block');
     if(blk.length){alert('Modification impossible :\n\n• '+blk.map(b=>b.txt).join('\n• '));return}
@@ -2530,6 +2556,18 @@ function delMl(id){if(!confirm('Supprimer cette absence maladie ?'))return;S.tom
 // Validation d'une maladie déclarée par un responsable
 function acceptMl(id){const m=(S.maladies||[]).find(x=>x.id===id);if(!m)return;delete m.statut;m._ts=NOW();save();render();if($('abspanel').style.display==='block')renderAbs();}
 function refuseMl(id){const m=(S.maladies||[]).find(x=>x.id===id);if(!m)return;m.statut='refuse';m._ts=NOW();save();render();if($('abspanel').style.display==='block')renderAbs();}
+function delAI(id){if(!confirm('Supprimer cette absence injustifiée ?'))return;S.tomb['ai|'+id]=NOW();S.absinj=(S.absinj||[]).filter(a=>a.id!==id);save();renderAbs();render()}
+// Le salarié apporte finalement un justificatif → l'absence injustifiée devient une maladie / un congé
+// (mêmes dates, note conservée). Une seule donnée à la fin : on ne laisse pas les deux cohabiter.
+function requalifAbsInj(id,vers){
+  const a=(S.absinj||[]).find(x=>x.id===id);if(!a)return;
+  const lib=vers==='maladie'?'un arrêt maladie':'un congé accepté';
+  if(!confirm('Requalifier cette absence injustifiée en '+lib+' ('+fmtFR(a.du)+' → '+fmtFR(a.au)+') ?\n\nLes heures redeviennent payées.'))return;
+  if(vers==='maladie')S.maladies.push({id:Date.now(),empId:a.empId,du:a.du,au:a.au,note:a.note||'',_ts:NOW()});
+  else S.conges.push({id:Date.now(),empId:a.empId,du:a.du,au:a.au,statut:'accepte',note:a.note||'',_ts:NOW()});
+  S.tomb['ai|'+a.id]=NOW();S.absinj=(S.absinj||[]).filter(x=>x.id!==a.id);
+  save();renderAbs();render();
+}
 function delEc(id){if(!confirm('Supprimer cette période d\'école ?'))return;S.tomb['ec|'+id]=NOW();S.ecoles=S.ecoles.filter(x=>x.id!==id);save();renderAbs();render()}
 function delEnt(id){if(!confirm('Supprimer cette période entreprise ? (retour au rythme de base sur la période)'))return;S.tomb['en|'+id]=NOW();S.entreprises=S.entreprises.filter(x=>x.id!==id);save();renderAbs();render()}
 function renderAbs(){
@@ -2541,12 +2579,13 @@ function renderAbs(){
    '<button class="act grey" style="margin-left:auto" onclick="$(\'abspanel\').style.display=\'none\'">Fermer</button></div>';
   // ── Déclarer / ajouter une absence : TOUJOURS visible en tête, quel que soit l'onglet
   // (Fabien 2026-07-28 : la ligne d'ajout était enterrée en bas de l'onglet Historique — introuvable)
-  h+='<div class="addrow">➕ <select id="ab-type"><option value="conge">🏖 Congé</option><option value="maladie">🤒 Maladie</option><option value="ecole">🎓 École (alternant)</option><option value="ent">🏭 Entreprise (alternant, planning 35h)</option></select>'+
+  h+='<div class="addrow">➕ <select id="ab-type" onchange="abTypeChg()"><option value="conge">🏖 Congé</option><option value="maladie">🤒 Maladie</option><option value="absinj">🚫 Absence injustifiée</option><option value="ecole">🎓 École (alternant)</option><option value="ent">🏭 Entreprise (alternant, planning 35h)</option></select>'+
    '<select id="ab-emp">'+S.employees.filter(x=>x.actif).map(x=>'<option value="'+x.id+'">'+esc(x.nom)+'</option>').join('')+'</select>'+
    'du <input type="date" id="ab-du"> au <input type="date" id="ab-au">'+
    '<select id="ab-st"><option value="attente">en attente</option><option value="accepte">accepté</option></select>'+
    '<input id="ab-note" placeholder="Note (optionnel)" style="width:150px">'+
-   '<button class="act" onclick="addAbs()">Ajouter</button></div>';
+   '<button class="act" onclick="addAbs()">Ajouter</button>'+
+   '<span class="small" id="ab-hint" style="display:none;flex-basis:100%;color:#b91c1c">🚫 <b>Absence injustifiée</b> : le salarié devait travailler et n\'est pas venu, sans justificatif (avion raté, absence non prévenue…). Les heures prévues ce(s) jour-là ne sont <b>ni travaillées ni rémunérées</b> — elles apparaissent en rouge dans le récap paie, le CSV et le texte comptable, et l\'absence est reprise automatiquement dans le 📒 Journal RH. Un simple retard reste un <b>retard</b> (Journal RH, en minutes).</span></div>';
   // ═══ ONGLET « À VALIDER » ═══
   if(absTab==='valider'){
   // ---- incohérences détectées sur les absences existantes ----
@@ -2554,10 +2593,10 @@ function renderAbs(){
   const scan=(arr,kind,label)=>{for(const r of arr){const e=emp(r.empId);if(!e||!absSel.has(e.b))continue;if(r.statut==='refuse')continue;
     for(const it of checkAbsence(r.empId,r.du,r.au,kind))if(it.sev==='block')
       probs.push({e,r,kind,label,txt:it.txt});}};
-  scan(S.conges,'conge','🏖 Congé');scan(S.maladies,'maladie','🤒 Maladie');scan(S.ecoles||[],'ecole','🎓 École');
+  scan(S.conges,'conge','🏖 Congé');scan(S.maladies,'maladie','🤒 Maladie');scan(S.absinj||[],'absinj','🚫 Absence injustifiée');scan(S.ecoles||[],'ecole','🎓 École');
   if(probs.length){
     h+='<div class="mhead" style="color:var(--red)">⚠️ Incohérences à corriger ('+probs.length+')</div>';
-    for(const p of probs)h+='<div class="aline red" style="margin-bottom:6px">'+p.label+' <b>'+esc(p.e.nom)+'</b> '+fmtFR(p.r.du)+' → '+fmtFR(p.r.au)+' : '+p.txt+' <button class="mini" style="margin-left:6px" onclick="'+(p.kind==='conge'?'delCg':p.kind==='ecole'?'delEc':'delMl')+'('+p.r.id+')">🗑 supprimer</button></div>';
+    for(const p of probs)h+='<div class="aline red" style="margin-bottom:6px">'+p.label+' <b>'+esc(p.e.nom)+'</b> '+fmtFR(p.r.du)+' → '+fmtFR(p.r.au)+' : '+p.txt+' <button class="mini" style="margin-left:6px" onclick="'+(p.kind==='conge'?'delCg':p.kind==='ecole'?'delEc':p.kind==='absinj'?'delAI':'delMl')+'('+p.r.id+')">🗑 supprimer</button></div>';
   }
   // ---- demandes en attente ----
   const att=S.conges.filter(c=>{const e=emp(c.empId);return c.statut==='attente'&&e&&absSel.has(e.b)}).sort((a,b)=>((a._ts||'')<(b._ts||'')?-1:1));
@@ -2645,37 +2684,42 @@ function renderAbs(){
 
   // ═══ ONGLET « HISTORIQUE » — congés/maladies/école/entreprise par salarié + ajout ═══
   if(absTab==='histo'){
-  h+='<div class="phead" style="padding-top:4px;border:none"><div class="seg">'+[['ALL','Tout'],['conge','🏖 Congés'],['maladie','🤒 Maladies'],['ecole','🎓 École'],['ent','🏭 Entreprise']].map(x=>'<button class="'+(absType===x[0]?'on':'')+'" onclick="setAbsT(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div></div>';
+  h+='<div class="phead" style="padding-top:4px;border:none"><div class="seg">'+[['ALL','Tout'],['conge','🏖 Congés'],['maladie','🤒 Maladies'],['absinj','🚫 Injustifiées'],['ecole','🎓 École'],['ent','🏭 Entreprise']].map(x=>'<button class="'+(absType===x[0]?'on':'')+'" onclick="setAbsT(\''+x[0]+'\')">'+x[1]+'</button>').join('')+'</div></div>';
   h+='<div class="mhead">Par salarié</div>';
   for(const e of S.employees.filter(x=>x.actif&&absSel.has(x.b))){
     const cgs=S.conges.filter(c=>c.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
     const mls=S.maladies.filter(m=>m.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
+    const ais=(S.absinj||[]).filter(x=>x.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
     const ecs=(S.ecoles||[]).filter(x=>x.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
     const ents=(S.entreprises||[]).filter(x=>x.empId===e.id).sort((a,b)=>a.du<b.du?-1:1);
     const rows=[];
     if(absType==='ALL'||absType==='conge')for(const c of cgs)rows.push({t:'conge',r:c});
     if(absType==='ALL'||absType==='maladie')for(const m of mls)rows.push({t:'maladie',r:m});
+    if(absType==='ALL'||absType==='absinj')for(const x of ais)rows.push({t:'absinj',r:x});
     if(absType==='ALL'||absType==='ecole')for(const x of ecs)rows.push({t:'ecole',r:x});
     if(absType==='ALL'||absType==='ent')for(const x of ents)rows.push({t:'ent',r:x});
     rows.sort((a,b)=>a.r.du<b.r.du?-1:1);
     const totAn=cgs.filter(c=>c.statut==='accepte'&&c.du.startsWith(an)).reduce((t,c)=>t+nbJours(c.du,c.au),0);
     const mlAn=mls.filter(m=>m.du.startsWith(an)).reduce((t,m)=>t+nbJours(m.du,m.au),0);
     const ecAn=ecs.filter(x=>x.du.startsWith(an)).reduce((t,x)=>t+nbJours(x.du,x.au),0);
+    const aiAn=ais.filter(x=>x.du.startsWith(an)).reduce((t,x)=>t+nbJours(x.du,x.au),0);
     const open=_absOpen.has(String(e.id));
     h+='<div class="ecard" style="flex-direction:column;align-items:stretch">';
     h+='<div class="brow" style="cursor:pointer" onclick="absToggleEmp(\''+e.id+'\')" title="'+(open?'Replier':'Déplier')+' le détail des absences">'+
       '<span style="width:13px;color:var(--mut);font-size:11px">'+(open?'▾':'▸')+'</span>'+
       '<span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b><span class="small" style="color:var(--'+e.b+');font-weight:700">'+bout(e.b).nom+'</span>'+
       '<span class="small" style="color:var(--mut)">'+rows.length+' absence'+(rows.length>1?'s':'')+'</span>'+
-      '<span class="small" style="margin-left:auto"><b>'+totAn+' j</b> de congés acceptés en '+an+(mlAn?' · '+mlAn+' j maladie':'')+(ecAn?' · '+ecAn+' j école':'')+' · '+badgeEstival(e.id,an)+'</span></div>';
+      '<span class="small" style="margin-left:auto"><b>'+totAn+' j</b> de congés acceptés en '+an+(mlAn?' · '+mlAn+' j maladie':'')+(ecAn?' · '+ecAn+' j école':'')+(aiAn?' · <span style="color:#b91c1c;font-weight:800">'+aiAn+' j injustifiée'+(aiAn>1?'s':'')+'</span>':'')+' · '+badgeEstival(e.id,an)+'</span></div>';
     if(open&&!rows.length)h+='<div class="small" style="padding:2px 0 2px 18px">Aucune absence enregistrée.</div>';
     if(open)for(const x of rows){
       const r=x.r;const past=r.au<todayISO();
       h+='<div class="brow absrow" id="absrow-'+x.t+'-'+r.id+'" style="padding-left:18px;border-radius:8px'+(past?';opacity:.5':'')+'">'+
-        '<span>'+(x.t==='conge'?'🏖':x.t==='ecole'?'🎓':x.t==='ent'?'🏭':'🤒')+'</span>'+
+        '<span>'+(x.t==='conge'?'🏖':x.t==='ecole'?'🎓':x.t==='ent'?'🏭':x.t==='absinj'?'🚫':'🤒')+'</span>'+
         '<span>'+fmtFR(r.du)+' → '+fmtFR(r.au)+'</span><span class="small"><b>'+nbJours(r.du,r.au)+' j</b></span>';
       if(x.t==='conge')h+=(r.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">accepté ✓</span>':r.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé'+(r.auto?' auto':'')+'</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>')+(r.auto&&r.motifAuto?'<span class="small" style="color:var(--red)" title="Refus automatique — l\'admin peut accepter manuellement avec ✓">🚫 '+esc(r.motifAuto)+'</span>':'');
       if(x.t==='maladie'&&r.statut==='refuse')h+='<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusé</span>';
+      if(x.t==='absinj'){const _e2=emp(r.empId);const _m=_e2?absInjMin(_e2,(function(){const o=[];for(let d2=r.du;d2<=r.au;d2=addD(d2,1))o.push(d2);return o;})()):0;
+        h+='<span class="gm" style="margin-left:0;cursor:default;background:#7f1d1d;color:#fff" title="Heures prévues non travaillées — non rémunérées">non rémunéré'+(_m?' · '+fmtDur(_m):'')+'</span>';}
       if(x.t==='conge'&&r.modifie)h+='<span class="modif" title="Demande initiale : '+fmtFR(r.demande.du)+' → '+fmtFR(r.demande.au)+'">✏️ modifié</span>';
       if(r.note)h+='<span class="small">'+esc(r.note)+'</span>';
       h+='<span style="margin-left:auto;white-space:nowrap">';
@@ -2683,7 +2727,8 @@ function renderAbs(){
       else h+='<button class="mini" onclick="startEditRow(\''+x.t+'\','+r.id+')" title="Modifier les dates">✎</button> ';
       if(x.t==='conge'&&r.statut!=='accepte')h+='<button class="mini" onclick="setCongeStatut('+r.id+',\'accepte\')">✓</button> ';
       if(x.t==='conge'&&r.statut!=='refuse')h+='<button class="mini" onclick="setCongeStatut('+r.id+',\'refuse\')">✗</button> ';
-      h+='<button class="mini ghost" onclick="'+(x.t==='conge'?'delCg':x.t==='ecole'?'delEc':x.t==='ent'?'delEnt':'delMl')+'('+r.id+')">🗑</button></span></div>';
+      if(x.t==='absinj')h+='<button class="mini" title="Le salarié a finalement fourni un justificatif : requalifier en arrêt maladie (mêmes dates)" onclick="requalifAbsInj('+r.id+',\'maladie\')">🤒 justifié</button> <button class="mini" title="Requalifier en congé accepté (mêmes dates)" onclick="requalifAbsInj('+r.id+',\'conge\')">🏖</button> ';
+      h+='<button class="mini ghost" onclick="'+(x.t==='conge'?'delCg':x.t==='ecole'?'delEc':x.t==='ent'?'delEnt':x.t==='absinj'?'delAI':'delMl')+'('+r.id+')">🗑</button></span></div>';
       if(x.t==='conge'&&editCgId===r.id)h+=cgEditor(r);
       if(x.t!=='conge'&&editRow&&editRow.t===x.t&&editRow.id===r.id)h+=rowEditor(x.t,r);
     }
@@ -2710,9 +2755,18 @@ function addAbs(){
   }
   else if(t==='conge')S.conges.push({id:Date.now(),empId:$('ab-emp').value,du,au,statut:$('ab-st').value,note:$('ab-note').value,_ts:NOW()});
   else if(t==='ecole')S.ecoles.push({id:Date.now(),empId:$('ab-emp').value,du,au,note:$('ab-note').value,_ts:NOW()});
+  else if(t==='absinj'){
+    const _e=emp($('ab-emp').value);
+    const _j=(function(){let n=0;for(let d2=du;d2<=au;d2=addD(d2,1))if(_e&&presence(_e,d2).st!=='repos'&&presence(_e,d2).st!=='off')n++;return n;})();
+    if(!_j&&!confirm('Sur cette période, '+( _e?_e.nom:'ce salarié')+' n\'était pas censé travailler (repos / hors planning).\n\nEnregistrer quand même ?'))return;
+    S.absinj=S.absinj||[];
+    S.absinj.push({id:Date.now(),empId:$('ab-emp').value,du,au,note:$('ab-note').value,_ts:NOW()});
+  }
   else S.maladies.push({id:Date.now(),empId:$('ab-emp').value,du,au,note:$('ab-note').value,_ts:NOW()});
   save();renderAbs();render();
 }
+function abTypeChg(){const t=$('ab-type')&&$('ab-type').value;const el=$('ab-hint');if(el)el.style.display=(t==='absinj')?'':'none';
+  const st=$('ab-st');if(st)st.style.display=(t==='conge')?'':'none';}
 function renderPeople(days){
   const emps=S.employees.filter(e=>empVisibleWeek(e,curMonday)&&(e.b===curB||days.some(d=>{const p=presence(e,d);return p.st==='present'&&(p.blocks||[]).some(bl=>bl[2]===curB)})));
   let h=emps.map(e=>'<button class="pchip'+(hidden.has(e.id)?' off':'')+'" onclick="togHide(\''+e.id+'\')" title="'+(hidden.has(e.id)?'Afficher':'Masquer')+' '+esc(e.nom)+'"><span class="dot" style="background:'+colOf(e)+'"></span><span class="n">'+esc(e.nom)+'</span></button>').join('');
@@ -2747,6 +2801,8 @@ function renderHoursBar(days){
       (ec>0?'<span class="ko">+'+fmtDur(ec)+'</span>':ec<0?'<span class="warn">−'+fmtDur(-ec)+'</span>':'<span class="ok">✓</span>')+
       (hs>0?'<span class="hsbadge">+ '+fmtDur(hs)+' en HS</span>':'')+
       (function(){const a=weekAdjLoss(e,curMonday);if(!a.total)return '';const lbl=a.retard&&!a.depart?'retard':a.depart&&!a.retard?'parti tôt':'retard/départ';return '<span class="hsbadge" style="background:rgba(239,68,68,.16);color:#f87171" title="'+(a.retard?fmtDur(a.retard)+' de retard':'')+(a.retard&&a.depart?' · ':'')+(a.depart?fmtDur(a.depart)+' parti plus tôt':'')+' — déjà déduit des heures">⚠ −'+fmtDur(a.total)+' '+lbl+'</span>';})()+
+      (function(){const dsW=[...Array(7)].map((_,i)=>addD(curMonday,i));const m=absInjMin(e,dsW);const n=absInjDays(e,dsW).length;
+        if(!n)return '';return '<span class="hsbadge" style="background:rgba(127,29,29,.18);color:#b91c1c" title="Absence injustifiée : '+n+' jour'+(n>1?'s':'')+' — heures prévues non travaillées, non rémunérées">🚫 '+(m?'−'+fmtDur(m)+' ':'')+'absence injustifiée</span>';})()+
       (function(){let t=0;for(let i=0;i<7;i++){const pz=pauseOf(e.id,addD(curMonday,i));if(pz&&pz.ret)t+=pauseDepassMin(pz);}if(!t)return '';return '<span class="hsbadge" style="background:rgba(217,119,6,.16);color:#d97706" title="Pauses pointées plus longues que prévu cette semaine — déjà déduit des heures">🍽 −'+fmtDur(t)+' pause</span>';})()+
       (here!==tot?'<span class="small">dont '+fmtDur(here)+' ici</span>':'')+'</div>';
   }
@@ -2762,8 +2818,8 @@ function showHDetail(eid){
       const bs=[...new Set(p.blocks.map(bl=>bl[2]))];const mixte=bs.length>1;
       h+='<tr><td>'+DAYJ[wdOf(d)]+' '+fmtCourt(d)+'</td><td>'+bs.map(x=>bout(x).nom).join(' + ')+'</td><td>'+p.blocks.map(b=>fmtH(b[0])+'-'+fmtH(b[1])+' ('+fmtDur(durMin(b[0],b[1]))+(mixte?' · '+bout(b[2]).nom:'')+(b[3]?' · HS':'')+(typeof b[4]==='string'&&b[4]?' · '+esc(b[4]):'')+')').join(' + ')+'</td><td><b>'+fmtDur(m)+'</b></td><td class="small">'+(p.ex?'modifié ce jour':'')+'</td></tr>';}
     else {const fcp=p.st==='repos'?ferieChomePay(e,d):0;
-      const cr=(p.st==='conge'||p.st==='maladie')?plannedDayMin(e,d):(p.st==='ecole'?(e.ecoleMin||420):fcp);
-      const lab=p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='ecole'?'🎓 école':(fcp>0?'🎌 férié chômé':'repos');
+      const cr=(p.st==='conge'||p.st==='maladie')?plannedDayMin(e,d):(p.st==='ecole'?(e.ecoleMin||420):p.st==='absinj'?0:fcp);
+      const lab=p.st==='conge'?'🏖 congé':p.st==='maladie'?'🤒 maladie':p.st==='absinj'?('🚫 absence injustifiée'+(plannedDayMin(e,d)?' — '+fmtDur(plannedDayMin(e,d))+' prévues, non rémunérées':'')):p.st==='ecole'?'🎓 école':(fcp>0?'🎌 férié chômé':'repos');
       h+='<tr><td>'+DAYJ[wdOf(d)]+' '+fmtCourt(d)+'</td><td colspan="3" class="small">'+lab+(cr?' — '+fmtDur(cr)+' décomptées'+(p.st==='ecole'?' (forfait journée)':fcp>0?' (jour férié payé)':' (heures prévues)'):'')+'</td><td class="small">'+(cr?fmtDur(cr):'')+'</td></tr>';}
   }
   const cm=Math.round(e.h*60);
@@ -3191,7 +3247,7 @@ function _restampAll(){
   const t=NOW();
   (S.employees||[]).forEach(x=>x._ts=t);
   (S.boutiques||[]).forEach(x=>x._ts=t);
-  ['exceptions','events','hsdemandes','conges','maladies','ecoles','entreprises','feries'].forEach(k=>(S[k]||[]).forEach(x=>x._ts=t));
+  ['exceptions','events','hsdemandes','conges','maladies','absinj','ecoles','entreprises','feries'].forEach(k=>(S[k]||[]).forEach(x=>x._ts=t));
   for(const k in (S.primes||{}))if(S.primes[k]&&typeof S.primes[k]==='object')S.primes[k]._ts=t;
   for(const k in (S.solidarite||{}))if(S.solidarite[k]&&typeof S.solidarite[k]==='object')S.solidarite[k]._ts=t;
   S.goLiveTs=t;S.adminPinTs=t;S.rhPinTs=t; // réglages globaux
@@ -3262,6 +3318,7 @@ function paieRow(e,days){
     retard:lossMin(e,days), retardLabel:lossMonthLabel(e,days),
     pause:pauseLossMin(e,days),
     ferchome:feriesOfMonth(days).filter(d=>inEmploi(e,d)&&dayWorkedMin(e,d)===0).length,
+    absinj:absInjDays(e,days).length, absinjMin:absInjMin(e,days),
     conge:daysAbs(S.conges.filter(c=>c.statut==='accepte'),e.id,days),
     maladie:daysAbs(S.maladies.filter(m=>m.statut!=='attente'),e.id,days),
     ecole:daysAbs(S.ecoles||[],e.id,days)
@@ -3278,7 +3335,7 @@ function setBilanHist(year,id,key,val){S.bilanHist[year]=S.bilanHist[year]||{};S
 function bilHistTog(bid,open){window._bilHistOpen=window._bilHistOpen||new Set();if(open)window._bilHistOpen.add(bid);else{window._bilHistOpen.delete(bid);renderPaie();}} // rafraîchit les barres à la fermeture du volet
 function bilanRow(e,days,year){
   const gl=S.goLive||'2026-06-01';
-  let hs=0,ferMin=0,dim=0,conge=0,maladie=0,ecole=0;
+  let hs=0,ferMin=0,dim=0,conge=0,maladie=0,ecole=0,absinj=0;
   for(const d of days){if(d<gl)continue; // avant la mise en service : couvert par l'historique Excel, pas de projection
     const p=presence(e,d);
     if(p.st==='present'&&p.blocks){
@@ -3286,13 +3343,13 @@ function bilanRow(e,days,year){
       const f=ferieOf(d);
       if(f&&f.type==='ferie'&&shopHours(p.b,d))ferMin+=blocksMin(p.blocks.filter(bl=>shopOpen(bl[2],d)));
       if(wdOf(d)===7&&shopHours(p.b,d))dim++;
-    }else if(p.st==='conge')conge++;else if(p.st==='maladie')maladie++;else if(p.st==='ecole')ecole++;}
+    }else if(p.st==='conge')conge++;else if(p.st==='maladie')maladie++;else if(p.st==='absinj')absinj++;else if(p.st==='ecole')ecole++;}
   const H=(S.bilanHist[year]||{})[e.id]||{};
   return{id:e.id,nom:e.nom,b:e.b,
     hsMin:hs+(+H.hs||0)*60, hsLiveMin:hs,
     ferMin:ferMin+(+H.fer||0)*60,
     dim:dim+(+H.dim||0),
-    conge:conge+(+H.conge||0), maladie:maladie+(+H.maladie||0), ecole:ecole+(+H.ecole||0)};
+    conge:conge+(+H.conge||0), maladie:maladie+(+H.maladie||0), ecole:ecole+(+H.ecole||0), absinj:absinj+(+H.absinj||0)};
 }
 // une barre comparative : valeur vs max de la boutique, avec repère de moyenne
 function bilBar(val,max,avg,color,unit,extra){
@@ -3321,6 +3378,7 @@ function renderBilan(){
   const gMaxDim=Math.max(1,...allRows.map(r=>r.dim));
   const gMaxCon=Math.max(1,...allRows.map(r=>r.conge));
   const gMaxMal=Math.max(1,...allRows.map(r=>r.maladie));
+  const gMaxAI=Math.max(1,...allRows.map(r=>r.absinj));
   for(const b of S.boutiques){
     if(!paieSel.has(b.id))continue;
     const rows=allRows.filter(r=>r.b===b.id);
@@ -3333,9 +3391,10 @@ function renderBilan(){
     const avgDim=rows.length?sum('dim')/rows.length:0,maxDim=gMaxDim;
     const avgCon=rows.length?sum('conge')/rows.length:0,maxCon=gMaxCon;
     const avgMal=rows.length?sum('maladie')/rows.length:0,maxMal=gMaxMal;
+    const avgAI=rows.length?sum('absinj')/rows.length:0,maxAI=gMaxAI;
     h+='<div class="bilbout"><div class="mhead" style="color:'+col+';border-bottom:2px solid '+col+';margin:6px 0 8px">'+b.nom+
       ' <span class="small" style="color:var(--mut);font-weight:600">— '+fmtMin0(sum('ferMin'))+' fériés · '+fmtMin0(sum('hsMin'))+' HS au total</span></div>';
-    h+='<table class="biltab"><tr><th></th><th>Heures sup (moy/sem)</th><th>Fériés travaillés</th><th>Dimanches</th><th>Congés (j)</th><th>Maladie (j)</th></tr>';
+    h+='<table class="biltab"><tr><th></th><th>Heures sup (moy/sem)</th><th>Fériés travaillés</th><th>Dimanches</th><th>Congés (j)</th><th>Maladie (j)</th><th title="Jours d\'absence injustifiée (non rémunérés)">🚫 Injust. (j)</th></tr>';
     for(const r of rows){
       const hsw=r.hsMin/60/weeks;
       h+='<tr><td class="bilnom"><span class="bdot" style="background:'+colOf(emp(r.id))+'"></span>'+esc(r.nom.split(' ')[0])+'</td>'+
@@ -3343,7 +3402,8 @@ function renderBilan(){
         '<td>'+bilBar(r.ferMin/60,maxFer,avgFer,col,'<b>'+fmtMin0(r.ferMin)+'</b>')+'</td>'+
         '<td>'+bilBar(r.dim,maxDim,avgDim,col,'<b>'+r.dim+'</b>')+'</td>'+
         '<td>'+bilBar(r.conge,maxCon,avgCon,col,'<b>'+r.conge+'</b> j',r.ecole?('+'+r.ecole+'é école'):'')+'</td>'+
-        '<td>'+bilBar(r.maladie,maxMal,avgMal,'#d97706','<b>'+r.maladie+'</b> j')+'</td></tr>';
+        '<td>'+bilBar(r.maladie,maxMal,avgMal,'#d97706','<b>'+r.maladie+'</b> j')+'</td>'+
+        '<td>'+(r.absinj?bilBar(r.absinj,maxAI,avgAI,'#7f1d1d','<b>'+r.absinj+'</b> j'):'<span class="small" style="color:var(--mut)">—</span>')+'</td></tr>';
     }
     h+='</table>';
     // saisie historique (Excel) repliable
@@ -3355,7 +3415,8 @@ function renderBilan(){
         'Dim. <input type="number" step="1" value="'+(H.dim||'')+'" onchange="setBilanHist('+year+',\''+e.id+'\',\'dim\',this.value)"> '+
         'Congés <input type="number" step="1" value="'+(H.conge||'')+'" onchange="setBilanHist('+year+',\''+e.id+'\',\'conge\',this.value)"> j '+
         'Maladie <input type="number" step="1" value="'+(H.maladie||'')+'" onchange="setBilanHist('+year+',\''+e.id+'\',\'maladie\',this.value)"> j '+
-        'École <input type="number" step="1" value="'+(H.ecole||'')+'" onchange="setBilanHist('+year+',\''+e.id+'\',\'ecole\',this.value)"> j</div>';
+        'École <input type="number" step="1" value="'+(H.ecole||'')+'" onchange="setBilanHist('+year+',\''+e.id+'\',\'ecole\',this.value)"> j '+
+        'Injust. <input type="number" step="1" value="'+(H.absinj||'')+'" onchange="setBilanHist('+year+',\''+e.id+'\',\'absinj\',this.value)" title="jours d\'absence injustifiée (période hors outil)"> j</div>';
     }
     h+='</div></details></div>';
   }
@@ -3390,7 +3451,7 @@ function renderPaie(){
       const r=paieRow(e,days);
       h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:4px">';
       h+='<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
-        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (non rattrapé) — déjà retirées des heures normales ci-contre, non rémunérées">'+fmtHfrac(r.retard)+' '+r.retardLabel+' (non rémunéré)</span>':'')+(r.pause?' · <span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà retirées des heures normales, non rémunérées">'+fmtHfrac(r.pause)+' pause (non rémunéré)</span>':'')+'</span></div>';
+        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (non rattrapé) — déjà retirées des heures normales ci-contre, non rémunérées">'+fmtHfrac(r.retard)+' '+r.retardLabel+' (non rémunéré)</span>':'')+(r.pause?' · <span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà retirées des heures normales, non rémunérées">'+fmtHfrac(r.pause)+' pause (non rémunéré)</span>':'')+(r.absinj?' · <span style="color:#7f1d1d;font-weight:800" title="Absence(s) injustifiée(s) — heures prévues non travaillées, non rémunérées">🚫 '+r.absinj+' j absence injustifiée'+(r.absinjMin?' ('+fmtDur(r.absinjMin)+' non rémunérées)':'')+'</span>':'')+'</span></div>';
       for(const ev of paieEvents(e,days)){
         h+='<div class="brow" style="padding-left:14px;font-size:12px"><span style="width:104px;color:var(--mut)">'+ev.label+'</span><span>'+ev.txt+'</span></div>';
       }
@@ -3411,6 +3472,8 @@ function paieEvents(e,days){
     evs.push({d:c.du,label:'🏖 Congés',txt:c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)});
   for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]))
     evs.push({d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
+  {const aj=absInjByDay(e,days),ad=absInjDays(e,days);
+   for(const d of ad)evs.push({d,label:'🚫 '+fmtCourt(d),txt:'<span style="color:#7f1d1d;font-weight:800" title="Absence injustifiée — heures prévues non travaillées">Absence injustifiée'+(aj[d]?' — '+fmtDur(aj[d]):'')+' <span style="font-weight:600">(non rémunéré)</span></span>'});}
   const hd=hsByDay(e,days);
   Object.keys(hd).sort().forEach(d=>{evs.push({d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtMin(hd[d])+' sup</span>'});});
   const lwi=lossDayInfo(e,days);
@@ -3427,10 +3490,10 @@ function paieEvents(e,days){
 function exportPaie(){
   const days=monthDays(paieAnchor);
   const emps=S.employees.filter(e=>!e.admin&&paieSel.has(e.b)&&(!paieEmp||e.id===paieEmp)&&days.some(d=>inEmploi(e,d)));
-  const head=['Salarié','Boutique','Heures normales','Heures sup','Retard/départ non rattrapé (déjà déduit)','Pauses prolongées (déjà déduit)','Fériés travaillés','Dimanches travaillés','Congés (j)','Maladie (j)','École (j)'];
+  const head=['Salarié','Boutique','Heures normales','Heures sup','Retard/départ non rattrapé (déjà déduit)','Pauses prolongées (déjà déduit)','Absences injustifiées (j)','Absences injustifiées (heures non rémunérées)','Fériés travaillés','Dimanches travaillés','Congés (j)','Maladie (j)','École (j)'];
   const lines=[head.join(';')];
   for(const e of emps){const r=paieRow(e,days);
-    lines.push([r.nom,bout(r.b).nom,fmtDur(r.norm),fmtDur(r.hs),r.retard?'-'+fmtDur(r.retard):'',r.pause?'-'+fmtDur(r.pause):'',r.fer,r.dim,r.conge,r.maladie,r.ecole].join(';'));}
+    lines.push([r.nom,bout(r.b).nom,fmtDur(r.norm),fmtDur(r.hs),r.retard?'-'+fmtDur(r.retard):'',r.pause?'-'+fmtDur(r.pause):'',r.absinj||'',r.absinjMin?'-'+fmtDur(r.absinjMin):'',r.fer,r.dim,r.conge,r.maladie,r.ecole].join(';'));}
   const blob=new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='recap-paie-'+paieAnchor.slice(0,7)+'.csv';a.click();
@@ -3466,6 +3529,9 @@ function paieTextStr(){
       // pauses prolongées pointées PAR JOUR — déjà déduites des heures travaillées, non rémunérées
       const pw=pauseLossByDay(e,days);
       Object.keys(pw).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(pw[d])+' pause prolongée (non rémunéré)\n';});
+      // 🚫 absences injustifiées du mois, PAR JOUR — heures prévues non travaillées, non rémunérées
+      {const aj=absInjByDay(e,days);
+       for(const d of absInjDays(e,days))out+='  Le '+fmtCourt(d)+' : absence injustifiée'+(aj[d]?' — '+fmtMin(aj[d])+' non rémunérées':' (jour non travaillé)')+'\n';}
       // congés acceptés du mois
       for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
         out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du)+'.':'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)+'.')+'\n';
@@ -4812,6 +4878,7 @@ const JTYPES=[
   {t:"Retard à l'ouverture",c:'#b91c1c'},
   {t:'Parti plus tôt',c:'#f97316'},
   {t:'Pause prolongée',c:'#dc2626'},
+  {t:'Absence injustifiée',c:'#7f1d1d'},
   {t:'Téléphone',c:'#7c3aed'},
   {t:'Comportement',c:'#d97706'},
   {t:'Inventaire',c:'#1d4ed8'},
@@ -4841,6 +4908,23 @@ function addJournalEntry(b){
   if(!d||!q){alert('Date et salarié requis.');return;}
   const sens=_PUNCT_SENS[t];
   if(sens&&q===JQ_BOUTIQUE){alert('Un retard / départ anticipé concerne une personne — choisis le salarié.');return;}
+  // 🚫 Absence injustifiée saisie ici → on crée la VRAIE absence (même donnée que le panneau 🏖),
+  // pas une simple note : le salarié disparaît du planning ce jour-là et les heures ne sont pas payées.
+  if(t==='Absence injustifiée'){
+    if(q===JQ_BOUTIQUE){alert('Une absence injustifiée concerne une personne — choisis le salarié.');return;}
+    const e=S.employees.find(x=>x.nom===q&&x.b===b)||S.employees.find(x=>x.nom===q);
+    if(!e){alert('Salarié introuvable.');return;}
+    if((S.absinj||[]).some(a=>a.empId===e.id&&d>=a.du&&d<=a.au)){alert('Cette absence est déjà enregistrée pour '+e.nom+' le '+fmtFR(d)+'.');return;}
+    const _p=presence(e,d).st;
+    if((_p==='repos'||_p==='off')&&!confirm(e.nom+' n\'était pas censé travailler le '+fmtFR(d)+' (repos / hors planning).\n\nEnregistrer quand même ?'))return;
+    S.absinj=S.absinj||[];
+    const rec={id:Date.now(),empId:e.id,du:d,au:d,note:c,_ts:NOW()};
+    if(!isAdmin()&&isResp())rec.parResp=ROLE.empId;
+    S.absinj.push(rec);
+    if($('jr-c'))$('jr-c').value='';
+    save();renderJournal();render();
+    return;
+  }
   if(sens){
     // Retard / départ anticipé → on crée un AJUSTEMENT (même donnée que l'onglet Heures sup),
     // qui s'affiche sur le planning et, une fois validé, raccourcit le créneau + déduit les heures.
@@ -4895,7 +4979,7 @@ function renderJournal(){
   if(isA)h+=S.boutiques.map(b=>'<button class="bchip '+b.id+(selB===b.id?' on':'')+'" onclick="setJournalB(\''+b.id+'\')">'+b.nom+'</button>').join('');
   else if(selB)h+='<span class="chipb" style="color:var(--'+selB+')">'+bout(selB).nom+'</span>';
   h+='<button class="act grey" style="margin-left:auto" onclick="$(\'journalpanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:6px;color:var(--mut)">Comportement · attitude · fiabilité · ponctualité — et <b>problèmes globaux de la boutique</b> (choisis « 🏬 Toute la boutique » : inventaire, ménage, tenue du magasin…). Les retards / départs anticipés déclarés (ajustements horaires) sont repris ici automatiquement (🕒 auto).</div>';
+  h+='<div class="small" style="margin-bottom:6px;color:var(--mut)">Comportement · attitude · fiabilité · ponctualité — et <b>problèmes globaux de la boutique</b> (choisis « 🏬 Toute la boutique » : inventaire, ménage, tenue du magasin…). Les retards / départs anticipés déclarés (ajustements horaires) et les <b>🚫 absences injustifiées</b> sont repris ici automatiquement.</div>';
   const emps=S.employees.filter(e=>e.actif&&e.b===selB);
   // si le salarié filtré n'est pas (ou plus) dans la boutique sélectionnée → on réinitialise (sauf le filtre 🏬 Boutique)
   if(journalFilterEmp&&journalFilterEmp!==JQ_BOUTIQUE&&!emps.some(e=>e.nom===journalFilterEmp))journalFilterEmp='';
@@ -4905,7 +4989,8 @@ function renderJournal(){
     '<select onchange="setJournalEmp(this.value)"><option value="">👤 Tous les salariés</option><option value="'+JQ_BOUTIQUE+'"'+(journalFilterEmp===JQ_BOUTIQUE?' selected':'')+'>🏬 Boutique (problèmes globaux)</option>'+emps.map(e=>'<option value="'+esc(e.nom)+'"'+(journalFilterEmp===e.nom?' selected':'')+'>'+esc(e.nom)+'</option>').join('')+'</select>'+
     '<select onchange="setJournalPeriod(this.value)">'+[['mois','📅 Ce mois-ci'],['mois-1','Mois dernier'],['j90','90 derniers jours'],['annee','Cette année'],['tout','Tout']].map(o=>'<option value="'+o[0]+'"'+(journalFilterPeriod===o[0]?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>'+
     '</div>';
-  h+='<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
+  h+='<div class="small" style="margin:-2px 0 6px;color:var(--mut)">Une <b>🚫 Absence injustifiée</b> saisie ici crée la vraie absence de la journée (le salarié disparaît du planning, ses heures ne sont pas payées) — pour un simple retard, garde « Retard » et sa durée en minutes.</div>'+
+    '<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
     '<select id="jr-q"><option value="'+JQ_BOUTIQUE+'">🏬 Toute la boutique (problème global)</option>'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
     '<select id="jr-t">'+JTYPES.map(j=>'<option>'+j.t+'</option>').join('')+'</select>'+
     '<input id="jr-min" type="number" min="1" step="1" placeholder="min (retard/départ)" title="Durée en minutes — requise pour Retard / Retard à l\'ouverture / Parti plus tôt : crée un ajustement à valider qui modifie le planning" style="width:135px">'+
@@ -4918,6 +5003,11 @@ function renderJournal(){
     // Affiche « à l'ouverture » si le salarié ouvre la boutique ce jour-là (vaut aussi pour les saisies antérieures).
     if(sn==='debut'&&tt==='Retard'&&isOpenerAtB(e,rq.date,(presence(e,rq.date)||{}).b||e.b))tt="Retard à l'ouverture";
     list.push({d:rq.date,q:e.nom,t:tt,c:fmtMin(rq.min)+(rq.note?' — '+rq.note:''),auto:true,id:rq.id,pending:rq.statut!=='accepte'});}
+  // 🚫 Absences injustifiées : reprises automatiquement (une ligne par jour concerné), comme les retards
+  for(const a of (S.absinj||[])){const e=emp(a.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;
+    for(let d2=a.du;d2<=a.au;d2=addD(d2,1)){if(!_journalInPeriod(d2))continue;if(presence(e,d2).st!=='absinj')continue;
+      const m=plannedDayMin(e,d2);
+      list.push({d:d2,q:e.nom,t:'Absence injustifiée',c:(m?fmtDur(m)+' non travaillées, non rémunérées':'jour non travaillé')+(a.note?' — '+a.note:''),absinj:true,id:a.id});}}
   // Pauses prolongées POINTÉES (dépassement > 0) : reprises automatiquement, comme les retards
   for(const pz of (S.pauses||[])){if(!pz.ret)continue;const dep=pauseDepassMin(pz);if(dep<=0)continue;
     const e=emp(pz.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;if(!_journalInPeriod(pz.date))continue;
@@ -4926,7 +5016,7 @@ function renderJournal(){
   h+='<div class="mhead">'+list.length+' entrée'+(list.length>1?'s':'')+'</div>';
   if(!list.length)h+='<div class="small">Aucune entrée pour cette boutique.</div>';
   for(const r of list){const col=jtypeColor(r.t);const _qe=r.q===JQ_BOUTIQUE?null:(S.employees.find(x=>x.nom===r.q&&x.b===selB)||S.employees.find(x=>x.nom===r.q));const qcol=r.q===JQ_BOUTIQUE?'var(--'+selB+')':(_qe?colOf(_qe):'');
-    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.pause?(((isA||isResp())&&canPauseEdit((S.pauses||[]).find(x=>x.id===r.id)||{empId:''}))?'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span> <button class="mini" title="Corriger les heures pointées" onclick="editPause('+r.id+')">✎</button> <button class="mini ghost" title="Annuler ce pointage — remet le planning comme prévu" onclick="delPause('+r.id+')">🗑</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span>'):r.auto?(isA?((r.pending?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> ':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 validé ✓</span> ')+'<button class="mini" title="Modifier la durée" onclick="editRetard('+r.id+')">✎</button> <button class="mini ghost" title="Annuler — rétablit les heures du jour" onclick="delRetard('+r.id+')">🗑</button>'):'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
+    h+='<div class="brow" style="padding:4px 6px;border-bottom:1px solid var(--line)"><span class="small" style="width:86px;white-space:nowrap">'+fmtFR(r.d)+'</span><b style="width:108px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:'+(qcol||'inherit')+'">'+esc(r.q)+'</b><span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+col+';color:#fff;white-space:nowrap">'+esc(r.t)+'</span><span class="small" style="flex:1">'+esc(r.c)+(r.auto&&r.pending?' <b style="color:#fbbf24">(à valider)</b>':'')+'</span>'+(r.absinj?(isA?'<span class="small" style="color:#b91c1c;white-space:nowrap" title="Absence injustifiée — partagée avec le panneau 🏖 Absences">🚫 non rémunéré</span> <button class="mini ghost" title="Annuler cette absence injustifiée" onclick="delAI('+r.id+');renderJournal()">🗑</button>':'<span class="small" style="color:#b91c1c;white-space:nowrap" title="Absence injustifiée — partagée avec le panneau 🏖 Absences">🚫 non rémunéré</span>'):r.pause?(((isA||isResp())&&canPauseEdit((S.pauses||[]).find(x=>x.id===r.id)||{empId:''}))?'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span> <button class="mini" title="Corriger les heures pointées" onclick="editPause('+r.id+')">✎</button> <button class="mini ghost" title="Annuler ce pointage — remet le planning comme prévu" onclick="delPause('+r.id+')">🗑</button>':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Pointage de pause — repris de 🍽️ Écarts de pause">🍽 pointage</span>'):r.auto?(isA?((r.pending?'<button class="mini" title="Valider → applique au planning (créneau raccourci, heures déduites)" onclick="acceptHS('+r.id+');renderJournal()">✓</button> ':'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 validé ✓</span> ')+'<button class="mini" title="Modifier la durée" onclick="editRetard('+r.id+')">✎</button> <button class="mini ghost" title="Annuler — rétablit les heures du jour" onclick="delRetard('+r.id+')">🗑</button>'):'<span class="small" style="color:var(--mut);white-space:nowrap" title="Ajustement horaire — partagé avec l\'onglet Heures sup">🕒 '+(r.pending?'à valider':'validé ✓')+'</span>'):((isA||selB===myB)?'<button class="mini" title="Modifier" onclick="editJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">✎</button> <button class="mini ghost" title="Supprimer" onclick="delJournalEntry('+JSON.stringify(r.sig).replace(/"/g,'&quot;')+')">🗑</button>':''))+'</div>';
   }
   $('journalpanel').innerHTML=h;
 }
@@ -4981,7 +5071,7 @@ function restoreRole(){
     S=JSON.parse(JSON.stringify(SEED));              // ni local ni serveur : tout premier démarrage
   }
   if(remote&&remote.updated_at)_lastRemoteAt=remote.updated_at;
-  S.overrides=S.overrides||[];S.maladies=S.maladies||[];S.solidarite=S.solidarite||{};S.primes=S.primes||{};
+  S.overrides=S.overrides||[];S.maladies=S.maladies||[];S.absinj=S.absinj||[];S.solidarite=S.solidarite||{};S.primes=S.primes||{};
   migrate(S);
   if(!S.theme)S.theme=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
   applyTheme();
