@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-24 16:56</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-24 17:41</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -3834,6 +3834,14 @@ const TESTEUR_TOTAL = 45;
 // Toutes les largeurs internes sont en MILLIMÈTRES ; l'affichage est en cm.
 const ETG_FLACON_MM = { '50mL': 34, '100mL': 43, '10mL': 20, '10mL_SDN': 20, '20mL': 25, '+150mL': 60 };
 function _etgFlaconMm(format) { return ETG_FLACON_MM[format] || 34; }
+// 📏 Largeur RÉELLE d'un flacon de CETTE gamme (Fabien 2026-08-24 : saisie en cliquant
+// sur le plan, appliquée à TOUS les plans) : `g.flaconMm` mesuré prime sur le standard
+// du format ; hors bornes ou absent → standard. Synchronisé comme les autres champs
+// de gamme (_ts). La GRILLE, elle, reste au pas du format (les emplacements ne bougent pas).
+function _etgFlaconMmDe(g) {
+  const v = g ? parseFloat(g.flaconMm) : NaN;
+  return (!isNaN(v) && v >= 8 && v <= 120) ? v : _etgFlaconMm(g && g.format);
+}
 // HAUTEURS des flacons par format (retour Fabien 2026-08-07 01:25 : un 10mL posé sur
 // l'étagère est PETIT — même proportion que le « 10 devant » qu'il a validée, ~42 %
 // d'un 50mL). Écran en px (le zoom ne joue que sur les largeurs), papier en mm.
@@ -4171,7 +4179,7 @@ function _etgCellsGamme(pl) {
   _etgCellsCache.set(pl.id, { v: _etgCacheV, cells: cells });
   const shopCell = _etgShopDePlacement(pl);
   const pousse = (g, p, nb) => {
-    const mm = _etgFlaconMm(g.format);
+    const mm = _etgFlaconMmDe(g); // 📏 largeur réelle de la gamme si mesurée, sinon standard du format
     // 🔟 10mL posé DEVANT ce flacon (pas de largeur en plus — il est devant, pas à côté)
     const devant = !!(pl.devant10 || {})[p.id] && g.format !== '10mL' && g.format !== '10mL_SDN' && !!_etgDixDe(g, p, shopCell);
     for (let i = 0; i < nb; i++) cells.push({ g, p, fmt: g.format, mm, devant, nb: (i === 0 && nb > 1) ? nb : 0 });
@@ -19059,6 +19067,7 @@ function pvEtgMenuParfum(ev, plid, parfumId, gammeId) {
   m.innerHTML = '<div style="font-size:10px; color:#94a3b8; padding:2px 4px;"><b style="color:#e2e8f0;">' + (p.n || '(sans nom)') + '</b> · ' + _etgNomGamme(g) + '</div>'
     + '<button onclick="pvEtgNbFlacons(\'' + plid + '\',\'' + parfumId + '\',\'' + g.id + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#f59e0b15; color:#fbbf24; border:1px solid #f59e0b40; border-radius:4px; cursor:pointer;">🔢 Nombre de flacons… <b>(actuellement ×' + nbCur + ')</b></button>'
     + ((_dixDispo || _dixActif) ? '<button onclick="pvEtgToggleDevant10(\'' + plid + '\',\'' + parfumId + '\',\'' + g.id + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#06b6d415; color:#67e8f9; border:1px solid #06b6d440; border-radius:4px; cursor:pointer;">' + (_dixActif ? '🔟 Retirer le 10mL de devant' : '🔟 Mettre le 10mL de ce parfum DEVANT') + '</button>' : '')
+    + '<button onclick="pvEtgLargeurFlacon(\'' + g.id + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#10b98115; color:#6ee7b7; border:1px solid #10b98140; border-radius:4px; cursor:pointer;" title="La largeur réellement consommée en rayon par UN flacon de cette gamme — s\'applique à tous les plans, toutes boutiques">📏 Largeur réelle du flacon… <b>(' + String(_etgFlaconMmDe(g)).replace('.', ',') + ' mm' + (_etgFlaconMmDe(g) !== _etgFlaconMm(g.format) ? ', mesurée' : '') + ')</b></button>'
     + '<button onclick="pvEtgToggleRetire(\'' + plid + '\',\'' + parfumId + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#ef444415; color:#f87171; border:1px solid #ef444440; border-radius:4px; cursor:pointer;">🚫 Ne pas présenter ce parfum ici</button>'
     + '<button onclick="pvEtgFermerMenu()" style="padding:3px 8px; font-size:10px; background:none; color:#64748b; border:none; cursor:pointer;">Fermer</button>';
   document.body.appendChild(m);
@@ -19099,6 +19108,9 @@ function pvEtgMenuBloc(ev, plid) {
     inner += '<button onclick="pvEtgToggleMultiFmt(\'' + plid + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; cursor:pointer;">'
       + (pl.multiFmt ? '↩️ Dégrouper (revenir au format seul)' : '🧬 Grouper les formats par parfum' + (_nbSoeurs > 1 ? ' (' + _nbSoeurs + ' formats)' : '')) + '</button>';
     inner += '<button onclick="pvEtgEtiquetteGamme(event, \'' + plid + '\'); pvEtgFermerMenu();" style="padding:5px 8px; font-size:11px; text-align:left; background:#38bdf815; color:#7dd3fc; border:1px solid #38bdf840; border-radius:4px; cursor:pointer;">🏷️ Étiquettes de la gamme' + ((pl.devant10 && Object.keys(pl.devant10).some(function(k) { return pl.devant10[k]; })) ? ' + 10mL devant' : '') + '</button>';
+    if (_gM) {
+      inner += '<button onclick="pvEtgLargeurFlacon(\'' + _gM.id + '\')" style="padding:5px 8px; font-size:11px; text-align:left; background:#10b98115; color:#6ee7b7; border:1px solid #10b98140; border-radius:4px; cursor:pointer;" title="La largeur réellement consommée en rayon par UN flacon de cette gamme — s\'applique à tous les plans, toutes boutiques' + (pl.multiFmt ? ' (gamme d\'ancrage du bloc — clique un flacon pour régler un autre format)' : '') + '">📏 Largeur réelle du flacon… <b>(' + String(_etgFlaconMmDe(_gM)).replace('.', ',') + ' mm' + (_etgFlaconMmDe(_gM) !== _etgFlaconMm(_gM.format) ? ', mesurée' : '') + ')</b></button>';
+    }
     if (pl.multiFmt) {
       inner += '<div style="display:flex; gap:4px; align-items:center; padding:0 4px;"><span style="font-size:10px; color:#94a3b8;">10mL par parfum : <b style="color:#e2e8f0;">×' + (Math.max(1, parseInt(pl.rep10, 10) || 3)) + '</b></span>'
         + '<button onclick="pvEtgRep10(\'' + plid + '\',-1)" style="padding:2px 9px; font-size:11px; background:#33415530; color:#e2e8f0; border:1px solid #47556960; border-radius:4px; cursor:pointer;">−</button>'
@@ -19115,6 +19127,33 @@ function pvEtgMenuBloc(ev, plid) {
   if (y + r.height > window.innerHeight - 8) y = ev.clientY - r.height - 6;
   m.style.left = x + 'px'; m.style.top = y + 'px';
   setTimeout(function() { document.addEventListener('click', pvEtgFermerMenu, { once: true }); }, 0);
+}
+// 📏 LARGEUR RÉELLE d'un flacon de la gamme (Fabien 2026-08-24) : mesurée en boutique
+// (« 10 flacons collés ÷ 10 »), saisie depuis le menu d'un flacon ou d'un bloc sur le
+// plan de N'IMPORTE QUELLE boutique — posée sur la GAMME (g.flaconMm) donc appliquée
+// à TOUS les plans, synchronisée entre postes (_ts). Vide = retour au standard du format.
+function pvEtgLargeurFlacon(gammeId) {
+  pvEtgFermerMenu();
+  if (!_etgPeutEditer()) return;
+  const g = baseLiq.find(function(x) { return x.id === gammeId; }); if (!g) return;
+  const std = _etgFlaconMm(g.format);
+  const cur = _etgFlaconMmDe(g);
+  const saisie = prompt('Largeur réelle d\'UN flacon de ' + _etgNomGamme(g) + ' (' + (LIQ_FORMAT_LABELS[g.format] || g.format) + '), en mm.\n\nAstuce : mesure 10 flacons collés côte à côte et divise par 10.\nStandard du format : ' + String(std).replace('.', ',') + ' mm — laisse VIDE pour y revenir.', String(cur).replace('.', ','));
+  if (saisie === null) return; // annulé
+  const _n = new Date().toISOString();
+  if (String(saisie).trim() === '') {
+    if (g.flaconMm == null) return;
+    g.flaconMm = null; g._ts = _n;
+    logAction('Plan étagères', '📏 Largeur flacon — ' + _etgNomGamme(g) + ' : retour au standard (' + std + ' mm)');
+  } else {
+    const v = parseFloat(String(saisie).replace(',', '.'));
+    if (isNaN(v) || v < 8 || v > 120) { pvAlert('Largeur invalide — entre 8 et 120 mm (mesure « 10 flacons collés ÷ 10 »).'); return; }
+    if (v === cur) return;
+    g.flaconMm = v; g._ts = _n;
+    logAction('Plan étagères', '📏 Largeur flacon mesurée — ' + _etgNomGamme(g) + ' : ' + String(v).replace('.', ',') + ' mm (standard ' + std + ')');
+  }
+  _etgCacheV++; // les cellules mémorisées utilisent l'ancienne largeur
+  saveData(); renderLiqAll();
 }
 // 🔢 Le NOMBRE de flacons d'un parfum (Fabien 2026-08-07 02:30 — remplace le ×2) :
 // saisie libre ≥ 1, puis proposition d'appliquer LE MÊME nombre à toute la gamme.
