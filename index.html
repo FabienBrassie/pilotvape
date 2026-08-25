@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-25 12:56</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-25 16:06</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -5792,6 +5792,94 @@ function groupeEnRetrait(acts, shop) {
   return anyOpen;
 }
 
+// ══════════════════════════════════════════════════════════════════════════
+// 🆕 NOUVEAUTÉ — « personne n'a encore rien coché » (demande Fabien 2026-08-25)
+// ══════════════════════════════════════════════════════════════════════════
+// Constat Fabien (capture du 25/08) : « le Luna, le Dragon lee sont invisibilisés dans la
+// masse, les équipes ne voient pas que ça a apparu au milieu du reste. » Une ligne qui
+// vient d'apparaître a TOUS ses camemberts vides, mais elle est rangée par marque au milieu
+// de 40 autres : personne ne la voit arriver.
+// RÈGLE (tranchée par Fabien) : une ligne est NOUVELLE tant que son camembert est vide —
+// SAUF si elle n'attend que Fabien (commande / livraison) : la boutique ne peut rien en
+// faire, ce n'est pas une nouveauté à lui signaler. Ce « rien d'immédiat » est déjà la
+// canonique actionEnRetrait / actionResteBoutique (2026-07-18) : on ne crée PAS un 2e juge.
+// PÉRIMÈTRE BOUTIQUE : filtre boutique posé → SON camembert ; pas de filtre → toutes.
+// Une boutique où la ligne est SANS OBJET (écoulée / hors stock : étapes shuntées, camembert
+// plein d'office) sort du périmètre — sinon elle masquerait la nouveauté chez les autres.
+const NOUVEAUTE_COLOR = '#38bdf8';
+
+function _shopsNouveauteAction(a, shop) {
+  let shops = shop ? [shop] : SHOPS.slice();
+  // Rétrocession : une seule boutique travaille (les autres sont court-circuitées).
+  if (a && a.type === 'RETRO_ENVOI' && a.retroFrom) shops = shops.filter(sh => sh === a.retroFrom);
+  if (a && a.type === 'RETRO_RECEPTION' && a.retroTo) shops = shops.filter(sh => sh === a.retroTo);
+  try {
+    if (typeof _ligneEcouleeChezShop === 'function') shops = shops.filter(sh => !_ligneEcouleeChezShop(a, sh));
+  } catch (e) {}
+  return shops;
+}
+
+function estNouveauteAction(a, shop) {
+  if (!a || a.annulee || a._archived || a.dateCloture) return false;
+  try { if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.has(a.id)) return false; } catch (e) {}
+  try { if (actionGlobalState(a) === 'FAIT') return false; } catch (e) {}
+  try { ensureActionSteps(a); } catch (e) {}
+  const shops = _shopsNouveauteAction(a, shop);
+  if (shops.length === 0) return false;
+  let travail = false;
+  for (const sh of shops) {
+    const st = (a.etats && a.etats[sh]) || {};
+    if (st.done === true) return false;            // une boutique a fini → plus une nouveauté
+    let cpt;
+    try { cpt = compteurEtapes(getActionSteps(a), st, { horsAdmin: true }); } catch (e) { return false; }
+    if (cpt.faits > 0) return false;               // camembert entamé → plus une nouveauté
+    if (cpt.restantsBoutique > 0) travail = true;  // du VRAI travail boutique, tout de suite
+  }
+  return travail;  // false = n'attend que Fabien (commande / livraison) → exception Fabien
+}
+
+function estNouveauteOp(op, shop) {
+  if (!op || op.annulee || op._archived) return false;
+  try { if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.has(op.id)) return false; } catch (e) {}
+  try { ensureOpSteps(op); } catch (e) {}
+  // Le bloc Amont (étapes de Fabien) compte comme entamé : le camembert de la carte OP
+  // mélange global + boutique — s'il n'est plus vide à l'œil, ce n'est plus une découverte.
+  // ⚠️ opGlobalStepsProgress renvoie 1 quand il n'y a AUCUNE étape globale : on teste les
+  // coches réelles, pas le ratio (piège vu au test O1).
+  try {
+    if (typeof computeOpGlobalStepDefs === 'function') {
+      const _gDefs = computeOpGlobalStepDefs(op) || [];
+      const _gProg = (op.progress && op.progress.global) || {};
+      if (_gDefs.length > 0 && _gDefs.some(d => _gProg[d.key] === true)) return false;
+    }
+  } catch (e) {}
+  let shops = shop ? [shop] : SHOPS.slice();
+  try {
+    if (typeof _opProduitEcouleChezShop === 'function') shops = shops.filter(sh => !_opProduitEcouleChezShop(op, sh));
+  } catch (e) {}
+  if (shops.length === 0) return false;
+  let travail = false;
+  for (const sh of shops) {
+    let cpt;
+    try { cpt = compteurEtapesOpShop(op, sh); } catch (e) { return false; }
+    if (cpt.faits > 0) return false;
+    if (cpt.restantsBoutique > 0) travail = true;
+  }
+  return travail;
+}
+
+// Badge 🆕 posé SUR la ligne, là où elle vit (règle 6-bis : la même info sur toutes les
+// surfaces — la card « 🆕 Nouveau » regroupe, le badge marque l'original dans sa section).
+function badgeNouveauteHtml(nb) {
+  const n = (typeof nb === 'number' && nb > 1) ? nb : 0;
+  const lbl = n ? ('🆕 ' + n + ' nouveaux') : '🆕 Nouveau';
+  return `<span title="Jamais entamé : aucune boutique n'a coché la moindre étape. Regroupé en tête du dashboard dans la card « 🆕 Nouveau »." style="font-size:9px; font-weight:700; padding:1px 6px; background:${NOUVEAUTE_COLOR}22; color:${NOUVEAUTE_COLOR}; border:1px solid ${NOUVEAUTE_COLOR}60; border-radius:3px; white-space:nowrap;">${lbl}</span>`;
+}
+// Nombre de nouveautés dans un lot d'actions (lignes groupées gamme / série).
+function _nbNouveautes(acts, shop) {
+  return (acts || []).filter(x => { try { return estNouveauteAction(x, shop); } catch (e) { return false; } }).length;
+}
+
 // RÈGLE 6-ter + audit 2026-07-09 : SEUL compteur autorisé pour tout x/y d'étapes — ne
 // jamais recompter à la main. Retourne { faits, total, attentes, attentesEvt, admin,
 // restantsBoutique } où :
@@ -11290,7 +11378,12 @@ let dashCollapsed = (() => {
   try { return JSON.parse(localStorage.getItem('pilotVapeDashCollapsed') || '{}'); }
   catch { return {}; }
 })();
-function isDashCollapsed(key) { return dashCollapsed[key] !== false; }
+function isDashCollapsed(key) {
+  // 🆕 « Nouveau » (2026-08-25) : la seule section DÉPLIÉE par défaut — son but est
+  // justement d'attraper l'œil sur ce que personne n'a vu arriver.
+  if (key === 'nouveau') return dashCollapsed[key] === true;
+  return dashCollapsed[key] !== false;
+}
 function toggleDashSection(key) {
   // Flip vers l'opposé de l'état effectif : si plié (missing/true) → ouvrir (false), sinon fermer (true).
   dashCollapsed[key] = isDashCollapsed(key) ? false : true;
@@ -23170,6 +23263,13 @@ function renderDashboard() {
       }).join('');
     }
 
+    // 🆕 NOUVEAU (2026-08-25) : la ligne dit elle-même qu'elle vient d'apparaître. Pas sur
+    // les lignes parfum « virtuelles » d'une action gamme entière (_opts.parfumId) : le
+    // badge vit alors sur la ligne gamme pliée — même règle que le 🐌 écoulement lent.
+    if (!(_opts && _opts.parfumId)) {
+      try { if (estNouveauteAction(a, fShop || null)) badgeTag = badgeNouveauteHtml() + badgeTag; } catch (e) {}
+    }
+
     const isExpanded = expandedActions.has(a.id);
 
     const _collapsedOnly = _opts && _opts.collapsedOnly;
@@ -23778,6 +23878,12 @@ function renderDashboard() {
   }
   function _ligneLiquide(cfg) {
     const isExpanded = expandedActions.has(cfg.groupKey);
+    // 🆕 NOUVEAU (2026-08-25) : point d'injection UNIQUE du badge pour TOUTES les lignes
+    // liquides (gamme, gamme entière, série multi-format) — cfg.actionsNouv = les actions
+    // que porte la ligne. Le badge est le PREMIER, avant tout le reste : c'est ce qui
+    // manquait pour que Luna / Dragon lee ne se noient plus dans la masse.
+    const _nbNouvLigne = cfg.actionsNouv ? _nbNouveautes(cfg.actionsNouv, fShop || null) : 0;
+    const _nouvBadgeLigne = _nbNouvLigne > 0 ? badgeNouveauteHtml(_nbNouvLigne) : '';
     // Teinte « qui commande » (2026-07-11) : cfg.baseBg/cfg.borderLeft optionnels — le survol
     // doit retomber sur la teinte, pas sur transparent (sinon la couleur disparaît au 1er survol).
     const _lqBg = cfg.baseBg || 'transparent';
@@ -23786,7 +23892,7 @@ function renderDashboard() {
     return `<div style="margin-bottom:1px;">
       <div onclick="toggleActionExpand('${cfg.groupKey}')" style="display:grid; grid-template-columns:24px 80px minmax(0,1.4fr) 36px 56px minmax(0,1fr) minmax(0,0.6fr) minmax(0,1fr) 66px; gap:4px; align-items:center; padding:4px 10px; cursor:pointer; border-radius:3px; background:${_lqBg};${_lqBorder}${cfg.dimmed ? ' opacity:0.55;' : ''}" onmouseover="this.style.background='${_lqHover}'" onmouseout="this.style.background='${_lqBg}'">
         <div style="color:#64748b; font-size:10px; text-align:center;">${isExpanded ? '▾' : '▸'}</div>
-        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto; max-width:52%;" title="${String(cfg.nom || '').replace(/"/g, '&quot;')}">${cfg.nom}</span>${cfg.badgesHtml || ''}</div>
+        <div style="grid-column:2/4; display:flex; align-items:center; gap:6px; min-width:0; overflow:hidden;"><span style="font-size:11px; color:#e2e8f0; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex:0 0 auto; max-width:52%;" title="${String(cfg.nom || '').replace(/"/g, '&quot;')}">${cfg.nom}</span>${_nouvBadgeLigne}${cfg.badgesHtml || ''}</div>
         <div style="font-size:9px; color:${cfg.profColor || '#64748b'}; font-weight:600; text-align:center;">${cfg.profShort || '—'}</div>
         <div style="font-size:9px; text-align:center;">${cfg.formatBadge ? `<span style="padding:1px 5px; background:${cfg.formatBadge.bg}; color:${cfg.formatBadge.text}; border-radius:2px; white-space:nowrap;">${cfg.formatLabel}</span>` : ''}</div>
         <div></div>
@@ -23910,6 +24016,7 @@ function renderDashboard() {
       groupKey,
       nom: g.gamme,
       dimmed: groupeEnRetrait(grp, fShop || null),
+      actionsNouv: grp,
       baseBg: _grpCmdAdmin ? '#261e3b' : undefined,
       hoverBg: _grpCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _grpCmdAdmin ? '#a78bfa' : _grpCmdUnset ? '#f59e0b' : undefined,
@@ -24040,6 +24147,7 @@ function renderDashboard() {
       groupKey,
       nom: g.gamme,
       dimmed: groupeEnRetrait([a], fShop || null),
+      actionsNouv: [a],
       baseBg: _glCmdAdmin ? '#261e3b' : undefined,
       hoverBg: _glCmdAdmin ? '#2f2549' : undefined,
       borderLeft: _glCmdAdmin ? '#a78bfa' : _glCmdUnset ? '#f59e0b' : undefined,
@@ -24143,6 +24251,7 @@ function renderDashboard() {
         groupKey,
         nom: u.nom,
         dimmed: groupeEnRetrait(allActions, fShop || null),
+        actionsNouv: allActions,
         baseBg: _allAdmin ? '#261e3b' : undefined,
         hoverBg: _allAdmin ? '#2f2549' : undefined,
         borderLeft: _allAdmin ? '#a78bfa' : _anyUnset ? '#f59e0b' : undefined,
@@ -24164,6 +24273,10 @@ function renderDashboard() {
     return html;
   }
 
+  // 🆕 (2026-08-25) : dans la card « Nouveau », les sous-accordéons (🔧 Kits · 🧪 Liquides
+  // · PD…) sont OUVERTS d'office — une nouveauté cachée derrière un accordéon replié serait
+  // exactement le problème que Fabien signale. Ailleurs, rien ne change.
+  let _grpForceOpen = false;
   function renderGroupedActionCards(actionList) {
     if (actionList.length === 0) return '';
     // Séparer kits vs liquides vs PD
@@ -24221,7 +24334,7 @@ function renderDashboard() {
       // (sinon les deux blocs partagent la même clé sub_<prefix>_SORTIR et toggle ensemble).
       const _subMotifSuffix = (actions[0] && actions[0].motifSortie === 'REPRISE') ? '_REPRISE' : '';
       const subKey = subKeyPrefix + '_' + (actions[0] ? actions[0].type : '') + _subMotifSuffix;
-      const isExpanded = expandedActions.has(subKey);
+      const isExpanded = _grpForceOpen || expandedActions.has(subKey);
       const _shopDots = SHOPS.map(sh => {
         if (fShop && sh !== fShop) return '';
         const col = SHOP_COLORS[sh];
@@ -24264,7 +24377,7 @@ function renderDashboard() {
     // Suffixe motif (REPRISE) pour la même raison que les sous-accordéons Kits/PD ci-dessus.
     const _liqMotifSuffix = (liqActions[0] && liqActions[0].motifSortie === 'REPRISE') ? '_REPRISE' : '';
     const liqSubKey = 'sub_liq_' + (liqActions[0] ? liqActions[0].type : '') + _liqMotifSuffix;
-    const liqExpanded = expandedActions.has(liqSubKey);
+    const liqExpanded = _grpForceOpen || expandedActions.has(liqSubKey);
     // Ronds de progression agrégée par shop
     const _liqShopDots = SHOPS.map(sh => {
       if (fShop && sh !== fShop) return '';
@@ -25615,6 +25728,59 @@ function renderDashboard() {
     </div>`;
   })();
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // 🆕 NOUVEAU — la card MIROIR des lignes jamais entamées (demande Fabien 2026-08-25)
+  // ══════════════════════════════════════════════════════════════════════════
+  // « Le Luna, le Dragon lee sont invisibilisés dans la masse, les équipes ne voient pas
+  // que ça a apparu au milieu du reste. » → une card en TÊTE du dashboard qui rassemble les
+  // MIROIRS des lignes à camembert vide de TOUTES les sections (À sortir, À rentrer, OP,
+  // Prix, À installer…). Miroir = la MÊME ligne rendue par les MÊMES fonctions (règle 8) :
+  // cocher ici = cocher là-bas, la ligne disparaît d'ici à la première coche. Chaque groupe
+  // garde l'en-tête de sa section d'origine, cliquable — jamais de liste déracinée (règle 7).
+  const _nouvShop = fShop || null;
+  const _nouvVus = new Set(); // anti-doublon (une OP peut être listée par 2 sections)
+  const _nouvA = (arr) => (arr || []).filter(x => {
+    if (!x || _nouvVus.has(x.id)) return false;
+    let ok = false; try { ok = estNouveauteAction(x, _nouvShop); } catch (e) { ok = false; }
+    if (ok) _nouvVus.add(x.id);
+    return ok;
+  });
+  const _nouvO = (arr) => (arr || []).filter(x => {
+    if (!x || _nouvVus.has(x.id)) return false;
+    let ok = false; try { ok = estNouveauteOp(x, _nouvShop); } catch (e) { ok = false; }
+    if (ok) _nouvVus.add(x.id);
+    return ok;
+  });
+  const _nouvGroupes = [
+    { key: 'install',    label: '📦 À installer',    color: '#f472b6', tests: _nouvA(testeurActionsInstall), acts: _nouvA(actionsAInstaller), opsL: _nouvO(opsInstallVisibles.concat(opsRecuesNonInstallees)) },
+    { key: 'desinstall', label: '🔻 À désinstaller',  color: '#f97316', tests: [], acts: [],                    opsL: _nouvO(opsDesinstVisibles) },
+    { key: 'opEnCours',  label: '🎯 OP en cours',     color: '#a855f7', tests: [], acts: [],                    opsL: _nouvO(_opEnCoursOps) },
+    { key: 'sortir',     label: 'À sortir',           color: '#ef4444', tests: [], acts: _nouvA(sortirAffich),  opsL: [] },
+    { key: 'reprises',   label: '📦 À reprendre',     color: '#0ea5e9', tests: [], acts: _nouvA(reprisesAffich), opsL: [] },
+    { key: 'retros',     label: '🔁 Rétrocessions',   color: '#06b6d4', tests: [], acts: _nouvA(retrosAffich),  opsL: [] },
+    { key: 'rentrer',    label: 'À rentrer',          color: '#22c55e', tests: [], acts: _nouvA(rentrerAffich), opsL: [] },
+    { key: 'prix',       label: 'Prix à modifier',    color: '#f59e0b', tests: [], acts: _nouvA(prixAffich),    opsL: _nouvO(opsPrixARefaire) }
+  ].map(g => Object.assign(g, { nb: g.acts.length + g.opsL.length + g.tests.length }))
+   .filter(g => g.nb > 0);
+  const _nouvCount = _nouvGroupes.reduce((n, g) => n + g.nb, 0);
+  const _nouvActsAll = _nouvGroupes.reduce((acc, g) => acc.concat(g.acts, g.tests), []);
+  const nouveauInner = (() => { _grpForceOpen = true; try { return _nouvGroupes.map(g => `<div style="margin-bottom:8px;">
+      <div onclick="openDashSectionDetail('${g.key}')" title="Ouvrir la section « ${g.label} » — c'est là que cette ligne vit normalement"
+        style="display:flex; align-items:center; gap:8px; padding:4px 6px 3px; cursor:pointer; border-radius:3px;"
+        onmouseover="this.style.background='#1e293b80'" onmouseout="this.style.background='transparent'">
+        <span style="width:3px; height:12px; background:${g.color}; border-radius:2px; flex-shrink:0;"></span>
+        <span style="font-size:10px; font-weight:700; color:${g.color}; letter-spacing:0.5px; text-transform:uppercase; white-space:nowrap;">${g.label}</span>
+        <span style="font-size:9px; color:#64748b; white-space:nowrap;">${g.nb} jamais entamée${g.nb > 1 ? 's' : ''}</span>
+        <div style="flex:1; height:1px; background:#33415560;"></div>
+        <span style="font-size:9px; color:#64748b; white-space:nowrap;">ouvrir la section ↗</span>
+      </div>
+      ${g.tests.length ? g.tests.map(a => _renderTesteurActionCard(a, fShop || '')).join('') : ''}
+      ${g.acts.length ? renderGroupedActionCards(g.acts) : ''}
+      ${g.opsL.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('')}
+    </div>`).join(''); } finally { _grpForceOpen = false; } })();
+  const nouveauBlock = _nouvCount === 0 ? '' : block('nouveau', '🆕 Nouveau', NOUVEAUTE_COLOR, _nouvCount, nouveauInner,
+    'Ce qui vient d\'apparaître et que PERSONNE n\'a encore entamé (camembert vide partout). Ce sont les MÊMES lignes que dans les sections d\'en dessous : cocher ici = cocher là-bas, et la ligne sort d\'ici dès la première coche. Ce qui n\'attend que Fabien (commande, livraison) n\'y figure pas.');
+
   // ═══════════════════════════════════════════════════════════════════════
   // Rendu final selon le mode d'affichage :
   //   - 'cards' (par défaut) → grille de cards résumées + bouton "Tout déplier"
@@ -25622,6 +25788,7 @@ function renderDashboard() {
   //   - 'all' → mode legacy (toutes sections empilées)
   // ═══════════════════════════════════════════════════════════════════════
   const _sectionMap = {
+    nouveau:    nouveauBlock,
     install:    installBlock,
     desinstall: desinstBlock,
     opEnCours:  opEnCoursBlock,
@@ -25652,7 +25819,7 @@ function renderDashboard() {
       _dashHtml = urgenceBlock + _retourBtn + (_sectionContent || `<div style="text-align:center; padding:30px; color:#64748b;">Cette section n'a pas de contenu actuellement.</div>`);
     } else if (dashViewMode === 'all') {
       // Mode legacy : toutes les sections empilées (comme avant la refonte)
-      _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+      _dashHtml = urgenceBlock + _modeBtns + nouveauBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
     } else {
       // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
       // Le filtre anti-doublon a déjà été appliqué en amont (sortirAffich/reprisesAffich/etc.).
@@ -25696,6 +25863,12 @@ function renderDashboard() {
       })();
 
       const _cards = [];
+      // 🆕 Nouveau en PREMIER (2026-08-25) : c'est la card qui doit accrocher l'œil.
+      if (_nouvCount > 0) {
+        _cards.push(_renderDashSectionCard('nouveau', '🆕 Nouveau', NOUVEAUTE_COLOR, _nouvCount,
+          _renderDashCardDots(_nouvActsAll),
+          _nouvGroupes.map(g => g.label + ' ' + g.nb).join(' · ')));
+      }
       if ((_nbInstallTotal + _nbInstallAttente) > 0) {
         const _dotsHtml = typeof renderAveragedShopDots === 'function' ? renderAveragedShopDots(opsInstallVisibles, fShop) : '';
         _cards.push(_renderDashSectionCard('install', '📦 À installer' + (_nbInstallAttente ? ' · ' + _nbInstallAttente + ' ⏳' : ''), '#f472b6', _nbInstallTotal, _dotsHtml, _installCtx));
@@ -25747,7 +25920,7 @@ function renderDashboard() {
     // l'ancien comportement (toutes sections empilées) pour ne PAS bloquer le dashboard.
     // L'erreur reste visible en console pour diagnostic.
     console.error('[DASH-RENDER] Erreur dans la vue cards/détail, fallback mode legacy :', _err);
-    _dashHtml = urgenceBlock + _modeBtns + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    _dashHtml = urgenceBlock + _modeBtns + nouveauBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
   }
   document.getElementById('dashContent').innerHTML = _dashHtml;
 
@@ -25758,6 +25931,7 @@ function renderDashboard() {
       onmouseover="this.style.background='${color}22'"
       onmouseout="this.style.background='transparent'">${label}</span>`;
   const summaryParts = [];
+  if (_nouvCount) summaryParts.push(chip(NOUVEAUTE_COLOR, `🆕 ${_nouvCount} nouveau${_nouvCount > 1 ? 'x' : ''}`, 'nouveau'));
   if (_nbInstallTotal) summaryParts.push(chip('#f472b6', `${_nbInstallTotal} à installer`, 'install'));
   if (_nbInstallAttente) summaryParts.push(chip('#fbbf24', `⏳ ${_nbInstallAttente} install. en attente`, 'install'));
   if (opsDesinstVisibles.length) summaryParts.push(chip('#f97316', `${opsDesinstVisibles.length} à désinstaller`, 'desinstall'));
@@ -32255,6 +32429,9 @@ function renderOpCardCompact(op, meta, kit, shopFilter, mecaMeta) {
 
   // Mini-tags (condensés, bulleless)
   const miniTags = [];
+  // 🆕 NOUVEAU (2026-08-25) : une OP que personne n'a entamée se signale sur SA carte,
+  // pas seulement dans la card « 🆕 Nouveau » (règle 6-bis, toutes les surfaces).
+  try { if (estNouveauteOp(op, shopFilter || null)) miniTags.push(badgeNouveauteHtml()); } catch (e) {}
   // Origine de l'OP : auto (relevé concurrence) vs manuelle (destockage)
   const _compactSourceActionId = op.prixActionId || op.rentrerActionId || op.sortirActionId || op.rentrerPrixActionId || op.mepActionId;
   const _compactSourceAction = _compactSourceActionId ? actions.find(x => x.id === _compactSourceActionId) : null;
