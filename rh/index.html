@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-08-25 22:08 — 📚 Formation, parcours ATTENDU revu (Fabien) : Liquides 3 sem · Matériel 3 sem · Vente 3 sem · Perfectionnement 2 sem (au lieu de 2½/2½/1½/1½). La référence « attendu » (FORM_ATTENDU) ET la création d'un nouveau parcours (durées d'étapes) suivent maintenant ces durées ; les caps automatiques (apte comptoir = fin Matériel, 100 % autonome = fin Vente, parfait = fin Perf.) et le calcul de retard « +X j vs attendu » s'ajustent tout seuls. Les parcours DÉJÀ créés gardent leurs dates. -->
 <!-- v 2026-08-24 16:58 — 🍽️ Tolérance de pause : un dépassement de MOINS DE 3 MINUTES est désormais sans objet — il n'est plus déduit des heures (plus de bloc rouge sur le planning) et ne sort plus nulle part : récap paie, texte comptable, CSV, Journal RH, badge de la semaine, marqueurs des vues Mois / 3 boutiques. Il reste visible, marqué « toléré », dans 🍽️ Écarts de pause et dans Mon espace du salarié — la vérité du pointage est conservée, c'est juste la paperasse qui disparaît. À partir de 3 min, rien ne change. Seuil unique : PAUSE_TOLERANCE_MIN. -->
 <!-- v 2026-08-24 16:01 — 🚫 ABSENCE INJUSTIFIÉE : nouveau type d'absence (ni congé, ni maladie, ni école) — le salarié devait travailler, il n'est pas venu et n'a pas de justificatif. Se déclare dans 🏖 Absences, au clic sur le bandeau événements, ou depuis le 📒 Journal RH (type « Absence injustifiée », qui crée la vraie absence du jour). Le salarié disparaît du planning ce jour-là, les heures prévues ne sont NI travaillées NI payées : elles sortent du décompte de la semaine (badge rouge 🚫), du récap paie, du CSV, du texte comptable et du bilan annuel, toujours avec la mention « non rémunéré ». Un simple retard reste un retard (Journal RH, en minutes). Bouton « 🤒 justifié » pour requalifier en maladie/congé si le justificatif arrive après coup. -->
 <!-- v 2026-08-11 16:38 — Présence : les ABSENCES (maladie, congé accepté, école) priment désormais sur les exceptions du jour — une maladie déclarée efface bien les blocs même si la journée avait été modifiée à la main (ou portait un retard / une pause pointée). Pour faire revenir quelqu'un de marqué malade : raccourcir la maladie, pas redessiner par-dessus. -->
@@ -4071,11 +4072,17 @@ function addFormation(){
   const eSel=S.employees.find(x=>String(x.id)===sel.value);if(!eSel){alert('Choisis un salarié.');return;}
   const empId=eSel.id,debut=(dt&&dt.value)||todayISO(); // id tel quel (texte pour l'équipe d'origine, nombre pour les ajouts récents)
   if(formationOf(empId)){alert('Cette personne a déjà un parcours en cours.');return;}
-  // Étapes calées sur les SEMAINES (Fabien : « 15 jours » = du lundi au dimanche, 14 j réels,
-  // l'étape suivante commence le lundi) : chaque étape va d'un lundi au dimanche 13 j plus tard.
-  // La 1re démarre au jour réel d'embauche mais finit au même dimanche que si elle avait commencé le lundi.
+  // Étapes calées sur les SEMAINES (lundi → dimanche ; l'étape suivante commence le lundi).
+  // Durées = le parcours ATTENDU (Fabien 2026-08-25) : Liquides 3 sem, Matériel 3 sem, Vente 3 sem,
+  // Perfectionnement 2 sem. La 1re démarre au jour réel d'embauche mais finit au même dimanche que
+  // si elle avait commencé le lundi. Chaque durée est dérivée de FORM_ATTENDU (j/7 semaines).
   const base=monday(debut);
-  const etapes=FORM_ETAPES.map((s,i)=>({k:s.k,label:s.label,du:i===0?debut:addD(base,i*14),au:addD(base,i*14+13),valide:null,par:''}));
+  let _cw=0; // cumul de semaines écoulées
+  const etapes=FORM_ETAPES.map((s,i)=>{
+    const a=FORM_ATTENDU.find(x=>x.k===s.k);const sem=Math.max(1,Math.round((a?a.j:14)/7));
+    const du=i===0?debut:addD(base,_cw*7);const au=addD(base,(_cw+sem)*7-1);_cw+=sem;
+    return {k:s.k,label:s.label,du,au,valide:null,par:''};
+  });
   const caps=FORM_CAPS.map(c=>({k:c.k,label:c.label,fait:null,par:''})); // dates dérivées (formCapDate), jamais stockées
   S.formations.push({id:Date.now(),empId,debut,etapes,caps,evals:[],fin:null,_ts:NOW()});
   save();renderFormPanel();render();
@@ -4162,7 +4169,7 @@ function formToggleDates(fid){if(_formDatesOpen.has(fid))_formDatesOpen.delete(f
 // 2 sem ½ Résistances/matos, 1 sem ½ Plan de vente, 1 sem ½ Perfectionnement — affiché en barre
 // fine sous la frise pour COMPARER d'un coup d'œil le réel (barres du haut, dates tenues à jour)
 // et l'attendu (référence fixe posée sur la date de début). Purement visuel, rien à saisir.
-const FORM_ATTENDU=[{k:'liquides',j:17.5,txt:'2 sem ½'},{k:'materiel',j:17.5,txt:'2 sem ½'},{k:'vente',j:10.5,txt:'1 sem ½'},{k:'perf',j:10.5,txt:'1 sem ½'}];
+const FORM_ATTENDU=[{k:'liquides',j:21,txt:'3 sem'},{k:'materiel',j:21,txt:'3 sem'},{k:'vente',j:21,txt:'3 sem'},{k:'perf',j:14,txt:'2 sem'}];
 function _formFriseHtml(f,avecComs){
   const t=todayISO(),start=f.debut;
   let end=f.etapes[f.etapes.length-1].au;
