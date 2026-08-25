@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-25 11:00</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-25 11:08</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -6925,7 +6925,10 @@ function syncAutoActions() {
     const _RAYON25 = ['DANS_OFFRE', 'FIN_DE_VIE', 'ARRETE', 'A_REMPLACER'];
     const _sEff25 = function(s) { return (!s || s === 'OK') ? 'DANS_OFFRE' : s; };
     actions.forEach(a => {
-      if (a._archived || a.annulee || a.produitType !== 'liq' || a.type !== 'SORTIR') return;
+      // ⚠ les actions ARCHIVÉES restent éligibles (fix retour Soda Ryan, même jour) :
+      // situationParfumChezShop ne regarde pas _archived — une SORTIR faite puis
+      // archivée cache le parfum exactement pareil, elle doit être annulée pareil.
+      if (a.annulee || a.produitType !== 'liq' || a.type !== 'SORTIR') return;
       const g = baseLiq.find(l => l.id === a.produitId);
       if (!g) return;
       if (!(a.etats && SHOPS.some(sh => a.etats[sh] && a.etats[sh].done))) return; // jamais faite → cycle normal
