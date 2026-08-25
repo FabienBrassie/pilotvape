@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-25 11:08</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-25 12:56</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -4138,6 +4138,21 @@ function _etgFusionnerCommodes() {
 function _etgRangee(e) { return (typeof e.rangee === 'number' && e.rangee > 0) ? e.rangee : (e.ordre || 1); }
 // Côté de la zone Puff sur l'étage ('droite' par défaut ; 'gauche' à Langon).
 function _etgPuffCote(e) { return e.puffCote === 'gauche' ? 'gauche' : 'droite'; }
+// Zone Puff EFFECTIVE en emplacements — filet de sécurité (incident Langon 2026-08-25 :
+// « Le coin puff a disparu de l'ordinateur de langon »). Un poste BOUTIQUE ne fait tourner
+// aucune migration (admin seulement) et le merge garde sa copie locale à _ts égal : une
+// étagère jamais éditée peut donc rester à l'ANCIENNE mesure (puffCm / puffCap) sans
+// jamais recevoir puffEmpl. Ici on LIT l'héritage en secours, sans rien écrire — même
+// conversion que _etgMigrerCm (50 cm → 15, 75 cm → 23, sinon arrondi grille). Un
+// puffEmpl explicite (même 0) fait toujours foi.
+function _etgPuffEmplDe(e) {
+  if (!e) return 0;
+  if (typeof e.puffEmpl === 'number') return Math.max(0, parseInt(e.puffEmpl, 10) || 0);
+  const mapPE = { 50: 15, 75: 23 };
+  if (typeof e.puffCm === 'number') return mapPE[e.puffCm] !== undefined ? mapPE[e.puffCm] : Math.max(0, Math.round((e.puffCm * 10) / ETG_FLACON_MM['50mL']));
+  if (typeof e.puffCap === 'number') return Math.max(0, parseInt(e.puffCap, 10) || 0);
+  return 0;
+}
 // Écart réel (cm) entre cette étagère et la SUIVANTE de sa rangée (mesure du mur) —
 // compté dans la ligne 100mL continue, mais JAMAIS dessiné entre les cartes
 // (Fabien 00:41 : les boutons/légendes font déjà l'espacement à l'écran).
@@ -4322,7 +4337,7 @@ function _etgZoneCap(e, zone) {
   // ligne 100mL = arrondi en emplacements de 43 mm. La grille couvre 100 % des zones.
   const g50 = ETG_FLACON_MM['50mL'];
   const totEmpl = Math.max(0, Math.round(((parseFloat(e.largCm) || 0) * 10) / g50));
-  const puffEmpl = Math.min(totEmpl, Math.max(0, parseInt(e.puffEmpl, 10) || 0));
+  const puffEmpl = Math.min(totEmpl, _etgPuffEmplDe(e)); // lecture avec filet héritage (incident Langon 25/08)
   if (zone === 'puff') return puffEmpl * g50;
   if (zone === 'commode') {
     if (!e.commode) return 0;
@@ -20014,7 +20029,7 @@ function renderVueEtageres() {
       <div style="display:flex; align-items:center; gap:8px; padding:6px 10px; background:#1e293b60; position:sticky; left:0; z-index:3; max-width:calc(100vw - 360px);">
         <b style="font-size:12px; color:#e2e8f0;">${e.nom || '?'}</b>
         ${e.profil ? `<span style="font-size:9px; font-weight:700; color:${pcol}; border:1px solid ${pcol}60; background:${pcol}12; padding:1px 6px; border-radius:3px;">${PROFIL_LABELS[e.profil] || e.profil}</span>` : ''}
-        <span style="font-size:9px; color:#64748b;">${e.nbEtages} étage${(e.nbEtages || 1) > 1 ? 's' : ''} × ${e.largCm || 0} cm (~${_etgEstimFlacons(e.largCm || 0)} flacons 50mL)${(e.puffEmpl || 0) > 0 ? ' · zone Puff ' + e.puffEmpl + ' × 50mL' : ''}${e.commode ? ' · porte la ligne 100mL de la rangée (' + (e.commodeCm || 0) + ' cm)' : ''}</span>
+        <span style="font-size:9px; color:#64748b;">${e.nbEtages} étage${(e.nbEtages || 1) > 1 ? 's' : ''} × ${e.largCm || 0} cm (~${_etgEstimFlacons(e.largCm || 0)} flacons 50mL)${_etgPuffEmplDe(e) > 0 ? ' · zone Puff ' + _etgPuffEmplDe(e) + ' × 50mL' : ''}${e.commode ? ' · porte la ligne 100mL de la rangée (' + (e.commodeCm || 0) + ' cm)' : ''}</span>
         <span style="margin-left:auto; font-size:10px; font-weight:700; color:${eUsed > eCap ? '#ef4444' : '#94a3b8'};">${_etgCm(eUsed)}/${_etgCm(eCap)} cm</span>
       </div>
       <div style="padding:8px 10px 10px;"><div style="display:flex; flex-direction:column; gap:8px; width:max-content; min-width:100%;">`;
