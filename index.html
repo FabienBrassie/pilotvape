@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 19:00</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 19:22</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -15251,7 +15251,7 @@ const REPRISE_MOTIFS = {
   SANS_CAMPAGNE: { lbl: 'Reprise sans nom de campagne', col: '#f59e0b',
     expl: 'L\'écran « Clôturer une campagne » ne listait que les reprises PORTANT un nom de campagne : celle-ci n\'y apparaissait pas, donc elle ne pouvait pas être clôturée. (Corrigé : elles sont désormais regroupées sous « (sans campagne) ».)' },
   CAMPAGNE_ACTIVE: { lbl: 'Campagne encore ouverte', col: '#0ea5e9',
-    expl: 'Rien d\'anormal : la campagne de reprise n\'a pas encore été clôturée. Clôture-la et le produit passera en Sorti.' },
+    expl: 'La campagne de reprise nommée ci-dessous n\'a jamais été clôturée — c\'est elle qui retient le statut. Elle ne s\'affiche que dans la section <b>📦 À reprendre</b> du dashboard (tout en bas, masquée quand elle est vide), ce qui explique qu\'on puisse la croire inexistante. Clôture-la ici : les produits passeront en Sorti.' },
   ACTION_CLOTUREE: { lbl: 'Clôturée, mais le statut est resté', col: '#ef4444',
     expl: 'L\'action de reprise est clôturée alors que le produit est resté « en reprise ». L\'auto-réparation du chargement RÉVEILLE alors l\'action à chaque ouverture — le produit ne peut plus se débloquer tout seul.' },
   SANS_ACTION: { lbl: 'Statut orphelin', col: '#94a3b8',
@@ -15336,6 +15336,39 @@ function pvTerminerReprises(cles) {
   pvAlert(nb + ' produit(s)/parfum(s) passé(s) en Sorti.');
 }
 
+// Clôture d'une campagne de reprise PAR SON NOM — sans avoir à la retrouver dans une liste.
+// Canonique partagée par la modale « 🏁 Clôturer une campagne » ET par le diagnostic
+// (Fabien 2026-08-27 : « aucune campagne n'est active, pourquoi c'est bloqué ? » — la
+// campagne existait bien, elle vivait juste dans une section du dashboard qu'il ne voyait
+// pas. Le diagnostic doit donc pouvoir la clôturer sur place).
+function cloturerCampagneRepriseParNom(nom) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return null; }
+  const jour = ymd(new Date()), nowTs = new Date().toISOString();
+  const gammes = new Set(), vus = new Set();
+  let nbActions = 0, nbProds = 0;
+  actions.forEach(function(a) {
+    if (!a || a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE') return;
+    if (a.annulee || a.dateCloture) return;
+    if ((a.campagneReprise || REPRISE_SANS_CAMPAGNE) !== nom) return;
+    if (_cloturerActionReprise(a, jour, nowTs, gammes) > 0 && !vus.has(a.produitId)) { vus.add(a.produitId); nbProds++; }
+    nbActions++;
+  });
+  gammes.forEach(function(gid) { const g = baseLiq.find(function(x) { return x.id === gid; }); if (g) _recomputeGammeStatutFromParfums(g); });
+  logAction('Campagne reprise clôturée', '"' + nom + '" · ' + nbActions + ' action(s) · ' + nbProds + ' produit(s)/parfum(s) → SORTI');
+  saveData();
+  try { renderDashboard(); } catch (e) {}
+  try { renderLiqAll(); } catch (e) {}
+  try { renderKits(); } catch (e) {}
+  try { renderBasePD(); } catch (e) {}
+  return { nbActions: nbActions, nbProds: nbProds };
+}
+function pvDiagCloturerCampagne(nom) {
+  const r = cloturerCampagneRepriseParNom(nom);
+  if (!r) return;
+  document.querySelectorAll('.pv-modal-overlay').forEach(function(x) { x.remove(); });
+  pvAlert('Campagne « ' + nom + ' » clôturée.\n' + r.nbProds + ' produit(s)/parfum(s) passé(s) en Sorti.');
+}
+
 function pvOuvrirDiagnosticReprise() {
   const diag = repriseDiagnostic();
   const e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
@@ -15354,6 +15387,18 @@ function pvOuvrirDiagnosticReprise() {
         ${d.pct === null ? '' : `<span style="font-size:9.5px; color:#94a3b8; white-space:nowrap;">${d.pct}% des étapes</span>`}
       </div>`;
     }).join('');
+    // Pour les campagnes encore ouvertes : un bouton de clôture PAR CAMPAGNE, ici même.
+    let boutons = '';
+    if (m === 'CAMPAGNE_ACTIVE' && isAdmin()) {
+      const camps = [];
+      lst.forEach(function(d) { const c = d.campagne || REPRISE_SANS_CAMPAGNE; if (camps.indexOf(c) === -1) camps.push(c); });
+      boutons = `<div style="display:flex; gap:6px; flex-wrap:wrap; padding:7px 9px 8px;">`
+        + camps.map(function(c) {
+            const n = lst.filter(function(d) { return (d.campagne || REPRISE_SANS_CAMPAGNE) === c; }).length;
+            return `<button onclick="pvDiagCloturerCampagne('${String(c).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" style="padding:4px 12px; font-size:10.5px; font-weight:700; background:#0ea5e9; color:#0f172a; border:none; border-radius:4px; cursor:pointer;" title="Passe les ${n} produit(s) de cette campagne en Sorti et clôture ses actions de reprise">🏁 Clôturer « ${e(c)} » (${n})</button>`;
+          }).join('')
+        + `</div>`;
+    }
     return `<div style="margin-bottom:10px; border:1px solid ${def.col}45; border-radius:5px; overflow:hidden;">
       <div style="padding:5px 9px; background:${def.col}18; display:flex; gap:8px; align-items:center;">
         <span style="font-size:11.5px; font-weight:800; color:${def.col};">${def.lbl}</span>
@@ -15361,6 +15406,7 @@ function pvOuvrirDiagnosticReprise() {
       </div>
       <div style="padding:5px 9px 2px; font-size:10px; color:#94a3b8; line-height:1.45;">${def.expl}</div>
       ${lignes}
+      ${boutons}
     </div>`;
   }).join('');
   const nbTerminables = diag.filter(function(d) { return d.motif !== 'CAMPAGNE_ACTIVE'; }).length;
@@ -15433,32 +15479,10 @@ async function cloturerCampagneReprise() {
         const campToClose = _sel.dataset.camp;
         const entry = camps.get(campToClose);
         if (!entry) { resolve(null); return; }
-        const _now = ymd(new Date());
-        const _nowTs = new Date().toISOString();
-        let nbActions = 0, nbProds = 0;
-        const _seenProds = new Set();
-        const _gammesToucheesParParfum = new Set(); // pour recalcul statut gamme après
-        entry.actions.forEach(a => {
-          // Bascule statut → SORTI + clôture de l'action, par LA canonique commune
-          // (règle 8) : le diagnostic « pourquoi encore en reprise ? » passe par la même.
-          if (_cloturerActionReprise(a, _now, _nowTs, _gammesToucheesParParfum) > 0) {
-            if (!_seenProds.has(a.produitId)) { _seenProds.add(a.produitId); nbProds++; }
-          }
-          nbActions++;
-        });
-        // Pour chaque gamme dont on a basculé un parfum en SORTI : recalcule le statut gamme
-        // (priorité au plus actif parmi les parfums restants).
-        _gammesToucheesParParfum.forEach(gid => {
-          const g = baseLiq.find(x => x.id === gid);
-          if (g) _recomputeGammeStatutFromParfums(g);
-        });
-        logAction('Campagne reprise clôturée', '"' + campToClose + '" · ' + nbActions + ' action(s) · ' + nbProds + ' produit(s)/parfum(s) → SORTI');
-        saveData();
-        try { renderDashboard(); } catch(e) {}
-        try { renderLiqAll && renderLiqAll(); } catch(e) {}
-        try { renderKits && renderKits(); } catch(e) {}
-        try { renderBasePD && renderBasePD(); } catch(e) {}
-        pvAlert('Campagne « ' + campToClose + ' » clôturée.\n' + nbProds + ' produit(s)/parfum(s) passé(s) en Sorti.');
+        // Une seule et même clôture, où qu'on la déclenche (règle 8).
+        const _r = cloturerCampagneRepriseParNom(campToClose);
+        if (!_r) { resolve(null); return; }
+        pvAlert('Campagne « ' + campToClose + ' » clôturée.\n' + _r.nbProds + ' produit(s)/parfum(s) passé(s) en Sorti.');
         resolve(campToClose);
       }
     );
@@ -17233,6 +17257,30 @@ function highlightKit(id) {
 function updateKitProfil(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit._ts = new Date().toISOString(); kit.profilChoisi = val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
 function updateKitRole(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit._ts = new Date().toISOString(); kit.roleChoisi = val === 'AUTO' ? '' : val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
 
+// ═══════════ ☑️ MENUS À COCHER : ils restent OUVERTS (Fabien, 2026-08-27) ═══════════
+// « Quand je coche un truc il se ferme et je dois le rouvrir à chaque coche. »
+// La cause : chaque coche re-rendait tout le conteneur, et le menu renaissait en
+// display:none ; et le clic remontait jusqu'au document, dont le gestionnaire ferme tout.
+// LA correction, commune aux QUATRE menus de ce type (règle 6-bis) : un registre d'état
+// d'ouverture qui SURVIT au re-rendu, + les clics DANS le menu qui ne remontent plus.
+// Un seul menu ouvert à la fois, fermeture au clic dehors : comportement inchangé.
+const PV_DROPDOWN_IDS = ['statut-dropdown-kit', 'statut-dropdown-liq', 'statut-dropdown-pd', 'liq-combo-dropdown'];
+const _pvDdOpen = new Set();
+function pvDdEstOuvert(id) { return _pvDdOpen.has(id); }
+function pvDdAppliquer() {
+  PV_DROPDOWN_IDS.forEach(function(id) {
+    const d = document.getElementById(id);
+    if (d) d.style.display = _pvDdOpen.has(id) ? 'block' : 'none';
+  });
+}
+function pvDdToggle(id) {
+  const etaitOuvert = _pvDdOpen.has(id);
+  _pvDdOpen.clear();                 // un seul menu ouvert à la fois
+  if (!etaitOuvert) _pvDdOpen.add(id);
+  pvDdAppliquer();
+}
+function pvDdFermerTous() { if (!_pvDdOpen.size) return; _pvDdOpen.clear(); pvDdAppliquer(); }
+
 // ═══ 🧩 FILTRE « FORMATS COMBINÉS » (demande Fabien 2026-08-27) ═══
 // Une gamme au sens commercial = marque + nom de gamme ; dans la base elle occupe UNE LIGNE
 // PAR FORMAT (10 mL, 50 mL…). Ce filtre raisonne à la GAMME, pas à la ligne :
@@ -17323,11 +17371,11 @@ function renderLiqComboSelect() {
     </label>`;
   }).join('');
   container.innerHTML = `
-    <div onclick="const d=document.getElementById('${ddId}'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; event.stopPropagation();" title="Ne garder que les gammes déclinées dans TOUS les formats cochés (ex : 10 mL + 10 mL SdN + 50 mL = seules les gammes qui existent dans les trois). Les autres formats de ces gammes restent affichés." style="display:flex; align-items:center; gap:4px; padding:4px 8px; min-width:120px; background:#0f172a; border:1px solid ${actif ? '#a855f780' : '#475569'}; border-radius:4px; cursor:pointer; flex-wrap:wrap; min-height:28px;">
+    <div onclick="event.stopPropagation(); pvDdToggle('${ddId}');" title="Ne garder que les gammes déclinées dans TOUS les formats cochés (ex : 10 mL + 10 mL SdN + 50 mL = seules les gammes qui existent dans les trois). Les autres formats de ces gammes restent affichés." style="display:flex; align-items:center; gap:4px; padding:4px 8px; min-width:120px; background:#0f172a; border:1px solid ${actif ? '#a855f780' : '#475569'}; border-radius:4px; cursor:pointer; flex-wrap:wrap; min-height:28px;">
       ${tags}
       <span style="margin-left:auto; font-size:8px; color:#64748b;">▼</span>
     </div>
-    <div id="${ddId}" style="display:none; position:absolute; top:100%; left:0; min-width:230px; background:#0f172a; border:1px solid #475569; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:100; padding:4px 0; margin-top:2px;">
+    <div id="${ddId}" onclick="event.stopPropagation();" style="display:${pvDdEstOuvert(ddId) ? 'block' : 'none'}; position:absolute; top:100%; left:0; min-width:230px; background:#0f172a; border:1px solid #475569; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:100; padding:4px 0; margin-top:2px;">
       <div style="padding:5px 8px; font-size:9px; color:#94a3b8; border-bottom:1px solid #1e293b; line-height:1.35;">Ne garder que les gammes dont la déclinaison de formats est <b style="color:#d8b4fe;">${liqComboMode === 'exact' ? 'exactement celle cochée' : 'au moins celle cochée'}</b>.</div>
       <label style="display:flex; align-items:center; gap:6px; padding:5px 8px; cursor:pointer; font-size:11px; color:#d8b4fe; border-bottom:1px solid #1e293b;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'">
         <input type="checkbox" ${liqComboMin2 ? 'checked' : ''} onchange="toggleLiqComboMin2()" style="margin:0; accent-color:#a855f7; cursor:pointer;">
@@ -17517,25 +17565,20 @@ function renderStatutMultiSelect(filterName) {
   }).join('');
 
   container.innerHTML = `
-    <div onclick="document.getElementById('${dropdownId}').style.display = document.getElementById('${dropdownId}').style.display === 'block' ? 'none' : 'block'; event.stopPropagation();" style="display:flex; align-items:center; gap:4px; padding:4px 8px; min-width:100px; background:#0f172a; border:1px solid ${arr.length > 0 ? '#60a5fa80' : '#475569'}; border-radius:4px; cursor:pointer; flex-wrap:wrap; min-height:28px;">
+    <div onclick="event.stopPropagation(); pvDdToggle('${dropdownId}');" style="display:flex; align-items:center; gap:4px; padding:4px 8px; min-width:100px; background:#0f172a; border:1px solid ${arr.length > 0 ? '#60a5fa80' : '#475569'}; border-radius:4px; cursor:pointer; flex-wrap:wrap; min-height:28px;">
       ${tags}
       <span style="margin-left:auto; font-size:8px; color:#64748b;">▼</span>
     </div>
-    <div id="${dropdownId}" style="display:none; position:absolute; top:100%; left:0; right:0; min-width:160px; background:#0f172a; border:1px solid #475569; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:100; padding:4px 0; margin-top:2px;">
+    <div id="${dropdownId}" onclick="event.stopPropagation();" style="display:${pvDdEstOuvert(dropdownId) ? 'block' : 'none'}; position:absolute; top:100%; left:0; right:0; min-width:160px; background:#0f172a; border:1px solid #475569; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:100; padding:4px 0; margin-top:2px;">
       ${arr.length > 0 ? `<div onclick="clearStatutFilter('${filterName}')" style="padding:4px 8px; font-size:10px; color:#94a3b8; cursor:pointer; border-bottom:1px solid #1e293b; text-align:center;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background=''">Effacer tout</div>` : ''}
       ${checkboxes}
     </div>`;
 }
 
-// Global click handler to close dropdowns
-document.addEventListener('click', () => {
-  ['kit','liq','pd'].forEach(f => {
-    const dd = document.getElementById('statut-dropdown-' + f);
-    if (dd) dd.style.display = 'none';
-  });
-  const _cdd = document.getElementById('liq-combo-dropdown');
-  if (_cdd) _cdd.style.display = 'none';
-});
+// Clic en dehors = on ferme TOUS les menus à cocher (une seule liste : PV_DROPDOWN_IDS).
+// Les clics à l'intérieur d'un menu ne remontent plus jusqu'ici (event.stopPropagation sur
+// le menu), c'est ce qui permet d'enchaîner les coches sans le rouvrir.
+document.addEventListener('click', pvDdFermerTous);
 
 async function sendBackToProposition(id) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
