@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-25 16:06</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 15:16</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -602,6 +602,7 @@ window.addEventListener('DOMContentLoaded', function() {
       <select id="liqFilterFormat" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous formats</option><option value="10mL">10 mL</option><option value="10mL_SDN">10 mL SdN</option><option value="20mL">20 mL</option><option value="50mL">50 mL</option><option value="100mL">100 mL</option><option value="+150mL">+150 mL</option>
       </select>
+      <div id="combo-multi-liq" style="position:relative; display:inline-block;"></div>
       <select id="liqFilterProfil" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Tous profils</option><option value="RECREATIF">Récréatif</option><option value="PRUDENT">Prudent</option><option value="DECIDE">Décidé</option>
       </select>
@@ -11786,6 +11787,9 @@ function saveUiState() {
     liqFilterRole: document.getElementById('liqFilterRole')?.value || '',
     liqShopFilter: document.getElementById('liqShopFilter')?.value || '',
     liqFilterStatut: liqStatutFilter,
+    liqComboFormats: liqComboFormats,
+    liqComboMode: liqComboMode,
+    liqComboMin2: liqComboMin2,
     liqViewMode: document.getElementById('liqSort')?.value || 'grille',
     liqSortCol, liqSortDir,
     kitSearch: document.getElementById('kitSearch')?.value || '',
@@ -11825,6 +11829,9 @@ function restoreUiState() {
     if (s.liqFilterRole) { const el = document.getElementById('liqFilterRole'); if (el) el.value = s.liqFilterRole; }
     if (s.liqShopFilter) { const el = document.getElementById('liqShopFilter'); if (el) el.value = s.liqShopFilter; }
     if (s.liqFilterStatut) { liqStatutFilter = Array.isArray(s.liqFilterStatut) ? s.liqFilterStatut : (s.liqFilterStatut ? [s.liqFilterStatut] : []); }
+    if (s.liqComboFormats) { liqComboFormats = Array.isArray(s.liqComboFormats) ? s.liqComboFormats.filter(f => LIQ_FORMATS.includes(f)) : []; }
+    if (typeof s.liqComboMin2 !== 'undefined') { liqComboMin2 = !!s.liqComboMin2; }
+    if (s.liqComboMode === 'exact' || s.liqComboMode === 'min') { liqComboMode = s.liqComboMode; }
     if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) el.value = s.liqViewMode; }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
     if (s.liqSortDir) liqSortDir = s.liqSortDir;
@@ -16969,6 +16976,115 @@ function highlightKit(id) {
 function updateKitProfil(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit._ts = new Date().toISOString(); kit.profilChoisi = val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
 function updateKitRole(id, val) { if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; } const kit = baseKits.find(k => k.id === id); if (kit) { kit._ts = new Date().toISOString(); kit.roleChoisi = val === 'AUTO' ? '' : val; syncKitToProp(kit); saveData(); renderKits(); renderWalls(); renderPropositions(); renderDashboard(); highlightKit(id); } }
 
+// ═══ 🧩 FILTRE « FORMATS COMBINÉS » (demande Fabien 2026-08-27) ═══
+// Une gamme au sens commercial = marque + nom de gamme ; dans la base elle occupe UNE LIGNE
+// PAR FORMAT (10 mL, 50 mL…). Ce filtre raisonne à la GAMME, pas à la ligne :
+//   • liqComboFormats = ['10mL','10mL_SDN','50mL'] + mode EXACT (défaut, décision Fabien
+//     2026-08-27) → on ne garde que les gammes dont la combinaison de formats est EXACTEMENT
+//     celle-là : cocher « 10 mL » seul ne sort que les gammes qui n'existent QU'en 10 mL.
+//   • mode AU MOINS → les gammes qui ont tous ces formats, peu importe ce qu'elles ont en plus.
+//   • liqComboMin2 = true → raccourci « gammes déclinées en au moins 2 formats » (exclusif avec
+//     une combinaison précise : cocher l'un décoche l'autre).
+// Se cumule avec le filtre « Format » du bandeau (qui, lui, choisit quelles LIGNES on affiche
+// parmi les gammes retenues).
+// Canoniques (règle 8) : _liqComboOk / _liqComboFiltre — tout écran qui filtre la base liquides
+// passe par là (Base Liquides toutes vues, planches d'étiquettes, tiroir du plan d'étagères).
+let liqComboFormats = [];
+let liqComboMode = 'exact';   // 'exact' = exactement cette combinaison · 'min' = au moins ces formats
+let liqComboMin2 = false;
+
+function _liqCleGamme(g) {
+  return (((g && g.marque) || '') + '').trim().toLowerCase() + '||' + (((g && g.gamme) || '') + '').trim().toLowerCase();
+}
+// Map cle de gamme → Set des formats où elle EXISTE (lignes vivantes : ni sorties, ni
+// supprimées, ni lignes séparateurs « autre / PA +/- »).
+function _liqFormatsIndex() {
+  const m = new Map();
+  (typeof baseLiq !== 'undefined' ? baseLiq : []).forEach(function(g) {
+    if (!g || !g.marque || !g.gamme) return;
+    if (g.marque === 'autre' && (g.gamme + '').includes('PA +/-')) return;
+    if (g.statutVie === 'SORTI') return;
+    if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.has && _deletedIds.has(g.id)) return;
+    const k = _liqCleGamme(g);
+    if (!m.has(k)) m.set(k, new Set());
+    if (g.format) m.get(k).add(g.format);
+  });
+  return m;
+}
+function _liqComboActif() { return (liqComboFormats && liqComboFormats.length > 0) || !!liqComboMin2; }
+function _liqComboOk(g, idx) {
+  if (!_liqComboActif()) return true;                       // filtre éteint = coût zéro
+  const s = (idx || _liqFormatsIndex()).get(_liqCleGamme(g)) || new Set();
+  if (liqComboFormats && liqComboFormats.length) {
+    // EXACT : la gamme n'existe QUE dans ces formats (ni plus, ni moins).
+    if (liqComboMode === 'exact' && s.size !== liqComboFormats.length) return false;
+    return liqComboFormats.every(function(f) { return s.has(f); });
+  }
+  if (liqComboMin2 && s.size < 2) return false;
+  return true;
+}
+function _liqComboFiltre(list) {
+  if (!_liqComboActif()) return list || [];
+  const idx = _liqFormatsIndex();                            // construit UNE fois par passe
+  return (list || []).filter(function(g) { return _liqComboOk(g, idx); });
+}
+// Nombre de formats existants pour la gamme de cette ligne (badge 🧩 de la vue par gamme).
+function _liqNbFormatsDeGamme(g, idx) {
+  const s = (idx || _liqFormatsIndex()).get(_liqCleGamme(g));
+  return s ? s.size : 0;
+}
+
+function toggleLiqComboFormat(fmt) {
+  const i = liqComboFormats.indexOf(fmt);
+  if (i >= 0) liqComboFormats.splice(i, 1); else { liqComboFormats.push(fmt); liqComboMin2 = false; }
+  liqComboFormats.sort(function(a, b) { return LIQ_FORMATS.indexOf(a) - LIQ_FORMATS.indexOf(b); });
+  renderLiqComboSelect(); renderLiqAll(); saveUiState();
+}
+function setLiqComboMode(m) { liqComboMode = (m === 'min' ? 'min' : 'exact'); renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
+function toggleLiqComboMin2() { liqComboMin2 = !liqComboMin2; if (liqComboMin2) liqComboFormats = []; renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
+function clearLiqCombo() { liqComboFormats = []; liqComboMin2 = false; renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
+
+function renderLiqComboSelect() {
+  const container = document.getElementById('combo-multi-liq');
+  if (!container) return;
+  const actif = _liqComboActif();
+  const tags = !actif
+    ? '<span style="color:#94a3b8; font-size:10px;">🧩 Formats combinés</span>'
+    : (liqComboMin2 ? '<span style="font-size:9px; padding:1px 5px; background:#a855f720; color:#d8b4fe; border:1px solid #a855f750; border-radius:3px; font-weight:600; white-space:nowrap;">≥ 2 formats<span onclick="event.stopPropagation(); toggleLiqComboMin2()" style="cursor:pointer; margin-left:3px; font-size:8px; opacity:0.6;">×</span></span>' : '')
+      + (liqComboFormats.length ? `<span style="font-size:9px; font-weight:800; color:${liqComboMode === 'exact' ? '#d8b4fe' : '#94a3b8'}; white-space:nowrap;">${liqComboMode === 'exact' ? 'que' : '≥'}</span>` : '')
+      + liqComboFormats.map(function(f) {
+          const c = LIQ_FORMAT_COLORS[f] || '#a855f7';
+          return `<span style="font-size:9px; padding:1px 5px; background:${c}20; color:${c}; border:1px solid ${c}50; border-radius:3px; font-weight:600; white-space:nowrap;">${LIQ_FORMAT_LABELS[f] || f}<span onclick="event.stopPropagation(); toggleLiqComboFormat('${f}')" style="cursor:pointer; margin-left:3px; font-size:8px; opacity:0.6;">×</span></span>`;
+        }).join('');
+  const ddId = 'liq-combo-dropdown';
+  const cases = LIQ_FORMATS.map(function(f) {
+    const checked = liqComboFormats.includes(f);
+    const c = LIQ_FORMAT_COLORS[f] || '#94a3b8';
+    return `<label style="display:flex; align-items:center; gap:6px; padding:4px 8px; cursor:pointer; font-size:11px; color:${c};" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'">
+      <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleLiqComboFormat('${f}')" style="margin:0; accent-color:${c}; cursor:pointer;">
+      ${LIQ_FORMAT_LABELS[f] || f}
+    </label>`;
+  }).join('');
+  container.innerHTML = `
+    <div onclick="const d=document.getElementById('${ddId}'); d.style.display = d.style.display === 'block' ? 'none' : 'block'; event.stopPropagation();" title="Ne garder que les gammes déclinées dans TOUS les formats cochés (ex : 10 mL + 10 mL SdN + 50 mL = seules les gammes qui existent dans les trois). Les autres formats de ces gammes restent affichés." style="display:flex; align-items:center; gap:4px; padding:4px 8px; min-width:120px; background:#0f172a; border:1px solid ${actif ? '#a855f780' : '#475569'}; border-radius:4px; cursor:pointer; flex-wrap:wrap; min-height:28px;">
+      ${tags}
+      <span style="margin-left:auto; font-size:8px; color:#64748b;">▼</span>
+    </div>
+    <div id="${ddId}" style="display:none; position:absolute; top:100%; left:0; min-width:230px; background:#0f172a; border:1px solid #475569; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:100; padding:4px 0; margin-top:2px;">
+      <div style="padding:5px 8px; font-size:9px; color:#94a3b8; border-bottom:1px solid #1e293b; line-height:1.35;">Ne garder que les gammes dont la déclinaison de formats est <b style="color:#d8b4fe;">${liqComboMode === 'exact' ? 'exactement celle cochée' : 'au moins celle cochée'}</b>.</div>
+      <label style="display:flex; align-items:center; gap:6px; padding:5px 8px; cursor:pointer; font-size:11px; color:#d8b4fe; border-bottom:1px solid #1e293b;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'">
+        <input type="checkbox" ${liqComboMin2 ? 'checked' : ''} onchange="toggleLiqComboMin2()" style="margin:0; accent-color:#a855f7; cursor:pointer;">
+        🧩 N'importe quel multi-format (≥ 2)
+      </label>
+      ${cases}
+      <div style="display:flex; gap:4px; padding:5px 8px; border-top:1px solid #1e293b;">
+        <button onclick="event.stopPropagation(); setLiqComboMode('exact')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'exact' ? 800 : 600}; background:${liqComboMode === 'exact' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'exact' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'exact' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Cocher 10 mL seul ne sort que les gammes qui n'existent QU'en 10 mL.">Exactement ces formats</button>
+        <button onclick="event.stopPropagation(); setLiqComboMode('min')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'min' ? 800 : 600}; background:${liqComboMode === 'min' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'min' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'min' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Les gammes qui ont au moins ces formats — elles peuvent en avoir d'autres.">Au moins ces formats</button>
+      </div>
+      ${actif ? `<div onclick="clearLiqCombo()" style="padding:4px 8px; font-size:10px; color:#94a3b8; cursor:pointer; border-top:1px solid #1e293b; text-align:center;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background=''">Effacer tout</div>` : ''}
+    </div>`;
+}
+
 // Statut multi-select filter arrays
 let kitStatutFilter = [];
 let liqStatutFilter = [];
@@ -17044,6 +17160,8 @@ document.addEventListener('click', () => {
     const dd = document.getElementById('statut-dropdown-' + f);
     if (dd) dd.style.display = 'none';
   });
+  const _cdd = document.getElementById('liq-combo-dropdown');
+  if (_cdd) _cdd.style.display = 'none';
 });
 
 async function sendBackToProposition(id) {
@@ -20079,6 +20197,7 @@ function renderVueEtageres() {
   const fFormat = document.getElementById('liqFilterFormat') ? document.getElementById('liqFilterFormat').value : '';
   const fProfil = document.getElementById('liqFilterProfil') ? document.getElementById('liqFilterProfil').value : '';
   const fRole = document.getElementById('liqFilterRole') ? document.getElementById('liqFilterRole').value : '';
+  const _comboIdxEtg = _liqComboActif() ? _liqFormatsIndex() : null;   // 🧩 formats combinés
   const ctx = { search: search, nbHl: 0, sh: sh }; // sh : la vie commerciale du plan est celle de LA boutique affichée (🧭 2026-08-08)
   let totUsed = 0, totCap = 0;
   etgs.forEach(function(e) {
@@ -20193,6 +20312,7 @@ function renderVueEtageres() {
     ordreFormats.forEach(function(fmt) {
       if (fFormat && fFormat !== fmt) return;
       let gs = (parFmt[fmt] || []).filter(function(g) {
+        if (!_liqComboOk(g, _comboIdxEtg)) return false;   // 🧩 formats combinés (règle 6-bis)
         if (fProfil && g.profilChoisi !== fProfil) return false;
         if (fRole && g.roleChoisi !== fRole) return false; // filtre Rôle du bandeau (retour Fabien 01:27)
         if (_etgProfilTiroir && g.profilChoisi !== _etgProfilTiroir) return false;
@@ -20218,7 +20338,7 @@ function renderVueEtageres() {
         </div>`;
       });
     });
-    if (vide) html += (search || fFormat || fProfil || fRole || _etgProfilTiroir)
+    if (vide) html += (search || fFormat || fProfil || fRole || _etgProfilTiroir || _liqComboActif())
       ? `<div style="font-size:10px; color:#64748b;">Rien à placer avec ces filtres${couv.nonPlacees.length ? ' (' + couv.nonPlacees.length + ' gamme(s) à placer au total — vide la 🔎 recherche/les filtres pour tout voir)' : ''}.</div>`
       : `<div style="font-size:10px; color:#4ade80;">✓ Toutes les gammes actives sont posées sur ce plan.</div>`;
     html += `</div>`;
@@ -20454,11 +20574,16 @@ function renderLiqAll() {
 
   // Exclure les lignes séparateurs/placeholder (marque vide, "autre" avec PA +/-, etc.)
   filtered = filtered.filter(g => g.marque && g.gamme && !(g.marque === 'autre' && g.gamme.includes('PA +/-')));
+  // 🧩 Formats combinés : filtre au niveau GAMME (canonique) — après les filtres de ligne.
+  filtered = _liqComboFiltre(filtered);
   const actifs = filtered.filter(g => g.statutVie !== 'SORTI');
   const sortis = filtered.filter(g => g.statutVie === 'SORTI');
 
-  // Stats
-  const totalGammes = baseLiq.length;
+  // Stats — vocabulaire (règle 10) : une GAMME peut occuper plusieurs LIGNES (une par format).
+  const totalGammes = baseLiq.length;                        // = nombre de lignes gamme × format
+  const _idxFmt = _liqFormatsIndex();
+  const _nbGammesBase = _idxFmt.size;                        // gammes commerciales distinctes
+  const _nbGammesVues = new Set(actifs.map(_liqCleGamme)).size;
   const totalParfums = baseLiq.reduce((s,g) => s + (g.parfums||[]).filter(p=>p.s!=='SORTI').length, 0);
   const statsEl = document.getElementById('liqStats');
   if (statsEl) {
@@ -20467,9 +20592,19 @@ function renderLiqAll() {
     const _shopBanner = fShopLiq ? `<div style="display:flex; gap:8px; align-items:center; font-size:10px; color:#67e8f9; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:4px; margin-bottom:4px;">
       🏪 <b>Vue ${SHOP_LABELS[fShopLiq] || fShopLiq}</b> — seules les gammes avec au moins un parfum présent (ou en tiroir) chez elle sont listées. Déplier une gamme : chaque parfum affiche sa situation ici → 🗄️ tiroir (commande client) · ✓ sorti · ⏳ pas reçu.
     </div>` : '';
-    statsEl.innerHTML = _shopBanner + `<div style="display:flex; gap:12px; font-size:10px; color:#94a3b8; padding:4px 8px; background:#1e293b; border-radius:4px;">
-      <span>${totalGammes} gammes</span><span>${totalParfums} parfums actifs</span>
-      <span style="margin-left:auto;">${actifs.length} affichées / ${filtered.length} filtrées</span>
+    // 🧩 Bandeau formats combinés : dire EXACTEMENT ce qui est gardé et ce qui reste visible.
+    const _comboBanner = _liqComboActif() ? `<div style="display:flex; gap:8px; align-items:center; font-size:10px; color:#d8b4fe; padding:4px 8px; background:#a855f712; border:1px solid #a855f740; border-radius:4px; margin-bottom:4px;">
+      🧩 <b>Formats combinés</b> — ${liqComboFormats.length
+        ? (liqComboMode === 'exact'
+            ? `seules les gammes déclinées <b>uniquement</b> en ${liqComboFormats.map(f => LIQ_FORMAT_LABELS[f] || f).join(' + ')} — ${liqComboFormats.length > 1 ? 'les ' + liqComboFormats.length + ' formats à la fois' : 'ce format seul'}, et dans aucun autre.`
+            : `seules les gammes qui existent <b>au moins</b> en ${liqComboFormats.map(f => LIQ_FORMAT_LABELS[f] || f).join(' + ')} — leurs autres formats restent affichés.`)
+        : 'seules les gammes déclinées dans <b>au moins 2 formats</b>.'}
+      <span style="margin-left:auto; white-space:nowrap;"><b>${_nbGammesVues}</b> gamme${_nbGammesVues > 1 ? 's' : ''} sur ${_nbGammesBase}</span>
+      <span onclick="clearLiqCombo()" style="cursor:pointer; color:#94a3b8; text-decoration:underline; white-space:nowrap;">effacer</span>
+    </div>` : '';
+    statsEl.innerHTML = _shopBanner + _comboBanner + `<div style="display:flex; gap:12px; font-size:10px; color:#94a3b8; padding:4px 8px; background:#1e293b; border-radius:4px;">
+      <span title="Gammes commerciales distinctes (marque + gamme), tous formats confondus">${_nbGammesBase} gammes</span><span title="Une ligne = une gamme dans un format">${totalGammes} lignes gamme × format</span><span>${totalParfums} parfums actifs</span>
+      <span style="margin-left:auto;">${_nbGammesVues} gamme${_nbGammesVues > 1 ? 's' : ''} · ${actifs.length} ligne${actifs.length > 1 ? 's' : ''} affichée${actifs.length > 1 ? 's' : ''} / ${filtered.length} filtrée${filtered.length > 1 ? 's' : ''}</span>
     </div>`;
   }
 
@@ -20906,12 +21041,15 @@ function renderLiqAll() {
       const mChev = mExpanded ? '▾' : '▸';
       const gammeNames = [...new Set(mItems.map(g => g.gamme || '—'))].sort((a, b) => a.localeCompare(b));
       const _nbParf = mItems.reduce((s, g) => s + (g.parfums || []).filter(p => p.s !== 'SORTI').length, 0);
+      // 🧩 combien de ces gammes sont déclinées en plusieurs formats (visible sans déplier)
+      const _nbMultiFmt = gammeNames.filter(gn => mItems.filter(g => (g.gamme || '—') === gn).length > 1).length;
 
       html += `<div style="margin-top:6px; background:${color}06; border:1px solid ${color}35; border-radius:5px; overflow:hidden;">`;
       html += `<div onclick="toggleLiqSection('${mKey}')" style="padding:5px 12px; background:${color}20; display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;" onmouseover="this.style.background='${color}30'" onmouseout="this.style.background='${color}20'">
         <span style="color:${color}; font-size:11px; width:12px; font-weight:700;">${mChev}</span>
         <span style="font-size:13px; font-weight:700; color:${color}; letter-spacing:0.5px;">${marque}</span>
         <span style="font-size:10px; color:#94a3b8;">${gammeNames.length} gamme${gammeNames.length > 1 ? 's' : ''} · ${_nbParf} parfums</span>
+        ${_nbMultiFmt ? `<span style="font-size:9px; font-weight:700; color:#d8b4fe; background:#a855f718; border:1px solid #a855f750; border-radius:3px; padding:0 6px;" title="Gammes de cette marque déclinées dans plusieurs formats">🧩 ${_nbMultiFmt} multi-format</span>` : ''}
       </div>`;
 
       if (mExpanded) {
@@ -20923,7 +21061,9 @@ function renderLiqAll() {
           html += `<div style="margin:3px 6px; border:1px solid #33415560; border-radius:4px; overflow:hidden;">`;
           html += `<div style="padding:4px 10px; background:#1e293b; display:flex; align-items:center; gap:8px;">
             <span style="font-size:12px; font-weight:700; color:#e2e8f0;">${gn}</span>
-            <span style="font-size:9px; color:#94a3b8;">${gEntries.length} format${gEntries.length > 1 ? 's' : ''} · ${fmtLbls}</span>
+            ${gEntries.length > 1
+              ? `<span style="font-size:9px; font-weight:700; color:#d8b4fe; background:#a855f718; border:1px solid #a855f750; border-radius:3px; padding:0 6px;" title="Gamme déclinée dans plusieurs formats">🧩 ${gEntries.length} formats</span><span style="font-size:9px; color:#94a3b8;">${fmtLbls}</span>`
+              : `<span style="font-size:9px; color:#94a3b8;">1 format · ${fmtLbls}</span>`}
           </div>`;
           gEntries.forEach(g => {
             const fc = LIQ_FORMAT_COLORS[g.format] || '#94a3b8';
@@ -35129,6 +35269,7 @@ function openVitrineDialogFromLiq() {
     return matchSearch && matchFormat && matchProfil && matchRole && matchStatut && matchShop;
   });
   list = list.filter(g => g.marque && g.gamme && !(g.marque === 'autre' && g.gamme.includes('PA +/-')));
+  list = _liqComboFiltre(list);   // 🧩 formats combinés (règle 6-bis : mêmes filtres que renderLiqAll)
   openVitrineDialog(list.map(g => _vitrineItemFromLiq(g)), { type: 'ETAGERE' });
 }
 
@@ -35496,6 +35637,7 @@ loadData().then(async () => {
   renderStatutMultiSelect('kit');
   renderStatutMultiSelect('liq');
   renderStatutMultiSelect('pd');
+  renderLiqComboSelect();   // 🧩 formats combinés (état restauré)
   // Restaurer l'onglet actif
   let savedTab = localStorage.getItem('pv_activeTab');
   // Vue Semaine masquée à la demande de Fabien 2026-07-09 : un poste qui l'avait comme
