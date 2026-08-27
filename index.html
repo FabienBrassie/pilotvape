@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 19:22</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 19:54</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -620,7 +620,7 @@ window.addEventListener('DOMContentLoaded', function() {
       <button onclick="const _ls=document.getElementById('liqSort'); if(_ls){_ls.value='testeurs'; renderLiqAll(); saveUiState();}" title="Vue 🧪 Testeurs : la malette réseau (sélection, numéros, affiche A5 du meuble de test)" style="padding:6px 9px; font-size:13px; background:#2dd4bf18; color:#2dd4bf; border:1px solid #2dd4bf60; border-radius:4px; cursor:pointer; white-space:nowrap;">🧪</button>
       <button onclick="const _ls=document.getElementById('liqSort'); if(_ls){_ls.value='etageres'; renderLiqAll(); saveUiState();}" title="Vue 🗄️ Plan des étagères : le placement des flacons par boutique (étagères, zone Puff, commode 100mL) + le plan imprimable pour les équipes" style="padding:6px 9px; font-size:13px; background:#f59e0b18; color:#fbbf24; border:1px solid #f59e0b60; border-radius:4px; cursor:pointer; white-space:nowrap;">🗄️</button>
       <select id="liqSort" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="testeurs">Vue: 🧪 Testeurs (malette)</option><option value="etageres">Vue: 🗄️ Étagères (plans)</option><option value="marque">Tri: Par marque</option><option value="gamme">Tri: Par gamme (tous formats)</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
+        <option value="liste">⭐ Tri: Liste</option><option value="grille">Tri: Grille (Format × Profil)</option><option value="freetouch">Vue: Freetouch (Mur)</option><option value="testeurs">Vue: 🧪 Testeurs (malette)</option><option value="etageres">Vue: 🗄️ Étagères (plans)</option><option value="marque">Tri: Par marque</option><option value="gamme">Tri: Par gamme (tous formats)</option><option value="parfums">Tri: Par parfum (tous formats)</option><option value="ct">Tri: Par catégorie goût</option><option value="pa">Tri: Prix achat</option><option value="pv">Tri: Prix vente</option><option value="marge">Tri: Marge €</option><option value="mml">Tri: Marge/mL</option><option value="role">Tri: Rôle</option><option value="statut">Tri: Statut</option><option value="refs">Tri: Nb parfums</option>
       </select>
     </div>
     <div id="liqStats" style="margin-bottom:8px;"></div>
@@ -1539,6 +1539,24 @@ const LIQ_ROLE_LABELS = { PRIX_D_APPEL: "Prix d'appel", MEILLEURE_MARGE: 'Meille
 const LIQ_ROLE_COLORS = { PRIX_D_APPEL: '#f87171', MEILLEURE_MARGE: '#4ade80', COMPLEMENT: '#64748b', NOTORIETE: '#64748b', COUP: '#fcd34d' };
 const LIQ_ROLE_SHORT = { PRIX_D_APPEL: 'PA', MEILLEURE_MARGE: 'MM', COMPLEMENT: 'C/N', NOTORIETE: 'C/N', COUP: 'OS' };
 const LIQ_ROLE_ICONS = { PRIX_D_APPEL: '💰', MEILLEURE_MARGE: '📈', COMPLEMENT: '➕', NOTORIETE: '➕', COUP: '⚡' };
+// ── Affichage d'un rôle en colonne : LA COULEUR DIT LE RÔLE (Fabien, 2026-08-27) ──
+// « Meilleure marge (forcée) orange alors que Complément est déjà orange, c'est illisible. »
+// AVANT : un rôle FORCÉ (différent du barème) était repeint en orange — la couleur ne disait
+// donc plus le rôle mais l'état « forcé », et deux rôles différents devenaient identiques
+// à l'œil. Désormais : les lettres gardent TOUJOURS la couleur de leur rôle, et c'est
+// l'astérisque seul qui porte l'orange du « forcé ». Un coup d'œil suffit à lire les deux.
+function roleLiqChipHtml(role, roleCalc) {
+  const r = liqRoleCanon(role);
+  if (!r) return '<span style="font-size:9px; color:#64748b;">—</span>';
+  if (r === 'COUP') return '<span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;">⚡ One-shot</span>';
+  const force = !!(r && liqRoleCanon(roleCalc) !== r);
+  const col = LIQ_ROLE_COLORS[r] || '#64748b';
+  const t = force
+    ? 'Rôle forcé à la main — le barème dit : ' + (roleCalc ? (LIQ_ROLE_LABELS[liqRoleCanon(roleCalc)] || roleCalc) : 'hors barème')
+    : (LIQ_ROLE_LABELS[r] || r) + ' (rôle du barème)';
+  return `<span style="font-size:9px; color:${col}; white-space:nowrap;" title="${t}">${LIQ_ROLE_SHORT[r] || r}${force ? '<span style="color:#f59e0b; font-weight:800;">*</span>' : ''}</span>`;
+}
+
 // ── Fusion de rôles : LA canonique (règle 8) ──
 // Table ancienne clé → clé qui survit. Toute lecture d'un rôle liquide passe par
 // liqRoleCanon() ; toute liste chargée passe par _liqNormaliserRoles(). Auto-guérison :
@@ -11871,6 +11889,7 @@ function saveUiState() {
     liqComboFormats: liqComboFormats,
     liqComboMode: liqComboMode,
     liqComboRecap: liqComboRecap,
+    pfvSortCol: _pfvSortCol, pfvSortDir: _pfvSortDir, pfvIncoh: _pfvSeulIncoherences, pfvTrous: _pfvSeulTrous,
     liqComboMin2: liqComboMin2,
     liqViewMode: document.getElementById('liqSort')?.value || 'grille',
     liqSortCol, liqSortDir,
@@ -11915,6 +11934,10 @@ function restoreUiState() {
     if (typeof s.liqComboMin2 !== 'undefined') { liqComboMin2 = !!s.liqComboMin2; }
     if (s.liqComboMode === 'exact' || s.liqComboMode === 'min') { liqComboMode = s.liqComboMode; }
     if (typeof s.liqComboRecap !== 'undefined') { liqComboRecap = !!s.liqComboRecap; }
+    if (s.pfvSortCol) _pfvSortCol = s.pfvSortCol;
+    if (s.pfvSortDir) _pfvSortDir = s.pfvSortDir;
+    if (typeof s.pfvIncoh !== 'undefined') _pfvSeulIncoherences = !!s.pfvIncoh;
+    if (typeof s.pfvTrous !== 'undefined') _pfvSeulTrous = !!s.pfvTrous;
     if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) el.value = s.liqViewMode; }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
     if (s.liqSortDir) liqSortDir = s.liqSortDir;
@@ -17506,6 +17529,100 @@ function pvLiqExportDeclinaisons() {
   try { logAction('Export déclinaisons liquides', combos.length + ' combinaisons'); } catch (err) {}
 }
 
+
+// ═══════════ 🧴 VUE PAR PARFUM (Fabien, 2026-08-27) ═══════════
+// « Comme une vue liste, sauf qu'au lieu d'une ligne par format à déplier, UNE ligne par
+//   parfum, avec ses formats marqués dessus : Marque VDLV / Gamme Cirkus / Parfum Classic
+//   Blend / 10 mL - 10 mL SdN - 50 mL. Ça me permettrait de trier les parfums et de voir
+//   les incohérences de noms. »
+//
+// La base range les parfums PAR GAMME ET PAR FORMAT : le même parfum vit dans plusieurs
+// lignes. Cette vue le recompose : une ligne = un parfum d'une gamme, tous formats réunis.
+// C'est ce regroupement qui fait apparaître les incohérences — c'est le but de la vue, pas
+// un effet de bord.
+//
+// Clé de regroupement : celle du plan d'étagères (_etgClefParfum : minuscules, tiret final
+// ignoré) PLUS l'écrasement des espaces multiples — sinon « Classic  Blend » et
+// « Classic Blend » feraient deux lignes au lieu d'une ligne signalée. Toute différence de
+// graphie restante est AFFICHÉE, jamais masquée.
+function _pfvNomCle(n) {
+  return String(n || '').toLowerCase().replace(/\s*-\s*$/, '').replace(/\s+/g, ' ').trim();
+}
+// Construit les lignes « un parfum » à partir des lignes gamme × format visibles.
+function _pfvLignes(gammes) {
+  const map = new Map();
+  (gammes || []).forEach(function(g) {
+    if (!g || !g.marque || !g.gamme) return;
+    (g.parfums || []).forEach(function(p) {
+      if (!p || !p.id) return;
+      const nom = String(p.n || '').trim();
+      const cle = _liqCleGamme(g) + '||' + _pfvNomCle(nom);
+      if (!map.has(cle)) map.set(cle, {
+        cle: cle, marque: g.marque, gamme: g.gamme, nom: nom || '(sans nom)',
+        graphies: new Set(), entrees: [], statuts: new Set(), gouts: new Set()
+      });
+      const e = map.get(cle);
+      if (nom) e.graphies.add(nom);
+      e.entrees.push({ g: g, p: p });
+      e.statuts.add(p.s || 'DANS_OFFRE');
+      e.gouts.add(p.ct || g.ct || '');
+    });
+  });
+  // Formats de la GAMME (pour repérer un parfum absent d'un format où sa gamme existe)
+  const idxFmt = _liqFormatsIndex();
+  const out = [];
+  map.forEach(function(e) {
+    e.entrees.sort(function(a, b) { return LIQ_FORMATS.indexOf(a.g.format) - LIQ_FORMATS.indexOf(b.g.format); });
+    const presents = new Set(e.entrees.map(function(x) { return x.g.format; }));
+    const tousFmt = idxFmt.get(_liqCleGamme(e.entrees[0].g)) || new Set();
+    e.formats = LIQ_FORMATS.filter(function(f) { return presents.has(f); });
+    e.manquants = LIQ_FORMATS.filter(function(f) { return tousFmt.has(f) && !presents.has(f); });
+    // Doublon : deux parfums de même nom DANS LE MÊME format (même ligne de base)
+    const parFmt = {};
+    e.entrees.forEach(function(x) { parFmt[x.g.format] = (parFmt[x.g.format] || 0) + 1; });
+    e.doublons = Object.keys(parFmt).filter(function(f) { return parFmt[f] > 1; });
+    // Les alertes, dans l'ordre où elles comptent pour Fabien
+    e.alertes = [];
+    if (e.graphies.size > 1) e.alertes.push({ k: 'graphie', txt: e.graphies.size + ' graphies : ' + Array.from(e.graphies).map(function(x) { return '« ' + x + ' »'; }).join(' / ') });
+    if (e.doublons.length) e.alertes.push({ k: 'doublon', txt: 'en double dans ' + e.doublons.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; }).join(', ') });
+    if (e.statuts.size > 1) e.alertes.push({ k: 'statut', txt: 'statuts différents selon le format : ' + Array.from(e.statuts).map(function(x) { return LIQ_GAMME_STATUT_LABELS[x] || x; }).join(' / ') });
+    if (e.gouts.size > 1) e.alertes.push({ k: 'gout', txt: 'goûts différents selon le format : ' + Array.from(e.gouts).map(function(x) { return x || '(vide)'; }).join(' / ') });
+    // ⚠️ « absent d'un format où la gamme existe » n'est PAS une incohérence : c'est la vie
+    // commerciale normale (mesuré sur la base réelle : 141 cas contre 4 vraies fautes de
+    // graphie — le compter en alerte noyait le signal). C'est une INFORMATION : elle reste
+    // visible sur la ligne (format barré) et a son propre compteur/filtre « trous ».
+    out.push(e);
+  });
+  return out;
+}
+
+let _pfvSortCol = 'parfum';
+let _pfvSortDir = 1;
+let _pfvSeulIncoherences = false;
+let _pfvSeulTrous = false;
+function pvPfvTri(col) {
+  if (_pfvSortCol === col) _pfvSortDir *= -1; else { _pfvSortCol = col; _pfvSortDir = 1; }
+  renderLiqAll(); saveUiState();
+}
+// Les deux filtres s'excluent : on regarde une chose à la fois.
+function pvPfvToggleIncoherences() { _pfvSeulIncoherences = !_pfvSeulIncoherences; if (_pfvSeulIncoherences) _pfvSeulTrous = false; renderLiqAll(); saveUiState(); }
+function pvPfvToggleTrous() { _pfvSeulTrous = !_pfvSeulTrous; if (_pfvSeulTrous) _pfvSeulIncoherences = false; renderLiqAll(); saveUiState(); }
+// Aller corriger : on bascule en vue liste, filtrée sur cette gamme, fiche dépliée.
+function pvPfvAllerA(gammeId, nom) {
+  const g = baseLiq.find(function(x) { return x.id === gammeId; });
+  if (!g) return;
+  const rech = document.getElementById('liqSearch');
+  if (rech) rech.value = nom || (g.marque + ' ' + g.gamme);
+  const sel = document.getElementById('liqSort');
+  if (sel) sel.value = 'liste';
+  try { if (!isLiqExpanded('liq-detail-' + g.id)) toggleLiqSection('liq-detail-' + g.id); } catch (e) {}
+  renderLiqAll(); saveUiState();
+  setTimeout(function() {
+    const el = document.querySelector('[data-liq-id="' + g.id + '"]');
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 60);
+}
+
 // Statut multi-select filter arrays
 let kitStatutFilter = [];
 let liqStatutFilter = [];
@@ -21793,10 +21910,10 @@ function renderLiqAll() {
         fmtGammes.sort(_sortFn).forEach(g => {
           const sc = liqGammeStatusColor(g.statutVie);
           const ctColor = LIQ_GOUT_COLORS[g.ct] || '#94a3b8';
-          const roleLbl = LIQ_ROLE_SHORT[g.roleChoisi] || '—';
+          // (libellé court du rôle : porté par roleLiqChipHtml)
           const _roleCalcLive2 = g.roleCalc || calcLiqRole(g.format, g.pa, g.pv);
           const _isRoleOverride = !!(g.roleChoisi && g.roleChoisi !== _roleCalcLive2);
-          const _roleColor = _isRoleOverride ? '#f59e0b' : (LIQ_ROLE_COLORS[g.roleChoisi]||'#64748b');
+          // (couleur du rôle : portée par roleLiqChipHtml — la couleur dit le RÔLE, l'astérisque dit « forcé »)
           const _profColor = g.profilChoisi ? PROFIL_COLORS[g.profilChoisi] : '#64748b';
           const _liqOneShotBadge = g.oneShot
             ? ` <span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;" title="One-shot — occupation temporaire pilotée par une OP">⚡ One-shot</span>`
@@ -21831,7 +21948,7 @@ function renderLiqAll() {
             <div style="font-size:10px; color:#4ade80; text-align:right;" title="Marge par mL (marge unitaire / contenance)">€${liqMargeMl(g).toFixed(2)}</div>
             <div style="font-size:9px; color:#94a3b8; text-align:center;">${(g.parfums||[]).filter(p=>p.s!=='SORTI').length}</div>
             <div style="font-size:8px; text-align:center; font-weight:700; color:${_profColor};">${g.profilChoisi ? PROFIL_SHORT[g.profilChoisi] : '—'}</div>
-            <div style="font-size:9px; color:${_roleColor};" title="${_isRoleOverride ? 'Override — barème: '+(LIQ_ROLE_LABELS[_roleCalcLive2]||'?') : ''}">${g.roleChoisi === 'COUP' ? '<span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;">⚡ One-shot</span>' : (roleLbl + (_isRoleOverride?'*':''))}</div>
+            <div>${roleLiqChipHtml(g.roleChoisi, _roleCalcLive2)}</div>
             <div style="${g.statutVie === 'ARRETE' ? statutChipCss('ARRETE', sc, '9px') + ' text-align:center;' : `font-size:9px; color:${sc}; font-weight:600;`}">${LIQ_GAMME_STATUT_LABELS[g.statutVie]||g.statutVie}</div>
           </div>`;
 
@@ -21894,6 +22011,75 @@ function renderLiqAll() {
       }
 
       html += `</div>`;
+    });
+  }
+  // ═══ MODE PAR PARFUM (tous formats réunis, demande Fabien 2026-08-27) ═══
+  else if (viewMode === 'parfums') {
+    const _e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+    let lignes = _pfvLignes(actifs);
+    const nbTotal = lignes.length;
+    const nbIncoh = lignes.filter(function(x) { return x.alertes.length; }).length;
+    const nbTrous = lignes.filter(function(x) { return x.manquants.length; }).length;
+    if (_pfvSeulIncoherences) lignes = lignes.filter(function(x) { return x.alertes.length; });
+    else if (_pfvSeulTrous) lignes = lignes.filter(function(x) { return x.manquants.length; });
+    const _dir = _pfvSortDir;
+    const _cmp = {
+      marque: function(a, b) { return (a.marque + ' ' + a.gamme + ' ' + a.nom).localeCompare(b.marque + ' ' + b.gamme + ' ' + b.nom); },
+      gamme:  function(a, b) { return (a.gamme + ' ' + a.marque + ' ' + a.nom).localeCompare(b.gamme + ' ' + b.marque + ' ' + b.nom); },
+      parfum: function(a, b) { return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }) || (a.marque + a.gamme).localeCompare(b.marque + b.gamme); },
+      nbfmt:  function(a, b) { return (a.formats.length - b.formats.length) || a.nom.localeCompare(b.nom); },
+      alerte: function(a, b) { return (b.alertes.length - a.alertes.length)
+        || ((b.manquants.length ? 1 : 0) - (a.manquants.length ? 1 : 0))
+        || a.nom.localeCompare(b.nom); }
+    };
+    lignes.sort(function(a, b) { return (_cmp[_pfvSortCol] || _cmp.parfum)(a, b) * _dir; });
+
+    const grid = 'display:grid; grid-template-columns: 110px 150px 1fr 190px 120px 100px; gap:8px; align-items:center;';
+    const _fl = function(col, lbl) {
+      const on = _pfvSortCol === col;
+      return `<span onclick="pvPfvTri('${col}')" style="cursor:pointer; user-select:none; color:${on ? '#e2e8f0' : '#64748b'}; font-weight:${on ? 700 : 600};">${lbl}${on ? (_pfvSortDir > 0 ? ' ▲' : ' ▼') : ''}</span>`;
+    };
+    html += `<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; padding:5px 10px; margin-bottom:4px; background:#1e293b; border:1px solid #33415560; border-radius:5px;">
+      <span style="font-size:12px; font-weight:800; color:#e2e8f0;">🧴 Vue par parfum</span>
+      <span style="font-size:10px; color:#94a3b8;">${nbTotal} parfum${nbTotal > 1 ? 's' : ''} (un parfum = une ligne, tous ses formats réunis)</span>
+      <span onclick="pvPfvToggleIncoherences()" style="cursor:pointer; font-size:10px; font-weight:700; padding:3px 10px; border-radius:4px; white-space:nowrap; background:${_pfvSeulIncoherences ? '#f59e0b' : '#f59e0b15'}; color:${_pfvSeulIncoherences ? '#0f172a' : '#fbbf24'}; border:1px solid #f59e0b60;" title="À corriger : deux graphies du même nom, doublon dans un format, statuts ou goûts qui divergent entre formats.">⚠ ${nbIncoh} à corriger${_pfvSeulIncoherences ? ' — affichés seuls' : ''}</span>
+      <span onclick="pvPfvToggleTrous()" style="cursor:pointer; font-size:10px; font-weight:700; padding:3px 10px; border-radius:4px; white-space:nowrap; background:${_pfvSeulTrous ? '#64748b' : '#64748b18'}; color:${_pfvSeulTrous ? '#0f172a' : '#94a3b8'}; border:1px solid #64748b60;" title="Le parfum n'existe pas dans un format où sa gamme existe. Ce n'est PAS une faute — juste une déclinaison incomplète, à regarder quand tu cherches quoi ajouter.">◌ ${nbTrous} déclinaison${nbTrous > 1 ? 's' : ''} incomplète${nbTrous > 1 ? 's' : ''}${_pfvSeulTrous ? ' — affichées seules' : ''}</span>
+      ${(_pfvSeulIncoherences || _pfvSeulTrous) ? `<span onclick="${_pfvSeulIncoherences ? 'pvPfvToggleIncoherences()' : 'pvPfvToggleTrous()'}" style="cursor:pointer; font-size:10px; color:#94a3b8; text-decoration:underline;">tout revoir</span>` : ''}
+    </div>`;
+    html += `<div style="${grid} padding:4px 10px; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid #334155;">
+      ${_fl('marque', 'Marque')}${_fl('gamme', 'Gamme')}${_fl('parfum', 'Parfum')}
+      ${_fl('nbfmt', 'Formats')}<span style="color:#64748b; font-weight:600;">Statut</span>${_fl('alerte', 'Cohérence')}
+    </div>`;
+    if (!lignes.length) {
+      html += `<div style="padding:16px; text-align:center; color:#64748b; font-style:italic;">${_pfvSeulIncoherences ? 'Rien à corriger — noms, doublons, statuts et goûts sont cohérents ✓' : (_pfvSeulTrous ? 'Toutes les déclinaisons sont complètes ✓' : 'Aucun parfum.')}</div>`;
+    }
+    lignes.forEach(function(L) {
+      const chips = L.formats.map(function(f) {
+        const c = LIQ_FORMAT_COLORS[f] || '#94a3b8';
+        const ent = L.entrees.find(function(x) { return x.g.format === f; });
+        return `<span onclick="pvPfvAllerA('${ent.g.id}','${_e(L.nom).replace(/'/g, "\\'")}')" style="cursor:pointer; font-size:9px; font-weight:700; color:${c}; background:${c}18; border:1px solid ${c}55; border-radius:3px; padding:0 5px; white-space:nowrap;" title="Ouvrir ${_e(L.marque)} — ${_e(L.gamme)} ${LIQ_FORMAT_LABELS[f] || f} pour corriger">${LIQ_FORMAT_LABELS[f] || f}</span>`;
+      }).join('<span style="color:#475569; font-size:9px;">·</span>');
+      const manq = L.manquants.map(function(f) {
+        return `<span style="font-size:9px; color:#475569; border:1px dashed #47556980; border-radius:3px; padding:0 5px; white-space:nowrap; text-decoration:line-through;" title="La gamme existe dans ce format, mais pas ce parfum">${LIQ_FORMAT_LABELS[f] || f}</span>`;
+      }).join(' ');
+      const statuts = Array.from(L.statuts).map(function(st) {
+        const c = liqGammeStatusColor(st);
+        return `<span style="font-size:9px; color:${c}; white-space:nowrap;">${LIQ_GAMME_STATUT_LABELS[st] || st}</span>`;
+      }).join('<span style="color:#475569;"> / </span>');
+      const gout = Array.from(L.gouts).filter(Boolean)[0] || '';
+      const alerteHtml = L.alertes.length
+        ? `<span style="font-size:9px; font-weight:700; color:#fbbf24; background:#f59e0b15; border:1px solid #f59e0b50; border-radius:3px; padding:0 5px; cursor:help; white-space:nowrap;" title="${_e(L.alertes.map(function(a) { return '• ' + a.txt; }).join('\n'))}">⚠ ${L.alertes.length}</span>`
+        : (L.manquants.length
+            ? `<span style="font-size:9px; color:#64748b; cursor:help; white-space:nowrap;" title="Déclinaison incomplète (pas une faute) — absent de ${_e(L.manquants.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; }).join(', '))}">◌</span>`
+            : `<span style="font-size:9px; color:#334155;">✓</span>`);
+      html += `<div style="${grid} padding:3px 10px; border-bottom:1px solid #1e293b;">
+        <span style="font-size:10px; color:#94a3b8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_e(L.marque)}">${_e(L.marque)}</span>
+        <span style="font-size:10.5px; color:#cbd5e1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_e(L.gamme)}">${_e(L.gamme)}</span>
+        <span style="font-size:11.5px; color:#e2e8f0; font-weight:600;">${_e(L.nom)}${L.graphies.size > 1 ? `<span style="font-size:9px; color:#fbbf24; font-weight:700; margin-left:5px;" title="${_e(Array.from(L.graphies).join(' / '))}">± ${L.graphies.size} graphies</span>` : ''}${gout ? `<span style="font-size:9px; color:${LIQ_GOUT_COLORS[gout] || '#64748b'}; margin-left:6px;">${_e(gout)}</span>` : ''}</span>
+        <span style="display:flex; gap:3px; flex-wrap:wrap; align-items:center;">${chips}${manq ? ' ' + manq : ''}</span>
+        <span style="display:flex; gap:2px; flex-wrap:wrap;">${statuts}</span>
+        <span>${alerteHtml}</span>
+      </div>`;
     });
   }
   // ═══ MODE PAR GAMME (marque → gamme → tous formats réunis, demande Fabien 2026-06-18) ═══
@@ -22054,10 +22240,10 @@ function renderLiqAll() {
         fmtGammes.sort(sortFn).forEach(g => {
           const sc = liqGammeStatusColor(g.statutVie);
           const ctColor = LIQ_GOUT_COLORS[g.ct] || '#94a3b8';
-          const roleLbl = LIQ_ROLE_SHORT[g.roleChoisi] || '—';
+          // (libellé court du rôle : porté par roleLiqChipHtml)
           const _roleCalcLive3 = g.roleCalc || calcLiqRole(g.format, g.pa, g.pv);
           const _isRoleOverride = !!(g.roleChoisi && g.roleChoisi !== _roleCalcLive3);
-          const _roleColor = _isRoleOverride ? '#f59e0b' : (LIQ_ROLE_COLORS[g.roleChoisi]||'#64748b');
+          // (couleur du rôle : portée par roleLiqChipHtml — la couleur dit le RÔLE, l'astérisque dit « forcé »)
           const _profColor2 = g.profilChoisi ? PROFIL_COLORS[g.profilChoisi] : '#64748b';
           const _liqOneShotBadge2 = g.oneShot
             ? ` <span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;" title="One-shot — occupation temporaire pilotée par une OP">⚡ One-shot</span>`
@@ -22077,7 +22263,7 @@ function renderLiqAll() {
             <div style="font-size:10px; color:#4ade80; text-align:right;" title="Marge par mL (marge unitaire / contenance)">€${liqMargeMl(g).toFixed(2)}</div>
             <div style="font-size:9px; color:#94a3b8; text-align:center;">${(g.parfums||[]).filter(p=>p.s!=='SORTI').length}</div>
             <div style="font-size:8px; text-align:center; font-weight:700; color:${_profColor2};">${g.profilChoisi ? PROFIL_SHORT[g.profilChoisi] : '—'}</div>
-            <div style="font-size:9px; color:${_roleColor};" title="${_isRoleOverride ? 'Override — barème: '+(LIQ_ROLE_LABELS[_roleCalcLive3]||'?') : ''}">${g.roleChoisi === 'COUP' ? '<span style="font-size:8px; padding:0 4px; background:#fcd34d22; color:#fcd34d; border:1px solid #fcd34d70; border-radius:3px; font-weight:700; white-space:nowrap;">⚡ One-shot</span>' : (roleLbl + (_isRoleOverride?'*':''))}</div>
+            <div>${roleLiqChipHtml(g.roleChoisi, _roleCalcLive3)}</div>
             <div style="${g.statutVie === 'ARRETE' ? statutChipCss('ARRETE', sc, '9px') + ' text-align:center;' : `font-size:9px; color:${sc}; font-weight:600;`}">${LIQ_GAMME_STATUT_LABELS[g.statutVie]||g.statutVie}</div>
           </div>`;
 
