@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 16:13</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 18:21</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -607,12 +607,13 @@ window.addEventListener('DOMContentLoaded', function() {
         <option value="">Tous profils</option><option value="RECREATIF">Récréatif</option><option value="PRUDENT">Prudent</option><option value="DECIDE">Décidé</option>
       </select>
       <select id="liqFilterRole" onchange="renderLiqAll();saveUiState();" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
-        <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option><option value="COMPLEMENT">Complément</option><option value="NOTORIETE">Notoriété</option><option value="COUP">One-shot</option>
+        <option value="">Tous rôles</option><option value="PRIX_D_APPEL">Prix d'appel</option><option value="MEILLEURE_MARGE">Meilleure marge</option><option value="COMPLEMENT">Complément / Notoriété</option><option value="COUP">One-shot</option>
       </select>
       <select id="liqShopFilter" onchange="renderLiqAll();saveUiState();" title="Vue boutique : ne montrer que ce qui est présent chez elle, avec la situation de chaque parfum (tiroir commande client, sortie faite, pas encore reçu)" style="padding:6px 8px; font-size:11px; background:#0f172a; border:1px solid #475569; color:#e2e8f0; border-radius:4px;">
         <option value="">Toutes boutiques</option><option value="pessac">🏪 Pessac</option><option value="merignac">🏪 Mérignac</option><option value="langon">🏪 Langon</option>
       </select>
       <div id="statut-multi-liq" style="position:relative; display:inline-block;"></div>
+      <button onclick="pvOuvrirNouvelleGammeVide()" title="Créer une gamme liquide VIDE (sans parfum) — pour y transférer ensuite des parfums mal rangés depuis une autre gamme" style="padding:6px 12px; font-size:11px; font-weight:700; background:#22c55e15; color:#86efac; border:1px solid #22c55e40; border-radius:4px; cursor:pointer; white-space:nowrap;">➕ Gamme vide</button>
       <button onclick="pvMrqOuvrirCouleurs()" title="🎨 Couleurs des marques : assigner une couleur à chaque marque (comme le tableur — César noir, Etasty orange…) ; elle teinte les flacons du plan des étagères, à l'écran et à l'impression." style="padding:6px 12px; font-size:11px; font-weight:700; background:#ec489915; color:#f9a8d4; border:1px solid #ec489940; border-radius:4px; cursor:pointer; white-space:nowrap;">🎨 Marques</button>
       <button onclick="pvOuvrirPointageEtageres()" title="Pointer, gamme par gamme et par boutique, si chaque liquide est posé sur les étagères : détecte les « à sortir » encore posés et les emplacements manquants." style="padding:6px 12px; font-size:11px; font-weight:700; background:#8b5cf615; color:#c4b5fd; border:1px solid #8b5cf640; border-radius:4px; cursor:pointer; white-space:nowrap;">📋 Pointage étagères</button>
       <button onclick="openVitrineDialogFromLiq()" title="Planche d'étiquettes étagère liquides (44 par feuille A4, blanc sur fond noir) : une étiquette par gamme+format filtrée, au prix du format" style="padding:6px 12px; font-size:11px; background:#38bdf8; color:#0f172a; border:none; border-radius:4px; cursor:pointer; font-weight:700; white-space:nowrap;">💧 Étiquettes…</button>
@@ -1527,11 +1528,34 @@ function _liqFormatBadge(formatKey) {
   return LIQ_FORMAT_BADGE[formatKey] || { bg: '#475569', text: '#94a3b8' };
 }
 // PROFILS déjà déclaré plus haut (ligne 266)
-// Rôles liquides : les mêmes que kits + NOTORIETE
-const LIQ_ROLES = ['PRIX_D_APPEL', 'MEILLEURE_MARGE', 'COMPLEMENT', 'NOTORIETE', 'COUP'];
-const LIQ_ROLE_LABELS = { PRIX_D_APPEL: "Prix d'appel", MEILLEURE_MARGE: 'Meilleure marge', COMPLEMENT: 'Complément', NOTORIETE: 'Notoriété', COUP: 'One-shot' };
-const LIQ_ROLE_COLORS = { PRIX_D_APPEL: '#f87171', MEILLEURE_MARGE: '#4ade80', COMPLEMENT: '#64748b', NOTORIETE: '#f59e0b', COUP: '#fcd34d' };
-const LIQ_ROLE_SHORT = { PRIX_D_APPEL: 'PA', MEILLEURE_MARGE: 'MM', COMPLEMENT: 'CPL', NOTORIETE: 'NOT', COUP: 'OS' };
+// Rôles liquides. 2026-08-27 (Fabien) : « Complément » et « Notoriété » ne font plus qu'UN
+// seul rôle, « Complément / Notoriété ». C'est COMPLEMENT qui survit comme clé ; NOTORIETE
+// devient une clé LEGACY — plus jamais proposée, mais toujours lisible (voir plus bas).
+const LIQ_ROLES = ['PRIX_D_APPEL', 'MEILLEURE_MARGE', 'COMPLEMENT', 'COUP'];
+// Les clés legacy restent dans les tables d'affichage, avec la MÊME valeur que leur clé de
+// fusion : une donnée pas encore normalisée (poste resté sur l'ancienne version, export
+// ancien rechargé) s'affiche juste, jamais en « — ».
+const LIQ_ROLE_LABELS = { PRIX_D_APPEL: "Prix d'appel", MEILLEURE_MARGE: 'Meilleure marge', COMPLEMENT: 'Complément / Notoriété', NOTORIETE: 'Complément / Notoriété', COUP: 'One-shot' };
+const LIQ_ROLE_COLORS = { PRIX_D_APPEL: '#f87171', MEILLEURE_MARGE: '#4ade80', COMPLEMENT: '#64748b', NOTORIETE: '#64748b', COUP: '#fcd34d' };
+const LIQ_ROLE_SHORT = { PRIX_D_APPEL: 'PA', MEILLEURE_MARGE: 'MM', COMPLEMENT: 'C/N', NOTORIETE: 'C/N', COUP: 'OS' };
+const LIQ_ROLE_ICONS = { PRIX_D_APPEL: '💰', MEILLEURE_MARGE: '📈', COMPLEMENT: '➕', NOTORIETE: '➕', COUP: '⚡' };
+// ── Fusion de rôles : LA canonique (règle 8) ──
+// Table ancienne clé → clé qui survit. Toute lecture d'un rôle liquide passe par
+// liqRoleCanon() ; toute liste chargée passe par _liqNormaliserRoles(). Auto-guérison :
+// si un poste resté sur l'ancienne version renvoie NOTORIETE par merge, on le renormalise
+// à la lecture SANS toucher aux _ts — donc sans bagarre de fusion, chaque poste corrige sa
+// copie tout seul. Une future fusion de rôles = une ligne de plus ici, rien d'autre.
+const LIQ_ROLES_FUSIONNES = { NOTORIETE: 'COMPLEMENT' };
+function liqRoleCanon(r) { return LIQ_ROLES_FUSIONNES[r] || r || ''; }
+function _liqNormaliserRoles(list) {
+  let n = 0;
+  (list || []).forEach(function(g) {
+    if (!g) return;
+    if (LIQ_ROLES_FUSIONNES[g.roleChoisi]) { g.roleChoisi = LIQ_ROLES_FUSIONNES[g.roleChoisi]; n++; }
+    if (LIQ_ROLES_FUSIONNES[g.roleCalc]) { g.roleCalc = LIQ_ROLES_FUSIONNES[g.roleCalc]; n++; }
+  });
+  return n;
+}
 // Barème auto-rôle liquides : {format, role, paMin, paMax, pvMin, pvMax, margeMin, margeMax}
 // margeMax = Infinity signifie pas de limite haute
 let LIQ_BAREME = [
@@ -2058,6 +2082,52 @@ let propositionsPD = JSON.parse(JSON.stringify(INIT_PROPOSITIONS_PD));
 let _deletedIds = new Set();
 let _deletedParfumIds = new Set(); // tombstones parfums liquides (empêche résurrection au merge)
 
+// ═══════════ 🔀 DÉMÉNAGEMENT DE PARFUM ENTRE GAMMES (Fabien, 2026-08-27) ═══════════
+// « J'ai des gammes qui mélangent des parfums d'autres gammes parce que j'ai mal regroupé.
+//   J'aimerais transférer des parfums d'une gamme à l'autre SANS perdre leurs infos. »
+//
+// LE PROBLÈME DE FOND : `_mergeLiqDeep` traite `g.parfums` comme une UNION par gamme, pas
+// comme une partition. Si on retire simplement un parfum de G1 pour le mettre dans G2, le
+// premier poll le retrouve dans la G1 distante et le RESSUSCITE dans G1 → le même parfum
+// vit dans deux gammes, avec le même id, et les deux copies se contaminent à chaque merge.
+// Et on ne peut PAS s'en sortir par un tombstone : `_deletedParfumIds` ne connaît que
+// l'id du parfum, pas la gamme — il le tuerait aussi dans sa nouvelle gamme.
+//
+// LA SOLUTION : un REGISTRE DE DOMICILE. `parfumsDeplaces[parfumId] = { g, ts }` dit où le
+// parfum habite MAINTENANT. Il se synchronise comme les tombstones (union), sauf qu'à
+// double déclaration c'est le `ts` le plus récent qui gagne. Le merge et le chargement
+// s'en servent pour refuser un parfum dans toute gamme qui n'est pas son domicile —
+// auto-guérison : un poste resté sur l'ancienne version se corrige tout seul.
+// L'id du parfum ne change JAMAIS : c'est ce qui permet de garder ses liaisons.
+let parfumsDeplaces = {};
+let _pvDeplacementEnCours = false;   // suspend le nettoyage des actions orphelines
+function _pfDomicile(pid) { const e = parfumsDeplaces[pid]; return (e && e.g) ? e.g : ''; }
+// Ce parfum a-t-il le droit d'être dans CETTE gamme ? (pas de domicile connu = oui)
+function _pfDomicileOk(pid, gammeId) { const h = _pfDomicile(pid); return !h || h === gammeId; }
+function _pfPoserDomicile(pid, gammeId, ts) { if (pid && gammeId) parfumsDeplaces[pid] = { g: gammeId, ts: ts || new Date().toISOString() }; }
+// Union de deux registres : à double déclaration, le déménagement le plus récent gagne.
+function _mergeParfumsDeplaces(local, remote) {
+  const out = Object.assign({}, local || {});
+  Object.keys(remote || {}).forEach(function(pid) {
+    const r = remote[pid];
+    if (!r || !r.g || !r.ts) return;
+    const l = out[pid];
+    if (!l || !l.ts || r.ts > l.ts) out[pid] = { g: r.g, ts: r.ts };
+  });
+  return out;
+}
+// Canonique : retrouver un parfum PARTOUT dans la base à partir de son seul id.
+// (Le reste du code est « gamme d'abord » ; cette fonction est le filet quand on ne
+// sait plus dans quelle gamme il vit.)
+function trouverParfumGlobal(pid) {
+  if (!pid) return null;
+  for (const g of baseLiq) {
+    const p = (g.parfums || []).find(function(x) { return x && x.id === pid; });
+    if (p) return { g: g, p: p };
+  }
+  return null;
+}
+
 // =====================================================================
 // PIÈCES DÉTACHÉES — Modèle de données (normalisation + ensure)
 // =====================================================================
@@ -2124,6 +2194,9 @@ function ensureLiqModel(g) {
   if (!g.ct) g.ct = '';
   if (!g.roleChoisi) g.roleChoisi = '';
   if (typeof g.roleCalc !== 'string') g.roleCalc = '';
+  // Fusion « Complément » + « Notoriété » (2026-08-27) — voir LIQ_ROLES_FUSIONNES
+  g.roleChoisi = liqRoleCanon(g.roleChoisi);
+  g.roleCalc = liqRoleCanon(g.roleCalc);
   if (!g.statutVie || g.statutVie === 'ELIGIBLE') g.statutVie = 'OK';
   // Normaliser statutVie: OK est l'équivalent liquide de DANS_OFFRE
   if (typeof g.note !== 'string') g.note = '';
@@ -2143,11 +2216,16 @@ function ensureLiqModel(g) {
   if (_deletedParfumIds.size > 0) {
     g.parfums = g.parfums.filter(p => !p.id || !_deletedParfumIds.has(p.id));
   }
+  // 🔀 Purger les parfums qui ont déménagé ailleurs (registre de domicile) — auto-guérison
+  // d'une copie locale antérieure au déplacement, sans tombstone (le parfum est VIVANT
+  // dans sa nouvelle gamme).
+  g.parfums = g.parfums.filter(p => !p.id || _pfDomicileOk(p.id, g.id));
   return g;
 }
 
 // Appliquer le modèle au load initial
 baseLiq.forEach(g => ensureLiqModel(g));
+_liqNormaliserRoles(propositionsLiq);
 
 // --- CLOUDFLARE SYNC ---
 // Remplace Supabase. Worker Cloudflare + KV = gratuit, jamais de pause.
@@ -6993,8 +7071,11 @@ function syncAutoActions() {
     _applyActionShopChange(a, SHOPS[0]);
   });
   // Nettoyage : supprimer les actions parfum orphelines (parfum introuvable dans la gamme)
+  // ⚠️ SUSPENDU pendant un déménagement de parfum : entre le splice de la gamme source et
+  // le repointage des actions, TOUTES les actions du parfum paraîtraient orphelines — et ce
+  // nettoyage les tombstone, donc les détruit définitivement sur tous les postes.
   const _orphanIds = new Set();
-  actions.forEach(a => {
+  if (!_pvDeplacementEnCours) actions.forEach(a => {
     if (a._archived) return;
     if (a.produitType !== 'liq' || !a.produitParfumId || a.annulee) return;
     const g = baseLiq.find(l => l.id === a.produitId);
@@ -11984,6 +12065,9 @@ async function loadData() {
     if (Array.isArray(remoteData._deletedIds)) remoteData._deletedIds.forEach(id => _deletedIds.add(id));
     if (Array.isArray(localData._deletedParfumIds)) localData._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
     if (Array.isArray(remoteData._deletedParfumIds)) remoteData._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+    // 🔀 Registre de domicile AVANT _mergeLiqDeep : il conditionne l'acceptation des parfums
+    parfumsDeplaces = _mergeParfumsDeplaces(_mergeParfumsDeplaces(parfumsDeplaces, localData.parfumsDeplaces), remoteData.parfumsDeplaces);
+    remoteData.parfumsDeplaces = parfumsDeplaces;
 
     // ── 1. Actions : LOCAL = base, merge steps depuis remote ──
     remoteData.actions = _mergeEtats(localData.actions || [], remoteData.actions || []);
@@ -12115,6 +12199,7 @@ async function loadData() {
       }
     }
     propositionsLiq = Array.isArray(data.propositionsLiq) ? data.propositionsLiq : [];
+    _liqNormaliserRoles(propositionsLiq);   // fusion de rôles (les props ne passent pas par ensureLiqModel)
     // ── Déduplication propositions liquides ──
     {
       const _pc = {};
@@ -12194,6 +12279,8 @@ async function loadData() {
       : (bilans.length ? Math.max(...bilans.map(b => parseInt(String(b.id).replace('BILAN-','')) || 0)) + 1 : 1);
     // 📋 Pointage étagères liquides (2026-07-30) : chargé + tombstones filtrées
     pointagesEtagere = (Array.isArray(data.pointagesEtagere) ? data.pointagesEtagere : []).filter(x => x && x.id && !_deletedIds.has(x.id));
+    // 🔀 Registre de domicile des parfums déplacés (union avec ce qu'on avait déjà)
+    if (data.parfumsDeplaces && typeof data.parfumsDeplaces === 'object') parfumsDeplaces = _mergeParfumsDeplaces(parfumsDeplaces, data.parfumsDeplaces);
     // 🧪 Malette de testeurs (2026-08-03) : chargée + tombstones filtrées
     testeursLiq = (Array.isArray(data.testeursLiq) ? data.testeursLiq : []).filter(x => x && x.id && !_deletedIds.has(x.id));
     // 🗄️ Plan des étagères (2026-08-06) : chargé + tombstones filtrées
@@ -13134,7 +13221,12 @@ async function loadData() {
       const _rc = (g.pa && g.pv) ? calcLiqRole(g.format, g.pa, g.pv) : '';
       g.roleCalc = _rc;
       if (g.roleChoisi === 'NOTORIETE' || g.roleChoisi === 'COUP') {
-        // Notoriété / Coup = choix manuel hors barème, on ne touche pas
+        // Notoriété / Coup = choix manuel hors barème, on ne touche pas.
+        // ⚠️ 'NOTORIETE' est une clé LEGACY depuis la fusion du 2026-08-27 : ce test ne peut
+        // plus matcher (tout est normalisé en COMPLEMENT au chargement). On le laisse tel
+        // quel VOLONTAIREMENT — cette migration est dormante (drapeau posé sur tous les
+        // postes, et le verrou « postes neufs » la neutralise), la réécrire changerait le
+        // comportement du barème pour les vrais Compléments.
         _notoriete++;
       } else if (_rc) {
         g.roleChoisi = _rc;
@@ -13410,7 +13502,7 @@ async function forcerVersionAdminPartout() {
 // ailleurs = perte silencieuse de données. Désormais, UNE source de vérité.
 // Tout nouveau champ de données se déclare ICI et nulle part ailleurs.
 function buildPayload() {
-  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, pointagesEtagere, testeursLiq, etageresLiq, placementsLiq, marquesLiq, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
+  return { baseKits, baseLiq, basePD, propositions, propositionsLiq, propositionsPD, actions, nextActionId, relevesPrix, nextReleveId, ops, nextOpId, campagnes, nextCampagneId, bilans, nextBilanId, pointagesEtagere, testeursLiq, etageresLiq, placementsLiq, marquesLiq, parfumsDeplaces, _deletedIds: Array.from(_deletedIds), _deletedParfumIds: Array.from(_deletedParfumIds), auditLog: auditLog.slice(-AUDIT_LOG_MAX) };
 }
 
 function saveData() {
@@ -14289,6 +14381,8 @@ function _mergeLiqDeep(localLiq, remoteLiq) {
     // ── Purger les parfums supprimés (tombstones) du local ──
     const beforeLen = lg.parfums.length;
     lg.parfums = lg.parfums.filter(p => !p.id || !_deletedParfumIds.has(p.id));
+    // 🔀 … et ceux qui ont déménagé dans une AUTRE gamme (registre de domicile)
+    lg.parfums = lg.parfums.filter(p => !p.id || _pfDomicileOk(p.id, lg.id));
     parfumsPurged += (beforeLen - lg.parfums.length);
     // ── Merger les parfums distants ──
     const rg = remoteMap[lg.id];
@@ -14298,6 +14392,9 @@ function _mergeLiqDeep(localLiq, remoteLiq) {
     rg.parfums.forEach(rp => {
       // Ignorer les parfums supprimés
       if (!rp.id || _deletedParfumIds.has(rp.id)) return;
+      // 🔀 … et ceux dont le domicile n'est PAS cette gamme (sinon le déplacement est
+      // annulé par le premier poll : c'était LE piège de cette feature).
+      if (!_pfDomicileOk(rp.id, lg.id)) return;
       const lp = localById[rp.id];
       if (!lp) {
         // Parfum distant inconnu localement → ajouter
@@ -14561,6 +14658,8 @@ async function _saveToSupabase(payload, _retryCount) {
       // 0. Intégrer les tombstones distants avant fusion
       if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
       if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+      parfumsDeplaces = _mergeParfumsDeplaces(parfumsDeplaces, remote.parfumsDeplaces);   // 🔀 avant _mergeLiqDeep
+      payload.parfumsDeplaces = parfumsDeplaces;
       payload._deletedIds = Array.from(_deletedIds);
       payload._deletedParfumIds = Array.from(_deletedParfumIds);
       // 1. Fusionner les coches actions (done, steps, responsable)
@@ -14720,6 +14819,7 @@ async function _doSyncPoll() {
       // Intégrer les tombstones distants AVANT le merge (pour ne pas ressusciter des items supprimés)
       if (Array.isArray(remote._deletedIds)) remote._deletedIds.forEach(id => _deletedIds.add(id));
       if (Array.isArray(remote._deletedParfumIds)) remote._deletedParfumIds.forEach(id => _deletedParfumIds.add(id));
+      parfumsDeplaces = _mergeParfumsDeplaces(parfumsDeplaces, remote.parfumsDeplaces);   // 🔀 avant _mergeLiqDeep
       // Fusionner actions (capturer le retour car .filter() crée un nouveau tableau).
       // Détection `changed` étendue (2026-05-18) : on compare l'objet entier, pas
       // seulement les etats[shop]. Avant, une modif admin sur un champ racine (date,
@@ -15770,6 +15870,7 @@ document.getElementById('importFile').addEventListener('change', async (e) => {
       });
       propositions = data.propositions || [];
       propositionsLiq = Array.isArray(data.propositionsLiq) ? data.propositionsLiq : [];
+      _liqNormaliserRoles(propositionsLiq);   // fusion de rôles (import fichier)
       // PD import
       if (Array.isArray(data.basePD) && data.basePD.length > 10) { basePD = data.basePD; basePD.forEach(pd => ensurePdModel(pd)); }
       else { basePD = JSON.parse(JSON.stringify(INIT_BASE_PD)); basePD.forEach(pd => ensurePdModel(pd)); console.log('[MIGRATION] Base PD réinitialisée avec', basePD.length, 'produits'); }
@@ -18382,6 +18483,429 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
   saveData(); renderLiqAll();
 }
 
+
+// ═══════════ 🔀 DÉMÉNAGEMENT DE PARFUM — LE MOTEUR (Fabien, 2026-08-27) ═══════════
+// Le registre de domicile (`parfumsDeplaces`, déclaré près des tombstones) rend le
+// déplacement PROPAGEABLE. Ici on traite tout ce qui, dans le modèle, référence le couple
+// (gamme, parfum) — sinon le parfum arrive nu dans sa nouvelle gamme et ses lignes, ses OP,
+// sa place sur les plans et son testeur restent accrochés à l'ancienne (ou pire, sont
+// détruits par le nettoyage des actions orphelines).
+// L'id du parfum ne change JAMAIS : c'est ce qui permet de tout garder.
+
+// Le « bagage » d'un parfum : tout ce qui le suivra. Sert à l'APERÇU avant validation
+// (Fabien voit ce qui déménage) ET au bilan après coup.
+function _pfBagage(pid, gSrcId) {
+  const acts = actions.filter(function(a) { return a && a.produitType === 'liq' && a.produitParfumId === pid && a.produitId === gSrcId; });
+  const opsL = ops.filter(function(op) {
+    if (!op || (op.produitIds || [])[0] !== gSrcId) return false;
+    return op.produitParfumId === pid || (Array.isArray(op.produitParfumIds) && op.produitParfumIds.indexOf(pid) !== -1);
+  });
+  const plc = placementsLiq.filter(function(pl) {
+    if (!pl || _deletedIds.has(pl.id) || pl.gammeId !== gSrcId) return false;
+    return (pl.retires || {})[pid] !== undefined || (pl.doubles || {})[pid] !== undefined || (pl.devant10 || {})[pid] !== undefined;
+  });
+  const ptg = pointagesEtagere.filter(function(r) { return r && r.gammeId === gSrcId && r.poses && r.poses[pid] !== undefined; });
+  const tst = testeursLiq.filter(function(t) { return t && t.parfumId === pid && !_deletedIds.has(t.id); });
+  return { actions: acts, ops: opsL, placements: plc, pointages: ptg, testeurs: tst };
+}
+
+// Les OP qui INTERDISENT le déplacement : celles qui visent à la fois des parfums qui
+// partent et des parfums qui restent. Une OP ne peut désigner qu'UNE gamme
+// (`produitIds[0]`) : la scinder à l'aveugle ferait perdre ses coches par boutique et son
+// historique. On préfère refuser et le dire, plutôt que d'abîmer en silence.
+function _pfOpsBloquantes(gSrcId, pids) {
+  const setP = new Set(pids);
+  const out = [];
+  ops.forEach(function(op) {
+    if (!op || (op.produitIds || [])[0] !== gSrcId) return;
+    const cibles = op.produitParfumId ? [op.produitParfumId]
+      : (Array.isArray(op.produitParfumIds) ? op.produitParfumIds.slice() : []);
+    if (!cibles.length) return;                                   // OP gamme entière : elle reste
+    const bougent = cibles.filter(function(x) { return setP.has(x); });
+    if (!bougent.length || bougent.length === cibles.length) return;
+    out.push({ op: op, restent: cibles.filter(function(x) { return !setP.has(x); }) });
+  });
+  return out;
+}
+
+function _pfMigrerActions(pid, gSrcId, gDstId, p, now) {
+  let n = 0;
+  actions.forEach(function(a) {
+    if (!a || a.produitType !== 'liq' || a.produitParfumId !== pid || a.produitId !== gSrcId) return;
+    a.produitId = gDstId;                       // ← LE repointage vital (sinon action orpheline = détruite)
+    a._parfumNom = p.n || a._parfumNom;
+    if ('parfumNom' in a) a.parfumNom = p.n || a.parfumNom;   // 2e nom de cache historique
+    a._ts = now; a._adminTs = now;
+    n++;
+  });
+  return n;
+}
+
+// Une seule passe pour tout le lot : une OP visant 3 parfums qui partent ensemble ne doit
+// être repointée qu'une fois.
+function _pfMigrerOps(pids, gSrcId, gDstId, now) {
+  const setP = new Set(pids);
+  let n = 0;
+  ops.forEach(function(op) {
+    if (!op || (op.produitIds || [])[0] !== gSrcId) return;
+    const cibles = op.produitParfumId ? [op.produitParfumId]
+      : (Array.isArray(op.produitParfumIds) ? op.produitParfumIds : []);
+    if (!cibles.length || !cibles.some(function(x) { return setP.has(x); })) return;
+    // Garanti par _pfOpsBloquantes : tous les parfums de cette OP font le voyage.
+    op.produitIds = [gDstId];
+    op._ts = now; op._adminTs = now;
+    n++;
+  });
+  return n;
+}
+
+function _pfMigrerPlacements(pid, gSrcId, gDstId, now) {
+  let n = 0;
+  placementsLiq.forEach(function(pl) {
+    if (!pl || _deletedIds.has(pl.id) || pl.gammeId !== gSrcId) return;
+    const sh = _etgShopDePlacement(pl);
+    const cible = placementsLiq.find(function(x) {
+      return x && !_deletedIds.has(x.id) && x.type === 'gamme' && x.gammeId === gDstId && _etgShopDePlacement(x) === sh;
+    });
+    ['retires', 'doubles', 'devant10'].forEach(function(champ) {
+      const m = pl[champ];
+      if (!m || m[pid] === undefined) return;
+      if (cible) { cible[champ] = cible[champ] || {}; cible[champ][pid] = m[pid]; _etgTouche(cible); }
+      delete m[pid];
+      _etgTouche(pl);
+      n++;
+    });
+  });
+  // Un placement de la gamme de DÉPART qui porte `devant10[pid]` a été traité ci-dessus ;
+  // ceux d'une AUTRE gamme (un 10 mL posé devant un 50 mL) visent le parfum, pas sa gamme :
+  // la clé reste valable, mais l'appariement `_etgDixDe` est NOMINAL → à revérifier à l'œil.
+  return n;
+}
+
+function _pfMigrerPointages(pid, gSrcId, gDstId, now) {
+  let n = 0;
+  pointagesEtagere.filter(function(r) { return r && r.gammeId === gSrcId && r.poses && r.poses[pid] !== undefined; })
+    .forEach(function(r) {
+      const cible = _ptgRec(r.shop, gDstId, true);
+      cible.poses[pid] = r.poses[pid];
+      cible._ts = now;
+      delete r.poses[pid];
+      r._ts = now;
+      n++;
+    });
+  return n;
+}
+
+function _pfMigrerTesteurs(pid, gDstId, now) {
+  let n = 0;
+  testeursLiq.forEach(function(t) {
+    if (!t || t.parfumId !== pid || _deletedIds.has(t.id)) return;
+    t.gammeId = gDstId; t._ts = now; t._adminTs = now; n++;
+  });
+  return n;
+}
+
+// Les comptages de reprise vivent DANS l'action « gamme entière », en map parfumId → nombre.
+// Piège : `_mergeEtats` fusionne cette map clé par clé et ne SUPPRIME jamais — un `delete`
+// serait réinjecté au poll suivant. On éteint donc la clé source avec `null` + un
+// horodatage neuf, seule façon de faire gagner l'extinction au merge.
+function _pfMigrerComptages(pids, gSrcId, gDstId, now) {
+  let n = 0;
+  actions.forEach(function(aS) {
+    if (!aS || aS.produitType !== 'liq' || aS.produitId !== gSrcId || aS.produitParfumId) return;
+    const aD = actions.find(function(a) {
+      return a && a.produitType === 'liq' && a.produitId === gDstId && !a.produitParfumId && a.type === aS.type && !a.annulee;
+    });
+    let touche = false;
+    SHOPS.forEach(function(sh) {
+      const st = aS.etats && aS.etats[sh];
+      if (!st || !st.comptageParfums) return;
+      pids.forEach(function(pid) {
+        if (st.comptageParfums[pid] === undefined || st.comptageParfums[pid] === null) return;
+        if (aD && aD.etats && aD.etats[sh]) {
+          const dt = aD.etats[sh];
+          dt.comptageParfums = dt.comptageParfums || {};
+          dt._comptageParfumsTs = dt._comptageParfumsTs || {};
+          dt.comptageParfums[pid] = st.comptageParfums[pid];
+          dt._comptageParfumsTs[pid] = now;
+          aD._ts = now; aD._adminTs = now;
+        }
+        st.comptageParfums[pid] = null;
+        st._comptageParfumsTs = st._comptageParfumsTs || {};
+        st._comptageParfumsTs[pid] = now;
+        touche = true; n++;
+      });
+    });
+    if (touche) { aS._ts = now; aS._adminTs = now; }
+  });
+  return n;
+}
+
+// LA canonique du déménagement. Retourne un bilan, ou null si refusé.
+function deplacerParfumsLiq(gSrcId, pids, gDstId) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return null; }
+  const gSrc = baseLiq.find(function(x) { return x.id === gSrcId; });
+  const gDst = baseLiq.find(function(x) { return x.id === gDstId; });
+  if (!gSrc || !gDst) { pvAlert('Gamme introuvable.'); return null; }
+  if (gSrc.id === gDst.id) { pvAlert('C\'est déjà sa gamme.'); return null; }
+  if (gSrc.format !== gDst.format) {
+    pvAlert('Un parfum ne se déplace que vers une gamme du MÊME format (' + (LIQ_FORMAT_LABELS[gSrc.format] || gSrc.format) + ').');
+    return null;
+  }
+  pids = (pids || []).filter(function(pid) { return (gSrc.parfums || []).some(function(p) { return p && p.id === pid; }); });
+  if (!pids.length) { pvAlert('Aucun parfum à déplacer.'); return null; }
+  const bloq = _pfOpsBloquantes(gSrcId, pids);
+  if (bloq.length) {
+    pvAlert('Déplacement impossible : ' + bloq.length + ' OP vise(nt) à la fois des parfums qui partent et des parfums qui restent '
+      + '(' + bloq.map(function(b) { return (b.op.nom || b.op.id); }).join(', ') + ').\n\n'
+      + 'Une OP ne peut désigner qu\'une gamme. Soit tu déplaces AUSSI les parfums qui restent, soit tu retires ce parfum de l\'OP avant.');
+    return null;
+  }
+
+  _pvDeplacementEnCours = true;   // ⚠️ suspend le nettoyage des actions orphelines
+  const bilan = { noms: [], actions: 0, ops: 0, placements: 0, pointages: 0, testeurs: 0, comptages: 0 };
+  try {
+    const now = new Date().toISOString();
+    let ordreMax = (gDst.parfums || []).reduce(function(m, p) { return Math.max(m, typeof p.ordre === 'number' ? p.ordre : -1); }, -1);
+    pids.forEach(function(pid) {
+      const idx = (gSrc.parfums || []).findIndex(function(p) { return p && p.id === pid; });
+      if (idx < 0) return;
+      const p = gSrc.parfums[idx];
+      _pfPoserDomicile(pid, gDst.id, now);   // 1) le domicile AVANT tout : le merge s'y fie
+      gSrc.parfums.splice(idx, 1);           // 2) le MÊME objet change de gamme (jamais remove+add)
+      // 3) matérialiser ce qui était HÉRITÉ de la gamme de départ, sinon ça change en silence
+      if (!p.ct) p.ct = gSrc.ct || '';
+      if (typeof p.pa !== 'number' || !p.pa) p.pa = gSrc.pa;
+      if (typeof p.pv !== 'number' || !p.pv) p.pv = gSrc.pv;
+      p.ordre = ++ordreMax;
+      p._ts = now;
+      gDst.parfums.push(p);
+      // 4) les liaisons suivent
+      bilan.actions += _pfMigrerActions(pid, gSrc.id, gDst.id, p, now);
+      bilan.placements += _pfMigrerPlacements(pid, gSrc.id, gDst.id, now);
+      bilan.pointages += _pfMigrerPointages(pid, gSrc.id, gDst.id, now);
+      bilan.testeurs += _pfMigrerTesteurs(pid, gDst.id, now);
+      bilan.noms.push(p.n || pid);
+    });
+    bilan.ops = _pfMigrerOps(pids, gSrc.id, gDst.id, now);
+    bilan.comptages = _pfMigrerComptages(pids, gSrc.id, gDst.id, now);
+    gSrc._ts = now; gSrc._adminTs = now;
+    gDst._ts = now; gDst._adminTs = now;
+    gSrc.nbRefs = (gSrc.parfums || []).filter(function(p) { return p.s !== 'SORTI'; }).length;
+    gDst.nbRefs = (gDst.parfums || []).filter(function(p) { return p.s !== 'SORTI'; }).length;
+    if (typeof _recomputeGammeStatutFromParfums === 'function') {
+      _recomputeGammeStatutFromParfums(gSrc); _recomputeGammeStatutFromParfums(gDst);
+    }
+    logAction('Parfums déplacés', '🔀 ' + bilan.noms.length + ' parfum(s) : ' + gSrc.marque + ' ' + gSrc.gamme
+      + ' → ' + gDst.marque + ' ' + gDst.gamme + ' (' + bilan.noms.join(', ') + ')');
+  } finally {
+    _pvDeplacementEnCours = false;
+  }
+  return bilan;
+}
+
+// Créer une gamme VIDE (aucun parfum) — demande de Fabien : préparer la gamme d'accueil
+// avant d'y transférer les parfums mal rangés.
+function creerGammeLiqVide(spec) {
+  const now = new Date().toISOString();
+  const g = {
+    id: 'LIQ-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6),
+    marque: String((spec && spec.marque) || '').trim(),
+    gamme: String((spec && spec.gamme) || '').trim(),
+    format: (spec && spec.format) || '10mL',
+    pa: parseFloat((spec && spec.pa) || 0) || 0,
+    pv: parseFloat((spec && spec.pv) || 0) || 0,
+    marge: 0, nbRefs: 0, rp: '',
+    profilChoisi: (spec && spec.profilChoisi) || '',
+    ct: (spec && spec.ct) || '',
+    roleChoisi: liqRoleCanon((spec && spec.roleChoisi) || ''),
+    roleCalc: '', statutVie: 'DANS_OFFRE', note: '',
+    commentaire: (spec && spec.commentaire) || '',
+    parfums: [], fournisseur: '', oneShotOpId: '',
+    _ts: now, _adminTs: now
+  };
+  try { const m = computeMarge(g.pa, g.pv); if (m && typeof m.marge === 'number') g.marge = m.marge; } catch (e) {}
+  try { g.roleCalc = calcLiqRole(g.format, g.pa, g.pv) || ''; } catch (e) {}
+  ensureLiqModel(g);
+  baseLiq.push(g);
+  logAction('Gamme liquide créée (vide)', '➕ ' + g.marque + ' — ' + g.gamme + ' ' + (LIQ_FORMAT_LABELS[g.format] || g.format));
+  return g;
+}
+
+// ── Sélection de parfums dans une fiche gamme (une gamme à la fois) ──
+let _pfSelGamme = '';
+const _pfSel = new Set();
+function pvPfSelToggle(gid, pid) {
+  if (_pfSelGamme !== gid) { _pfSel.clear(); _pfSelGamme = gid; }
+  if (_pfSel.has(pid)) _pfSel.delete(pid); else _pfSel.add(pid);
+  if (!_pfSel.size) _pfSelGamme = '';
+  renderLiqAll();
+}
+function pvPfSelVider() { _pfSel.clear(); _pfSelGamme = ''; renderLiqAll(); }
+function pvPfSelTout(gid) {
+  const g = baseLiq.find(function(x) { return x.id === gid; });
+  if (!g) return;
+  _pfSelGamme = gid; _pfSel.clear();
+  (g.parfums || []).forEach(function(p) { if (p && p.id) _pfSel.add(p.id); });
+  renderLiqAll();
+}
+
+// ── La fenêtre « déplacer vers… » ──
+function pvOuvrirDeplacerParfums(gid) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const g = baseLiq.find(function(x) { return x.id === gid; });
+  if (!g) return;
+  const pids = Array.from(_pfSel);
+  if (!pids.length) { pvAlert('Coche d\'abord les parfums à déplacer.'); return; }
+  const e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  const noms = pids.map(function(pid) { const p = (g.parfums || []).find(function(x) { return x.id === pid; }); return p ? (p.n || '(sans nom)') : pid; });
+
+  // Cibles possibles : MÊME format, gamme vivante, pas elle-même.
+  const cibles = baseLiq.filter(function(x) {
+    return x && x.id !== g.id && x.format === g.format && x.marque && x.gamme
+      && !(x.marque === 'autre' && String(x.gamme).includes('PA +/-')) && x.statutVie !== 'SORTI';
+  }).sort(function(a, b) { return (a.marque + ' ' + a.gamme).localeCompare(b.marque + ' ' + b.gamme); });
+
+  // Le bagage cumulé (ce qui suit) + les OP bloquantes
+  let nbA = 0, nbO = 0, nbP = 0, nbT = 0, nbPl = 0;
+  const opsVues = new Set();
+  pids.forEach(function(pid) {
+    const b = _pfBagage(pid, g.id);
+    nbA += b.actions.length; nbP += b.pointages.length; nbT += b.testeurs.length; nbPl += b.placements.length;
+    b.ops.forEach(function(op) { opsVues.add(op.id); });
+  });
+  nbO = opsVues.size;
+  const bloq = _pfOpsBloquantes(g.id, pids);
+
+  const ligneBagage = function(icone, n, libelle) {
+    return n ? `<div style="display:flex; gap:6px; align-items:center; font-size:10.5px; color:#cbd5e1;"><span>${icone}</span><b style="color:#e2e8f0;">${n}</b> ${libelle}</div>` : '';
+  };
+  const bagageHtml = (nbA + nbO + nbPl + nbP + nbT) === 0
+    ? `<div style="font-size:10.5px; color:#64748b; font-style:italic;">Rien d'autre n'est accroché à ${pids.length > 1 ? 'ces parfums' : 'ce parfum'} — déplacement simple.</div>`
+    : ligneBagage('📋', nbA, 'ligne(s) à rentrer / à sortir / prix')
+      + ligneBagage('🎯', nbO, 'OP')
+      + ligneBagage('🗄️', nbPl, 'réglage(s) sur un plan d\'étagères')
+      + ligneBagage('📋', nbP, 'réponse(s) de pointage')
+      + ligneBagage('🧪', nbT, 'entrée(s) dans la malette de testeurs');
+
+  const html = `<div style="color:#c4b5fd; font-weight:700; font-size:13px; margin-bottom:2px;">🔀 Déplacer ${pids.length} parfum${pids.length > 1 ? 's' : ''}</div>
+    <div style="font-size:10.5px; color:#94a3b8; margin-bottom:8px; line-height:1.45;">Depuis <b style="color:#e2e8f0;">${e(g.marque)} — ${e(g.gamme)}</b> <span style="color:#64748b;">(${LIQ_FORMAT_LABELS[g.format] || g.format})</span><br>
+      ${noms.map(function(n) { return `<span style="display:inline-block; font-size:10px; background:#1e293b; border:1px solid #33415560; border-radius:3px; padding:1px 6px; margin:2px 3px 0 0;">${e(n)}</span>`; }).join('')}</div>
+    <label style="color:#94a3b8; font-size:11px; display:block; margin-bottom:10px;">Gamme d'arrivée (même format uniquement)
+      <select id="_pfDstSel" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;">
+        <option value="">— choisir —</option>
+        <option value="__NEW__">➕ Créer une gamme vide…</option>
+        ${cibles.map(function(x) { return `<option value="${x.id}">${e(x.marque)} — ${e(x.gamme)}${(x.parfums || []).length ? ' (' + (x.parfums || []).length + ' parfums)' : ' (vide)'}</option>`; }).join('')}
+      </select></label>
+    <div id="_pfNewBox" style="display:none; padding:8px 10px; background:#0f172a; border:1px solid #475569; border-radius:5px; margin-bottom:10px;">
+      <div style="font-size:10px; color:#94a3b8; margin-bottom:6px;">Nouvelle gamme — format <b style="color:#e2e8f0;">${LIQ_FORMAT_LABELS[g.format] || g.format}</b> (celui des parfums déplacés). Profil, rôle et prix sont repris de la gamme de départ, modifiables ensuite.</div>
+      <div style="display:flex; gap:6px;">
+        <label style="flex:1; color:#94a3b8; font-size:10.5px;">Marque *<input id="_pfNewMarque" type="text" value="${e(g.marque)}" style="display:block; margin-top:3px; width:100%; padding:5px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; font-size:12px;"></label>
+        <label style="flex:1; color:#94a3b8; font-size:10.5px;">Nom de gamme *<input id="_pfNewGamme" type="text" placeholder="ex : Freeze" style="display:block; margin-top:3px; width:100%; padding:5px 8px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:4px; font-size:12px;"></label>
+      </div>
+    </div>
+    <div style="padding:8px 10px; background:#8b5cf610; border:1px solid #8b5cf635; border-radius:5px;">
+      <div style="font-size:10px; font-weight:700; color:#c4b5fd; margin-bottom:5px;">CE QUI SUIT LE PARFUM</div>
+      ${bagageHtml}
+      <div style="font-size:9.5px; color:#64748b; margin-top:6px; line-height:1.4;">L'identifiant du parfum ne change pas : son historique, son statut, ses prix, ses commandes clients et ses coches restent les siens.</div>
+    </div>
+    ${bloq.length ? `<div style="margin-top:8px; padding:8px 10px; background:#ef444412; border:1px solid #ef444450; border-radius:5px; font-size:10.5px; color:#fca5a5; line-height:1.45;">
+      ⚠️ <b>Bloqué</b> — ${bloq.length} OP vise${bloq.length > 1 ? 'nt' : ''} à la fois des parfums qui partent et des parfums qui restent : ${bloq.map(function(b) { return e(b.op.nom || b.op.id); }).join(', ')}.<br>
+      Une OP ne peut désigner qu'une seule gamme. Déplace aussi les parfums qui restent, ou retire celui-ci de l'OP avant.
+    </div>` : ''}`;
+
+  const ov = _pvModal(html, [{ label: 'Déplacer', color: '#8b5cf6' }, { label: 'Annuler' }], function(idx) {
+    if (idx !== 0) return;
+    const sel = ov.querySelector('#_pfDstSel');
+    const val = sel ? sel.value : '';
+    if (!val) { pvAlert('Choisis une gamme d\'arrivée.'); return; }
+    let dstId = val;
+    if (val === '__NEW__') {
+      const mq = (ov.querySelector('#_pfNewMarque').value || '').trim();
+      const gm = (ov.querySelector('#_pfNewGamme').value || '').trim();
+      if (!mq || !gm) { pvAlert('Marque et nom de gamme sont obligatoires.'); return; }
+      const doublon = baseLiq.find(function(x) {
+        return x && x.format === g.format && String(x.marque).trim().toLowerCase() === mq.toLowerCase()
+          && String(x.gamme).trim().toLowerCase() === gm.toLowerCase();
+      });
+      if (doublon) { pvAlert('Cette gamme existe déjà dans ce format — choisis-la dans la liste.'); return; }
+      dstId = creerGammeLiqVide({ marque: mq, gamme: gm, format: g.format, profilChoisi: g.profilChoisi,
+        roleChoisi: g.roleChoisi, pa: g.pa, pv: g.pv, ct: g.ct }).id;
+    }
+    const bilan = deplacerParfumsLiq(g.id, Array.from(_pfSel), dstId);
+    if (!bilan) return;
+    _pfSel.clear(); _pfSelGamme = '';
+    saveData();
+    if (typeof syncAutoActions === 'function') try { syncAutoActions(); } catch (err) {}
+    if (typeof renderLiqAll === 'function') try { renderLiqAll(); } catch (err) {}
+    if (typeof renderDashboard === 'function') try { renderDashboard(); } catch (err) {}
+    const dst = baseLiq.find(function(x) { return x.id === dstId; });
+    const suivi = [];
+    if (bilan.actions) suivi.push(bilan.actions + ' ligne(s)');
+    if (bilan.ops) suivi.push(bilan.ops + ' OP');
+    if (bilan.placements) suivi.push(bilan.placements + ' réglage(s) de plan');
+    if (bilan.pointages) suivi.push(bilan.pointages + ' réponse(s) de pointage');
+    if (bilan.testeurs) suivi.push(bilan.testeurs + ' testeur(s)');
+    if (bilan.comptages) suivi.push(bilan.comptages + ' comptage(s) de reprise');
+    pvAlert(bilan.noms.length + ' parfum(s) déplacé(s) vers « ' + dst.marque + ' — ' + dst.gamme + ' ».'
+      + (suivi.length ? '\n\nOnt suivi : ' + suivi.join(', ') + '.' : '\n\nRien d\'autre n\'y était accroché.'));
+  });
+  const selEl = ov.querySelector('#_pfDstSel');
+  if (selEl) selEl.addEventListener('change', function() {
+    const box = ov.querySelector('#_pfNewBox');
+    if (box) box.style.display = (selEl.value === '__NEW__') ? 'block' : 'none';
+  });
+}
+
+// ── Créer une gamme vide depuis le bandeau Base Liquides ──
+function pvOuvrirNouvelleGammeVide() {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const html = `<div style="color:#86efac; font-weight:700; font-size:13px; margin-bottom:2px;">➕ Nouvelle gamme (vide)</div>
+    <div style="font-size:10.5px; color:#94a3b8; margin-bottom:10px; line-height:1.45;">Crée la gamme sans aucun parfum. Tu pourras y transférer des parfums mal rangés depuis leur gamme actuelle (coche les parfums → 🔀 Déplacer).</div>
+    <div style="display:flex; flex-direction:column; gap:8px;">
+      <div style="display:flex; gap:6px;">
+        <label style="flex:1; color:#94a3b8; font-size:11px;">Marque *<input id="_ngMarque" type="text" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;"></label>
+        <label style="flex:1; color:#94a3b8; font-size:11px;">Nom de gamme *<input id="_ngGamme" type="text" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;"></label>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <label style="flex:1; color:#94a3b8; font-size:11px;">Format *
+          <select id="_ngFormat" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;">
+            ${LIQ_FORMATS.map(function(f) { return `<option value="${f}">${LIQ_FORMAT_LABELS[f] || f}</option>`; }).join('')}
+          </select></label>
+        <label style="flex:1; color:#94a3b8; font-size:11px;">Profil
+          <select id="_ngProfil" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;">
+            <option value="">—</option>${PROFILS.map(function(p) { return `<option value="${p}">${PROFIL_LABELS[p] || p}</option>`; }).join('')}
+          </select></label>
+        <label style="flex:1; color:#94a3b8; font-size:11px;">Rôle
+          <select id="_ngRole" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;">
+            <option value="">— auto —</option>${LIQ_ROLES.map(function(r) { return `<option value="${r}">${LIQ_ROLE_LABELS[r] || r}</option>`; }).join('')}
+          </select></label>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <label style="flex:1; color:#94a3b8; font-size:11px;">Prix d'achat<input id="_ngPa" type="number" step="0.01" value="0" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;"></label>
+        <label style="flex:1; color:#94a3b8; font-size:11px;">Prix de vente<input id="_ngPv" type="number" step="0.01" value="0" style="display:block; margin-top:3px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:12px;"></label>
+      </div>
+    </div>`;
+  const ov = _pvModal(html, [{ label: 'Créer la gamme', color: '#22c55e' }, { label: 'Annuler' }], function(idx) {
+    if (idx !== 0) return;
+    const mq = (ov.querySelector('#_ngMarque').value || '').trim();
+    const gm = (ov.querySelector('#_ngGamme').value || '').trim();
+    const fmt = ov.querySelector('#_ngFormat').value;
+    if (!mq || !gm) { pvAlert('Marque et nom de gamme sont obligatoires.'); return; }
+    const doublon = baseLiq.find(function(x) {
+      return x && x.format === fmt && String(x.marque).trim().toLowerCase() === mq.toLowerCase()
+        && String(x.gamme).trim().toLowerCase() === gm.toLowerCase();
+    });
+    if (doublon) { pvAlert('Cette gamme existe déjà dans ce format.'); return; }
+    const g = creerGammeLiqVide({ marque: mq, gamme: gm, format: fmt,
+      profilChoisi: ov.querySelector('#_ngProfil').value, roleChoisi: ov.querySelector('#_ngRole').value,
+      pa: ov.querySelector('#_ngPa').value, pv: ov.querySelector('#_ngPv').value });
+    saveData();
+    if (typeof renderLiqAll === 'function') try { renderLiqAll(); } catch (e) {}
+    pvAlert('Gamme « ' + g.marque + ' — ' + g.gamme + ' » créée, vide.\nCoche des parfums dans leur gamme actuelle puis « 🔀 Déplacer » pour les y transférer.');
+  });
+}
+
 function addLiqParfum(gId) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const g = baseLiq.find(l => l.id === gId);
@@ -18845,7 +19369,12 @@ function renderLiqGammeDetail(g) {
           : ` background:linear-gradient(90deg, ${_tintCols[0]}, ${_tintCols[1]}); border-radius:3px;`;
         const _pfDnd = isAdmin() ? `ondragover="pvLiqPfDragOver(event,'${g.id}')" ondragleave="pvLiqPfDragLeave(event)" ondrop="pvLiqPfDrop(event,'${g.id}',${pi})"` : '';
         html += `<div ${_pfDnd} style="display:flex; gap:4px; align-items:center; padding:2px 0; ${dimStyle}${_pTint}">`;
-        if (isAdmin()) html += `<span draggable="true" ondragstart="pvLiqPfDragStart(event,'${g.id}',${pi})" ondragend="pvLiqPfDragEnd()" style="cursor:grab; color:#475569; font-size:10px; flex-shrink:0; padding:0 1px;" title="Glisser pour réordonner le parfum dans sa gamme — l'ordre vaut aussi pour le mur FT et les blocs du plan d'étagères">⠿</span>`;
+        if (isAdmin()) {
+          // 🔀 coche de sélection pour un déplacement vers une autre gamme
+          const _pfCoche = (_pfSelGamme === g.id && p.id && _pfSel.has(p.id));
+          if (p.id) html += `<input type="checkbox" ${_pfCoche ? 'checked' : ''} onclick="event.stopPropagation(); pvPfSelToggle('${g.id}','${p.id}')" style="margin:0 1px 0 0; cursor:pointer; accent-color:#8b5cf6; transform:scale(0.85); flex-shrink:0;" title="Cocher pour déplacer ce parfum vers une autre gamme">`;
+          html += `<span draggable="true" ondragstart="pvLiqPfDragStart(event,'${g.id}',${pi})" ondragend="pvLiqPfDragEnd()" style="cursor:grab; color:#475569; font-size:10px; flex-shrink:0; padding:0 1px;" title="Glisser pour réordonner le parfum dans sa gamme — l'ordre vaut aussi pour le mur FT et les blocs du plan d'étagères">⠿</span>`;
+        }
         html += `<span style="width:2px; height:18px; background:${pSc}; border-radius:1px; flex-shrink:0;"></span>`;
         html += `<input value="${(p.n||'').replace(/"/g,'&quot;')}" onblur="updateLiqParfumField('${g.id}',${pi},'n',this.value)" style="flex:1; min-width:100px; padding:2px 4px; font-size:11px; background:#0f172a; border:1px solid #33415580; color:#cbd5e1; border-radius:2px;">`;
         html += _prBadge;
@@ -18881,6 +19410,15 @@ function renderLiqGammeDetail(g) {
       if (_hiddenCount > 0) {
         html += `<div style="font-size:9px; color:#64748b; font-style:italic; padding:2px 0;">+ ${_hiddenCount} parfum${_hiddenCount > 1 ? 's' : ''} masqué${_hiddenCount > 1 ? 's' : ''} par le filtre</div>`;
       }
+    }
+    // 🔀 Barre de déplacement — visible dès qu'un parfum de CETTE gamme est coché
+    if (isAdmin() && _pfSelGamme === g.id && _pfSel.size > 0) {
+      html += `<div style="margin-top:5px; display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:4px 8px; background:#8b5cf612; border:1px solid #8b5cf645; border-radius:4px;">
+        <span style="font-size:10.5px; font-weight:700; color:#c4b5fd;">${_pfSel.size} parfum${_pfSel.size > 1 ? 's' : ''} coché${_pfSel.size > 1 ? 's' : ''}</span>
+        <button onclick="event.stopPropagation(); pvOuvrirDeplacerParfums('${g.id}')" style="padding:2px 10px; font-size:10px; font-weight:700; background:#8b5cf6; color:#0f172a; border:none; border-radius:3px; cursor:pointer;" title="Transférer ces parfums vers une autre gamme du même format — ils gardent leur historique, leurs lignes et leurs OP">🔀 Déplacer vers…</button>
+        <button onclick="event.stopPropagation(); pvPfSelTout('${g.id}')" style="padding:2px 8px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556960; border-radius:3px; cursor:pointer;">Tout cocher</button>
+        <button onclick="event.stopPropagation(); pvPfSelVider()" style="padding:2px 8px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556960; border-radius:3px; cursor:pointer;">Décocher</button>
+      </div>`;
     }
     html += `<button onclick="addLiqParfum('${g.id}')" style="margin-top:4px; padding:2px 10px; font-size:10px; background:#22c55e20; color:#22c55e; border:1px solid #22c55e40; border-radius:2px; cursor:pointer;">+ parfum</button>`;
 
@@ -20774,7 +21312,7 @@ function renderLiqAll() {
             LIQ_ROLES.forEach(role => {
               const rc = LIQ_ROLE_COLORS[role];
               const items = fmtGammes.filter(g => g.profilChoisi === prof && g.roleChoisi === role);
-              const roleIcon = role === 'PRIX_D_APPEL' ? '💰' : role === 'MEILLEURE_MARGE' ? '📈' : '⭐';
+              const roleIcon = LIQ_ROLE_ICONS[role] || '•';
 
               // Séparateur fin pour le rôle
               html += `<div style="padding:3px 6px 2px; display:flex; align-items:center; gap:6px; border-top:1px solid ${rc}15; margin-top:2px;">`;
@@ -20842,7 +21380,7 @@ function renderLiqAll() {
 
       ftMainRoles.forEach((role, ri) => {
         const rc = LIQ_ROLE_COLORS[role];
-        const roleIcon = role === 'PRIX_D_APPEL' ? '💰' : role === 'COMPLEMENT' ? '➕' : '📈';
+        const roleIcon = LIQ_ROLE_ICONS[role] || '•';
         const roleShort = LIQ_ROLE_SHORT[role];
         html += `<div style="${gridTpl}">`;
         html += `<div style="display:flex; align-items:center; gap:3px; padding:2px 4px;${ri === 0 ? ' border-top:2px solid ' + pc + '40;' : ''}">
@@ -20898,10 +21436,11 @@ function renderLiqAll() {
         html += `</div>`;
       });
 
-      // Notoriété / Coup compacts
-      ['NOTORIETE','COUP'].forEach(role => {
+      // One-shot compact (depuis la fusion du 2026-08-27, « Complément / Notoriété »
+      // vit dans la grille principale — il n'y a plus que le One-shot à part)
+      ['COUP'].forEach(role => {
         const rc = LIQ_ROLE_COLORS[role];
-        const icon = role === 'NOTORIETE' ? '⭐' : '⚡';
+        const icon = LIQ_ROLE_ICONS[role] || '⚡';
         const hasAny = ftFormats.some(fmt => actifs.some(g => g.format === fmt && g.profilChoisi === prof && g.roleChoisi === role));
         if (!hasAny) return;
         html += `<div style="${gridTpl}">`;
@@ -31144,7 +31683,12 @@ function postPrixRougeDecision(opId, decision) {
       if (liq && _opParfumIds.length > 0) {
         _targets = _opParfumIds.map(function(pfId) {
           var pf = (liq.parfums || []).find(function(p) { return p.id === pfId; });
-          if (!pf) { var idxMatch = String(pfId).match(/_p(\d+)$/); if (idxMatch) pf = (liq.parfums || [])[parseInt(idxMatch[1], 10)]; }
+          // Repli historique par INDEX déduit de l'id ('..._p003' → 3e parfum). Neutralisé
+          // depuis le déménagement de parfums (2026-08-27) : sur une gamme d'accueil cet
+          // index désigne un AUTRE parfum — bug silencieux. On ne s'en sert plus que si
+          // l'id appartient bien à cette gamme (préfixe), sinon on cherche globalement.
+          if (!pf && String(pfId).indexOf(liq.id + '_p') === 0) { var idxMatch = String(pfId).match(/_p(\d+)$/); if (idxMatch) pf = (liq.parfums || [])[parseInt(idxMatch[1], 10)]; }
+          if (!pf) { var _gp = trouverParfumGlobal(pfId); if (_gp) pf = _gp.p; }
           // Si parfum sorti, ne pas recréer
           if (pf && (pf.s === 'SORTI' || pf.s === 'SORTIE')) return null;
           return { parfumId: pfId, parfumNom: pf ? pf.n : '' };
