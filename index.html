@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 23:07</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 23:31</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -11888,6 +11888,7 @@ function saveUiState() {
     liqFilterStatut: liqStatutFilter,
     liqComboFormats: liqComboFormats,
     liqComboMode: liqComboMode,
+    liqComboNiveau: liqComboNiveau,
     liqComboRecap: liqComboRecap,
     pfvSortCol: _pfvSortCol, pfvSortDir: _pfvSortDir, pfvIncoh: _pfvSeulIncoherences, pfvTrous: _pfvSeulTrous,
     pfvGrpFermes: [..._pfvGrpFermes],
@@ -11934,6 +11935,7 @@ function restoreUiState() {
     if (s.liqComboFormats) { liqComboFormats = Array.isArray(s.liqComboFormats) ? s.liqComboFormats.filter(f => LIQ_FORMATS.includes(f)) : []; }
     if (typeof s.liqComboMin2 !== 'undefined') { liqComboMin2 = !!s.liqComboMin2; }
     if (s.liqComboMode === 'exact' || s.liqComboMode === 'min') { liqComboMode = s.liqComboMode; }
+    if (s.liqComboNiveau === 'gamme' || s.liqComboNiveau === 'parfum') { liqComboNiveau = s.liqComboNiveau; }
     if (typeof s.liqComboRecap !== 'undefined') { liqComboRecap = !!s.liqComboRecap; }
     if (s.pfvSortCol) _pfvSortCol = s.pfvSortCol;
     if (s.pfvSortDir) _pfvSortDir = s.pfvSortDir;
@@ -17322,6 +17324,15 @@ function pvDdFermerTous() { if (!_pvDdOpen.size) return; _pvDdOpen.clear(); pvDd
 let liqComboFormats = [];
 let liqComboMode = 'exact';   // 'exact' = exactement cette combinaison · 'min' = au moins ces formats
 let liqComboMin2 = false;
+// 🧴 NIVEAU du filtre (demande Fabien 2026-08-27) : la même question se pose à deux échelles.
+//   • 'gamme'  → la déclinaison de la GAMME (une gamme existe en 10 mL + 50 mL).
+//   • 'parfum' → la déclinaison DU PARFUM dans sa gamme (« Classic Blend » n'existe qu'en
+//     10 mL, alors que sa gamme, elle, existe aussi en 50 mL).
+// Fabien : « exactement ces formats » se pose au PARFUM (quels parfums n'existent qu'en
+// 10 mL), « au moins ces formats » se pose à la GAMME. Basculer le mode règle donc le
+// niveau sur ce défaut-là — mais le niveau reste un bouton à part, pour pouvoir croiser
+// les quatre combinaisons et pour que le récap puisse l'épingler.
+let liqComboNiveau = 'gamme';   // 'gamme' | 'parfum'
 
 function _liqCleGamme(g) {
   return (((g && g.marque) || '') + '').trim().toLowerCase() + '||' + (((g && g.gamme) || '') + '').trim().toLowerCase();
@@ -17341,22 +17352,71 @@ function _liqFormatsIndex() {
   });
   return m;
 }
+// Clé d'un parfum au sens commercial : sa gamme + son nom normalisé — la MÊME clé que la
+// vue par parfum (_pfvNomCle), pour que les deux écrans regroupent identiquement.
+function _liqCleParfum(g, p) {
+  return _liqCleGamme(g) + '||' + _pfvNomCle((p && p.n) || '');
+}
+// Map clé de parfum → Set des formats où CE parfum existe (parfums vivants seulement).
+function _liqFormatsIndexParfum() {
+  const m = new Map();
+  (typeof baseLiq !== 'undefined' ? baseLiq : []).forEach(function(g) {
+    if (!g || !g.marque || !g.gamme) return;
+    if (g.marque === 'autre' && (g.gamme + '').includes('PA +/-')) return;
+    if (g.statutVie === 'SORTI') return;
+    if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.has && _deletedIds.has(g.id)) return;
+    if (!g.format) return;
+    (g.parfums || []).forEach(function(p) {
+      if (!p || !p.id || p.s === 'SORTI') return;
+      const k = _liqCleParfum(g, p);
+      if (!m.has(k)) m.set(k, new Set());
+      m.get(k).add(g.format);
+    });
+  });
+  return m;
+}
 function _liqComboActif() { return (liqComboFormats && liqComboFormats.length > 0) || !!liqComboMin2; }
-function _liqComboOk(g, idx) {
-  if (!_liqComboActif()) return true;                       // filtre éteint = coût zéro
-  const s = (idx || _liqFormatsIndex()).get(_liqCleGamme(g)) || new Set();
+// Le verdict, sur un ensemble de formats — commun à la gamme et au parfum.
+function _liqComboVerdict(s) {
   if (liqComboFormats && liqComboFormats.length) {
-    // EXACT : la gamme n'existe QUE dans ces formats (ni plus, ni moins).
+    // EXACT : n'existe QUE dans ces formats (ni plus, ni moins).
     if (liqComboMode === 'exact' && s.size !== liqComboFormats.length) return false;
     return liqComboFormats.every(function(f) { return s.has(f); });
   }
   if (liqComboMin2 && s.size < 2) return false;
   return true;
 }
+// LE prédicat au niveau parfum (règle 8).
+function _liqComboOkParfum(g, p, idxP) {
+  if (!_liqComboActif()) return true;
+  if (!p || !p.id) return true;
+  const s = (idxP || _liqFormatsIndexParfum()).get(_liqCleParfum(g, p)) || new Set();
+  return _liqComboVerdict(s);
+}
+// Un parfum doit-il être MASQUÉ dans les listes ? Seulement au niveau parfum : au niveau
+// gamme, le filtre choisit des gammes et laisse leurs parfums tranquilles.
+function _liqComboParfumMasque(g, p, idxP) {
+  if (liqComboNiveau !== 'parfum' || !_liqComboActif()) return false;
+  return !_liqComboOkParfum(g, p, idxP);
+}
+// LE prédicat au niveau ligne-de-gamme (règle 8) — niveau-conscient, pour que TOUS les
+// appelants existants (Base Liquides, planches d'étiquettes, tiroir du plan d'étagères)
+// héritent du niveau parfum sans être modifiés : au niveau parfum, on garde la ligne dès
+// qu'elle porte au moins un parfum retenu.
+function _liqComboOk(g, idx, idxP) {
+  if (!_liqComboActif()) return true;                       // filtre éteint = coût zéro
+  if (liqComboNiveau === 'parfum') {
+    const ip = idxP || _liqFormatsIndexParfum();
+    return (g && g.parfums || []).some(function(p) { return p && p.id && p.s !== 'SORTI' && _liqComboOkParfum(g, p, ip); });
+  }
+  const s = (idx || _liqFormatsIndex()).get(_liqCleGamme(g)) || new Set();
+  return _liqComboVerdict(s);
+}
 function _liqComboFiltre(list) {
   if (!_liqComboActif()) return list || [];
-  const idx = _liqFormatsIndex();                            // construit UNE fois par passe
-  return (list || []).filter(function(g) { return _liqComboOk(g, idx); });
+  const idx = _liqFormatsIndex();                            // construits UNE fois par passe
+  const idxP = liqComboNiveau === 'parfum' ? _liqFormatsIndexParfum() : null;
+  return (list || []).filter(function(g) { return _liqComboOk(g, idx, idxP); });
 }
 // Nombre de formats existants pour la gamme de cette ligne (badge 🧩 de la vue par gamme).
 function _liqNbFormatsDeGamme(g, idx) {
@@ -17370,7 +17430,16 @@ function toggleLiqComboFormat(fmt) {
   liqComboFormats.sort(function(a, b) { return LIQ_FORMATS.indexOf(a) - LIQ_FORMATS.indexOf(b); });
   renderLiqComboSelect(); renderLiqAll(); saveUiState();
 }
-function setLiqComboMode(m) { liqComboMode = (m === 'min' ? 'min' : 'exact'); renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
+// Basculer le mode pose le niveau que Fabien a demandé pour ce mode : « exactement » se
+// pose au parfum, « au moins » se pose à la gamme. Le bouton Niveau permet d'en sortir.
+function setLiqComboMode(m) {
+  liqComboMode = (m === 'min' ? 'min' : 'exact');
+  liqComboNiveau = (liqComboMode === 'exact') ? 'parfum' : 'gamme';
+  renderLiqComboSelect(); renderLiqAll(); saveUiState();
+}
+function setLiqComboNiveau(n) { liqComboNiveau = (n === 'parfum' ? 'parfum' : 'gamme'); renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
+// Le mot juste, partout : « gammes » ou « parfums ».
+function _liqComboMot(pluriel) { return liqComboNiveau === 'parfum' ? (pluriel ? 'parfums' : 'parfum') : (pluriel ? 'gammes' : 'gamme'); }
 function toggleLiqComboMin2() { liqComboMin2 = !liqComboMin2; if (liqComboMin2) liqComboFormats = []; renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
 function clearLiqCombo() { liqComboFormats = []; liqComboMin2 = false; renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
 
@@ -17381,6 +17450,7 @@ function renderLiqComboSelect() {
   const tags = !actif
     ? '<span style="color:#94a3b8; font-size:10px;">🧩 Formats combinés</span>'
     : (liqComboMin2 ? '<span style="font-size:9px; padding:1px 5px; background:#a855f720; color:#d8b4fe; border:1px solid #a855f750; border-radius:3px; font-weight:600; white-space:nowrap;">≥ 2 formats<span onclick="event.stopPropagation(); toggleLiqComboMin2()" style="cursor:pointer; margin-left:3px; font-size:8px; opacity:0.6;">×</span></span>' : '')
+      + (actif ? `<span style="font-size:9px; font-weight:800; color:${liqComboNiveau === 'parfum' ? '#86efac' : '#d8b4fe'}; white-space:nowrap;" title="${liqComboNiveau === 'parfum' ? 'Filtre appliqué aux parfums' : 'Filtre appliqué aux gammes'}">${liqComboNiveau === 'parfum' ? '🧴' : '🧩'}</span>` : '')
       + (liqComboFormats.length ? `<span style="font-size:9px; font-weight:800; color:${liqComboMode === 'exact' ? '#d8b4fe' : '#94a3b8'}; white-space:nowrap;">${liqComboMode === 'exact' ? 'que' : '≥'}</span>` : '')
       + liqComboFormats.map(function(f) {
           const c = LIQ_FORMAT_COLORS[f] || '#a855f7';
@@ -17401,7 +17471,7 @@ function renderLiqComboSelect() {
       <span style="margin-left:auto; font-size:8px; color:#64748b;">▼</span>
     </div>
     <div id="${ddId}" onclick="event.stopPropagation();" style="display:${pvDdEstOuvert(ddId) ? 'block' : 'none'}; position:absolute; top:100%; left:0; min-width:230px; background:#0f172a; border:1px solid #475569; border-radius:4px; box-shadow:0 4px 12px rgba(0,0,0,0.4); z-index:100; padding:4px 0; margin-top:2px;">
-      <div style="padding:5px 8px; font-size:9px; color:#94a3b8; border-bottom:1px solid #1e293b; line-height:1.35;">Ne garder que les gammes dont la déclinaison de formats est <b style="color:#d8b4fe;">${liqComboMode === 'exact' ? 'exactement celle cochée' : 'au moins celle cochée'}</b>.</div>
+      <div style="padding:5px 8px; font-size:9px; color:#94a3b8; border-bottom:1px solid #1e293b; line-height:1.35;">Ne garder que les <b style="color:${liqComboNiveau === 'parfum' ? '#86efac' : '#d8b4fe'};">${liqComboNiveau === 'parfum' ? 'parfums' : 'gammes'}</b> dont la déclinaison de formats est <b style="color:#d8b4fe;">${liqComboMode === 'exact' ? 'exactement celle cochée' : 'au moins celle cochée'}</b>.${liqComboNiveau === 'parfum' ? '<br><span style="color:#64748b;">Un parfum peut n\'exister qu\'en 10 mL alors que sa gamme existe aussi en 50 mL.</span>' : ''}</div>
       <label style="display:flex; align-items:center; gap:6px; padding:5px 8px; cursor:pointer; font-size:11px; color:#d8b4fe; border-bottom:1px solid #1e293b;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'">
         <input type="checkbox" ${liqComboMin2 ? 'checked' : ''} onchange="toggleLiqComboMin2()" style="margin:0; accent-color:#a855f7; cursor:pointer;">
         🧩 N'importe quel multi-format (≥ 2)
@@ -17411,9 +17481,14 @@ function renderLiqComboSelect() {
         <input type="checkbox" ${liqComboRecap ? 'checked' : ''} onchange="toggleLiqComboRecap()" style="margin:0; accent-color:#22c55e; cursor:pointer;">
         📊 Récap des déclinaisons (bas de page)
       </label>
-      <div style="display:flex; gap:4px; padding:5px 8px; border-top:1px solid #1e293b;">
-        <button onclick="event.stopPropagation(); setLiqComboMode('exact')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'exact' ? 800 : 600}; background:${liqComboMode === 'exact' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'exact' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'exact' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Cocher 10 mL seul ne sort que les gammes qui n'existent QU'en 10 mL.">Exactement ces formats</button>
-        <button onclick="event.stopPropagation(); setLiqComboMode('min')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'min' ? 800 : 600}; background:${liqComboMode === 'min' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'min' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'min' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Les gammes qui ont au moins ces formats — elles peuvent en avoir d'autres.">Au moins ces formats</button>
+      <div style="display:flex; gap:4px; align-items:center; padding:5px 8px; border-top:1px solid #1e293b;">
+        <span style="font-size:9px; color:#64748b; white-space:nowrap;">Appliquer à</span>
+        <button onclick="event.stopPropagation(); setLiqComboNiveau('gamme')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboNiveau === 'gamme' ? 800 : 600}; background:${liqComboNiveau === 'gamme' ? '#a855f728' : 'transparent'}; color:${liqComboNiveau === 'gamme' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboNiveau === 'gamme' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="La déclinaison de la GAMME : elle existe en 10 mL, en 50 mL…">🧩 Gammes</button>
+        <button onclick="event.stopPropagation(); setLiqComboNiveau('parfum')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboNiveau === 'parfum' ? 800 : 600}; background:${liqComboNiveau === 'parfum' ? '#22c55e28' : 'transparent'}; color:${liqComboNiveau === 'parfum' ? '#86efac' : '#94a3b8'}; border:1px solid ${liqComboNiveau === 'parfum' ? '#22c55e' : '#47556960'}; border-radius:3px; cursor:pointer;" title="La déclinaison DU PARFUM dans sa gamme : « Classic Blend » n'existe qu'en 10 mL alors que sa gamme existe aussi en 50 mL. Les parfums qui ne correspondent pas sont masqués dans les listes.">🧴 Parfums</button>
+      </div>
+      <div style="display:flex; gap:4px; padding:0 8px 5px;">
+        <button onclick="event.stopPropagation(); setLiqComboMode('exact')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'exact' ? 800 : 600}; background:${liqComboMode === 'exact' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'exact' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'exact' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Exactement cette déclinaison, et aucun autre format. Bascule sur 🧴 Parfums : cocher 10 mL seul sort les parfums qui n'existent QU'en 10 mL.">Exactement ces formats</button>
+        <button onclick="event.stopPropagation(); setLiqComboMode('min')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'min' ? 800 : 600}; background:${liqComboMode === 'min' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'min' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'min' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Au moins ces formats — il peut y en avoir d'autres. Bascule sur 🧩 Gammes.">Au moins ces formats</button>
       </div>
       ${actif ? `<div onclick="clearLiqCombo()" style="padding:4px 8px; font-size:10px; color:#94a3b8; cursor:pointer; border-top:1px solid #1e293b; text-align:center;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background=''">Effacer tout</div>` : ''}
     </div>`;
@@ -17428,24 +17503,35 @@ let liqComboRecap = false;      // forcer l'affichage même sans filtre 🧩 act
 let _liqRecapPerim = [];        // dernier périmètre rendu (sert à l'export tableur)
 
 function _liqDeclinaisons(lignes) {
-  const parGamme = new Map();
+  // Le récap répond à la question posée : au niveau gamme il compte des GAMMES, au niveau
+  // parfum il compte des PARFUMS. Même tableau, même clic, deux échelles de lecture.
+  const parSujet = new Map();
   (lignes || []).forEach(function(g) {
     if (!g || !g.marque || !g.gamme) return;
     if (g.statutVie === 'SORTI') return;
     if (g.marque === 'autre' && (g.gamme + '').includes('PA +/-')) return;
+    if (liqComboNiveau === 'parfum') {
+      (g.parfums || []).forEach(function(p) {
+        if (!p || !p.id || p.s === 'SORTI') return;
+        const kp = _liqCleParfum(g, p);
+        if (!parSujet.has(kp)) parSujet.set(kp, { marque: g.marque, gamme: g.gamme, nom: String(p.n || '').trim() || '(sans nom)', formats: new Set() });
+        if (g.format) parSujet.get(kp).formats.add(g.format);
+      });
+      return;
+    }
     const k = _liqCleGamme(g);
-    if (!parGamme.has(k)) parGamme.set(k, { marque: g.marque, gamme: g.gamme, formats: new Set() });
-    if (g.format) parGamme.get(k).formats.add(g.format);
+    if (!parSujet.has(k)) parSujet.set(k, { marque: g.marque, gamme: g.gamme, formats: new Set() });
+    if (g.format) parSujet.get(k).formats.add(g.format);
   });
   const combos = new Map();
-  parGamme.forEach(function(v) {
+  parSujet.forEach(function(v) {
     const arr = LIQ_FORMATS.filter(function(f) { return v.formats.has(f); });   // ordre canonique
     const cle = arr.join('|');
-    if (!combos.has(cle)) combos.set(cle, { cle: cle, formats: arr, gammes: [] });
-    combos.get(cle).gammes.push(v);
+    if (!combos.has(cle)) combos.set(cle, { cle: cle, formats: arr, items: [] });
+    combos.get(cle).items.push(v);
   });
   const out = [...combos.values()];
-  out.forEach(function(c) { c.gammes.sort(function(a, b) { return (a.marque + ' ' + a.gamme).localeCompare(b.marque + ' ' + b.gamme); }); });
+  out.forEach(function(c) { c.items.sort(function(a, b) { return (a.marque + ' ' + a.gamme + ' ' + (a.nom || '')).localeCompare(b.marque + ' ' + b.gamme + ' ' + (b.nom || '')); }); });
   // Ordre de lecture : par la suite des formats (10 mL seul, puis 10 mL + SdN, puis…).
   out.sort(function(a, b) {
     const ia = a.formats.map(function(f) { return LIQ_FORMATS.indexOf(f); });
@@ -17474,20 +17560,23 @@ function _liqRecapDeclinaisonsHtml(lignes) {
   if (!(_liqComboActif() || liqComboRecap)) return '';
   const e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
   const combos = _liqDeclinaisons(lignes);
-  const nbGammes = combos.reduce(function(n, c) { return n + c.gammes.length; }, 0);
-  const maxi = combos.reduce(function(n, c) { return Math.max(n, c.gammes.length); }, 1);
+  const nbSujets = combos.reduce(function(n, c) { return n + c.items.length; }, 0);
+  const maxi = combos.reduce(function(n, c) { return Math.max(n, c.items.length); }, 1);
+  const _mot = _liqComboMot(nbSujets > 1);
+  const _auNiveauParfum = liqComboNiveau === 'parfum';
   const cleActive = (liqComboMode === 'exact' && liqComboFormats.length) ? liqComboFormats.join('|') : '';
   let h = `<div style="margin-top:14px; background:#a855f708; border:1px solid #a855f740; border-radius:6px; overflow:hidden;">
     <div style="padding:6px 12px; background:#a855f718; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
       <span style="font-size:12px; font-weight:800; color:#d8b4fe; letter-spacing:0.3px;">📊 Récap des déclinaisons</span>
-      <span style="font-size:10px; color:#94a3b8;">${nbGammes} gamme${nbGammes > 1 ? 's' : ''} réparties en ${combos.length} combinaison${combos.length > 1 ? 's' : ''} de formats — clique une ligne pour ne garder qu'elle</span>
+      <span style="font-size:9px; font-weight:700; padding:1px 7px; border-radius:3px; background:${_auNiveauParfum ? '#22c55e18' : '#a855f720'}; color:${_auNiveauParfum ? '#86efac' : '#d8b4fe'}; border:1px solid ${_auNiveauParfum ? '#22c55e50' : '#a855f750'};">${_auNiveauParfum ? '🧴 par parfum' : '🧩 par gamme'}</span>
+      <span style="font-size:10px; color:#94a3b8;">${nbSujets} ${_mot} réparti${_auNiveauParfum ? 's' : 'es'} en ${combos.length} combinaison${combos.length > 1 ? 's' : ''} de formats — clique une ligne pour ne garder qu'elle</span>
       <span style="margin-left:auto; display:flex; gap:6px;">
         <button onclick="pvLiqExportDeclinaisons()" style="padding:3px 9px; font-size:10px; font-weight:700; background:#22c55e15; color:#86efac; border:1px solid #22c55e50; border-radius:3px; cursor:pointer;" title="Export CSV (ouvrable dans Excel / Numbers) : une ligne par gamme, une colonne par format">⬇️ Tableur</button>
         ${liqComboRecap ? `<button onclick="toggleLiqComboRecap()" style="padding:3px 9px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556960; border-radius:3px; cursor:pointer;">Masquer</button>` : ''}
       </span>
     </div>`;
   if (!combos.length) {
-    return h + `<div style="padding:14px; text-align:center; color:#64748b; font-size:11px; font-style:italic;">Aucune gamme dans le périmètre filtré.</div></div>`;
+    return h + `<div style="padding:14px; text-align:center; color:#64748b; font-size:11px; font-style:italic;">Aucun${_auNiveauParfum ? ' parfum' : 'e gamme'} dans le périmètre filtré.</div></div>`;
   }
   combos.forEach(function(c) {
     const actif = c.cle === cleActive;
@@ -17495,14 +17584,14 @@ function _liqRecapDeclinaisonsHtml(lignes) {
       const col = LIQ_FORMAT_COLORS[f] || '#94a3b8';
       return `<span style="font-size:9px; font-weight:700; color:${col}; background:${col}18; border:1px solid ${col}55; border-radius:3px; padding:0 5px; white-space:nowrap;">${LIQ_FORMAT_LABELS[f] || f}</span>`;
     }).join('<span style="color:#475569; font-size:9px;">+</span>');
-    const noms = c.gammes.map(function(g) {
-      return `<span style="font-size:10px; color:#cbd5e1; background:#1e293b; border:1px solid #33415560; border-radius:3px; padding:1px 6px; white-space:nowrap;">${e(g.marque)} <b style="color:#e2e8f0;">${e(g.gamme)}</b></span>`;
+    const noms = c.items.map(function(g) {
+      return `<span style="font-size:10px; color:#cbd5e1; background:#1e293b; border:1px solid #33415560; border-radius:3px; padding:1px 6px; white-space:nowrap;">${e(g.marque)} <b style="color:#e2e8f0;">${e(g.gamme)}</b>${g.nom ? ` <span style="color:#94a3b8;">·</span> ${e(g.nom)}` : ''}</span>`;
     }).join(' ');
-    h += `<div onclick="pvLiqComboAppliquer('${c.cle}')" title="${actif ? 'Cliquer pour enlever le filtre' : 'Ne garder que ces gammes'}" style="display:flex; gap:10px; align-items:flex-start; padding:6px 12px; border-top:1px solid #33415540; cursor:pointer; background:${actif ? '#a855f715' : 'transparent'};" onmouseover="this.style.background='#a855f710'" onmouseout="this.style.background='${actif ? '#a855f715' : 'transparent'}'">
+    h += `<div onclick="pvLiqComboAppliquer('${c.cle}')" title="${actif ? 'Cliquer pour enlever le filtre' : (_auNiveauParfum ? 'Ne garder que ces parfums' : 'Ne garder que ces gammes')}" style="display:flex; gap:10px; align-items:flex-start; padding:6px 12px; border-top:1px solid #33415540; cursor:pointer; background:${actif ? '#a855f715' : 'transparent'};" onmouseover="this.style.background='#a855f710'" onmouseout="this.style.background='${actif ? '#a855f715' : 'transparent'}'">
       <div style="flex:0 0 190px; display:flex; align-items:center; gap:3px; flex-wrap:wrap;">${actif ? '<span style="color:#d8b4fe; font-size:10px;">●</span>' : ''}${chips}</div>
       <div style="flex:0 0 78px; display:flex; align-items:center; gap:5px;">
-        <span style="font-size:11px; font-weight:800; color:${actif ? '#d8b4fe' : '#e2e8f0'};">${c.gammes.length}</span>
-        <span style="flex:1; height:5px; background:#33415560; border-radius:3px; overflow:hidden;"><span style="display:block; height:100%; width:${Math.round(c.gammes.length / maxi * 100)}%; background:#a855f7aa;"></span></span>
+        <span style="font-size:11px; font-weight:800; color:${actif ? '#d8b4fe' : '#e2e8f0'};">${c.items.length}</span>
+        <span style="flex:1; height:5px; background:#33415560; border-radius:3px; overflow:hidden;"><span style="display:block; height:100%; width:${Math.round(c.items.length / maxi * 100)}%; background:#a855f7aa;"></span></span>
       </div>
       <div style="flex:1; display:flex; gap:3px; flex-wrap:wrap; align-items:center;">${noms}</div>
     </div>`;
@@ -17514,11 +17603,14 @@ function pvLiqExportDeclinaisons() {
   const combos = _liqDeclinaisons(_liqRecapPerim);
   const sep = ';';
   const q = function(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
-  const rows = [['Marque', 'Gamme', 'Combinaison', 'Nb formats'].concat(LIQ_FORMATS.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; })).map(q).join(sep)];
+  const parParfum = liqComboNiveau === 'parfum';
+  const entete = parParfum ? ['Marque', 'Gamme', 'Parfum', 'Combinaison', 'Nb formats'] : ['Marque', 'Gamme', 'Combinaison', 'Nb formats'];
+  const rows = [entete.concat(LIQ_FORMATS.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; })).map(q).join(sep)];
   combos.forEach(function(c) {
     const lbl = c.formats.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; }).join(' + ');
-    c.gammes.forEach(function(g) {
-      rows.push([g.marque, g.gamme, lbl, c.formats.length]
+    c.items.forEach(function(g) {
+      const base = parParfum ? [g.marque, g.gamme, g.nom || '', lbl, c.formats.length] : [g.marque, g.gamme, lbl, c.formats.length];
+      rows.push(base
         .concat(LIQ_FORMATS.map(function(f) { return c.formats.includes(f) ? 'X' : ''; }))
         .map(q).join(sep));
     });
@@ -17526,7 +17618,7 @@ function pvLiqExportDeclinaisons() {
   const blob = new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = 'PilotVape_Declinaisons_liquides_' + ymd(new Date()) + '.csv';
+  link.download = 'PilotVape_Declinaisons_' + (parParfum ? 'parfums' : 'gammes') + '_liquides_' + ymd(new Date()) + '.csv';
   link.click();
   try { logAction('Export déclinaisons liquides', combos.length + ' combinaisons'); } catch (err) {}
 }
@@ -19515,9 +19607,13 @@ function renderLiqGammeCard(g, showDetail) {
   // Si un filtre statut est actif, on ne compte/affiche que les parfums qui matchent ce filtre
   // (généralisation du comportement déjà en place dans le détail dépliable).
   const _activeStatutFilter = (typeof liqStatutFilter !== 'undefined' && liqStatutFilter && liqStatutFilter.length > 0) ? liqStatutFilter : null;
+  // 🧴 Le compteur doit dire ce qui sera VU : au niveau parfum, le filtre 🧩 masque des
+  //    parfums dans le détail — les compter ici mentirait sur ce que la ligne contient.
+  const _cardIdxPf = (typeof liqComboNiveau !== 'undefined' && liqComboNiveau === 'parfum' && _liqComboActif()) ? _liqFormatsIndexParfum() : null;
   const parfumsActifs = (g.parfums || []).filter(p => {
     if (!p.s || p.s === 'SORTI') return false;
     if (_activeStatutFilter && !_activeStatutFilter.includes(p.s)) return false;
+    if (_cardIdxPf && !_liqComboOkParfum(g, p, _cardIdxPf)) return false;
     return true;
   });
   const isExpanded = isLiqExpanded('liq-detail-' + g.id);
@@ -19707,10 +19803,15 @@ function renderLiqGammeDetail(g) {
       var _detailFStatut = liqStatutFilter;
       var _filterParfums = _detailFStatut.length > 0;
       var _hiddenCount = 0;
+      // 🧴 Filtre 🧩 au niveau PARFUM : on ne montre que les parfums dont la déclinaison
+      //    correspond. Au niveau gamme, rien n'est masqué ici (le filtre a choisi la gamme).
+      var _comboIdxPfD = (liqComboNiveau === 'parfum' && _liqComboActif()) ? _liqFormatsIndexParfum() : null;
+      var _hiddenCombo = 0;
       // Vue boutique active : situation de chaque parfum CHEZ ELLE (tiroir / sortie / pas reçu)
       const _detailShop = document.getElementById('liqShopFilter')?.value || '';
       g.parfums.forEach((p, pi) => {
         if (_filterParfums && !_detailFStatut.includes(p.s)) { _hiddenCount++; return; }
+        if (_comboIdxPfD && !_liqComboOkParfum(g, p, _comboIdxPfD)) { _hiddenCombo++; return; }
         const pSc = liqGammeStatusColor(p.s || 'OK');
         const pCtColor = LIQ_GOUT_COLORS[p.ct] || '#94a3b8';
         let dimStyle = p.s === 'SORTI' ? 'opacity:0.4;' : (p.exclu ? 'opacity:0.55;' : '');
@@ -19789,6 +19890,9 @@ function renderLiqGammeDetail(g) {
         html += `<button onclick="removeLiqParfum('${g.id}',${pi})" style="padding:1px 5px; font-size:10px; background:none; border:1px solid #ef444440; color:#ef4444; border-radius:2px; cursor:pointer; line-height:1.2;" title="Retirer">×</button>`;
         html += `</div>`;
       });
+      if (_hiddenCombo > 0) {
+        html += `<div style="font-size:9px; color:#d8b4fe; font-style:italic; padding:2px 0;">🧩 + ${_hiddenCombo} parfum${_hiddenCombo > 1 ? 's' : ''} de cette gamme ${_hiddenCombo > 1 ? 'n\'ont' : 'n\'a'} pas cette déclinaison de formats</div>`;
+      }
       if (_hiddenCount > 0) {
         html += `<div style="font-size:9px; color:#64748b; font-style:italic; padding:2px 0;">+ ${_hiddenCount} parfum${_hiddenCount > 1 ? 's' : ''} masqué${_hiddenCount > 1 ? 's' : ''} par le filtre</div>`;
       }
@@ -21236,6 +21340,7 @@ function renderVueEtageres() {
   const fProfil = document.getElementById('liqFilterProfil') ? document.getElementById('liqFilterProfil').value : '';
   const fRole = document.getElementById('liqFilterRole') ? document.getElementById('liqFilterRole').value : '';
   const _comboIdxEtg = _liqComboActif() ? _liqFormatsIndex() : null;   // 🧩 formats combinés
+  const _comboIdxPfEtg = (_liqComboActif() && liqComboNiveau === 'parfum') ? _liqFormatsIndexParfum() : null;
   const ctx = { search: search, nbHl: 0, sh: sh }; // sh : la vie commerciale du plan est celle de LA boutique affichée (🧭 2026-08-08)
   let totUsed = 0, totCap = 0;
   etgs.forEach(function(e) {
@@ -21350,7 +21455,7 @@ function renderVueEtageres() {
     ordreFormats.forEach(function(fmt) {
       if (fFormat && fFormat !== fmt) return;
       let gs = (parFmt[fmt] || []).filter(function(g) {
-        if (!_liqComboOk(g, _comboIdxEtg)) return false;   // 🧩 formats combinés (règle 6-bis)
+        if (!_liqComboOk(g, _comboIdxEtg, _comboIdxPfEtg)) return false;   // 🧩 formats combinés (règle 6-bis)
         if (fProfil && g.profilChoisi !== fProfil) return false;
         if (fRole && g.roleChoisi !== fRole) return false; // filtre Rôle du bandeau (retour Fabien 01:27)
         if (_etgProfilTiroir && g.profilChoisi !== _etgProfilTiroir) return false;
@@ -21623,6 +21728,18 @@ function renderLiqAll() {
   const _idxFmt = _liqFormatsIndex();
   const _nbGammesBase = _idxFmt.size;                        // gammes commerciales distinctes
   const _nbGammesVues = new Set(actifs.map(_liqCleGamme)).size;
+  // 🧴 Combien de parfums distincts survivent au filtre 🧩 quand il travaille au parfum
+  const _nbParfumsVus = (function() {
+    if (liqComboNiveau !== 'parfum' || !_liqComboActif()) return 0;
+    const ip = _liqFormatsIndexParfum(); const vus = new Set();
+    actifs.forEach(function(g) {
+      (g.parfums || []).forEach(function(p) {
+        if (!p || !p.id || p.s === 'SORTI') return;
+        if (_liqComboOkParfum(g, p, ip)) vus.add(_liqCleParfum(g, p));
+      });
+    });
+    return vus.size;
+  })();
   const totalParfums = baseLiq.reduce((s,g) => s + (g.parfums||[]).filter(p=>p.s!=='SORTI').length, 0);
   const statsEl = document.getElementById('liqStats');
   if (statsEl) {
@@ -21646,12 +21763,12 @@ function renderLiqAll() {
     } catch (e) {}
     // 🧩 Bandeau formats combinés : dire EXACTEMENT ce qui est gardé et ce qui reste visible.
     const _comboBanner = _liqComboActif() ? `<div style="display:flex; gap:8px; align-items:center; font-size:10px; color:#d8b4fe; padding:4px 8px; background:#a855f712; border:1px solid #a855f740; border-radius:4px; margin-bottom:4px;">
-      🧩 <b>Formats combinés</b> — ${liqComboFormats.length
+      ${liqComboNiveau === 'parfum' ? '🧴' : '🧩'} <b>Formats combinés</b> <span style="font-size:9px; font-weight:700; padding:0 5px; border-radius:3px; background:${liqComboNiveau === 'parfum' ? '#22c55e18' : '#a855f720'}; color:${liqComboNiveau === 'parfum' ? '#86efac' : '#d8b4fe'};">${liqComboNiveau === 'parfum' ? 'par parfum' : 'par gamme'}</span> — ${liqComboFormats.length
         ? (liqComboMode === 'exact'
-            ? `seules les gammes déclinées <b>uniquement</b> en ${liqComboFormats.map(f => LIQ_FORMAT_LABELS[f] || f).join(' + ')} — ${liqComboFormats.length > 1 ? 'les ' + liqComboFormats.length + ' formats à la fois' : 'ce format seul'}, et dans aucun autre.`
-            : `seules les gammes qui existent <b>au moins</b> en ${liqComboFormats.map(f => LIQ_FORMAT_LABELS[f] || f).join(' + ')} — leurs autres formats restent affichés.`)
-        : 'seules les gammes déclinées dans <b>au moins 2 formats</b>.'}
-      <span style="margin-left:auto; white-space:nowrap;"><b>${_nbGammesVues}</b> gamme${_nbGammesVues > 1 ? 's' : ''} sur ${_nbGammesBase}</span>
+            ? `seul${liqComboNiveau === 'parfum' ? 's les parfums déclinés' : 'es les gammes déclinées'} <b>uniquement</b> en ${liqComboFormats.map(f => LIQ_FORMAT_LABELS[f] || f).join(' + ')} — ${liqComboFormats.length > 1 ? 'les ' + liqComboFormats.length + ' formats à la fois' : 'ce format seul'}, et dans aucun autre.`
+            : `seul${liqComboNiveau === 'parfum' ? 's les parfums qui existent' : 'es les gammes qui existent'} <b>au moins</b> en ${liqComboFormats.map(f => LIQ_FORMAT_LABELS[f] || f).join(' + ')} — ${liqComboNiveau === 'parfum' ? 'ils peuvent en avoir d\'autres' : 'leurs autres formats restent affichés'}.`)
+        : `seul${liqComboNiveau === 'parfum' ? 's les parfums déclinés' : 'es les gammes déclinées'} dans <b>au moins 2 formats</b>.`}${liqComboNiveau === 'parfum' ? ` <span style="color:#94a3b8;">Les autres parfums de ces gammes sont masqués.</span>` : ''}
+      <span style="margin-left:auto; white-space:nowrap;">${liqComboNiveau === 'parfum' ? `<b>${_nbParfumsVus}</b> parfum${_nbParfumsVus > 1 ? 's' : ''} dans <b>${_nbGammesVues}</b> gamme${_nbGammesVues > 1 ? 's' : ''}` : `<b>${_nbGammesVues}</b> gamme${_nbGammesVues > 1 ? 's' : ''} sur ${_nbGammesBase}`}</span>
       <span onclick="document.getElementById('liqDisplay').lastElementChild?.scrollIntoView({behavior:'smooth', block:'center'})" style="cursor:pointer; color:#d8b4fe; text-decoration:underline; white-space:nowrap;" title="Aller au tableau récapitulatif en bas de page">📊 récap</span>
       <span onclick="clearLiqCombo()" style="cursor:pointer; color:#94a3b8; text-decoration:underline; white-space:nowrap;">effacer</span>
     </div>` : '';
@@ -22085,6 +22202,15 @@ function renderLiqAll() {
   else if (viewMode === 'parfums') {
     const _e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
     let lignes = _pfvLignes(actifs);
+    // 🧩 Filtre formats combinés au niveau PARFUM : c'est ICI qu'il se voit le mieux — une
+    //    ligne = un parfum, ses formats sont écrits dessus. La clé d'une ligne EST celle de
+    //    l'index parfum (_liqCleParfum), les deux se calquent volontairement.
+    if (liqComboNiveau === 'parfum' && _liqComboActif()) {
+      const _idxPfV = _liqFormatsIndexParfum();
+      lignes = lignes.filter(function(L) {
+        const x = L.entrees[0]; return x && _liqComboOkParfum(x.g, x.p, _idxPfV);
+      });
+    }
     _pfvDernieresLignes = lignes;   // le renommage « tous formats » travaille dessus
     const nbTotal = lignes.length;
     const nbIncoh = lignes.filter(function(x) { return x.alertes.length; }).length;
