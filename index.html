@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 20:09</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 20:58</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -17596,6 +17596,54 @@ function _pfvLignes(gammes) {
   return out;
 }
 
+// Lignes dépliées de la vue par parfum (une ligne = un parfum, son détail = ses formats).
+const _pfvOpen = new Set();
+function pvPfvToggleLigne(cle) {
+  if (_pfvOpen.has(cle)) _pfvOpen.delete(cle); else _pfvOpen.add(cle);
+  renderLiqAll();
+}
+// ✏️ Renommer le parfum DANS TOUS SES FORMATS d'un coup — c'est la correction que la vue
+// est faite pour permettre (une graphie « Vaurien - » / « Vaurien » se répare ici, pas en
+// ouvrant trois fiches gamme). Écriture directe (pas updateLiqParfumField, qui sauvegarde et
+// re-rend à CHAQUE appel) : on horodate parfum + gamme pour le merge, puis UN seul save.
+async function pvPfvRenommerPartout(cle) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const L = (_pfvDernieresLignes || []).find(function(x) { return x.cle === cle; });
+  if (!L) return;
+  // Graphie proposée : la plus fréquente, sinon la première
+  const compte = {};
+  L.entrees.forEach(function(x) { const n = String(x.p.n || '').trim(); if (n) compte[n] = (compte[n] || 0) + 1; });
+  const propose = Object.keys(compte).sort(function(a, b) { return compte[b] - compte[a] || a.localeCompare(b); })[0] || L.nom;
+  const _esc = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  const v = await new Promise(function(resolve) {
+    const html = `<div style="color:#e2e8f0; font-weight:700; font-size:13px; margin-bottom:2px;">✏️ Renommer dans tous les formats</div>
+      <div style="font-size:10.5px; color:#94a3b8; margin-bottom:10px; line-height:1.45;">${_esc(L.marque)} — <b style="color:#e2e8f0;">${_esc(L.gamme)}</b><br>
+        Le même nom sera écrit dans ${L.entrees.length} format${L.entrees.length > 1 ? 's' : ''} :
+        ${L.entrees.map(function(x) { return '<span style="display:inline-block; font-size:9.5px; background:#1e293b; border:1px solid #33415560; border-radius:3px; padding:1px 6px; margin:2px 3px 0 0;">' + (LIQ_FORMAT_LABELS[x.g.format] || x.g.format) + ' : « ' + _esc(x.p.n || '') + ' »</span>'; }).join('')}</div>
+      <label style="color:#94a3b8; font-size:11px; display:block;">Nom retenu *
+        <input type="text" id="_pfvNom" value="${_esc(propose)}" style="display:block; margin-top:4px; width:100%; padding:6px 10px; background:#1e293b; color:#e2e8f0; border:1px solid #475569; border-radius:5px; font-size:13px;"></label>`;
+    const ov = _pvModal(html, [{ label: 'Renommer', color: '#f59e0b' }, { label: 'Annuler' }], function(idx) {
+      resolve(idx === 0 ? String((ov.querySelector('#_pfvNom') || {}).value || '').trim() : null);
+    });
+    setTimeout(function() { const el = ov.querySelector('#_pfvNom'); if (el) { el.focus(); el.select(); } }, 30);
+  });
+  if (v === null) return;
+  if (!v) { pvAlert('Le nom ne peut pas être vide.'); return; }
+  const now = new Date().toISOString();
+  let n = 0;
+  L.entrees.forEach(function(x) {
+    if (String(x.p.n || '').trim() === v) return;
+    x.p.n = v; x.p._ts = now; x.g._ts = now; n++;
+  });
+  if (!n) { pvAlert('Ce nom est déjà le même partout.'); return; }
+  logAction('Parfum renommé (tous formats)', '✏️ ' + L.marque + ' — ' + L.gamme + ' : « ' + L.nom + ' » → « ' + v +' » (' + n + ' format' + (n > 1 ? 's' : '') + ')');
+  saveData();
+  renderLiqAll();
+  try { renderDashboard(); } catch (e) {}
+  pvAlert('Renommé dans ' + n + ' format' + (n > 1 ? 's' : '') + '.');
+}
+let _pfvDernieresLignes = [];
+
 let _pfvSortCol = 'parfum';
 let _pfvSortDir = 1;
 let _pfvSeulIncoherences = false;
@@ -22017,6 +22065,7 @@ function renderLiqAll() {
   else if (viewMode === 'parfums') {
     const _e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
     let lignes = _pfvLignes(actifs);
+    _pfvDernieresLignes = lignes;   // le renommage « tous formats » travaille dessus
     const nbTotal = lignes.length;
     const nbIncoh = lignes.filter(function(x) { return x.alertes.length; }).length;
     const nbTrous = lignes.filter(function(x) { return x.manquants.length; }).length;
@@ -22110,12 +22159,61 @@ function renderLiqAll() {
         : (L.manquants.length
             ? `<span style="font-size:9px; color:#64748b; cursor:help; white-space:nowrap;" title="Déclinaison incomplète (pas une faute) — absent de ${_e(L.manquants.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; }).join(', '))}">◌</span>`
             : `<span style="font-size:9px; color:#334155;">✓</span>`);
-      html += `<div style="${grid} padding:3px 10px 3px 26px; border-bottom:1px solid #1e293b;">
-        <span style="font-size:11.5px; color:#e2e8f0; font-weight:600;">${_e(L.nom)}${L.graphies.size > 1 ? `<span style="font-size:9px; color:#fbbf24; font-weight:700; margin-left:5px;" title="${_e(Array.from(L.graphies).join(' / '))}">± ${L.graphies.size} graphies</span>` : ''}${gout ? `<span style="font-size:9px; color:${LIQ_GOUT_COLORS[gout] || '#64748b'}; margin-left:6px;">${_e(gout)}</span>` : ''}</span>
+      const _ouvert = _pfvOpen.has(L.cle);
+      html += `<div onclick="pvPfvToggleLigne('${L.cle.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" style="${grid} padding:3px 10px 3px 12px; border-bottom:1px solid #1e293b; cursor:pointer; ${_ouvert ? 'background:#1e293b80;' : ''}" onmouseover="this.style.background='#1e293b60'" onmouseout="this.style.background='${_ouvert ? '#1e293b80' : 'transparent'}'">
+        <span style="font-size:11.5px; color:#e2e8f0; font-weight:600;"><span style="color:#64748b; font-size:9px; width:10px; display:inline-block;">${_ouvert ? '▾' : '▸'}</span>${_e(L.nom)}${L.graphies.size > 1 ? `<span style="font-size:9px; color:#fbbf24; font-weight:700; margin-left:5px;" title="${_e(Array.from(L.graphies).join(' / '))}">± ${L.graphies.size} graphies</span>` : ''}${gout ? `<span style="font-size:9px; color:${LIQ_GOUT_COLORS[gout] || '#64748b'}; margin-left:6px;">${_e(gout)}</span>` : ''}</span>
         <span style="display:flex; gap:3px; flex-wrap:wrap; align-items:center;">${chips}${manq ? ' ' + manq : ''}</span>
         <span style="display:flex; gap:2px; flex-wrap:wrap;">${statuts}</span>
         <span>${alerteHtml}</span>
       </div>`;
+      // ── Détail déplié : une sous-ligne PAR FORMAT, avec le nom EXACT tel qu'il y est
+      //    écrit (c'est là qu'on voit « Vaurien - » face à « Vaurien »), le statut et le
+      //    goût modifiables sur place, les prix, et le bouton « renommer partout ».
+      if (_ouvert) {
+        const admin = isAdmin();
+        html += `<div style="padding:6px 10px 8px 34px; border-bottom:1px solid #1e293b; background:#0f172a;">`;
+        if (L.alertes.length) {
+          html += `<div style="margin-bottom:6px; padding:4px 8px; background:#f59e0b12; border:1px solid #f59e0b40; border-radius:4px;">`
+            + L.alertes.map(function(a) { return `<div style="font-size:10px; color:#fbbf24;">⚠ ${_e(a.txt)}</div>`; }).join('')
+            + `</div>`;
+        }
+        html += `<div style="display:grid; grid-template-columns: 90px 1fr 130px 150px 80px 80px 70px; gap:8px; align-items:center; font-size:9px; color:#64748b; text-transform:uppercase; letter-spacing:0.4px; padding:0 0 3px;">
+          <span>Format</span><span>Nom dans ce format</span><span>Goût</span><span>Statut</span><span>PA</span><span>PV</span><span>Marge/mL</span>
+        </div>`;
+        L.entrees.forEach(function(x) {
+          const g = x.g, p = x.p;
+          const pi = (g.parfums || []).indexOf(p);
+          const c = LIQ_FORMAT_COLORS[g.format] || '#94a3b8';
+          const nomDiverge = L.graphies.size > 1;
+          const pa = (typeof p.pa === 'number' && p.pa) ? p.pa : g.pa;
+          const pv = (typeof p.pv === 'number' && p.pv) ? p.pv : g.pv;
+          const ml = LIQ_FORMAT_ML[g.format] || 50;
+          const mMl = ml > 0 ? ((pv - pa * 1.2) / ml) : 0;
+          html += `<div onclick="event.stopPropagation();" style="display:grid; grid-template-columns: 90px 1fr 130px 150px 80px 80px 70px; gap:8px; align-items:center; padding:2px 0; border-top:1px solid #1e293b;">
+            <span onclick="pvPfvAllerA('${g.id}','${_e(L.nom).replace(/'/g, "\\'")}')" style="cursor:pointer; font-size:9px; font-weight:700; color:${c}; background:${c}18; border:1px solid ${c}55; border-radius:3px; padding:1px 5px; text-align:center;" title="Ouvrir cette gamme dans la vue liste">${LIQ_FORMAT_LABELS[g.format] || g.format}</span>
+            <span style="font-size:11px; color:${nomDiverge ? '#fbbf24' : '#cbd5e1'}; font-weight:${nomDiverge ? 700 : 400};">${_e(p.n || '(sans nom)')}</span>
+            ${admin ? `<select onchange="updateLiqParfumField('${g.id}',${pi},'ct',this.value)" style="padding:1px 3px; font-size:9px; background:#0f172a; border:1px solid #33415580; color:${LIQ_GOUT_COLORS[p.ct] || '#94a3b8'}; border-radius:3px;">
+              <option value="" ${!p.ct ? 'selected' : ''}>—</option>${LIQ_GOUT_CATS.map(function(cc) { return `<option value="${cc}" ${p.ct === cc ? 'selected' : ''}>${cc}</option>`; }).join('')}</select>`
+              : `<span style="font-size:9.5px; color:${LIQ_GOUT_COLORS[p.ct] || '#64748b'};">${_e(p.ct || '—')}</span>`}
+            ${admin ? `<select onchange="updateLiqParfumField('${g.id}',${pi},'s',this.value)" style="padding:1px 3px; font-size:9px; background:#0f172a; border:1px solid #33415580; color:${liqGammeStatusColor(p.s)}; border-radius:3px;">
+              ${LIQ_PARFUM_STATUTS.map(function(st) { const dis = (st === 'REPRISE' && p.s !== 'REPRISE'); return `<option value="${st}" ${p.s === st ? 'selected' : ''}${dis ? ' disabled' : ''}>${LIQ_GAMME_STATUT_LABELS[st] || st}</option>`; }).join('')}</select>`
+              : `<span style="font-size:9.5px; color:${liqGammeStatusColor(p.s)};">${LIQ_GAMME_STATUT_LABELS[p.s] || p.s}</span>`}
+            <span style="font-size:10px; color:#94a3b8;">€${pa.toFixed(2)}</span>
+            <span style="font-size:10px; color:#cbd5e1;">€${pv.toFixed(2)}</span>
+            <span style="font-size:10px; color:#4ade80;">€${mMl.toFixed(3)}</span>
+          </div>`;
+        });
+        if (L.manquants.length) {
+          html += `<div style="margin-top:5px; font-size:9.5px; color:#64748b;">◌ Pas décliné en ${L.manquants.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; }).join(', ')} — la gamme, elle, y existe.</div>`;
+        }
+        if (admin) {
+          html += `<div onclick="event.stopPropagation();" style="margin-top:7px; display:flex; gap:6px; flex-wrap:wrap;">
+            <button onclick="pvPfvRenommerPartout('${L.cle.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" style="padding:3px 11px; font-size:10px; font-weight:700; background:${L.graphies.size > 1 ? '#f59e0b' : '#33415580'}; color:${L.graphies.size > 1 ? '#0f172a' : '#cbd5e1'}; border:1px solid ${L.graphies.size > 1 ? '#f59e0b' : '#47556980'}; border-radius:4px; cursor:pointer;" title="Écrire le même nom dans les ${L.entrees.length} format(s) de ce parfum">✏️ Renommer dans tous les formats</button>
+            <button onclick="pvPfvAllerA('${L.entrees[0].g.id}','${_e(L.nom).replace(/'/g, "\\'")}')" style="padding:3px 11px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556980; border-radius:4px; cursor:pointer;">↗ Ouvrir la fiche gamme</button>
+          </div>`;
+        }
+        html += `</div>`;
+      }
       });
     });
   }
