@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 18:21</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 19:00</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -15201,6 +15201,182 @@ function exportReprisesExcel() {
   logAction('Export reprises', sorted.length + ' actions × ' + SHOPS.length + ' boutiques');
 }
 
+// ═══════════ 📦 CLÔTURE D'UNE REPRISE — LA CANONIQUE (règle 8) ═══════════
+// Extraite de `cloturerCampagneReprise` le 2026-08-27 : la même bascule vers SORTI est
+// désormais utilisée par la clôture de campagne ET par le diagnostic « pourquoi encore en
+// reprise ? ». Deux copies de cette logique = deux façons de laisser un liquide coincé.
+// Retourne le nombre de produits/parfums réellement basculés (0 si l'action ne touche rien).
+function _cloturerActionReprise(a, jour, nowTs, gammesTouchees) {
+  if (!a || a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE') return 0;
+  let n = 0;
+  if (a.produitType === 'liq') {
+    const g = baseLiq.find(function(x) { return x.id === a.produitId; });
+    if (g) {
+      if (a.produitParfumId) {
+        const p = (g.parfums || []).find(function(x) { return x.id === a.produitParfumId; });
+        if (p) { p.s = 'SORTI'; p._ts = nowTs; }
+        if (gammesTouchees) gammesTouchees.add(g.id);
+      } else {
+        g.statutVie = 'SORTI';
+        // Reprise gamme entière : tous les parfums suivent, sinon la priorité de statut
+        // ferait remonter la gamme à un statut « actif » et elle repartirait en reprise.
+        (g.parfums || []).forEach(function(p) { if (p.s !== 'SORTI') { p.s = 'SORTI'; p._ts = nowTs; } });
+      }
+      g._ts = nowTs;
+      n++;
+    }
+  } else if (a.produitType === 'pd') {
+    const p = basePD.find(function(x) { return x.id === a.produitId; });
+    if (p) { p.statutVie = 'SORTI'; p._ts = nowTs; n++; }
+  } else {
+    const k = baseKits.find(function(x) { return x.id === a.produitId; });
+    if (k) { k.statutVie = 'SORTI'; k._ts = nowTs; n++; }
+  }
+  // Clôturée, pas annulée : on garde la trace pour l'export historique.
+  a.dateCloture = jour;
+  a._ts = nowTs;
+  SHOPS.forEach(function(sh) {
+    const st = a.etats && a.etats[sh];
+    if (st) { st.done = true; if (!st.dateFait) st.dateFait = jour; }
+  });
+  return n;
+}
+
+// ═══════════ 🔎 « POURQUOI ENCORE EN REPRISE ? » (Fabien, 2026-08-27) ═══════════
+// « J'ai clôturé la reprise il y a quelques semaines, pourquoi les liquides sont toujours
+//   en reprise et pas en sortis ? » — il y a QUATRE façons de rester coincé, et elles ne se
+// voient pas depuis la base. Ce diagnostic les nomme, une ligne par produit bloqué.
+const REPRISE_SANS_CAMPAGNE = '(sans campagne)';
+const REPRISE_MOTIFS = {
+  SANS_CAMPAGNE: { lbl: 'Reprise sans nom de campagne', col: '#f59e0b',
+    expl: 'L\'écran « Clôturer une campagne » ne listait que les reprises PORTANT un nom de campagne : celle-ci n\'y apparaissait pas, donc elle ne pouvait pas être clôturée. (Corrigé : elles sont désormais regroupées sous « (sans campagne) ».)' },
+  CAMPAGNE_ACTIVE: { lbl: 'Campagne encore ouverte', col: '#0ea5e9',
+    expl: 'Rien d\'anormal : la campagne de reprise n\'a pas encore été clôturée. Clôture-la et le produit passera en Sorti.' },
+  ACTION_CLOTUREE: { lbl: 'Clôturée, mais le statut est resté', col: '#ef4444',
+    expl: 'L\'action de reprise est clôturée alors que le produit est resté « en reprise ». L\'auto-réparation du chargement RÉVEILLE alors l\'action à chaque ouverture — le produit ne peut plus se débloquer tout seul.' },
+  SANS_ACTION: { lbl: 'Statut orphelin', col: '#94a3b8',
+    expl: 'Le produit est marqué « en reprise » mais plus aucune action de reprise ne le concerne.' }
+};
+// Retrouve l'action de reprise d'un couple (produit, parfum) — active en priorité.
+function _repriseActionDe(pid, parfumId) {
+  const m = actions.filter(function(x) {
+    return x && x.type === 'SORTIR' && x.motifSortie === 'REPRISE' && x.produitId === pid
+      && (parfumId ? x.produitParfumId === parfumId : !x.produitParfumId);
+  });
+  return m.find(function(x) { return !x.annulee && !x.dateCloture; }) || m[0] || null;
+}
+// La liste des liquides encore en reprise, avec LA raison de chacun.
+// Granularité : une reprise lancée sur la GAMME ENTIÈRE met tous ses parfums en reprise mais
+// n'a QU'UNE action — on la compte alors pour une seule ligne « (gamme entière) », sinon on
+// afficherait chaque parfum comme « statut orphelin », ce qui serait faux ET illisible.
+function repriseDiagnostic() {
+  const out = [];
+  const ajoute = function(g, p, a) {
+    let motif;
+    if (!a) motif = 'SANS_ACTION';
+    else if (a.annulee || a.dateCloture) motif = 'ACTION_CLOTUREE';
+    else if (!a.campagneReprise) motif = 'SANS_CAMPAGNE';
+    else motif = 'CAMPAGNE_ACTIVE';
+    let pct = null;
+    if (a) {
+      const defs = getActionSteps(a);
+      let tot = 0, fait = 0;
+      SHOPS.forEach(function(sh) {
+        const st = a.etats && a.etats[sh]; if (!st) return;
+        tot += defs.length;
+        fait += defs.filter(function(d) { return st.steps && st.steps[d.key] === true; }).length;
+      });
+      pct = tot ? Math.round(100 * fait / tot) : 0;
+    }
+    out.push({ g: g, p: p, a: a, motif: motif, campagne: (a && a.campagneReprise) || '', pct: pct });
+  };
+  baseLiq.forEach(function(g) {
+    if (!g || _deletedIds.has(g.id)) return;
+    const aG = _repriseActionDe(g.id, null);
+    const enRep = (g.parfums || []).filter(function(p) { return p && p.s === 'REPRISE'; });
+    // On ne liste QUE ce qui est encore réellement en reprise : une action de reprise
+    // clôturée sur une gamme déjà sortie n'est pas un blocage, c'est de l'historique.
+    if (g.statutVie !== 'REPRISE' && !enRep.length) return;
+    // Reprise GAMME ENTIÈRE (ou gamme bloquée sans parfum en reprise) → une seule ligne,
+    // et elle couvre tous les parfums en dessous.
+    if (aG || (g.statutVie === 'REPRISE' && !enRep.length)) { ajoute(g, null, aG); if (aG) return; }
+    enRep.forEach(function(p) { ajoute(g, p, _repriseActionDe(g.id, p.id)); });
+  });
+  return out;
+}
+// Terminer maintenant : bascule en Sorti + clôture l'action, par la canonique commune.
+function pvTerminerReprises(cles) {
+  if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
+  const diag = repriseDiagnostic();
+  const set = new Set(cles || []);
+  const jour = ymd(new Date()), nowTs = new Date().toISOString();
+  const gammes = new Set();
+  let nb = 0, nbSansAction = 0;
+  diag.forEach(function(d) {
+    const cle = d.g.id + '|' + (d.p ? d.p.id : '');
+    if (set.size && !set.has(cle)) return;
+    if (d.a) {
+      // Une action clôturée doit être « re-clôturée » proprement : sans ça l'auto-réparation
+      // du prochain chargement la réveillerait encore (elle ne regarde que le STATUT).
+      nb += _cloturerActionReprise(d.a, jour, nowTs, gammes);
+    } else {
+      // Statut orphelin : pas d'action à clôturer, on bascule le statut à la main.
+      if (d.p) { d.p.s = 'SORTI'; d.p._ts = nowTs; gammes.add(d.g.id); }
+      else { d.g.statutVie = 'SORTI'; (d.g.parfums || []).forEach(function(p) { if (p.s !== 'SORTI') { p.s = 'SORTI'; p._ts = nowTs; } }); }
+      d.g._ts = nowTs;
+      nb++; nbSansAction++;
+    }
+  });
+  gammes.forEach(function(gid) { const g = baseLiq.find(function(x) { return x.id === gid; }); if (g) _recomputeGammeStatutFromParfums(g); });
+  logAction('Reprises terminées manuellement', '📦 ' + nb + ' produit(s)/parfum(s) → SORTI' + (nbSansAction ? ' (dont ' + nbSansAction + ' sans action)' : ''));
+  saveData();
+  try { syncAutoActions(); } catch (e) {}
+  try { renderDashboard(); } catch (e) {}
+  try { renderLiqAll(); } catch (e) {}
+  pvAlert(nb + ' produit(s)/parfum(s) passé(s) en Sorti.');
+}
+
+function pvOuvrirDiagnosticReprise() {
+  const diag = repriseDiagnostic();
+  const e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  if (!diag.length) {
+    pvAlert('Aucun liquide n\'est en reprise — tout est à jour.');
+    return;
+  }
+  const parMotif = {};
+  diag.forEach(function(d) { (parMotif[d.motif] = parMotif[d.motif] || []).push(d); });
+  const blocs = Object.keys(REPRISE_MOTIFS).filter(function(m) { return parMotif[m]; }).map(function(m) {
+    const def = REPRISE_MOTIFS[m], lst = parMotif[m];
+    const lignes = lst.map(function(d) {
+      return `<div style="display:flex; gap:8px; align-items:center; padding:3px 8px; font-size:10.5px; color:#e2e8f0; border-top:1px solid #33415540;">
+        <span style="flex:1;">${e(d.g.marque)} — <b>${e(d.g.gamme)}</b> <span style="color:#64748b;">${LIQ_FORMAT_LABELS[d.g.format] || d.g.format}</span>${d.p ? ' · ' + e(d.p.n || '(sans nom)') : ' <span style="color:#94a3b8;">(gamme entière)</span>'}</span>
+        ${d.campagne ? `<span style="font-size:9px; padding:1px 6px; background:#0ea5e920; color:#7dd3fc; border:1px solid #0ea5e950; border-radius:3px; white-space:nowrap;">${e(d.campagne)}</span>` : ''}
+        ${d.pct === null ? '' : `<span style="font-size:9.5px; color:#94a3b8; white-space:nowrap;">${d.pct}% des étapes</span>`}
+      </div>`;
+    }).join('');
+    return `<div style="margin-bottom:10px; border:1px solid ${def.col}45; border-radius:5px; overflow:hidden;">
+      <div style="padding:5px 9px; background:${def.col}18; display:flex; gap:8px; align-items:center;">
+        <span style="font-size:11.5px; font-weight:800; color:${def.col};">${def.lbl}</span>
+        <span style="font-size:10px; color:#94a3b8;">${lst.length} ligne${lst.length > 1 ? 's' : ''}</span>
+      </div>
+      <div style="padding:5px 9px 2px; font-size:10px; color:#94a3b8; line-height:1.45;">${def.expl}</div>
+      ${lignes}
+    </div>`;
+  }).join('');
+  const nbTerminables = diag.filter(function(d) { return d.motif !== 'CAMPAGNE_ACTIVE'; }).length;
+  const html = `<div style="color:#7dd3fc; font-weight:700; font-size:13px; margin-bottom:2px;">🔎 Pourquoi ces liquides sont-ils encore « en reprise » ?</div>
+    <div style="font-size:10.5px; color:#94a3b8; margin-bottom:10px;">${diag.length} ligne${diag.length > 1 ? 's' : ''} encore en reprise dans la base liquides.</div>
+    ${blocs}
+    ${nbTerminables ? `<div style="font-size:10px; color:#94a3b8; margin-top:4px; line-height:1.45;">« Terminer » applique exactement ce que fait la clôture de campagne : produit en <b style="color:#e2e8f0;">Sorti</b> et action de reprise clôturée (l'historique est conservé pour l'export). Les campagnes encore ouvertes ne sont pas touchées — clôture-les depuis l'écran des campagnes.</div>` : ''}`;
+  _pvModal(html,
+    (nbTerminables ? [{ label: 'Terminer les ' + nbTerminables + ' bloquées → Sorti', color: '#0ea5e9' }, { label: 'Fermer' }] : [{ label: 'Fermer' }]),
+    function(idx) {
+      if (!nbTerminables || idx !== 0) return;
+      pvTerminerReprises(diag.filter(function(d) { return d.motif !== 'CAMPAGNE_ACTIVE'; })
+        .map(function(d) { return d.g.id + '|' + (d.p ? d.p.id : ''); }));
+    }, { maxWidth: 720 });
+}
+
 // Ouvre la modale "Clôturer une campagne de reprise" : liste les campagnes actives avec leur avancement,
 // laisse Fabien choisir laquelle clôturer, puis bascule tous les produits/parfums concernés en SORTI
 // et marque les actions REPRISE comme clôturées.
@@ -15211,9 +15387,13 @@ async function cloturerCampagneReprise() {
   actions.forEach(a => {
     if (a.type !== 'SORTIR' || a.motifSortie !== 'REPRISE') return;
     if (a.annulee || a.dateCloture) return;
-    if (!a.campagneReprise) return;
-    if (!camps.has(a.campagneReprise)) camps.set(a.campagneReprise, { actions: [], totalSteps: 0, doneSteps: 0 });
-    const entry = camps.get(a.campagneReprise);
+    // 2026-08-27 : AVANT, une reprise sans nom de campagne était ignorée ici — donc elle
+    // n'apparaissait JAMAIS dans cet écran et ne pouvait pas être clôturée. C'est une des
+    // causes du « j'ai clôturé et c'est toujours en reprise ». Elles sont désormais
+    // regroupées sous une entrée dédiée.
+    const _camp = a.campagneReprise || REPRISE_SANS_CAMPAGNE;
+    if (!camps.has(_camp)) camps.set(_camp, { actions: [], totalSteps: 0, doneSteps: 0 });
+    const entry = camps.get(_camp);
     entry.actions.push(a);
     const defs = getActionSteps(a);
     SHOPS.forEach(sh => {
@@ -15259,37 +15439,11 @@ async function cloturerCampagneReprise() {
         const _seenProds = new Set();
         const _gammesToucheesParParfum = new Set(); // pour recalcul statut gamme après
         entry.actions.forEach(a => {
-          // Bascule le statut produit/parfum à SORTI
-          if (a.produitType === 'liq') {
-            const g = baseLiq.find(x => x.id === a.produitId);
-            if (g) {
-              if (a.produitParfumId) {
-                const p = (g.parfums || []).find(x => x.id === a.produitParfumId);
-                if (p) { p.s = 'SORTI'; p._ts = _nowTs; }
-                _gammesToucheesParParfum.add(g.id);
-              } else {
-                g.statutVie = 'SORTI';
-                // Reprise gamme entière clôturée : on bascule aussi tous les parfums en SORTI
-                // pour rester cohérent (sinon la priorité ferait remonter la gamme à un statut "actif").
-                (g.parfums || []).forEach(p => { if (p.s !== 'SORTI') { p.s = 'SORTI'; p._ts = _nowTs; } });
-              }
-              g._ts = _nowTs;
-              if (!_seenProds.has(g.id)) { _seenProds.add(g.id); nbProds++; }
-            }
-          } else if (a.produitType === 'pd') {
-            const p = basePD.find(x => x.id === a.produitId);
-            if (p) { p.statutVie = 'SORTI'; p._ts = _nowTs; if (!_seenProds.has(p.id)) { _seenProds.add(p.id); nbProds++; } }
-          } else {
-            const k = baseKits.find(x => x.id === a.produitId);
-            if (k) { k.statutVie = 'SORTI'; k._ts = _nowTs; if (!_seenProds.has(k.id)) { _seenProds.add(k.id); nbProds++; } }
+          // Bascule statut → SORTI + clôture de l'action, par LA canonique commune
+          // (règle 8) : le diagnostic « pourquoi encore en reprise ? » passe par la même.
+          if (_cloturerActionReprise(a, _now, _nowTs, _gammesToucheesParParfum) > 0) {
+            if (!_seenProds.has(a.produitId)) { _seenProds.add(a.produitId); nbProds++; }
           }
-          // Marque l'action comme clôturée (pas annulée — on garde la trace pour l'export historique)
-          a.dateCloture = _now;
-          a._ts = _nowTs;
-          SHOPS.forEach(sh => {
-            const st = a.etats && a.etats[sh];
-            if (st) { st.done = true; if (!st.dateFait) st.dateFait = _now; }
-          });
           nbActions++;
         });
         // Pour chaque gamme dont on a basculé un parfum en SORTI : recalcule le statut gamme
@@ -21249,6 +21403,19 @@ function renderLiqAll() {
     const _shopBanner = fShopLiq ? `<div style="display:flex; gap:8px; align-items:center; font-size:10px; color:#67e8f9; padding:4px 8px; background:#0e749015; border:1px solid #06b6d440; border-radius:4px; margin-bottom:4px;">
       🏪 <b>Vue ${SHOP_LABELS[fShopLiq] || fShopLiq}</b> — seules les gammes avec au moins un parfum présent (ou en tiroir) chez elle sont listées. Déplier une gamme : chaque parfum affiche sa situation ici → 🗄️ tiroir (commande client) · ✓ sorti · ⏳ pas reçu.
     </div>` : '';
+    // 📦 Bandeau « encore en reprise » : la question de Fabien (2026-08-27) se pose ICI,
+    // devant la base, pas dans l'écran des campagnes. Il n'apparaît que s'il y a matière.
+    let _repriseBanner = '';
+    try {
+      const _dg = repriseDiagnostic();
+      if (_dg.length) {
+        const _bloquees = _dg.filter(function(d) { return d.motif !== 'CAMPAGNE_ACTIVE'; }).length;
+        _repriseBanner = `<div style="display:flex; gap:8px; align-items:center; font-size:10px; color:#7dd3fc; padding:4px 8px; background:#0ea5e912; border:1px solid #0ea5e940; border-radius:4px; margin-bottom:4px;">
+          📦 <b>${_dg.length} ligne${_dg.length > 1 ? 's' : ''} encore « en reprise »</b>${_bloquees ? ` — dont <b style="color:#fca5a5;">${_bloquees} qui ne se débloquera${_bloquees > 1 ? 'ient' : ''} pas tout${_bloquees > 1 ? 'es' : ''} seule${_bloquees > 1 ? 's' : ''}</b>` : ' (campagnes encore ouvertes)'}
+          <span onclick="pvOuvrirDiagnosticReprise()" style="margin-left:auto; cursor:pointer; color:#7dd3fc; text-decoration:underline; white-space:nowrap; font-weight:700;">🔎 pourquoi ?</span>
+        </div>`;
+      }
+    } catch (e) {}
     // 🧩 Bandeau formats combinés : dire EXACTEMENT ce qui est gardé et ce qui reste visible.
     const _comboBanner = _liqComboActif() ? `<div style="display:flex; gap:8px; align-items:center; font-size:10px; color:#d8b4fe; padding:4px 8px; background:#a855f712; border:1px solid #a855f740; border-radius:4px; margin-bottom:4px;">
       🧩 <b>Formats combinés</b> — ${liqComboFormats.length
@@ -21260,7 +21427,7 @@ function renderLiqAll() {
       <span onclick="document.getElementById('liqDisplay').lastElementChild?.scrollIntoView({behavior:'smooth', block:'center'})" style="cursor:pointer; color:#d8b4fe; text-decoration:underline; white-space:nowrap;" title="Aller au tableau récapitulatif en bas de page">📊 récap</span>
       <span onclick="clearLiqCombo()" style="cursor:pointer; color:#94a3b8; text-decoration:underline; white-space:nowrap;">effacer</span>
     </div>` : '';
-    statsEl.innerHTML = _shopBanner + _comboBanner + `<div style="display:flex; gap:12px; font-size:10px; color:#94a3b8; padding:4px 8px; background:#1e293b; border-radius:4px;">
+    statsEl.innerHTML = _shopBanner + _repriseBanner + _comboBanner + `<div style="display:flex; gap:12px; font-size:10px; color:#94a3b8; padding:4px 8px; background:#1e293b; border-radius:4px;">
       <span title="Gammes commerciales distinctes (marque + gamme), tous formats confondus">${_nbGammesBase} gammes</span><span title="Une ligne = une gamme dans un format">${totalGammes} lignes gamme × format</span><span>${totalParfums} parfums actifs</span>
       <span style="margin-left:auto;">${_nbGammesVues} gamme${_nbGammesVues > 1 ? 's' : ''} · ${actifs.length} ligne${actifs.length > 1 ? 's' : ''} affichée${actifs.length > 1 ? 's' : ''} / ${filtered.length} filtrée${filtered.length > 1 ? 's' : ''}</span>
     </div>`;
