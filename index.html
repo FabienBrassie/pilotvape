@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 19:54</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 20:09</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -17558,7 +17558,7 @@ function _pfvLignes(gammes) {
       const nom = String(p.n || '').trim();
       const cle = _liqCleGamme(g) + '||' + _pfvNomCle(nom);
       if (!map.has(cle)) map.set(cle, {
-        cle: cle, marque: g.marque, gamme: g.gamme, nom: nom || '(sans nom)',
+        cle: cle, cleGamme: _liqCleGamme(g), marque: g.marque, gamme: g.gamme, nom: nom || '(sans nom)',
         graphies: new Set(), entrees: [], statuts: new Set(), gouts: new Set()
       });
       const e = map.get(cle);
@@ -22022,19 +22022,44 @@ function renderLiqAll() {
     const nbTrous = lignes.filter(function(x) { return x.manquants.length; }).length;
     if (_pfvSeulIncoherences) lignes = lignes.filter(function(x) { return x.alertes.length; });
     else if (_pfvSeulTrous) lignes = lignes.filter(function(x) { return x.manquants.length; });
+    // ── Regroupement MARQUE → GAMME (recadrage Fabien 2026-08-27 : « tout est mélangé,
+    //    il faut quand même un tri par marque et gamme, et ensuite les parfums »).
+    //    Le regroupement est PERMANENT : c'est la structure de lecture. Le tri, lui, joue
+    //    À L'INTÉRIEUR d'une gamme (parfum · nb de formats · cohérence) ; cliquer Marque ou
+    //    Gamme réordonne les GROUPES, pas les lignes.
     const _dir = _pfvSortDir;
-    const _cmp = {
-      marque: function(a, b) { return (a.marque + ' ' + a.gamme + ' ' + a.nom).localeCompare(b.marque + ' ' + b.gamme + ' ' + b.nom); },
-      gamme:  function(a, b) { return (a.gamme + ' ' + a.marque + ' ' + a.nom).localeCompare(b.gamme + ' ' + b.marque + ' ' + b.nom); },
-      parfum: function(a, b) { return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }) || (a.marque + a.gamme).localeCompare(b.marque + b.gamme); },
-      nbfmt:  function(a, b) { return (a.formats.length - b.formats.length) || a.nom.localeCompare(b.nom); },
+    const _cmpLigne = {
+      parfum: function(a, b) { return a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }); },
+      nbfmt:  function(a, b) { return (a.formats.length - b.formats.length) || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }); },
       alerte: function(a, b) { return (b.alertes.length - a.alertes.length)
         || ((b.manquants.length ? 1 : 0) - (a.manquants.length ? 1 : 0))
-        || a.nom.localeCompare(b.nom); }
+        || a.nom.localeCompare(b.nom, 'fr', { sensitivity: 'base' }); }
     };
-    lignes.sort(function(a, b) { return (_cmp[_pfvSortCol] || _cmp.parfum)(a, b) * _dir; });
+    const _triLigne = _cmpLigne[_pfvSortCol] || _cmpLigne.parfum;
+    const _dirLigne = (_pfvSortCol === 'marque' || _pfvSortCol === 'gamme') ? 1 : _dir;
+    const groupes = new Map();
+    lignes.forEach(function(L) {
+      if (!groupes.has(L.cleGamme)) groupes.set(L.cleGamme, { marque: L.marque, gamme: L.gamme, lignes: [] });
+      groupes.get(L.cleGamme).lignes.push(L);
+    });
+    const ordreGroupes = Array.from(groupes.values());
+    ordreGroupes.forEach(function(G) {
+      G.lignes.sort(function(a, b) { return _triLigne(a, b) * _dirLigne; });
+      G.nbAlertes = G.lignes.filter(function(x) { return x.alertes.length; }).length;
+      // Les formats où CETTE gamme existe (l'en-tête dit la déclinaison de la gamme)
+      const fmts = new Set();
+      G.lignes.forEach(function(L) { L.formats.forEach(function(f) { fmts.add(f); }); L.manquants.forEach(function(f) { fmts.add(f); }); });
+      G.formats = LIQ_FORMATS.filter(function(f) { return fmts.has(f); });
+    });
+    const _dirGroupe = (_pfvSortCol === 'marque' || _pfvSortCol === 'gamme') ? _dir : 1;
+    ordreGroupes.sort(function(a, b) {
+      const r = (_pfvSortCol === 'gamme')
+        ? ((a.gamme + ' ' + a.marque).localeCompare(b.gamme + ' ' + b.marque))
+        : ((a.marque + ' ' + a.gamme).localeCompare(b.marque + ' ' + b.gamme));
+      return r * _dirGroupe;
+    });
 
-    const grid = 'display:grid; grid-template-columns: 110px 150px 1fr 190px 120px 100px; gap:8px; align-items:center;';
+    const grid = 'display:grid; grid-template-columns: 1fr 210px 150px 70px; gap:10px; align-items:center;';
     const _fl = function(col, lbl) {
       const on = _pfvSortCol === col;
       return `<span onclick="pvPfvTri('${col}')" style="cursor:pointer; user-select:none; color:${on ? '#e2e8f0' : '#64748b'}; font-weight:${on ? 700 : 600};">${lbl}${on ? (_pfvSortDir > 0 ? ' ▲' : ' ▼') : ''}</span>`;
@@ -22046,14 +22071,27 @@ function renderLiqAll() {
       <span onclick="pvPfvToggleTrous()" style="cursor:pointer; font-size:10px; font-weight:700; padding:3px 10px; border-radius:4px; white-space:nowrap; background:${_pfvSeulTrous ? '#64748b' : '#64748b18'}; color:${_pfvSeulTrous ? '#0f172a' : '#94a3b8'}; border:1px solid #64748b60;" title="Le parfum n'existe pas dans un format où sa gamme existe. Ce n'est PAS une faute — juste une déclinaison incomplète, à regarder quand tu cherches quoi ajouter.">◌ ${nbTrous} déclinaison${nbTrous > 1 ? 's' : ''} incomplète${nbTrous > 1 ? 's' : ''}${_pfvSeulTrous ? ' — affichées seules' : ''}</span>
       ${(_pfvSeulIncoherences || _pfvSeulTrous) ? `<span onclick="${_pfvSeulIncoherences ? 'pvPfvToggleIncoherences()' : 'pvPfvToggleTrous()'}" style="cursor:pointer; font-size:10px; color:#94a3b8; text-decoration:underline;">tout revoir</span>` : ''}
     </div>`;
-    html += `<div style="${grid} padding:4px 10px; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; border-bottom:1px solid #334155;">
-      ${_fl('marque', 'Marque')}${_fl('gamme', 'Gamme')}${_fl('parfum', 'Parfum')}
-      ${_fl('nbfmt', 'Formats')}<span style="color:#64748b; font-weight:600;">Statut</span>${_fl('alerte', 'Cohérence')}
+    html += `<div style="display:flex; gap:14px; align-items:center; padding:3px 10px; font-size:9px; text-transform:uppercase; letter-spacing:0.5px; color:#64748b; border-bottom:1px solid #334155;">
+      <span>Groupes :</span>${_fl('marque', 'Marque')}${_fl('gamme', 'Gamme')}
+      <span style="margin-left:12px;">Dans la gamme :</span>${_fl('parfum', 'Parfum')}${_fl('nbfmt', 'Nb de formats')}${_fl('alerte', 'Cohérence')}
     </div>`;
     if (!lignes.length) {
       html += `<div style="padding:16px; text-align:center; color:#64748b; font-style:italic;">${_pfvSeulIncoherences ? 'Rien à corriger — noms, doublons, statuts et goûts sont cohérents ✓' : (_pfvSeulTrous ? 'Toutes les déclinaisons sont complètes ✓' : 'Aucun parfum.')}</div>`;
     }
-    lignes.forEach(function(L) {
+    ordreGroupes.forEach(function(G) {
+      const _mc = _mrqCouleur(G.marque) || '#94a3b8';
+      html += `<div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:8px; padding:4px 10px; background:${_mc}12; border-left:3px solid ${_mc}; border-radius:3px;">
+        <span style="font-size:11px; font-weight:800; color:${_mc}; letter-spacing:0.4px;">${_e(G.marque)}</span>
+        <span style="color:#475569;">›</span>
+        <span style="font-size:12px; font-weight:700; color:#e2e8f0;">${_e(G.gamme)}</span>
+        <span style="font-size:9px; color:#94a3b8;">${G.lignes.length} parfum${G.lignes.length > 1 ? 's' : ''}</span>
+        <span style="display:flex; gap:3px; align-items:center;">${G.formats.map(function(f) {
+          const c = LIQ_FORMAT_COLORS[f] || '#94a3b8';
+          return `<span style="font-size:8.5px; font-weight:700; color:${c}; background:${c}15; border:1px solid ${c}45; border-radius:3px; padding:0 5px;">${LIQ_FORMAT_LABELS[f] || f}</span>`;
+        }).join('')}</span>
+        ${G.nbAlertes ? `<span style="margin-left:auto; font-size:9px; font-weight:700; color:#fbbf24; background:#f59e0b15; border:1px solid #f59e0b50; border-radius:3px; padding:0 6px;">⚠ ${G.nbAlertes}</span>` : ''}
+      </div>`;
+      G.lignes.forEach(function(L) {
       const chips = L.formats.map(function(f) {
         const c = LIQ_FORMAT_COLORS[f] || '#94a3b8';
         const ent = L.entrees.find(function(x) { return x.g.format === f; });
@@ -22072,14 +22110,13 @@ function renderLiqAll() {
         : (L.manquants.length
             ? `<span style="font-size:9px; color:#64748b; cursor:help; white-space:nowrap;" title="Déclinaison incomplète (pas une faute) — absent de ${_e(L.manquants.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; }).join(', '))}">◌</span>`
             : `<span style="font-size:9px; color:#334155;">✓</span>`);
-      html += `<div style="${grid} padding:3px 10px; border-bottom:1px solid #1e293b;">
-        <span style="font-size:10px; color:#94a3b8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_e(L.marque)}">${_e(L.marque)}</span>
-        <span style="font-size:10.5px; color:#cbd5e1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${_e(L.gamme)}">${_e(L.gamme)}</span>
+      html += `<div style="${grid} padding:3px 10px 3px 26px; border-bottom:1px solid #1e293b;">
         <span style="font-size:11.5px; color:#e2e8f0; font-weight:600;">${_e(L.nom)}${L.graphies.size > 1 ? `<span style="font-size:9px; color:#fbbf24; font-weight:700; margin-left:5px;" title="${_e(Array.from(L.graphies).join(' / '))}">± ${L.graphies.size} graphies</span>` : ''}${gout ? `<span style="font-size:9px; color:${LIQ_GOUT_COLORS[gout] || '#64748b'}; margin-left:6px;">${_e(gout)}</span>` : ''}</span>
         <span style="display:flex; gap:3px; flex-wrap:wrap; align-items:center;">${chips}${manq ? ' ' + manq : ''}</span>
         <span style="display:flex; gap:2px; flex-wrap:wrap;">${statuts}</span>
         <span>${alerteHtml}</span>
       </div>`;
+      });
     });
   }
   // ═══ MODE PAR GAMME (marque → gamme → tous formats réunis, demande Fabien 2026-06-18) ═══
