@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 15:16</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 15:28</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -11789,6 +11789,7 @@ function saveUiState() {
     liqFilterStatut: liqStatutFilter,
     liqComboFormats: liqComboFormats,
     liqComboMode: liqComboMode,
+    liqComboRecap: liqComboRecap,
     liqComboMin2: liqComboMin2,
     liqViewMode: document.getElementById('liqSort')?.value || 'grille',
     liqSortCol, liqSortDir,
@@ -11832,6 +11833,7 @@ function restoreUiState() {
     if (s.liqComboFormats) { liqComboFormats = Array.isArray(s.liqComboFormats) ? s.liqComboFormats.filter(f => LIQ_FORMATS.includes(f)) : []; }
     if (typeof s.liqComboMin2 !== 'undefined') { liqComboMin2 = !!s.liqComboMin2; }
     if (s.liqComboMode === 'exact' || s.liqComboMode === 'min') { liqComboMode = s.liqComboMode; }
+    if (typeof s.liqComboRecap !== 'undefined') { liqComboRecap = !!s.liqComboRecap; }
     if (s.liqViewMode) { const el = document.getElementById('liqSort'); if (el) el.value = s.liqViewMode; }
     if (s.liqSortCol) liqSortCol = s.liqSortCol;
     if (s.liqSortDir) liqSortDir = s.liqSortDir;
@@ -17077,12 +17079,128 @@ function renderLiqComboSelect() {
         🧩 N'importe quel multi-format (≥ 2)
       </label>
       ${cases}
+      <label style="display:flex; align-items:center; gap:6px; padding:5px 8px; cursor:pointer; font-size:11px; color:#86efac; border-top:1px solid #1e293b;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background='transparent'" title="Le tableau récapitulatif en bas de page : quelles gammes pour chaque combinaison de formats. Toujours affiché quand un filtre 🧩 est actif.">
+        <input type="checkbox" ${liqComboRecap ? 'checked' : ''} onchange="toggleLiqComboRecap()" style="margin:0; accent-color:#22c55e; cursor:pointer;">
+        📊 Récap des déclinaisons (bas de page)
+      </label>
       <div style="display:flex; gap:4px; padding:5px 8px; border-top:1px solid #1e293b;">
         <button onclick="event.stopPropagation(); setLiqComboMode('exact')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'exact' ? 800 : 600}; background:${liqComboMode === 'exact' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'exact' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'exact' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Cocher 10 mL seul ne sort que les gammes qui n'existent QU'en 10 mL.">Exactement ces formats</button>
         <button onclick="event.stopPropagation(); setLiqComboMode('min')" style="flex:1; padding:3px 5px; font-size:9px; font-weight:${liqComboMode === 'min' ? 800 : 600}; background:${liqComboMode === 'min' ? '#a855f728' : 'transparent'}; color:${liqComboMode === 'min' ? '#d8b4fe' : '#94a3b8'}; border:1px solid ${liqComboMode === 'min' ? '#a855f7' : '#47556960'}; border-radius:3px; cursor:pointer;" title="Les gammes qui ont au moins ces formats — elles peuvent en avoir d'autres.">Au moins ces formats</button>
       </div>
       ${actif ? `<div onclick="clearLiqCombo()" style="padding:4px 8px; font-size:10px; color:#94a3b8; cursor:pointer; border-top:1px solid #1e293b; text-align:center;" onmouseenter="this.style.background='#1e293b'" onmouseleave="this.style.background=''">Effacer tout</div>` : ''}
     </div>`;
+}
+
+// ═══ 📊 RÉCAP DES DÉCLINAISONS (demande Fabien 2026-08-27) ═══
+// « Un truc qui me dit : que 10 mL → telles gammes, 10 + SdN → telles gammes, etc. »
+// Le tableau du bas regroupe les gammes par COMBINAISON EXACTE de formats. Il se calcule
+// sur le périmètre du bandeau (recherche, profil, rôle, statut, boutique) MAIS avant le
+// filtre 🧩 lui-même — sinon il se réduirait à la seule ligne cochée.
+let liqComboRecap = false;      // forcer l'affichage même sans filtre 🧩 actif
+let _liqRecapPerim = [];        // dernier périmètre rendu (sert à l'export tableur)
+
+function _liqDeclinaisons(lignes) {
+  const parGamme = new Map();
+  (lignes || []).forEach(function(g) {
+    if (!g || !g.marque || !g.gamme) return;
+    if (g.statutVie === 'SORTI') return;
+    if (g.marque === 'autre' && (g.gamme + '').includes('PA +/-')) return;
+    const k = _liqCleGamme(g);
+    if (!parGamme.has(k)) parGamme.set(k, { marque: g.marque, gamme: g.gamme, formats: new Set() });
+    if (g.format) parGamme.get(k).formats.add(g.format);
+  });
+  const combos = new Map();
+  parGamme.forEach(function(v) {
+    const arr = LIQ_FORMATS.filter(function(f) { return v.formats.has(f); });   // ordre canonique
+    const cle = arr.join('|');
+    if (!combos.has(cle)) combos.set(cle, { cle: cle, formats: arr, gammes: [] });
+    combos.get(cle).gammes.push(v);
+  });
+  const out = [...combos.values()];
+  out.forEach(function(c) { c.gammes.sort(function(a, b) { return (a.marque + ' ' + a.gamme).localeCompare(b.marque + ' ' + b.gamme); }); });
+  // Ordre de lecture : par la suite des formats (10 mL seul, puis 10 mL + SdN, puis…).
+  out.sort(function(a, b) {
+    const ia = a.formats.map(function(f) { return LIQ_FORMATS.indexOf(f); });
+    const ib = b.formats.map(function(f) { return LIQ_FORMATS.indexOf(f); });
+    for (let i = 0; i < Math.max(ia.length, ib.length); i++) {
+      // combinaison plus courte d'abord : « 10 mL seul » avant « 10 mL + SdN + 50 mL »
+      const x = ia[i] === undefined ? -1 : ia[i], y = ib[i] === undefined ? -1 : ib[i];
+      if (x !== y) return x - y;
+    }
+    return 0;
+  });
+  return out;
+}
+function toggleLiqComboRecap() { liqComboRecap = !liqComboRecap; renderLiqComboSelect(); renderLiqAll(); saveUiState(); }
+// Clic sur une ligne du récap = appliquer CETTE combinaison exacte (ou la retirer).
+function pvLiqComboAppliquer(cle) {
+  const arr = cle ? cle.split('|') : [];
+  const memeQueDeja = liqComboMode === 'exact' && arr.length === liqComboFormats.length
+    && arr.every(function(f) { return liqComboFormats.includes(f); });
+  liqComboFormats = memeQueDeja ? [] : arr;
+  liqComboMode = 'exact'; liqComboMin2 = false;
+  renderLiqComboSelect(); renderLiqAll(); saveUiState();
+}
+function _liqRecapDeclinaisonsHtml(lignes) {
+  _liqRecapPerim = lignes || [];
+  if (!(_liqComboActif() || liqComboRecap)) return '';
+  const e = function(t) { return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); };
+  const combos = _liqDeclinaisons(lignes);
+  const nbGammes = combos.reduce(function(n, c) { return n + c.gammes.length; }, 0);
+  const maxi = combos.reduce(function(n, c) { return Math.max(n, c.gammes.length); }, 1);
+  const cleActive = (liqComboMode === 'exact' && liqComboFormats.length) ? liqComboFormats.join('|') : '';
+  let h = `<div style="margin-top:14px; background:#a855f708; border:1px solid #a855f740; border-radius:6px; overflow:hidden;">
+    <div style="padding:6px 12px; background:#a855f718; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+      <span style="font-size:12px; font-weight:800; color:#d8b4fe; letter-spacing:0.3px;">📊 Récap des déclinaisons</span>
+      <span style="font-size:10px; color:#94a3b8;">${nbGammes} gamme${nbGammes > 1 ? 's' : ''} réparties en ${combos.length} combinaison${combos.length > 1 ? 's' : ''} de formats — clique une ligne pour ne garder qu'elle</span>
+      <span style="margin-left:auto; display:flex; gap:6px;">
+        <button onclick="pvLiqExportDeclinaisons()" style="padding:3px 9px; font-size:10px; font-weight:700; background:#22c55e15; color:#86efac; border:1px solid #22c55e50; border-radius:3px; cursor:pointer;" title="Export CSV (ouvrable dans Excel / Numbers) : une ligne par gamme, une colonne par format">⬇️ Tableur</button>
+        ${liqComboRecap ? `<button onclick="toggleLiqComboRecap()" style="padding:3px 9px; font-size:10px; background:none; color:#94a3b8; border:1px solid #47556960; border-radius:3px; cursor:pointer;">Masquer</button>` : ''}
+      </span>
+    </div>`;
+  if (!combos.length) {
+    return h + `<div style="padding:14px; text-align:center; color:#64748b; font-size:11px; font-style:italic;">Aucune gamme dans le périmètre filtré.</div></div>`;
+  }
+  combos.forEach(function(c) {
+    const actif = c.cle === cleActive;
+    const chips = c.formats.map(function(f) {
+      const col = LIQ_FORMAT_COLORS[f] || '#94a3b8';
+      return `<span style="font-size:9px; font-weight:700; color:${col}; background:${col}18; border:1px solid ${col}55; border-radius:3px; padding:0 5px; white-space:nowrap;">${LIQ_FORMAT_LABELS[f] || f}</span>`;
+    }).join('<span style="color:#475569; font-size:9px;">+</span>');
+    const noms = c.gammes.map(function(g) {
+      return `<span style="font-size:10px; color:#cbd5e1; background:#1e293b; border:1px solid #33415560; border-radius:3px; padding:1px 6px; white-space:nowrap;">${e(g.marque)} <b style="color:#e2e8f0;">${e(g.gamme)}</b></span>`;
+    }).join(' ');
+    h += `<div onclick="pvLiqComboAppliquer('${c.cle}')" title="${actif ? 'Cliquer pour enlever le filtre' : 'Ne garder que ces gammes'}" style="display:flex; gap:10px; align-items:flex-start; padding:6px 12px; border-top:1px solid #33415540; cursor:pointer; background:${actif ? '#a855f715' : 'transparent'};" onmouseover="this.style.background='#a855f710'" onmouseout="this.style.background='${actif ? '#a855f715' : 'transparent'}'">
+      <div style="flex:0 0 190px; display:flex; align-items:center; gap:3px; flex-wrap:wrap;">${actif ? '<span style="color:#d8b4fe; font-size:10px;">●</span>' : ''}${chips}</div>
+      <div style="flex:0 0 78px; display:flex; align-items:center; gap:5px;">
+        <span style="font-size:11px; font-weight:800; color:${actif ? '#d8b4fe' : '#e2e8f0'};">${c.gammes.length}</span>
+        <span style="flex:1; height:5px; background:#33415560; border-radius:3px; overflow:hidden;"><span style="display:block; height:100%; width:${Math.round(c.gammes.length / maxi * 100)}%; background:#a855f7aa;"></span></span>
+      </div>
+      <div style="flex:1; display:flex; gap:3px; flex-wrap:wrap; align-items:center;">${noms}</div>
+    </div>`;
+  });
+  return h + `</div>`;
+}
+// Export « tableur » : une ligne par gamme, une colonne cochée par format (Excel / Numbers).
+function pvLiqExportDeclinaisons() {
+  const combos = _liqDeclinaisons(_liqRecapPerim);
+  const sep = ';';
+  const q = function(v) { return '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"'; };
+  const rows = [['Marque', 'Gamme', 'Combinaison', 'Nb formats'].concat(LIQ_FORMATS.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; })).map(q).join(sep)];
+  combos.forEach(function(c) {
+    const lbl = c.formats.map(function(f) { return LIQ_FORMAT_LABELS[f] || f; }).join(' + ');
+    c.gammes.forEach(function(g) {
+      rows.push([g.marque, g.gamme, lbl, c.formats.length]
+        .concat(LIQ_FORMATS.map(function(f) { return c.formats.includes(f) ? 'X' : ''; }))
+        .map(q).join(sep));
+    });
+  });
+  const blob = new Blob(['\ufeff' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = 'PilotVape_Declinaisons_liquides_' + ymd(new Date()) + '.csv';
+  link.click();
+  try { logAction('Export déclinaisons liquides', combos.length + ' combinaisons'); } catch (err) {}
 }
 
 // Statut multi-select filter arrays
@@ -20575,6 +20693,7 @@ function renderLiqAll() {
   // Exclure les lignes séparateurs/placeholder (marque vide, "autre" avec PA +/-, etc.)
   filtered = filtered.filter(g => g.marque && g.gamme && !(g.marque === 'autre' && g.gamme.includes('PA +/-')));
   // 🧩 Formats combinés : filtre au niveau GAMME (canonique) — après les filtres de ligne.
+  const _perimAvantCombo = filtered;   // périmètre du récap : tout SAUF le filtre 🧩 lui-même
   filtered = _liqComboFiltre(filtered);
   const actifs = filtered.filter(g => g.statutVie !== 'SORTI');
   const sortis = filtered.filter(g => g.statutVie === 'SORTI');
@@ -20600,6 +20719,7 @@ function renderLiqAll() {
             : `seules les gammes qui existent <b>au moins</b> en ${liqComboFormats.map(f => LIQ_FORMAT_LABELS[f] || f).join(' + ')} — leurs autres formats restent affichés.`)
         : 'seules les gammes déclinées dans <b>au moins 2 formats</b>.'}
       <span style="margin-left:auto; white-space:nowrap;"><b>${_nbGammesVues}</b> gamme${_nbGammesVues > 1 ? 's' : ''} sur ${_nbGammesBase}</span>
+      <span onclick="document.getElementById('liqDisplay').lastElementChild?.scrollIntoView({behavior:'smooth', block:'center'})" style="cursor:pointer; color:#d8b4fe; text-decoration:underline; white-space:nowrap;" title="Aller au tableau récapitulatif en bas de page">📊 récap</span>
       <span onclick="clearLiqCombo()" style="cursor:pointer; color:#94a3b8; text-decoration:underline; white-space:nowrap;">effacer</span>
     </div>` : '';
     statsEl.innerHTML = _shopBanner + _comboBanner + `<div style="display:flex; gap:12px; font-size:10px; color:#94a3b8; padding:4px 8px; background:#1e293b; border-radius:4px;">
@@ -21259,7 +21379,9 @@ function renderLiqAll() {
     html += `</div>`;
   }
 
-  document.getElementById('liqDisplay').innerHTML = html || '<p style="color:#64748b; text-align:center; padding:40px;">Aucun liquide trouvé</p>';
+  // 📊 Récap des déclinaisons en bas de page — hors vues à géométrie propre (plans, malette, mur).
+  const _recap = ['etageres', 'testeurs', 'freetouch'].includes(viewMode) ? '' : _liqRecapDeclinaisonsHtml(_perimAvantCombo);
+  document.getElementById('liqDisplay').innerHTML = (html || '<p style="color:#64748b; text-align:center; padding:40px;">Aucun liquide trouvé</p>') + _recap;
 }
 
 // Helper partagé : OP active (non clôturée, non orpheline) liée à une action donnée.
