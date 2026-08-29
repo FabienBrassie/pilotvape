@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
-<!-- v 2026-08-29 14:50 — 🔒 FERMETURE ANTICIPÉE : miroir de « Retard à l'ouverture » dans le 📒 Journal RH. Nouveau type de problème, et détection automatique — un « Parti plus tôt » du salarié qui FERMAIT la boutique ce jour-là devient une fermeture anticipée (badge 🔒, marqueur des vues Mois / 3 boutiques, libellé « fermeture anticipée » jusque dans le récap paie et le texte comptable) ; les saisies antérieures sont requalifiées toutes seules. Saisie naturelle : on tape l'HEURE RÉELLE (« fermé à 19h50 »), l'écart en minutes se calcule contre l'horaire prévu et s'affiche avant validation — idem pour un retard (« arrivé à 9h40 »). Le champ minutes reste possible. -->
 <!-- v 2026-08-25 22:08 — 📚 Formation, parcours ATTENDU revu (Fabien) : Liquides 3 sem · Matériel 3 sem · Vente 3 sem · Perfectionnement 2 sem (au lieu de 2½/2½/1½/1½). La référence « attendu » (FORM_ATTENDU) ET la création d'un nouveau parcours (durées d'étapes) suivent maintenant ces durées ; les caps automatiques (apte comptoir = fin Matériel, 100 % autonome = fin Vente, parfait = fin Perf.) et le calcul de retard « +X j vs attendu » s'ajustent tout seuls. Les parcours DÉJÀ créés gardent leurs dates. -->
 <!-- v 2026-08-24 16:58 — 🍽️ Tolérance de pause : un dépassement de MOINS DE 3 MINUTES est désormais sans objet — il n'est plus déduit des heures (plus de bloc rouge sur le planning) et ne sort plus nulle part : récap paie, texte comptable, CSV, Journal RH, badge de la semaine, marqueurs des vues Mois / 3 boutiques. Il reste visible, marqué « toléré », dans 🍽️ Écarts de pause et dans Mon espace du salarié — la vérité du pointage est conservée, c'est juste la paperasse qui disparaît. À partir de 3 min, rien ne change. Seuil unique : PAUSE_TOLERANCE_MIN. -->
 <!-- v 2026-08-24 16:01 — 🚫 ABSENCE INJUSTIFIÉE : nouveau type d'absence (ni congé, ni maladie, ni école) — le salarié devait travailler, il n'est pas venu et n'a pas de justificatif. Se déclare dans 🏖 Absences, au clic sur le bandeau événements, ou depuis le 📒 Journal RH (type « Absence injustifiée », qui crée la vraie absence du jour). Le salarié disparaît du planning ce jour-là, les heures prévues ne sont NI travaillées NI payées : elles sortent du décompte de la semaine (badge rouge 🚫), du récap paie, du CSV, du texte comptable et du bilan annuel, toujours avec la mention « non rémunéré ». Un simple retard reste un retard (Journal RH, en minutes). Bouton « 🤒 justifié » pour requalifier en maladie/congé si le justificatif arrive après coup. -->
@@ -1338,33 +1337,6 @@ function _firstStartAtB(emp,iso,bid){const bl=dayBlocksOf(emp,iso);let m=Infinit
 function isOpenerAtB(e,iso,bid){const mine=_firstStartAtB(e,iso,bid);if(mine==null)return false;
   for(const o of (S.employees||[])){if(o.id===e.id)continue;const s=_firstStartAtB(o,iso,bid);if(s!=null&&s<mine)return false;}
   return true;}
-// Heure de DERNIER départ d'un salarié à une boutique donnée (miroir de _firstStartAtB).
-function _lastEndAtB(emp,iso,bid){const bl=dayBlocksOf(emp,iso);let m=-1;
-  bl.forEach(x=>{if(!isRetardBlock(x)&&String(x[2])===String(bid))m=Math.max(m,t2m(x[1]));});
-  return m>=0?m:null;}
-// Vrai si e est le FERMEUR de la boutique bid ce jour-là (personne ne part strictement après lui).
-// Miroir exact de isOpenerAtB : c'est ce qui distingue « parti plus tôt » d'une FERMETURE ANTICIPÉE
-// (la boutique a fermé avant l'heure — visible du client), demande Fabien 2026-08-24.
-function isCloserAtB(e,iso,bid){const mine=_lastEndAtB(e,iso,bid);if(mine==null)return false;
-  for(const o of (S.employees||[])){if(o.id===e.id)continue;const f=_lastEndAtB(o,iso,bid);if(f!=null&&f>mine)return false;}
-  return true;}
-// Bornes PRÉVUES de la journée à une boutique (marqueurs retard/pause compris : ils occupent
-// toujours le créneau d'origine) → sert de référence pour convertir « il a fermé à 19h50 » en minutes.
-function _borneDebutAtB(e,iso,bid){const bl=dayBlocksOf(e,iso);let m=Infinity;
-  bl.forEach(x=>{if(String(x[2])===String(bid))m=Math.min(m,t2m(x[0]));});return isFinite(m)?m:null;}
-function _borneFinAtB(e,iso,bid){const bl=dayBlocksOf(e,iso);let m=-1;
-  bl.forEach(x=>{if(String(x[2])===String(bid))m=Math.max(m,t2m(x[1]));});return m>=0?m:null;}
-// QUALIFICATION CANONIQUE d'un ajustement horaire (règle 8) : le libellé exact d'un retard / d'un
-// départ, en tenant compte du rôle ouverture/fermeture du salarié CE JOUR-LÀ. Vaut aussi pour les
-// saisies antérieures (rien à migrer) — tout affichage passe par elle.
-function punctKind(rq){
-  const sn=(rq&&rq.sens)||'sup';if(sn!=='debut'&&sn!=='fin')return null;
-  const k=rq.kind||(sn==='debut'?'Retard':'Parti plus tôt');
-  const e=emp(rq.empId);if(!e)return k;
-  const wb=(presence(e,rq.date)||{}).b||e.b;
-  if(sn==='debut'&&k==='Retard'&&isOpenerAtB(e,rq.date,wb))return "Retard à l'ouverture";
-  if(sn==='fin'&&k==='Parti plus tôt'&&isCloserAtB(e,rq.date,wb))return 'Fermeture anticipée';
-  return k;}
 function activePat(e,iso){let cur=e.pats[0];for(const pe of e.pats){if(pe.from<=iso&&(!cur||pe.from>=cur.from))cur=pe}return cur}
 
 // Écrit la journée complète d'un salarié (scope 'jour' = exception, 'sem' = planning type)
@@ -1485,8 +1457,7 @@ function lossTagFor(eid,d){
   const ls=(S.hsdemandes||[]).filter(x=>x.statut==='accepte'&&x.empId===eid&&x.date===d&&(x.sens==='debut'||x.sens==='fin'));
   if(ls.length){
     const tot=ls.reduce((s,x)=>s+x.min,0);const isRet=ls.some(x=>x.sens==='debut');
-    const _ferm=!isRet&&ls.every(x=>punctKind(x)==='Fermeture anticipée');
-    out+=' <span class="mtag" style="background:'+(_ferm?'#c2410c':'#dc2626')+';color:#fff" title="'+(isRet?'Retard':_ferm?'Fermeture anticipée':'Départ anticipé')+' validé — '+fmtMin(tot)+' en moins (déjà déduit des heures)">'+(isRet?'⏰':_ferm?'🔒':'🌙')+' −'+fmtMin(tot)+'</span>';
+    out+=' <span class="mtag" style="background:#dc2626;color:#fff" title="'+(isRet?'Retard':'Départ anticipé')+' validé — '+fmtMin(tot)+' en moins (déjà déduit des heures)">'+(isRet?'⏰':'🌙')+' −'+fmtMin(tot)+'</span>';
   }
   const pz=pauseOf(eid,d);const pd=pz&&pz.ret?pauseDepassMin(pz):0;
   if(pd>0)out+=' <span class="mtag" style="background:#dc2626;color:#fff" title="Pause prolongée — pointée '+fmtH(pz.dep)+'→'+fmtH(pz.ret)+', '+fmtMin(pd)+' au-delà de la pause prévue (déjà déduit des heures)">🍽 −'+fmtMin(pd)+'</span>';
@@ -1528,8 +1499,7 @@ function _evtOnlyChips(d){
     for(const rq of (S.hsdemandes||[])){
       if(rq.statut!=='accepte'||rq.date!==d)continue;const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;
       const e=emp(rq.empId);if(!e)continue;const wb=(presence(e,d)||{}).b||e.b;
-      const _pk=punctKind(rq)||'';
-      out.push('<span class="evc" style="background:'+(_pk==='Fermeture anticipée'?'#c2410c':'#dc2626')+';color:#fff" title="'+esc(_pk||(sn==='debut'?'Retard':'Départ anticipé'))+' — '+esc(e.nom)+' ('+bout(wb).nom+'), '+fmtMin(rq.min)+' en moins (déjà déduit)">'+(_pk==='Fermeture anticipée'?'🔒':sn==='debut'?'⏰':'🌙')+' '+esc(e.nom.split(' ')[0])+' −'+fmtMin(rq.min)+' · '+esc(bout(wb).nom)+'</span>');
+      out.push('<span class="evc" style="background:#dc2626;color:#fff" title="'+(sn==='debut'?'Retard':'Départ anticipé')+' validé — '+esc(e.nom)+' ('+bout(wb).nom+'), '+fmtMin(rq.min)+' en moins (déjà déduit)">'+(sn==='debut'?'⏰':'🌙')+' '+esc(e.nom.split(' ')[0])+' −'+fmtMin(rq.min)+' · '+esc(bout(wb).nom)+'</span>');
     }
     for(const pz of (S.pauses||[])){
       if(pz.date!==d||!pz.ret)continue;const dep=pauseDepassMin(pz);if(dep<=0)continue;
@@ -3334,15 +3304,12 @@ function fmtHfrac(min){const h=Math.floor(min/60),m=min%60;const F={15:'1/4',30:
 // comme les heures sup — plus d'ambiguïté de semaine à cheval, lecture directe pour la comptable).
 function lossDayInfo(e,days){const w={};const ds=new Set(days);
   for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;
-    const o=(w[r.date]=w[r.date]||{min:0,deb:0,fin:0,ferm:0});o.min+=r.min;o[sn==='debut'?'deb':'fin']+=r.min;
-    if(punctKind(r)==='Fermeture anticipée')o.ferm+=r.min;}
-  Object.keys(w).forEach(k=>{const o=w[k];
-    o.label=(o.deb&&o.fin)?'retard/départ':(o.fin?((o.ferm===o.fin)?'fermeture anticipée':'départ anticipé'):'retard');});
+    const o=(w[r.date]=w[r.date]||{min:0,deb:0,fin:0});o.min+=r.min;o[sn==='debut'?'deb':'fin']+=r.min;}
+  Object.keys(w).forEach(k=>{const o=w[k];o.label=(o.deb&&o.fin)?'retard/départ':(o.fin?'départ anticipé':'retard');});
   return w;}
-function lossMonthLabel(e,days){let deb=0,fin=0,ferm=0;const ds=new Set(days);
-  for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;
-    if(sn==='debut')deb+=r.min;else{fin+=r.min;if(punctKind(r)==='Fermeture anticipée')ferm+=r.min;}}
-  return (deb&&fin)?'retard/départ':(fin?((ferm===fin)?'fermeture anticipée':'départ anticipé'):'retard');}
+function lossMonthLabel(e,days){let deb=0,fin=0;const ds=new Set(days);
+  for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;if(sn==='debut')deb+=r.min;else fin+=r.min;}
+  return (deb&&fin)?'retard/départ':(fin?'départ anticipé':'retard');}
 function feriesOfMonth(days){return days.filter(d=>{const f=ferieOf(d);return f&&f.type==='ferie';}).sort();}
 function daysAbs(arr,eid,days){let n=0;for(const d of days)if(arr.some(x=>x.empId===eid&&d>=x.du&&d<=x.au))n++;return n;}
 function paieRow(e,days){
@@ -3660,11 +3627,9 @@ function fmtMin(m){const h=Math.floor(m/60),mm=m%60;return (h?h+'h':'')+(mm?(h?S
 function hsLabel(x){const sn=x.sens||'sup';const ic=sn==='fin'?'🌙 −':sn==='debut'?'🌅 −':'⏱ +';return ic+fmtMin(x.min);}
 // Distingue visuellement les AJUSTEMENTS : heures sup (positif, cyan) vs retard / parti plus tôt
 // (problèmes, rouge/orange) — pour ne pas faire croire qu'un retard est une heure sup (Fabien 2026-06-24).
-function hsKind(x){const sn=x.sens||'sup';const _k=punctKind(x);
-  if(sn==='debut')return{ic:'🌅',sign:'−',txt:(_k==="Retard à l'ouverture"?'retard ouverture':'retard'),fg:'#f87171',bg:'rgba(220,38,38,.14)',bd:'#dc262666',accent:'#ef4444',prob:true};
-  if(sn==='fin')return (_k==='Fermeture anticipée')
-    ?{ic:'🔒',sign:'−',txt:'fermeture anticipée',fg:'#fb923c',bg:'rgba(194,65,12,.18)',bd:'#c2410c88',accent:'#c2410c',prob:true}
-    :{ic:'🌙',sign:'−',txt:'parti plus tôt',fg:'#fb923c',bg:'rgba(234,88,12,.14)',bd:'#ea580c66',accent:'#f97316',prob:true};
+function hsKind(x){const sn=x.sens||'sup';
+  if(sn==='debut')return{ic:'🌅',sign:'−',txt:(x.kind==="Retard à l'ouverture"?'retard ouverture':'retard'),fg:'#f87171',bg:'rgba(220,38,38,.14)',bd:'#dc262666',accent:'#ef4444',prob:true};
+  if(sn==='fin')return{ic:'🌙',sign:'−',txt:'parti plus tôt',fg:'#fb923c',bg:'rgba(234,88,12,.14)',bd:'#ea580c66',accent:'#f97316',prob:true};
   return{ic:'⏱',sign:'+',txt:'heures sup',fg:'#22d3ee',bg:'rgba(8,145,178,.16)',bd:'#0891b255',accent:'#0891b2',prob:false};}
 function hsBadge(x){const k=hsKind(x);return '<span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+k.bg+';color:'+k.fg+';border:1px solid '+k.bd+';white-space:nowrap">'+k.ic+' '+k.sign+fmtMin(x.min)+' · '+k.txt+'</span>';}
 // Admin : accepter une HS -> ajoute un bloc HS en fin de journée
@@ -4933,7 +4898,6 @@ const JTYPES=[
   {t:'Retard',c:'#ef4444'},
   {t:"Retard à l'ouverture",c:'#b91c1c'},
   {t:'Parti plus tôt',c:'#f97316'},
-  {t:'Fermeture anticipée',c:'#c2410c'},
   {t:'Pause prolongée',c:'#dc2626'},
   {t:'Absence injustifiée',c:'#7f1d1d'},
   {t:'Téléphone',c:'#7c3aed'},
@@ -4958,7 +4922,7 @@ function togJournal(){if(!canJournal())return;const el=$('journalpanel');const s
 function setJournalB(b){journalFilterB=b;journalFilterEmp='';renderJournal();}
 function setJournalEmp(v){journalFilterEmp=v;renderJournal();}
 function setJournalPeriod(v){journalFilterPeriod=v;renderJournal();}
-const _PUNCT_SENS={'Retard':'debut',"Retard à l'ouverture":'debut','Parti plus tôt':'fin','Fermeture anticipée':'fin'};
+const _PUNCT_SENS={'Retard':'debut',"Retard à l'ouverture":'debut','Parti plus tôt':'fin'};
 function addJournalEntry(b){
   if(!canJournal())return;
   const d=$('jr-d').value,q=$('jr-q').value,t=$('jr-t').value,c=($('jr-c').value||'').trim();
@@ -4983,33 +4947,21 @@ function addJournalEntry(b){
     return;
   }
   if(sens){
-    // Retard / départ anticipé / fermeture anticipée → on crée un AJUSTEMENT (même donnée que
-    // l'onglet Heures sup), qui s'affiche sur le planning et, une fois validé, raccourcit le
-    // créneau + déduit les heures.
+    // Retard / départ anticipé → on crée un AJUSTEMENT (même donnée que l'onglet Heures sup),
+    // qui s'affiche sur le planning et, une fois validé, raccourcit le créneau + déduit les heures.
+    const min=parseInt(($('jr-min')||{}).value)||0;
+    if(min<1){alert('Pour un retard / départ anticipé, indique une durée en minutes (≥ 1).');return;}
     const e=S.employees.find(x=>x.nom===q&&x.b===b)||S.employees.find(x=>x.nom===q);
     if(!e){alert('Salarié introuvable.');return;}
-    const _wb=(presence(e,d)||{}).b||e.b;
-    // Saisie NATURELLE : « il a fermé à 19h50 » / « il est arrivé à 9h40 » — les minutes se
-    // calculent contre l'horaire prévu du salarié ce jour-là (Fabien 2026-08-24).
-    let min=parseInt(($('jr-min')||{}).value)||0;
-    const _hv=($('jr-h')||{}).value;
-    if(_hv){
-      const ref=(sens==='debut')?_borneDebutAtB(e,d,_wb):_borneFinAtB(e,d,_wb);
-      if(ref==null){alert(e.nom+' n\'a aucun créneau planifié le '+fmtFR(d)+' — saisis directement les minutes.');return;}
-      min=(sens==='debut')?(t2m(_hv)-ref):(ref-t2m(_hv));
-      if(min<1){alert('Prévu '+(sens==='debut'?'à partir de ':'jusqu\'à ')+fmtH(m2t(ref))+' — l\'heure saisie ('+fmtH(_hv)+') ne montre aucun écart.');return;}
-      if(!confirm((sens==='debut'?'Arrivée':'Fermeture')+' à '+fmtH(_hv)+' au lieu de '+fmtH(m2t(ref))+' → '+fmtMin(min)+' '+(sens==='debut'?'de retard':'en moins')+'.\n\nEnregistrer ?'))return;
-    }
-    if(min<1){alert('Indique l\'heure réelle (ex : 19h50) ou une durée en minutes (≥ 1).');return;}
     S.hsdemandes=S.hsdemandes||[];
-    // Détection auto : ouvreur → « Retard à l'ouverture » · fermeur → « Fermeture anticipée ».
+    // Détection auto « à l'ouverture » : un retard d'un salarié qui ouvre la boutique ce jour-là.
     let kind=t;
+    const _wb=(presence(e,d)||{}).b||e.b;
     if(sens==='debut'&&kind==='Retard'&&isOpenerAtB(e,d,_wb))kind="Retard à l'ouverture";
-    if(sens==='fin'&&kind==='Parti plus tôt'&&isCloserAtB(e,d,_wb))kind='Fermeture anticipée';
     const dem={id:Date.now(),empId:e.id,date:d,min,sens,kind,note:c,statut:'attente',_ts:NOW()};
     if(!isAdmin()&&isResp())dem.parResp=ROLE.empId;
     S.hsdemandes.push(dem);
-    if($('jr-c'))$('jr-c').value='';if($('jr-min'))$('jr-min').value='';if($('jr-h'))$('jr-h').value='';
+    if($('jr-c'))$('jr-c').value='';if($('jr-min'))$('jr-min').value='';
     // Auto-validé (comportement « comme validé ») → applique au planning : bloc rouge "retard" + heures déduites
     try{acceptHS(dem.id);}catch(e2){save();}
     renderJournal();
@@ -5038,34 +4990,6 @@ function delJournalEntry(sig){
   S.rh=(S.rh||[]).filter(r=>_journalSig(r)!==sig);
   save();renderJournal();
 }
-// Le formulaire du Journal s'adapte au type choisi : heure réelle + minutes n'apparaissent que
-// pour les types de PONCTUALITÉ (retard, départ, fermeture anticipée), avec le bon libellé.
-function jrTypeChg(){
-  const t=$('jr-t')&&$('jr-t').value;const sens=_PUNCT_SENS[t];
-  const h=$('jr-h'),m=$('jr-min'),hint=$('jr-hint');
-  if(h)h.style.display=sens?'':'none';
-  if(m)m.style.display=sens?'':'none';
-  if(hint){hint.style.display=sens?'':'none';
-    hint.textContent=!sens?'':(sens==='debut'
-      ?'heure d\'arrivée réelle (ex : 9h40) — ou directement les minutes'
-      :'heure de fermeture réelle (ex : 19h50) — ou directement les minutes');}
-  jrHChg();
-}
-// Aperçu immédiat de l'écart quand on tape l'heure réelle.
-function jrHChg(){
-  const hint=$('jr-hint');if(!hint)return;
-  const t=$('jr-t')&&$('jr-t').value,sens=_PUNCT_SENS[t];if(!sens)return;
-  const hv=($('jr-h')||{}).value;if(!hv)return;
-  const d=($('jr-d')||{}).value,q=($('jr-q')||{}).value;
-  const e=S.employees.find(x=>x.nom===q);if(!e||!d)return;
-  const wb=(presence(e,d)||{}).b||e.b;
-  const ref=(sens==='debut')?_borneDebutAtB(e,d,wb):_borneFinAtB(e,d,wb);
-  if(ref==null){hint.innerHTML='<b style="color:#dc2626">aucun créneau prévu ce jour-là</b>';return;}
-  const min=(sens==='debut')?(t2m(hv)-ref):(ref-t2m(hv));
-  hint.innerHTML=(min>0)
-    ?('prévu '+(sens==='debut'?'à ':'jusqu\'à ')+fmtH(m2t(ref))+' → <b style="color:#dc2626">'+fmtMin(min)+'</b> '+(sens==='debut'?'de retard':'en moins'))
-    :('prévu '+(sens==='debut'?'à ':'jusqu\'à ')+fmtH(m2t(ref))+' → <b style="color:var(--green)">aucun écart</b>');
-}
 function renderJournal(){
   if(!canJournal())return;
   const isA=isAdmin();const myB=journalMyB();
@@ -5076,7 +5000,7 @@ function renderJournal(){
   if(isA)h+=S.boutiques.map(b=>'<button class="bchip '+b.id+(selB===b.id?' on':'')+'" onclick="setJournalB(\''+b.id+'\')">'+b.nom+'</button>').join('');
   else if(selB)h+='<span class="chipb" style="color:var(--'+selB+')">'+bout(selB).nom+'</span>';
   h+='<button class="act grey" style="margin-left:auto" onclick="$(\'journalpanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin-bottom:6px;color:var(--mut)">Comportement · attitude · fiabilité · ponctualité — et <b>problèmes globaux de la boutique</b> (choisis « 🏬 Toute la boutique » : inventaire, ménage, tenue du magasin…). Les retards / départs anticipés déclarés (ajustements horaires) et les <b>🚫 absences injustifiées</b> sont repris ici automatiquement. Pour un <b>🔒 retard à l\'ouverture</b> ou une <b>fermeture anticipée</b>, saisis simplement l\'<b>heure réelle</b> (ex : 19h50) : l\'écart se calcule tout seul contre l\'horaire prévu, et le libellé s\'ajuste selon que le salarié ouvrait ou fermait la boutique ce jour-là.</div>';
+  h+='<div class="small" style="margin-bottom:6px;color:var(--mut)">Comportement · attitude · fiabilité · ponctualité — et <b>problèmes globaux de la boutique</b> (choisis « 🏬 Toute la boutique » : inventaire, ménage, tenue du magasin…). Les retards / départs anticipés déclarés (ajustements horaires) et les <b>🚫 absences injustifiées</b> sont repris ici automatiquement.</div>';
   const emps=S.employees.filter(e=>e.actif&&e.b===selB);
   // si le salarié filtré n'est pas (ou plus) dans la boutique sélectionnée → on réinitialise (sauf le filtre 🏬 Boutique)
   if(journalFilterEmp&&journalFilterEmp!==JQ_BOUTIQUE&&!emps.some(e=>e.nom===journalFilterEmp))journalFilterEmp='';
@@ -5089,18 +5013,16 @@ function renderJournal(){
   h+='<div class="small" style="margin:-2px 0 6px;color:var(--mut)">Une <b>🚫 Absence injustifiée</b> saisie ici crée la vraie absence de la journée (le salarié disparaît du planning, ses heures ne sont pas payées) — pour un simple retard, garde « Retard » et sa durée en minutes.</div>'+
     '<div class="addrow">➕ <input type="date" id="jr-d" value="'+todayISO()+'">'+
     '<select id="jr-q"><option value="'+JQ_BOUTIQUE+'">🏬 Toute la boutique (problème global)</option>'+emps.map(e=>'<option>'+esc(e.nom)+'</option>').join('')+'</select>'+
-    '<select id="jr-t" onchange="jrTypeChg()">'+JTYPES.map(j=>'<option>'+j.t+'</option>').join('')+'</select>'+
-    '<input type="time" id="jr-h" onchange="jrHChg()" title="Heure réelle constatée (ex : 19h50) — les minutes se calculent toutes seules contre l\'horaire prévu" style="width:112px;display:none">'+
-    '<input id="jr-min" type="number" min="1" step="1" placeholder="ou min" title="Durée en minutes — si tu préfères la saisir directement" style="width:100px;display:none">'+
-    '<span class="small" id="jr-hint" style="display:none;color:var(--mut)"></span>'+
+    '<select id="jr-t">'+JTYPES.map(j=>'<option>'+j.t+'</option>').join('')+'</select>'+
+    '<input id="jr-min" type="number" min="1" step="1" placeholder="min (retard/départ)" title="Durée en minutes — requise pour Retard / Retard à l\'ouverture / Parti plus tôt : crée un ajustement à valider qui modifie le planning" style="width:135px">'+
     '<input id="jr-c" placeholder="Commentaire (optionnel)" style="flex:1;min-width:140px">'+
     '<button class="act green" onclick="addJournalEntry(\''+selB+'\')">Ajouter</button></div>';
-  setTimeout(jrTypeChg,0);
   const list=[];
   for(const r of (S.rh||[]))if(r.b===selB&&(!journalFilterEmp||r.q===journalFilterEmp)&&_journalInPeriod(r.d))list.push({d:r.d,q:r.q,t:r.t,c:r.c||'',sig:_journalSig(r)});
   for(const rq of (S.hsdemandes||[])){const sn=rq.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(rq.statut==='refuse')continue;const e=emp(rq.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;if(!_journalInPeriod(rq.date))continue;
-    // Libellé exact (ouverture / fermeture) par la canonique — vaut aussi pour les saisies antérieures.
-    const tt=punctKind(rq)||(sn==='debut'?'Retard':'Parti plus tôt');
+    let tt=rq.kind||(sn==='debut'?'Retard':'Parti plus tôt');
+    // Affiche « à l'ouverture » si le salarié ouvre la boutique ce jour-là (vaut aussi pour les saisies antérieures).
+    if(sn==='debut'&&tt==='Retard'&&isOpenerAtB(e,rq.date,(presence(e,rq.date)||{}).b||e.b))tt="Retard à l'ouverture";
     list.push({d:rq.date,q:e.nom,t:tt,c:fmtMin(rq.min)+(rq.note?' — '+rq.note:''),auto:true,id:rq.id,pending:rq.statut!=='accepte'});}
   // 🚫 Absences injustifiées : reprises automatiquement (une ligne par jour concerné), comme les retards
   for(const a of (S.absinj||[])){const e=emp(a.empId);if(!e||e.b!==selB)continue;if(journalFilterEmp&&e.nom!==journalFilterEmp)continue;
