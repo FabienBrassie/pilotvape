@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-09-01 11:29 — 💶 Le bloc prime du récap paie tient en UNE ligne repliée (« 💶 Prime 3/4 · ⚠ 1 à trancher », avec les critères perdus en clair) : le détail des 4 critères et les boutons de décision s'ouvrent au clic, comme l'Historique des absences et les Écarts de pause. Il ne mange plus la colonne du salarié. -->
 <!-- v 2026-09-01 10:13 — 💶 PRIME SUR OBJECTIFS (mensuelle, 4 critères d'un quart chacun : ⏰ ponctualité · 📦 inventaire/stock · 🧾 procédures · 📈 KPIs). Les retards, retards à l'ouverture et fermetures anticipées ne portent plus la mention « non rémunéré » mais « condition d'obtention de prime », et le récap paie affiche « 1/4 de prime non obtenu » à côté de l'heure perdue. L'outil ne mesure QUE la ponctualité et se contente de PROPOSER la perte du quart au-delà d'une tolérance réglable (15 min cumulées sur le mois par défaut) : rien n'apparaît chez le salarié tant que tu n'as pas confirmé, et tu peux maintenir le quart malgré les retards. Les 3 autres critères se retirent à la main. Quarts confirmés repris dans le texte comptable, le CSV et « Mon espace ». -->
 <!-- v 2026-08-31 19:16 — 🚷 L'ABSENCE SE QUALIFIE : en la déclarant (panneau 🏖 ou bandeau événements) on choisit désormais « injustifiée » · « justifiée, non payée » · « justifiée ET payée », et on peut changer d'avis après coup depuis l'historique (le justificatif arrive souvent plus tard). Injustifiée = non payée + reprise au 📒 Journal RH comme problème ; justifiée = ce n'est plus une faute, elle sort du Journal, mais elle reste NON PAYÉE par défaut (justifié ne veut pas dire rémunéré) ; justifiée et payée = heures créditées comme un congé. Étiquettes, couleurs, récap paie, CSV, texte comptable et bilan annuel suivent la qualification. Les absences saisies avant restent injustifiées. -->
 <!-- v 2026-08-29 14:50 — 🔒 FERMETURE ANTICIPÉE : miroir de « Retard à l'ouverture » dans le 📒 Journal RH. Nouveau type de problème, et détection automatique — un « Parti plus tôt » du salarié qui FERMAIT la boutique ce jour-là devient une fermeture anticipée (badge 🔒, marqueur des vues Mois / 3 boutiques, libellé « fermeture anticipée » jusque dans le récap paie et le texte comptable) ; les saisies antérieures sont requalifiées toutes seules. Saisie naturelle : on tape l'HEURE RÉELLE (« fermé à 19h50 »), l'écart en minutes se calcule contre l'horaire prévu et s'affiche avant validation — idem pour un retard (« arrivé à 9h40 »). Le champ minutes reste possible. -->
@@ -3403,6 +3404,8 @@ const PRIME_CRITERES=[
   {k:'stock',lib:'Inventaire / Stock',ic:'📦',auto:false,aide:'Inventaires faits avant le 26 du mois'},
   {k:'proc', lib:'Procédures',       ic:'🧾',auto:false,aide:'Encaissements et respect des procédures SAV'},
   {k:'kpi',  lib:'KPIs',             ic:'📈',auto:false,aide:'Panier moyen au-dessus de 35 € et marge au-dessus de 50 %'}];
+const _primeOpen=new Set();   // quels salariés ont leur détail de prime déplié (récap paie)
+function primeToggle(id){id=String(id);if(_primeOpen.has(id))_primeOpen.delete(id);else _primeOpen.add(id);renderPaie();}
 const PRIME_TOL_DEFAUT=15; // minutes de retard tolérées sur le mois avant de proposer la perte du quart
 function primeTolMin(){const c=(S.primes||{})._cfg;const v=c&&+c.ponctTolMin;return (v||v===0)?v:PRIME_TOL_DEFAUT;}
 function setPrimeTol(v){S.primes=S.primes||{};S.primes._cfg=Object.assign({},S.primes._cfg,{ponctTolMin:Math.max(0,parseInt(v)||0),_ts:NOW()});save();renderPaie();}
@@ -3609,11 +3612,17 @@ function renderPaie(){
 // L'outil PROPOSE (ponctualité), Fabien TRANCHE — et seul ce qu'il a tranché existe pour le salarié.
 function primeBloc(e,days){
   const mois=primeMois(days),q=primeQuarts(e,days);
-  let h='<div class="primebloc"><div class="brow" style="gap:6px;flex-wrap:wrap">'+
-    '<b class="small">💶 Prime sur objectifs</b>'+
+  const open=_primeOpen.has(String(e.id));
+  // UNE seule ligne repliée (Fabien 2026-09-01 : le bloc mangeait la colonne) — le détail au clic.
+  let h='<div class="primebloc"><div class="brow" style="gap:6px;cursor:pointer" onclick="primeToggle(\''+e.id+'\')" title="'+(open?'Replier':'Déplier')+' le détail des 4 critères (ponctualité · inventaire/stock · procédures · KPIs)">'+
+    '<span style="width:11px;color:var(--mut);font-size:11px">'+(open?'▾':'▸')+'</span>'+
+    '<b class="small">💶 Prime</b>'+
     '<span class="small" style="font-weight:800;color:'+(q.perdus?'#7f1d1d':'var(--green)')+'">'+q.obtenus+'/4</span>'+
-    (q.proposes?'<span class="small" style="color:#b45309;font-weight:700">— '+q.proposes+' quart'+(q.proposes>1?'s':'')+' à trancher</span>':'')+
-    '<span class="small" style="color:var(--mut)">— la prime se calcule sur la marge, ces 4 critères la conditionnent</span></div>';
+    (q.proposes?'<span class="small" style="color:#b45309;font-weight:700">⚠ '+q.proposes+' à trancher</span>':'')+
+    (q.perdus?'<span class="small" style="color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+primeCriteresPerdus(e,days).map(c=>c.ic).join('')+' '+primeCriteresPerdus(e,days).map(c=>c.lib.toLowerCase()).join(', ')+'</span>':'')+
+    '</div>';
+  if(!open)return h+'</div>';
+  h+='<div class="small" style="padding-left:19px;color:var(--mut)">La prime se calcule sur la marge ; ces 4 critères la conditionnent, 1/4 chacun. Rien n\'est visible du salarié tant que tu n\'as pas tranché.</div>';
   for(const c of PRIME_CRITERES){
     const st=primeEtat(e,days,c.k);
     const det=(c.k==='ponct'&&st.min)?' · '+fmtMin(st.min)+' sur le mois':'';
@@ -3628,7 +3637,7 @@ function primeBloc(e,days){
     else {etiq='✓ acquis';coul='var(--green)';fond='transparent';
       act='<button class="mini ghost" title="Retirer ce quart (visible du salarié une fois retiré)" onclick="primeSetCritere(\''+e.id+'\',\''+mois+'\',\''+c.k+'\',\'perdu\')">✗ retirer le quart</button>';}
     h+='<div class="brow" style="padding-left:8px;font-size:11.5px;gap:6px" title="'+esc(c.aide)+'">'+
-      '<span style="width:132px">'+c.ic+' '+c.lib+(c.auto?' <span class="small" style="color:var(--mut)" title="Mesuré automatiquement par l\'outil">auto</span>':'')+'</span>'+
+      '<span style="width:11px"></span><span style="width:132px">'+c.ic+' '+c.lib+(c.auto?' <span class="small" style="color:var(--mut)" title="Mesuré automatiquement par l\'outil">auto</span>':'')+'</span>'+
       '<span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+fond+';color:'+coul+';border:1px solid '+(fond==='transparent'?'var(--line)':fond)+';white-space:nowrap">'+etiq+'</span>'+
       '<span class="small" style="color:var(--mut);flex:1">'+esc(det.replace(/^ · /,''))+'</span>'+
       '<span style="white-space:nowrap">'+act+'</span></div>';
