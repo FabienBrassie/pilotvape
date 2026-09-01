@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-09-01 10:13 — 💶 PRIME SUR OBJECTIFS (mensuelle, 4 critères d'un quart chacun : ⏰ ponctualité · 📦 inventaire/stock · 🧾 procédures · 📈 KPIs). Les retards, retards à l'ouverture et fermetures anticipées ne portent plus la mention « non rémunéré » mais « condition d'obtention de prime », et le récap paie affiche « 1/4 de prime non obtenu » à côté de l'heure perdue. L'outil ne mesure QUE la ponctualité et se contente de PROPOSER la perte du quart au-delà d'une tolérance réglable (15 min cumulées sur le mois par défaut) : rien n'apparaît chez le salarié tant que tu n'as pas confirmé, et tu peux maintenir le quart malgré les retards. Les 3 autres critères se retirent à la main. Quarts confirmés repris dans le texte comptable, le CSV et « Mon espace ». -->
 <!-- v 2026-08-31 19:16 — 🚷 L'ABSENCE SE QUALIFIE : en la déclarant (panneau 🏖 ou bandeau événements) on choisit désormais « injustifiée » · « justifiée, non payée » · « justifiée ET payée », et on peut changer d'avis après coup depuis l'historique (le justificatif arrive souvent plus tard). Injustifiée = non payée + reprise au 📒 Journal RH comme problème ; justifiée = ce n'est plus une faute, elle sort du Journal, mais elle reste NON PAYÉE par défaut (justifié ne veut pas dire rémunéré) ; justifiée et payée = heures créditées comme un congé. Étiquettes, couleurs, récap paie, CSV, texte comptable et bilan annuel suivent la qualification. Les absences saisies avant restent injustifiées. -->
 <!-- v 2026-08-29 14:50 — 🔒 FERMETURE ANTICIPÉE : miroir de « Retard à l'ouverture » dans le 📒 Journal RH. Nouveau type de problème, et détection automatique — un « Parti plus tôt » du salarié qui FERMAIT la boutique ce jour-là devient une fermeture anticipée (badge 🔒, marqueur des vues Mois / 3 boutiques, libellé « fermeture anticipée » jusque dans le récap paie et le texte comptable) ; les saisies antérieures sont requalifiées toutes seules. Saisie naturelle : on tape l'HEURE RÉELLE (« fermé à 19h50 »), l'écart en minutes se calcule contre l'horaire prévu et s'affiche avant validation — idem pour un retard (« arrivé à 9h40 »). Le champ minutes reste possible. -->
 <!-- v 2026-08-25 22:08 — 📚 Formation, parcours ATTENDU revu (Fabien) : Liquides 3 sem · Matériel 3 sem · Vente 3 sem · Perfectionnement 2 sem (au lieu de 2½/2½/1½/1½). La référence « attendu » (FORM_ATTENDU) ET la création d'un nouveau parcours (durées d'étapes) suivent maintenant ces durées ; les caps automatiques (apte comptoir = fin Matériel, 100 % autonome = fin Vente, parfait = fin Perf.) et le calcul de retard « +X j vs attendu » s'ajustent tout seuls. Les parcours DÉJÀ créés gardent leurs dates. -->
@@ -166,6 +167,8 @@ body.viewpast #calwrap,body.viewpast #monthwrap{opacity:.64;filter:grayscale(.55
 .mscale{display:flex;justify-content:space-between;font-size:9.5px;color:var(--mut);margin-left:85px}
 .paiecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px;align-items:start}
 .paiecol{min-width:0}
+.primebloc{border-top:1px dashed var(--line);margin-top:2px;padding-top:4px}
+
 .paiecol .ecard{margin-bottom:8px}
 .aline.blue{background:#dbeafe;color:#1e40af}
 body.dark .aline.blue{background:#14263f;color:#93c5fd}
@@ -3386,6 +3389,61 @@ function lossMonthLabel(e,days){let deb=0,fin=0,ferm=0;const ds=new Set(days);
   for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;
     if(sn==='debut')deb+=r.min;else{fin+=r.min;if(punctKind(r)==='Fermeture anticipée')ferm+=r.min;}}
   return (deb&&fin)?'retard/départ':(fin?((ferm===fin)?'fermeture anticipée':'départ anticipé'):'retard');}
+// ══════════════════ 💶 PRIME SUR OBJECTIFS (Fabien 2026-08-31) ══════════════════
+// La prime se calcule sur la marge en € de chacun (hors outil) et se CONDITIONNE à 4 critères,
+// chacun valant 1/4. Période : LE MOIS (choix Fabien) — même maille que le récap paie.
+//  ⏰ Ponctualité  : retards, retards à l'ouverture, fermetures anticipées du mois (AUTOMATIQUE)
+//  📦 Inventaire/Stock : inventaires faits avant le 26 du mois
+//  🧾 Procédures   : encaissements et respect des procédures SAV
+//  📈 KPIs         : panier moyen > 35 € et marge > 50 %
+// Le seul critère que l'outil sait mesurer est la ponctualité : il PROPOSE la perte du quart,
+// il ne la décide jamais. RIEN n'est visible du salarié tant que Fabien n'a pas confirmé.
+const PRIME_CRITERES=[
+  {k:'ponct',lib:'Ponctualité',      ic:'⏰',auto:true, aide:'Retards, retards à l\'ouverture et fermetures anticipées du mois'},
+  {k:'stock',lib:'Inventaire / Stock',ic:'📦',auto:false,aide:'Inventaires faits avant le 26 du mois'},
+  {k:'proc', lib:'Procédures',       ic:'🧾',auto:false,aide:'Encaissements et respect des procédures SAV'},
+  {k:'kpi',  lib:'KPIs',             ic:'📈',auto:false,aide:'Panier moyen au-dessus de 35 € et marge au-dessus de 50 %'}];
+const PRIME_TOL_DEFAUT=15; // minutes de retard tolérées sur le mois avant de proposer la perte du quart
+function primeTolMin(){const c=(S.primes||{})._cfg;const v=c&&+c.ponctTolMin;return (v||v===0)?v:PRIME_TOL_DEFAUT;}
+function setPrimeTol(v){S.primes=S.primes||{};S.primes._cfg=Object.assign({},S.primes._cfg,{ponctTolMin:Math.max(0,parseInt(v)||0),_ts:NOW()});save();renderPaie();}
+function primeMois(days){return days[0].slice(0,7);}
+function primeKey(e,mois){return e.id+'|'+mois;}
+function primeRec(e,mois){return (S.primes||{})[primeKey(e,mois)]||null;}
+// Minutes de PONCTUALITÉ du mois : retards + retards à l'ouverture + fermetures anticipées.
+// (La pause prolongée n'en fait pas partie — définition de Fabien.)
+function primePonctMin(e,days){const ds=new Set(days);let t=0;
+  for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;
+    const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;t+=r.min;}
+  return t;}
+function primePonctDetail(e,days){const ds=new Set(days);const out=[];
+  for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;
+    const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;
+    out.push({d:r.date,min:r.min,lib:punctKind(r)||'Retard'});}
+  return out.sort((a,b)=>a.d<b.d?-1:1);}
+// État d'un critère : 'acquis' · 'propose' (l'outil suggère la perte, RIEN n'est visible du salarié)
+// · 'perdu' (tu as confirmé : le quart saute et le salarié le voit) · 'maintenu' (proposé mais tu as tranché « on garde »)
+function primeEtat(e,days,k){
+  const mois=primeMois(days);const rec=primeRec(e,mois);
+  const st=rec&&rec.crit?rec.crit[k]:null;
+  if(st==='perdu')return{etat:'perdu',min:k==='ponct'?primePonctMin(e,days):0};
+  if(st==='ok')return{etat:(k==='ponct'&&primePonctMin(e,days)>primeTolMin())?'maintenu':'acquis',min:k==='ponct'?primePonctMin(e,days):0};
+  if(k==='ponct'){const m=primePonctMin(e,days);
+    if(m>primeTolMin())return{etat:'propose',min:m};
+    return{etat:'acquis',min:m};}
+  return{etat:'acquis',min:0};
+}
+function primeSetCritere(eid,mois,k,val){ // val : 'perdu' | 'ok' | null (= remettre à l'état proposé)
+  S.primes=S.primes||{};const key=eid+'|'+mois;
+  const rec=S.primes[key]||{crit:{}};rec.crit=rec.crit||{};
+  if(val===null)delete rec.crit[k];else rec.crit[k]=val;
+  rec._ts=NOW();S.primes[key]=rec;save();renderPaie();
+  if($('minepanel')&&$('minepanel').style.display==='block')renderMine();}
+// Quarts effectivement perdus (CONFIRMÉS) et proposés (en attente de toi)
+function primeQuarts(e,days){let perdus=0,proposes=0;
+  for(const c of PRIME_CRITERES){const st=primeEtat(e,days,c.k).etat;
+    if(st==='perdu')perdus++;else if(st==='propose')proposes++;}
+  return{perdus,proposes,obtenus:4-perdus};}
+function primeCriteresPerdus(e,days){return PRIME_CRITERES.filter(c=>primeEtat(e,days,c.k).etat==='perdu');}
 function feriesOfMonth(days){return days.filter(d=>{const f=ferieOf(d);return f&&f.type==='ferie';}).sort();}
 function daysAbs(arr,eid,days){let n=0;for(const d of days)if(arr.some(x=>x.empId===eid&&d>=x.du&&d<=x.au))n++;return n;}
 function paieRow(e,days){
@@ -3520,7 +3578,7 @@ function renderPaie(){
     '<button class="act green" onclick="showPaieText()">📋 Texte pour la comptable</button>'+
     '<button class="act'+(bilanOpen?' on':'')+'" onclick="togBilan()">📊 Bilan annuel</button></div>';
   if(bilanOpen)h+=renderBilan();
-  h+='<div class="small" style="margin:2px 0 10px">Heures planifiées du mois, événements en ordre chronologique. À recouper avec le pointage réel ; les majorations (fériés/dimanches) dépendent de ta convention.</div>';
+  h+='<div class="small" style="margin:2px 0 10px">Heures planifiées du mois, événements en ordre chronologique. À recouper avec le pointage réel ; les majorations (fériés/dimanches) dépendent de ta convention.<br>💶 <b>Prime sur objectifs</b> : 4 critères, chacun 1/4. L\'outil ne mesure que la <b>ponctualité</b> (retards, retards à l\'ouverture, fermetures anticipées) et se contente de te PROPOSER la perte du quart au-delà de <input type="number" min="0" step="1" value="'+primeTolMin()+'" onchange="setPrimeTol(this.value)" style="width:56px" title="Tolérance de retard cumulé sur le mois avant proposition"> min cumulées sur le mois. <b>Rien n\'apparaît chez le salarié tant que tu n\'as pas tranché.</b></div>';
   h+='<div class="paiecols">';
   for(const b of S.boutiques){
     if(!paieSel.has(b.id))continue;
@@ -3529,9 +3587,14 @@ function renderPaie(){
     h+='<div class="paiecol"><div class="mhead" style="color:var(--'+b.id+');border-bottom:2px solid var(--'+b.id+');margin-top:0">'+b.nom+'</div>';
     for(const e of bemps){
       const r=paieRow(e,days);
+      const _pq=primeQuarts(e,days),_pp=primeEtat(e,days,'ponct');
       h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:4px">';
       h+='<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
-        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (non rattrapé) — déjà retirées des heures normales ci-contre, non rémunérées">'+fmtHfrac(r.retard)+' '+r.retardLabel+' (non rémunéré)</span>':'')+(r.pause?' · <span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà retirées des heures normales, non rémunérées">'+fmtHfrac(r.pause)+' pause (non rémunéré)</span>':'')+(r.absNP?' · <span style="color:#7f1d1d;font-weight:800" title="Jours d\'absence non payés — heures prévues non travaillées'+(r.absFaute?' (dont '+r.absFaute+' injustifiée(s))':' (absence justifiée)')+'">'+(r.absFaute?'🚫':'🚷')+' '+r.absNP+' j absence non payée'+(r.absNPMin?' ('+fmtDur(r.absNPMin)+')':'')+'</span>':'')+(r.absPayee?' · <span style="color:#0e7490;font-weight:700" title="Absence justifiée que tu as choisi de payer — heures créditées">🚷 '+r.absPayee+' j absence justifiée payée</span>':'')+'</span></div>';
+        '<span class="small" style="margin-left:auto">'+fmtDur(r.norm)+' normales'+(r.hs?' · <span style="color:#0891b2;font-weight:700">'+fmtDur(r.hs)+' HS</span>':'')+(r.retard?' · <span style="color:#dc2626;font-weight:700" title="Heures manquées (non rattrapé) — déjà retirées des heures normales ci-contre. Elles conditionnent le quart « Ponctualité » de la prime.">'+fmtHfrac(r.retard)+' '+r.retardLabel+' (condition d\'obtention de prime)</span>':'')+(r.pause?' · <span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà retirées des heures normales, non rémunérées">'+fmtHfrac(r.pause)+' pause (non rémunéré)</span>':'')+(r.absNP?' · <span style="color:#7f1d1d;font-weight:800" title="Jours d\'absence non payés — heures prévues non travaillées'+(r.absFaute?' (dont '+r.absFaute+' injustifiée(s))':' (absence justifiée)')+'">'+(r.absFaute?'🚫':'🚷')+' '+r.absNP+' j absence non payée'+(r.absNPMin?' ('+fmtDur(r.absNPMin)+')':'')+'</span>':'')+(r.absPayee?' · <span style="color:#0e7490;font-weight:700" title="Absence justifiée que tu as choisi de payer — heures créditées">🚷 '+r.absPayee+' j absence justifiée payée</span>':'')+
+        (_pp.etat==='perdu'?' · <span style="color:#7f1d1d;font-weight:800" title="Quart « Ponctualité » retiré — confirmé par toi, visible du salarié">💶 1/4 de prime non obtenu</span>'
+         :_pp.etat==='propose'?' · <span style="color:#b45309;font-weight:800" title="Proposition de l\'outil : '+fmtMin(_pp.min)+' au-delà de la tolérance de '+primeTolMin()+' min. Rien n\'est visible du salarié tant que tu n\'as pas confirmé.">💶 1/4 de prime non obtenu ?</span>'
+         :_pp.etat==='maintenu'?' · <span style="color:#0e7490;font-weight:700" title="Retards au-delà de la tolérance, mais tu as décidé de maintenir le quart">💶 quart maintenu</span>':'')+'</span></div>';
+      h+=primeBloc(e,days);
       for(const ev of paieEvents(e,days)){
         h+='<div class="brow" style="padding-left:14px;font-size:12px"><span style="width:104px;color:var(--mut)">'+ev.label+'</span><span>'+ev.txt+'</span></div>';
       }
@@ -3541,6 +3604,36 @@ function renderPaie(){
   }
   h+='</div>';
   $('paiepanel').innerHTML=h;
+}
+// Bloc « prime sur objectifs » d'un salarié pour le mois affiché : 4 critères, chacun 1/4.
+// L'outil PROPOSE (ponctualité), Fabien TRANCHE — et seul ce qu'il a tranché existe pour le salarié.
+function primeBloc(e,days){
+  const mois=primeMois(days),q=primeQuarts(e,days);
+  let h='<div class="primebloc"><div class="brow" style="gap:6px;flex-wrap:wrap">'+
+    '<b class="small">💶 Prime sur objectifs</b>'+
+    '<span class="small" style="font-weight:800;color:'+(q.perdus?'#7f1d1d':'var(--green)')+'">'+q.obtenus+'/4</span>'+
+    (q.proposes?'<span class="small" style="color:#b45309;font-weight:700">— '+q.proposes+' quart'+(q.proposes>1?'s':'')+' à trancher</span>':'')+
+    '<span class="small" style="color:var(--mut)">— la prime se calcule sur la marge, ces 4 critères la conditionnent</span></div>';
+  for(const c of PRIME_CRITERES){
+    const st=primeEtat(e,days,c.k);
+    const det=(c.k==='ponct'&&st.min)?' · '+fmtMin(st.min)+' sur le mois':'';
+    let etiq,coul,fond,act;
+    if(st.etat==='perdu'){etiq='✗ 1/4 non obtenu';coul='#fff';fond='#7f1d1d';
+      act='<button class="mini" title="Revenir dessus : le quart est rendu et le salarié ne voit plus rien" onclick="primeSetCritere(\''+e.id+'\',\''+mois+'\',\''+c.k+'\',\'ok\')">↩︎ rendre le quart</button>';}
+    else if(st.etat==='propose'){etiq='⚠ à trancher';coul='#fff';fond='#b45309';
+      act='<button class="mini" title="Confirmer : le quart est retiré et devient visible du salarié" onclick="primeSetCritere(\''+e.id+'\',\''+mois+'\',\''+c.k+'\',\'perdu\')">✓ retirer le quart</button> '+
+          '<button class="mini ghost" title="Maintenir le quart malgré les retards" onclick="primeSetCritere(\''+e.id+'\',\''+mois+'\',\''+c.k+'\',\'ok\')">✗ maintenir</button>';}
+    else if(st.etat==='maintenu'){etiq='✓ maintenu';coul='#fff';fond='#0e7490';
+      act='<button class="mini" title="Finalement, retirer le quart" onclick="primeSetCritere(\''+e.id+'\',\''+mois+'\',\''+c.k+'\',\'perdu\')">✗ retirer</button>';}
+    else {etiq='✓ acquis';coul='var(--green)';fond='transparent';
+      act='<button class="mini ghost" title="Retirer ce quart (visible du salarié une fois retiré)" onclick="primeSetCritere(\''+e.id+'\',\''+mois+'\',\''+c.k+'\',\'perdu\')">✗ retirer le quart</button>';}
+    h+='<div class="brow" style="padding-left:8px;font-size:11.5px;gap:6px" title="'+esc(c.aide)+'">'+
+      '<span style="width:132px">'+c.ic+' '+c.lib+(c.auto?' <span class="small" style="color:var(--mut)" title="Mesuré automatiquement par l\'outil">auto</span>':'')+'</span>'+
+      '<span style="font-size:10px;font-weight:800;padding:1px 7px;border-radius:5px;background:'+fond+';color:'+coul+';border:1px solid '+(fond==='transparent'?'var(--line)':fond)+';white-space:nowrap">'+etiq+'</span>'+
+      '<span class="small" style="color:var(--mut);flex:1">'+esc(det.replace(/^ · /,''))+'</span>'+
+      '<span style="white-space:nowrap">'+act+'</span></div>';
+  }
+  return h+'</div>';
 }
 // Liste chronologique des événements de paye d'un salarié sur le mois
 function paieEvents(e,days){
@@ -3558,7 +3651,7 @@ function paieEvents(e,days){
   const hd=hsByDay(e,days);
   Object.keys(hd).sort().forEach(d=>{evs.push({d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtMin(hd[d])+' sup</span>'});});
   const lwi=lossDayInfo(e,days);
-  Object.keys(lwi).sort().forEach(d=>{evs.push({d,label:'⏰ '+fmtCourt(d),txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures, non rémunéré">'+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' <span style="font-weight:600">(non rémunéré)</span></span>'});});
+  Object.keys(lwi).sort().forEach(d=>{evs.push({d,label:'⏰ '+fmtCourt(d),txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures. Compte pour le quart « Ponctualité » de la prime.">'+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' <span style="font-weight:600">(condition d\'obtention de prime)</span></span>'});});
   const pw=pauseLossByDay(e,days);
   Object.keys(pw).sort().forEach(d=>{evs.push({d,label:'🍽 '+fmtCourt(d),txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[d])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
   // dates de contrat rappelées CHAQUE mois (minimaliste — une date antérieure au mois se classe en tête)
@@ -3571,10 +3664,10 @@ function paieEvents(e,days){
 function exportPaie(){
   const days=monthDays(paieAnchor);
   const emps=S.employees.filter(e=>!e.admin&&paieSel.has(e.b)&&(!paieEmp||e.id===paieEmp)&&days.some(d=>inEmploi(e,d)));
-  const head=['Salarié','Boutique','Heures normales','Heures sup','Retard/départ non rattrapé (déjà déduit)','Pauses prolongées (déjà déduit)','Absences non payées (j)','Absences non payées (heures)','dont injustifiées (j)','Absences justifiées payées (j)','Fériés travaillés','Dimanches travaillés','Congés (j)','Maladie (j)','École (j)'];
+  const head=['Salarié','Boutique','Heures normales','Heures sup','Retard/départ non rattrapé (déjà déduit)','Pauses prolongées (déjà déduit)','Absences non payées (j)','Absences non payées (heures)','dont injustifiées (j)','Absences justifiées payées (j)','Fériés travaillés','Dimanches travaillés','Congés (j)','Maladie (j)','École (j)','Prime sur objectifs (quarts obtenus)','Quarts non obtenus (confirmés)'];
   const lines=[head.join(';')];
   for(const e of emps){const r=paieRow(e,days);
-    lines.push([r.nom,bout(r.b).nom,fmtDur(r.norm),fmtDur(r.hs),r.retard?'-'+fmtDur(r.retard):'',r.pause?'-'+fmtDur(r.pause):'',r.absNP||'',r.absNPMin?'-'+fmtDur(r.absNPMin):'',r.absFaute||'',r.absPayee||'',r.fer,r.dim,r.conge,r.maladie,r.ecole].join(';'));}
+    lines.push([r.nom,bout(r.b).nom,fmtDur(r.norm),fmtDur(r.hs),r.retard?'-'+fmtDur(r.retard):'',r.pause?'-'+fmtDur(r.pause):'',r.absNP||'',r.absNPMin?'-'+fmtDur(r.absNPMin):'',r.absFaute||'',r.absPayee||'',r.fer,r.dim,r.conge,r.maladie,r.ecole,primeQuarts(e,days).obtenus+'/4',primeCriteresPerdus(e,days).map(c=>c.lib).join(' + ')].join(';'));}
   const blob=new Blob(['﻿'+lines.join('\n')],{type:'text/csv;charset=utf-8'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);
   a.download='recap-paie-'+paieAnchor.slice(0,7)+'.csv';a.click();
@@ -3606,7 +3699,7 @@ function paieTextStr(){
       Object.keys(hd).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtMin(hd[d])+' sup\n';});
       // heures manquées (retard/départ non rattrapé) PAR JOUR — déjà déduites des heures travaillées, non rémunérées
       const lwi=lossDayInfo(e,days);
-      Object.keys(lwi).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' (non rémunéré)\n';});
+      Object.keys(lwi).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' (condition d\'obtention de prime)\n';});
       // pauses prolongées pointées PAR JOUR — déjà déduites des heures travaillées, non rémunérées
       const pw=pauseLossByDay(e,days);
       Object.keys(pw).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(pw[d])+' pause prolongée (non rémunéré)\n';});
@@ -3615,6 +3708,9 @@ function paieTextStr(){
        for(const d of absJours(e,days)){const q=absQualif(presence(e,d).abs);
          out+='  Le '+fmtCourt(d)+' : '+q.lib.toLowerCase()+(q.payee?' — journée payée'
               :(aj[d]?' — '+fmtMin(aj[d])+' non rémunérées':' (jour non travaillé)'))+'\n';}}
+      // 💶 prime sur objectifs : seulement les quarts CONFIRMÉS (la comptable a besoin du nombre de quarts)
+      {const pq=primeQuarts(e,days),pp=primeCriteresPerdus(e,days);
+       if(pp.length)out+='  Prime sur objectifs : '+pq.obtenus+'/4 — non obtenu : '+pp.map(c=>c.lib.toLowerCase()).join(', ')+'.\n';}
       // congés acceptés du mois
       for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
         out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du)+'.':'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)+'.')+'\n';
@@ -3636,7 +3732,7 @@ function showPaieText(){
     '<button class="act" onclick="dlPaieText()">⬇️ .txt</button>'+
     '<button class="act grey" onclick="renderPaie()">← Tableau</button>'+
     '<button class="act grey" style="margin-left:auto" onclick="$(\'paiepanel\').style.display=\'none\'">Fermer</button></div>';
-  h+='<div class="small" style="margin:2px 0 8px">Les primes (de gestion / sur objectif) seront ajoutées dans une prochaine brique. Relis avant d\'envoyer.</div>';
+  h+='<div class="small" style="margin:2px 0 8px">La prime sur objectifs apparaît en quarts obtenus (le montant dépend de la marge, calculée hors outil) — seuls les quarts que tu as confirmés y figurent. Relis avant d\'envoyer.</div>';
   h+='<textarea id="paietxt" style="width:100%;height:54vh;font-family:ui-monospace,Menlo,monospace;font-size:12.5px;border:1px solid var(--line);border-radius:10px;padding:10px;background:var(--bg);color:var(--txt)">'+esc(txt)+'</textarea>';
   el.innerHTML=h;el.style.display='block';
 }
@@ -4851,6 +4947,19 @@ function renderMine(){
       h+='<div class="brow" style="padding-left:6px'+(past&&x.statut!=='attente'?';opacity:.5':'')+'"><span>⏱</span><span>'+fmtFR(x.date)+'</span><span class="small" style="color:#0891b2;font-weight:700">'+hsLabel(x)+'</span>'+
         (x.statut==='accepte'?'<span class="gm done" style="margin-left:0;cursor:default">acceptée ✓</span>':x.statut==='refuse'?'<span class="gm" style="margin-left:0;cursor:default;opacity:.6">refusée</span>':'<span class="gm todo" style="margin-left:0;cursor:default">en attente</span>')+
         (x.statut==='attente'?' <button class="mini ghost" onclick="delHS('+x.id+')" title="Annuler ma demande">🗑</button>':'')+'</div>';}}
+  // 3-0) MA PRIME SUR OBJECTIFS — UNIQUEMENT les quarts que l'employeur a CONFIRMÉS.
+  // Tant qu'un quart n'est que « proposé » par l'outil, le salarié n'en voit RIEN (règle Fabien).
+  {const moisAff=[monthDays(curMonday),monthDays(addD(monday(curMonday),-31))];
+   let hp='';
+   for(const dm of moisAff){
+     const perdus=primeCriteresPerdus(e,dm);if(!perdus.length)continue;
+     const lbl=MOISN[+dm[0].slice(5,7)]+' '+dm[0].slice(0,4);
+     hp+='<div class="brow" style="padding-left:6px"><span>💶</span><span style="width:110px">'+lbl+'</span>'+
+       perdus.map(c=>'<span class="gm" style="margin-left:0;cursor:default;background:#7f1d1d;color:#fff" title="'+esc(c.aide)+'">'+c.ic+' '+c.lib+' — 1/4 non obtenu</span>').join(' ')+
+       '<span class="small" style="color:var(--mut);margin-left:auto">'+(4-perdus.length)+'/4</span></div>';
+   }
+   if(hp)h+='<div class="mhead">💶 Prime sur objectifs</div>'+hp+
+     '<div class="small" style="color:var(--mut);margin:2px 0 6px">La prime se calcule sur ta marge en € et dépend de 4 critères (ponctualité · inventaire/stock · procédures · KPIs). Seuls les quarts confirmés par la direction apparaissent ici.</div>';}
   // 3-bis) MES PAUSES POINTÉES (transparence : le salarié voit ce qui est enregistré)
   const myps=(S.pauses||[]).filter(x=>x.empId===e.id).sort((a,b)=>a.date<b.date?1:-1).slice(0,15);
   if(myps.length){h+='<div class="mhead">🍽️ Mes pauses pointées</div>';
