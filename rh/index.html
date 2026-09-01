@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-09-01 12:26 — Récap paie : plus de doublon sur la prime. La ligne « 💶 Prime 3/4 · ponctualité » (dépliable) porte seule l'information et remonte AU-DESSUS des pointillés, avec les infos du salarié ; le trait sépare maintenant le salarié (et sa prime) de ses événements du mois. -->
 <!-- v 2026-09-01 11:41 — Récap paie plus lisible : les informations d'un salarié (heures normales · HS · retard · absences · prime) sont désormais UNE PAR LIGNE — tout à la suite laissait croire, par exemple, que le quart de prime tombait à cause des jours d'absence non payés. La ligne de prime nomme d'ailleurs son critère (« 1/4 de prime non obtenu — ponctualité »). Les lignes d'événements du mois ne se cassent plus en deux : le texte suit sa date et retourne à la ligne dans sa colonne. -->
 <!-- v 2026-09-01 11:29 — 💶 Le bloc prime du récap paie tient en UNE ligne repliée (« 💶 Prime 3/4 · ⚠ 1 à trancher », avec les critères perdus en clair) : le détail des 4 critères et les boutons de décision s'ouvrent au clic, comme l'Historique des absences et les Écarts de pause. Il ne mange plus la colonne du salarié. -->
 <!-- v 2026-09-01 10:13 — 💶 PRIME SUR OBJECTIFS (mensuelle, 4 critères d'un quart chacun : ⏰ ponctualité · 📦 inventaire/stock · 🧾 procédures · 📈 KPIs). Les retards, retards à l'ouverture et fermetures anticipées ne portent plus la mention « non rémunéré » mais « condition d'obtention de prime », et le récap paie affiche « 1/4 de prime non obtenu » à côté de l'heure perdue. L'outil ne mesure QUE la ponctualité et se contente de PROPOSER la perte du quart au-delà d'une tolérance réglable (15 min cumulées sur le mois par défaut) : rien n'apparaît chez le salarié tant que tu n'as pas confirmé, et tu peux maintenir le quart malgré les retards. Les 3 autres critères se retirent à la main. Quarts confirmés repris dans le texte comptable, le CSV et « Mon espace ». -->
@@ -169,7 +170,8 @@ body.viewpast #calwrap,body.viewpast #monthwrap{opacity:.64;filter:grayscale(.55
 .mscale{display:flex;justify-content:space-between;font-size:9.5px;color:var(--mut);margin-left:85px}
 .paiecols{display:grid;grid-template-columns:repeat(auto-fit,minmax(270px,1fr));gap:12px;align-items:start}
 .paiecol{min-width:0}
-.primebloc{border-top:1px dashed var(--line);margin-top:2px;padding-top:4px}
+.primebloc{margin-top:1px}
+.paiesep{border-top:1px dashed var(--line);margin:4px 0 2px}
 .paieinfos{display:flex;flex-direction:column;gap:1px;padding-left:19px;line-height:1.45}
 
 .paiecol .ecard{margin-bottom:8px}
@@ -3592,7 +3594,6 @@ function renderPaie(){
     h+='<div class="paiecol"><div class="mhead" style="color:var(--'+b.id+');border-bottom:2px solid var(--'+b.id+');margin-top:0">'+b.nom+'</div>';
     for(const e of bemps){
       const r=paieRow(e,days);
-      const _pq=primeQuarts(e,days),_pp=primeEtat(e,days,'ponct');
       h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:4px">';
       // Chaque information sur SA ligne (Fabien 2026-09-01 : tout à la suite laissait croire que
       // le quart de prime tombait à cause des absences non payées).
@@ -3603,12 +3604,10 @@ function renderPaie(){
       if(r.pause)infos.push('<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà retirées des heures normales, non rémunérées">'+fmtHfrac(r.pause)+' pause (non rémunéré)</span>');
       if(r.absNP)infos.push('<span style="color:#7f1d1d;font-weight:800" title="Jours d\'absence non payés — heures prévues non travaillées'+(r.absFaute?' (dont '+r.absFaute+' injustifiée(s))':' (absence justifiée)')+'">'+(r.absFaute?'🚫':'🚷')+' '+r.absNP+' j absence non payée'+(r.absNPMin?' ('+fmtDur(r.absNPMin)+')':'')+'</span>');
       if(r.absPayee)infos.push('<span style="color:#0e7490;font-weight:700" title="Absence justifiée que tu as choisi de payer — heures créditées">🚷 '+r.absPayee+' j absence justifiée payée</span>');
-      if(_pp.etat==='perdu')infos.push('<span style="color:#7f1d1d;font-weight:800" title="Quart « Ponctualité » retiré — confirmé par toi, visible du salarié">💶 1/4 de prime non obtenu — ponctualité</span>');
-      else if(_pp.etat==='propose')infos.push('<span style="color:#b45309;font-weight:800" title="Proposition de l\'outil : '+fmtMin(_pp.min)+' au-delà de la tolérance de '+primeTolMin()+' min. Rien n\'est visible du salarié tant que tu n\'as pas confirmé.">💶 1/4 de prime non obtenu — ponctualité ?</span>');
-      else if(_pp.etat==='maintenu')infos.push('<span style="color:#0e7490;font-weight:700" title="Retards au-delà de la tolérance, mais tu as décidé de maintenir le quart">💶 quart « ponctualité » maintenu</span>');
       h+='<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b></div>';
       h+='<div class="paieinfos small">'+infos.map(x=>'<div>'+x+'</div>').join('')+'</div>';
       h+=primeBloc(e,days);
+      h+='<div class="paiesep"></div>';   // le trait sépare le salarié (+ sa prime) de ses événements du mois
       for(const ev of paieEvents(e,days)){
         // la ligne d'événement ne se casse plus en deux : le texte suit son étiquette et retourne à la ligne DANS sa colonne
         h+='<div class="brow" style="padding-left:14px;font-size:12px;flex-wrap:nowrap;align-items:flex-start;gap:6px"><span style="width:74px;flex:none;color:var(--mut)">'+ev.label+'</span><span style="flex:1;min-width:0">'+ev.txt+'</span></div>';
