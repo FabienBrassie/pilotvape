@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-09-01 12:42 — Récap paie compact : le détail du mois (fériés, congés, absences, heures sup, retards, pauses, dates de contrat) est regroupé sous une ligne repliée « 📅 Détail du mois — N lignes » avec un résumé en pastilles à droite (⏰ 3 · 🚷 2 · 🎌 1). Une carte salarié tient désormais en 4 lignes ; un mois sans événement n'affiche ni trait ni ligne. -->
 <!-- v 2026-09-01 12:26 — Récap paie : plus de doublon sur la prime. La ligne « 💶 Prime 3/4 · ponctualité » (dépliable) porte seule l'information et remonte AU-DESSUS des pointillés, avec les infos du salarié ; le trait sépare maintenant le salarié (et sa prime) de ses événements du mois. -->
 <!-- v 2026-09-01 11:41 — Récap paie plus lisible : les informations d'un salarié (heures normales · HS · retard · absences · prime) sont désormais UNE PAR LIGNE — tout à la suite laissait croire, par exemple, que le quart de prime tombait à cause des jours d'absence non payés. La ligne de prime nomme d'ailleurs son critère (« 1/4 de prime non obtenu — ponctualité »). Les lignes d'événements du mois ne se cassent plus en deux : le texte suit sa date et retourne à la ligne dans sa colonne. -->
 <!-- v 2026-09-01 11:29 — 💶 Le bloc prime du récap paie tient en UNE ligne repliée (« 💶 Prime 3/4 · ⚠ 1 à trancher », avec les critères perdus en clair) : le détail des 4 critères et les boutons de décision s'ouvrent au clic, comme l'Historique des absences et les Écarts de pause. Il ne mange plus la colonne du salarié. -->
@@ -3607,10 +3608,20 @@ function renderPaie(){
       h+='<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b></div>';
       h+='<div class="paieinfos small">'+infos.map(x=>'<div>'+x+'</div>').join('')+'</div>';
       h+=primeBloc(e,days);
-      h+='<div class="paiesep"></div>';   // le trait sépare le salarié (+ sa prime) de ses événements du mois
-      for(const ev of paieEvents(e,days)){
-        // la ligne d'événement ne se casse plus en deux : le texte suit son étiquette et retourne à la ligne DANS sa colonne
-        h+='<div class="brow" style="padding-left:14px;font-size:12px;flex-wrap:nowrap;align-items:flex-start;gap:6px"><span style="width:74px;flex:none;color:var(--mut)">'+ev.label+'</span><span style="flex:1;min-width:0">'+ev.txt+'</span></div>';
+      // Le détail du mois vit sous une ligne repliée, comme la prime (Fabien 2026-09-01 : gagner de la place).
+      const evs=paieEvents(e,days);
+      if(evs.length){
+        h+='<div class="paiesep"></div>';   // le trait sépare le salarié (+ sa prime) de son détail du mois
+        const openE=_paieEvOpen.has(String(e.id));
+        h+='<div class="brow" style="gap:6px;cursor:pointer;padding:2px 0" onclick="paieEvToggle(\''+e.id+'\')" title="'+(openE?'Replier':'Déplier')+' le détail jour par jour du mois">'+
+          '<span style="width:11px;color:var(--mut);font-size:11px">'+(openE?'▾':'▸')+'</span>'+
+          '<b class="small">📅 Détail du mois</b>'+
+          '<span class="small" style="color:var(--mut)">'+evs.length+' ligne'+(evs.length>1?'s':'')+'</span>'+
+          '<span class="small" style="margin-left:auto;white-space:nowrap">'+paieEvResume(evs)+'</span></div>';
+        if(openE)for(const ev of evs){
+          // la ligne d'événement ne se casse plus en deux : le texte suit son étiquette et retourne à la ligne DANS sa colonne
+          h+='<div class="brow" style="padding-left:19px;font-size:12px;flex-wrap:nowrap;align-items:flex-start;gap:6px"><span style="width:74px;flex:none;color:var(--mut)">'+ev.label+'</span><span style="flex:1;min-width:0">'+ev.txt+'</span></div>';
+        }
       }
       h+='</div>';
     }
@@ -3618,6 +3629,16 @@ function renderPaie(){
   }
   h+='</div>';
   $('paiepanel').innerHTML=h;
+}
+const _paieEvOpen=new Set();   // quels salariés ont leur détail du mois déplié
+function paieEvToggle(id){id=String(id);if(_paieEvOpen.has(id))_paieEvOpen.delete(id);else _paieEvOpen.add(id);renderPaie();}
+// Résumé d'un mois en pastilles : ce qu'on voit sans déplier (« ⏰ 3 · 🚷 2 · 🎌 1 »).
+const PAIE_EV_ICONES=[['ret','⏰','retard / départ'],['pz','🍽','pause prolongée'],['abs','🚷','absence'],
+                      ['hs','⏱','heures sup'],['cg','🏖','congés'],['ml','🤒','maladie'],
+                      ['fer','🎌','férié'],['ctr','📄','contrat']];
+function paieEvResume(evs){
+  const n={};for(const x of evs)n[x.k||'?']=(n[x.k||'?']||0)+1;
+  return PAIE_EV_ICONES.filter(x=>n[x[0]]).map(x=>'<span title="'+x[2]+'" style="margin-left:5px">'+x[1]+' '+n[x[0]]+'</span>').join('');
 }
 // Bloc « prime sur objectifs » d'un salarié pour le mois affiché : 4 critères, chacun 1/4.
 // L'outil PROPOSE (ponctualité), Fabien TRANCHE — et seul ce qu'il a tranché existe pour le salarié.
@@ -3660,26 +3681,25 @@ function paieEvents(e,days){
   const evs=[];
   for(const d of feriesOfMonth(days)){if(!inEmploi(e,d))continue;
     const wm=dayWorkedMin(e,d);
-    evs.push({d,label:frDate(d),txt:wm>0?'🟢 '+fmtMin(wm)+' travaillées':'🔴 Chômé'});}
+    evs.push({k:'fer',d,label:frDate(d),txt:wm>0?'🟢 '+fmtMin(wm)+' travaillées':'🔴 Chômé'});}
   for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]))
-    evs.push({d:c.du,label:'🏖 Congés',txt:c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)});
+    evs.push({k:'cg',d:c.du,label:'🏖 Congés',txt:c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)});
   for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]))
-    evs.push({d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
+    evs.push({k:'ml',d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
   {const aj=absByDayNonPayees(e,days);
    for(const d of absJours(e,days)){const q=absQualif(presence(e,d).abs);
-     evs.push({d,label:q.ic+' '+fmtCourt(d),txt:'<span style="color:'+q.col+';font-weight:800" title="'+(q.payee?'Absence justifiée que tu as choisi de payer — heures créditées':'Heures prévues non travaillées')+'">'+q.lib+(aj[d]?' — '+fmtDur(aj[d]):'')+' <span style="font-weight:600">('+(q.payee?'payé':'non rémunéré')+')</span></span>'});}}
+     evs.push({k:'abs',d,label:q.ic+' '+fmtCourt(d),txt:'<span style="color:'+q.col+';font-weight:800" title="'+(q.payee?'Absence justifiée que tu as choisi de payer — heures créditées':'Heures prévues non travaillées')+'">'+q.lib+(aj[d]?' — '+fmtDur(aj[d]):'')+' <span style="font-weight:600">('+(q.payee?'payé':'non rémunéré')+')</span></span>'});}}
   const hd=hsByDay(e,days);
-  Object.keys(hd).sort().forEach(d=>{evs.push({d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtMin(hd[d])+' sup</span>'});});
+  Object.keys(hd).sort().forEach(d=>{evs.push({k:'hs',d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtMin(hd[d])+' sup</span>'});});
   const lwi=lossDayInfo(e,days);
-  Object.keys(lwi).sort().forEach(d=>{evs.push({d,label:'⏰ '+fmtCourt(d),txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures. Compte pour le quart « Ponctualité » de la prime.">'+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' <span style="font-weight:600">(condition d\'obtention de prime)</span></span>'});});
+  Object.keys(lwi).sort().forEach(d=>{evs.push({k:'ret',d,label:'⏰ '+fmtCourt(d),txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures. Compte pour le quart « Ponctualité » de la prime.">'+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' <span style="font-weight:600">(condition d\'obtention de prime)</span></span>'});});
   const pw=pauseLossByDay(e,days);
-  Object.keys(pw).sort().forEach(d=>{evs.push({d,label:'🍽 '+fmtCourt(d),txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[d])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
+  Object.keys(pw).sort().forEach(d=>{evs.push({k:'pz',d,label:'🍽 '+fmtCourt(d),txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[d])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
   // dates de contrat rappelées CHAQUE mois (minimaliste — une date antérieure au mois se classe en tête)
-  if(e.dateIn)evs.push({d:e.dateIn,label:'📄 Entré',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
-  if(e.dateOut)evs.push({d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
+  if(e.dateIn)evs.push({k:'ctr',d:e.dateIn,label:'📄 Entré',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
+  if(e.dateOut)evs.push({k:'ctr',d:e.dateOut,label:'📄 Fin de contrat',txt:'<b>le '+fmtFR(e.dateOut)+'</b>'});
   evs.sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0);
-  if(!evs.length)evs.push({d:'',label:'',txt:'<span class="small">Aucun événement ce mois.</span>'});
-  return evs;
+  return evs;   // liste vide = mois sans événement (le récap n'affiche alors rien du tout)
 }
 function exportPaie(){
   const days=monthDays(paieAnchor);
