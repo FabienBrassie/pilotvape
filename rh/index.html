@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-09-01 15:18 — 🔁 Multi-boutiques, la ventilation est juste : un salarié à cheval apparaît sous CHAQUE boutique dans le récap ET dans le mail comptable (il manquait dans le mail), et chaque événement va où il s'est passé — heures sup, retards, absences et fériés sont rattachés à la boutique du jour ; congés, arrêts maladie et dates de contrat valent pour toutes ses boutiques et portent la mention « (sur ses 2 boutiques) ». Son total du mois et sa ventilation n'apparaissent qu'une fois, chez lui ; sous l'autre boutique : heures faites là-bas, ce qui s'y est passé, et « paie détaillée sous … ». -->
 <!-- v 2026-09-01 15:11 — 🔁 Salarié à cheval sur deux boutiques (cas Louis) : il apparaît maintenant dans le récap paie ET dans le mail comptable de CHAQUE boutique où il a travaillé. Sur sa boutique de rattachement, sa carte dit la ventilation (« 🔁 86h30 à Mérignac · 53h30 à Pessac ») ; dans l'autre, une carte courte donne les heures faites là-bas et renvoie la paie chez lui — aucune heure, aucune prime, aucun événement n'est compté deux fois. Le CSV garde une seule ligne par salarié avec une colonne « Répartition par boutique ». -->
 <!-- v 2026-09-01 12:42 — Récap paie compact : le détail du mois (fériés, congés, absences, heures sup, retards, pauses, dates de contrat) est regroupé sous une ligne repliée « 📅 Détail du mois — N lignes » avec un résumé en pastilles à droite (⏰ 3 · 🚷 2 · 🎌 1). Une carte salarié tient désormais en 4 lignes ; un mois sans événement n'affiche ni trait ni ligne. -->
 <!-- v 2026-09-01 12:26 — Récap paie : plus de doublon sur la prime. La ligne « 💶 Prime 3/4 · ponctualité » (dépliable) porte seule l'information et remonte AU-DESSUS des pointillés, avec les infos du salarié ; le trait sépare maintenant le salarié (et sa prime) de ses événements du mois. -->
@@ -3371,7 +3372,8 @@ function dayWorkedMin(e,iso){const pp=presence(e,iso);if(pp.st!=='present')retur
 // par semaine — une semaine à cheval sur deux mois affichait « S27 : 7,75h » côté paie de juillet
 // alors que la barre du planning montrait la semaine entière à 8h15 ; au jour, chaque heure
 // appartient à un seul mois et les totaux mensuels collent d'eux-mêmes).
-function hsByDay(e,days){const w={};for(const d of days){const pp=presence(e,d);if(pp.st!=='present')continue;for(const bl of (pp.blocks||[]))if(bl[3])w[d]=(w[d]||0)+durMin(bl[0],bl[1]);}return w;}
+function hsByDay(e,days,bId){const w={};for(const d of days){const pp=presence(e,d);if(pp.st!=='present')continue;
+  for(const bl of (pp.blocks||[]))if(bl[3]&&(!bId||String(bl[2]||pp.b)===String(bId)))w[d]=(w[d]||0)+durMin(bl[0],bl[1]);}return w;}
 // Heures MANQUÉES non rattrapées (retards + départs anticipés acceptés), par semaine ISO. Déjà retirées des heures normales (blocs rouges exclus du décompte) — le symétrique des HS, pour NE PAS les payer.
 function lossByWeek(e,days){const w={};const ds=new Set(days);
   for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;const k=isoWeek(r.date);w[k]=(w[k]||0)+r.min;}
@@ -3385,8 +3387,9 @@ function fmtHfrac(min){const h=Math.floor(min/60),m=min%60;const F={15:'1/4',30:
 // Retards/départs validés par semaine ISO : {min, label} — label correct (retard / départ anticipé / les deux).
 // Retards / départs anticipés PAR JOUR pour le récap comptable (Fabien 2026-07-27 : au jour,
 // comme les heures sup — plus d'ambiguïté de semaine à cheval, lecture directe pour la comptable).
-function lossDayInfo(e,days){const w={};const ds=new Set(days);
+function lossDayInfo(e,days,bId){const w={};const ds=new Set(days);
   for(const r of (S.hsdemandes||[])){if(r.empId!==e.id||r.statut!=='accepte')continue;const sn=r.sens||'sup';if(sn!=='debut'&&sn!=='fin')continue;if(!ds.has(r.date))continue;
+    if(!estDuShop(e,r.date,bId))continue;
     const o=(w[r.date]=w[r.date]||{min:0,deb:0,fin:0,ferm:0});o.min+=r.min;o[sn==='debut'?'deb':'fin']+=r.min;
     if(punctKind(r)==='Fermeture anticipée')o.ferm+=r.min;}
   Object.keys(w).forEach(k=>{const o=w[k];
@@ -3473,6 +3476,19 @@ function repartitionShops(e,days){
 function paieVisiteurs(bId,days){
   return S.employees.filter(e=>!e.admin&&e.b!==bId&&(!paieEmp||e.id===paieEmp)
     &&days.some(d=>inEmploi(e,d))&&minChezShop(e,days,bId)>0);}
+// Boutique à laquelle rattacher un ÉVÉNEMENT DATÉ (heure sup, retard, absence, pause, férié) :
+// celle où le salarié était — ou devait être — ce jour-là. Un jour partagé va à la boutique où il
+// a fait le plus d'heures. Les événements de PÉRIODE (congé, maladie, dates de contrat) ne sont
+// rattachés à personne : ils valent pour toutes ses boutiques (Fabien : « ses congés sont dans les
+// 2 boutiques en même temps, mais les heures sup, les retards ou absences sont dans l'une ou l'autre »).
+function shopDuJour(e,iso){
+  const p=presence(e,iso);
+  if(p.st==='present'&&p.blocks&&p.blocks.length){
+    const m={};for(const bl of p.blocks){const k=String(bl[2]||p.b);m[k]=(m[k]||0)+durMin(bl[0],bl[1]);}
+    const ks=Object.keys(m).sort((a,b2)=>m[b2]-m[a]);if(ks.length)return ks[0];}
+  return String(p.b||e.b);
+}
+function estDuShop(e,iso,bId){return !bId||shopDuJour(e,iso)===String(bId);}
 function feriesOfMonth(days){return days.filter(d=>{const f=ferieOf(d);return f&&f.type==='ferie';}).sort();}
 function daysAbs(arr,eid,days){let n=0;for(const d of days)if(arr.some(x=>x.empId===eid&&d>=x.du&&d<=x.au))n++;return n;}
 function paieRow(e,days){
@@ -3634,7 +3650,7 @@ function renderPaie(){
       h+='<div class="paieinfos small">'+infos.map(x=>'<div>'+x+'</div>').join('')+'</div>';
       h+=primeBloc(e,days);
       // Le détail du mois vit sous une ligne repliée, comme la prime (Fabien 2026-09-01 : gagner de la place).
-      const evs=paieEvents(e,days);
+      const evs=paieEvents(e,days,b.id);
       if(evs.length){
         h+='<div class="paiesep"></div>';   // le trait sépare le salarié (+ sa prime) de son détail du mois
         const openE=_paieEvOpen.has(String(e.id));
@@ -3653,11 +3669,25 @@ function renderPaie(){
     // ── Salariés d'une AUTRE boutique qui ont travaillé ici ce mois (cas Louis) ──
     for(const e of bvis){
       const m=minChezShop(e,days,b.id),j=joursChezShop(e,days,b.id);
-      h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:2px;opacity:.92">'+
+      h+='<div class="ecard" style="flex-direction:column;align-items:stretch;gap:2px">'+
         '<div class="brow" style="margin-bottom:2px"><span class="bdot" style="background:'+colOf(e)+'"></span><b>'+esc(e.nom)+'</b>'+
           '<span class="chipb" style="color:var(--'+e.b+')" title="Boutique de rattachement — sa paie est détaillée là-bas">🔁 '+bout(e.b).nom+'</span></div>'+
         '<div class="paieinfos small"><div><span><b>'+fmtDur(m)+'</b> effectuées ici ('+j+' jour'+(j>1?'s':'')+')</span></div>'+
-        '<div><span style="color:var(--mut)">total du mois '+fmtDur(paieRow(e,days).norm)+' — paie détaillée sous '+esc(bout(e.b).nom)+'</span></div></div></div>';
+        '<div><span style="color:var(--mut)">total du mois '+fmtDur(paieRow(e,days).norm)+' — paie détaillée sous '+esc(bout(e.b).nom)+'</span></div></div>';
+      // ce qui s'est passé ICI (heures sup, retards, absences de ces jours-là) + ses périodes communes
+      const evsV=paieEvents(e,days,b.id);
+      if(evsV.length){
+        h+='<div class="paiesep"></div>';
+        const oV=_paieEvOpen.has(String(e.id)+'|'+b.id);
+        h+='<div class="brow" style="gap:6px;cursor:pointer;padding:2px 0" onclick="paieEvToggle(\''+e.id+'|'+b.id+'\')" title="'+(oV?'Replier':'Déplier')+' ce qui s\'est passé à '+esc(b.nom)+'">'+
+          '<span style="width:11px;color:var(--mut);font-size:11px">'+(oV?'▾':'▸')+'</span>'+
+          '<b class="small">📅 Ici ce mois</b>'+
+          '<span class="small" style="color:var(--mut)">'+evsV.length+' ligne'+(evsV.length>1?'s':'')+'</span>'+
+          '<span class="small" style="margin-left:auto;white-space:nowrap">'+paieEvResume(evsV)+'</span></div>';
+        if(oV)for(const ev of evsV)
+          h+='<div class="brow" style="padding-left:19px;font-size:12px;flex-wrap:nowrap;align-items:flex-start;gap:6px"><span style="width:74px;flex:none;color:var(--mut)">'+ev.label+'</span><span style="flex:1;min-width:0">'+ev.txt+'</span></div>';
+      }
+      h+='</div>';
     }
     h+='</div>';
   }
@@ -3711,23 +3741,26 @@ function primeBloc(e,days){
   return h+'</div>';
 }
 // Liste chronologique des événements de paye d'un salarié sur le mois
-function paieEvents(e,days){
+function paieEvents(e,days,bId){
   const evs=[];
-  for(const d of feriesOfMonth(days)){if(!inEmploi(e,d))continue;
+  const multi=repartitionShops(e,days).length>1;
+  const suffCommun=multi?' <span class="small" style="color:var(--mut)">(sur ses 2 boutiques)</span>':'';
+  for(const d of feriesOfMonth(days)){if(!inEmploi(e,d))continue;if(!estDuShop(e,d,bId))continue;
     const wm=dayWorkedMin(e,d);
     evs.push({k:'fer',d,label:frDate(d),txt:wm>0?'🟢 '+fmtMin(wm)+' travaillées':'🔴 Chômé'});}
   for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]))
-    evs.push({k:'cg',d:c.du,label:'🏖 Congés',txt:c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)});
+    evs.push({k:'cg',d:c.du,label:'🏖 Congés',txt:(c.du===c.au?'le '+fmtCourt(c.du):'du '+fmtCourt(c.du)+' au '+fmtCourt(c.au))+suffCommun});
   for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]))
-    evs.push({k:'ml',d:m.du,label:'🤒 Maladie',txt:m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)});
+    evs.push({k:'ml',d:m.du,label:'🤒 Maladie',txt:(m.du===m.au?'le '+fmtCourt(m.du):'du '+fmtCourt(m.du)+' au '+fmtCourt(m.au))+suffCommun});
   {const aj=absByDayNonPayees(e,days);
    for(const d of absJours(e,days)){const q=absQualif(presence(e,d).abs);
+     if(!estDuShop(e,d,bId))continue;
      evs.push({k:'abs',d,label:q.ic+' '+fmtCourt(d),txt:'<span style="color:'+q.col+';font-weight:800" title="'+(q.payee?'Absence justifiée que tu as choisi de payer — heures créditées':'Heures prévues non travaillées')+'">'+q.lib+(aj[d]?' — '+fmtDur(aj[d]):'')+' <span style="font-weight:600">('+(q.payee?'payé':'non rémunéré')+')</span></span>'});}}
-  const hd=hsByDay(e,days);
+  const hd=hsByDay(e,days,bId);
   Object.keys(hd).sort().forEach(d=>{evs.push({k:'hs',d,label:'⏱ '+fmtCourt(d),txt:'<span style="color:#0891b2;font-weight:700">'+fmtMin(hd[d])+' sup</span>'});});
-  const lwi=lossDayInfo(e,days);
+  const lwi=lossDayInfo(e,days,bId);
   Object.keys(lwi).sort().forEach(d=>{evs.push({k:'ret',d,label:'⏰ '+fmtCourt(d),txt:'<span style="color:#dc2626;font-weight:700" title="Non rattrapé — déjà déduit des heures. Compte pour le quart « Ponctualité » de la prime.">'+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' <span style="font-weight:600">(condition d\'obtention de prime)</span></span>'});});
-  const pw=pauseLossByDay(e,days);
+  const pw=pauseLossByDay(e,days,bId);
   Object.keys(pw).sort().forEach(d=>{evs.push({k:'pz',d,label:'🍽 '+fmtCourt(d),txt:'<span style="color:#d97706;font-weight:700" title="Pauses pointées plus longues que prévu — déjà déduit des heures, non rémunéré">'+fmtHfrac(pw[d])+' pause prolongée <span style="font-weight:600">(non rémunéré)</span></span>'});});
   // dates de contrat rappelées CHAQUE mois (minimaliste — une date antérieure au mois se classe en tête)
   if(e.dateIn)evs.push({k:'ctr',d:e.dateIn,label:'📄 Entré',txt:'<b>le '+fmtFR(e.dateIn)+'</b>'});
@@ -3756,55 +3789,68 @@ function paieTextStr(){
   for(const b of S.boutiques){
     if(!paieSel.has(b.id))continue;
     const emps=S.employees.filter(e=>!e.admin&&e.b===b.id&&(!paieEmp||e.id===paieEmp)&&days.some(d=>inEmploi(e,d)));
-    if(!emps.length)continue;
+    const vis=paieVisiteurs(b.id,days);
+    if(!emps.length&&!vis.length)continue;
     out+='\n• '+b.nom+' :\n';
-    for(const e of emps){
-      out+='- '+e.nom+' :\n';
+    for(const e of emps.concat(vis)){
+      const visiteur=(e.b!==b.id);
+      const rep0=repartitionShops(e,days);
+      out+='- '+e.nom+(rep0.length>1?(visiteur?' (rattaché à '+bout(e.b).nom+')':' (aussi à '+rep0.filter(x=>x.b!==b.id).map(x=>x.nom).join(', ')+')'):'')+' :\n';
+      if(rep0.length>1&&visiteur)out+='  '+fmtMin(minChezShop(e,days,b.id))+' effectuées à '+b.nom+' sur '+joursChezShop(e,days,b.id)+' jour(s).\n';
+      if(visiteur){
+        // un visiteur : uniquement ce qui s'est passé ICI + ses périodes communes ; sa paie est détaillée chez lui
+        const hdV=hsByDay(e,days,b.id);
+        Object.keys(hdV).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtMin(hdV[d])+' sup\n';});
+        const lwV=lossDayInfo(e,days,b.id);
+        Object.keys(lwV).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(lwV[d].min)+' '+lwV[d].label+' (condition d\'obtention de prime)\n';});
+        const pwV=pauseLossByDay(e,days,b.id);
+        Object.keys(pwV).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(pwV[d])+' pause prolongée (non rémunéré)\n';});
+        {const aj=absByDayNonPayees(e,days);
+         for(const d of absJours(e,days)){if(!estDuShop(e,d,b.id))continue;const q=absQualif(presence(e,d).abs);
+           out+='  Le '+fmtCourt(d)+' : '+q.lib.toLowerCase()+(q.payee?' — journée payée':(aj[d]?' — '+fmtMin(aj[d])+' non rémunérées':' (jour non travaillé)'))+'\n';}}
+        for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1))
+          out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du):'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au))+' (sur ses 2 boutiques).\n';
+        for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1))
+          out+=(m.du===m.au?'  Arrêt maladie le '+fmtCourt(m.du):'  Arrêt maladie du '+fmtCourt(m.du)+' au '+fmtCourt(m.au))+' (sur ses 2 boutiques).\n';
+        out+='  Paie détaillée sous '+bout(e.b).nom+'.\n';
+        continue;
+      }
       // dates de contrat rappelées CHAQUE mois, version minimaliste (choix Fabien 2026-07-27 : juste la date)
       if(e.dateIn)out+='  Entré le '+fmtFR(e.dateIn)+'.\n';
       if(e.dateOut)out+='  Fin de contrat le '+fmtFR(e.dateOut)+'.\n';
       // fériés (chômé / travaillé)
-      for(const d of fers){if(!inEmploi(e,d))continue;
+      for(const d of fers){if(!inEmploi(e,d))continue;if(!estDuShop(e,d,b.id))continue;
         const wm=dayWorkedMin(e,d);
         out+='  '+frDate(d)+' : '+(wm>0?fmtMin(wm)+' travaillées':'Chômé')+'\n';
       }
       // heures sup PAR JOUR (chaque jour appartient à un seul mois — pas d'ambiguïté de semaine à cheval)
-      const hd=hsByDay(e,days);
+      const hd=hsByDay(e,days,b.id);
       Object.keys(hd).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtMin(hd[d])+' sup\n';});
       // heures manquées (retard/départ non rattrapé) PAR JOUR — déjà déduites des heures travaillées, non rémunérées
-      const lwi=lossDayInfo(e,days);
+      const lwi=lossDayInfo(e,days,b.id);
       Object.keys(lwi).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(lwi[d].min)+' '+lwi[d].label+' (condition d\'obtention de prime)\n';});
       // pauses prolongées pointées PAR JOUR — déjà déduites des heures travaillées, non rémunérées
-      const pw=pauseLossByDay(e,days);
+      const pw=pauseLossByDay(e,days,b.id);
       Object.keys(pw).sort().forEach(d=>{out+='  Le '+fmtCourt(d)+' : '+fmtHfrac(pw[d])+' pause prolongée (non rémunéré)\n';});
       // 🚫 absences injustifiées du mois, PAR JOUR — heures prévues non travaillées, non rémunérées
       {const aj=absByDayNonPayees(e,days);
-       for(const d of absJours(e,days)){const q=absQualif(presence(e,d).abs);
+       for(const d of absJours(e,days)){if(!estDuShop(e,d,b.id))continue;const q=absQualif(presence(e,d).abs);
          out+='  Le '+fmtCourt(d)+' : '+q.lib.toLowerCase()+(q.payee?' — journée payée'
               :(aj[d]?' — '+fmtMin(aj[d])+' non rémunérées':' (jour non travaillé)'))+'\n';}}
-      // multi-boutiques : où ces heures ont été faites
-      {const rep2=repartitionShops(e,days);
-       if(rep2.length>1)out+='  Réparti : '+rep2.map(x=>fmtMin(x.min)+' à '+x.nom).join(', ')+'.\n';}
+      // multi-boutiques : le total du mois et sa ventilation, UNE fois, chez lui
+      if(rep0.length>1)out+='  '+fmtMin(rep0.reduce((t,x)=>t+x.min,0))+' au total ce mois : '+rep0.map(x=>fmtMin(x.min)+' à '+x.nom).join(' + ')+'.\n';
       // 💶 prime sur objectifs : seulement les quarts CONFIRMÉS (la comptable a besoin du nombre de quarts)
       {const pq=primeQuarts(e,days),pp=primeCriteresPerdus(e,days);
        if(pp.length)out+='  Prime sur objectifs : '+pq.obtenus+'/4 — non obtenu : '+pp.map(c=>c.lib.toLowerCase()).join(', ')+'.\n';}
       // congés acceptés du mois
       for(const c of S.conges.filter(c=>c.empId===e.id&&c.statut==='accepte'&&c.du<=days[days.length-1]&&c.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
-        out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du)+'.':'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au)+'.')+'\n';
+        out+=(c.du===c.au?'  Congés le '+fmtCourt(c.du):'  Congés du '+fmtCourt(c.du)+' au '+fmtCourt(c.au))+(rep0.length>1?' (sur ses 2 boutiques)':'')+'.\n';
       }
       // arrêts maladie du mois
       for(const m of (S.maladies||[]).filter(m=>m.empId===e.id&&m.statut!=='attente'&&m.du<=days[days.length-1]&&m.au>=days[0]).sort((a,b2)=>a.du<b2.du?-1:1)){
-        out+=(m.du===m.au?'  Arrêt maladie le '+fmtCourt(m.du)+'.':'  Arrêt maladie du '+fmtCourt(m.du)+' au '+fmtCourt(m.au)+'.')+'\n';
+        out+=(m.du===m.au?'  Arrêt maladie le '+fmtCourt(m.du):'  Arrêt maladie du '+fmtCourt(m.du)+' au '+fmtCourt(m.au))+(rep0.length>1?' (sur ses 2 boutiques)':'')+'.\n';
       }
     }
-  }
-  // Salariés d'une autre boutique venus travailler ici : rappelés SANS leur paie (pas de double compte)
-  for(const b of S.boutiques){
-    if(!paieSel.has(b.id))continue;
-    const vis=paieVisiteurs(b.id,days);
-    if(!vis.length)continue;
-    out+='\n• '+b.nom+' — également présents (paie détaillée sous leur boutique) :\n';
-    for(const e of vis)out+='- '+e.nom+' : '+fmtMin(minChezShop(e,days,b.id))+' effectuées à '+b.nom+' sur '+joursChezShop(e,days,b.id)+' jour(s) — paie sous '+bout(e.b).nom+'.\n';
   }
   out+='\nBien à vous,';
   return out;
@@ -4161,9 +4207,9 @@ function addPauseManual(){
   save();_pauseRefresh();
 }
 // Dépassements de pause par semaine ISO (pour la paie) — en minutes
-function pauseLossByDay(e,days){const w={};const ds=new Set(days);
+function pauseLossByDay(e,days,bId){const w={};const ds=new Set(days);
   for(const r of (S.pauses||[])){if(r.empId!==e.id||!r.ret||!ds.has(r.date))continue;
-    const dm=pauseDepassMin(r);if(dm<=0)continue;w[r.date]=(w[r.date]||0)+dm;}
+    const dm=pauseDepassMin(r);if(dm<=0)continue;if(!estDuShop(e,r.date,bId))continue;w[r.date]=(w[r.date]||0)+dm;}
   return w;}
 function pauseLossMin(e,days){const w=pauseLossByDay(e,days);return Object.keys(w).reduce((t,k)=>t+w[k],0);}
 // --- Bouton rapide (header salarié + pastille mobile) : pointer MA pause d'aujourd'hui ---
