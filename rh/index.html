@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Planning RH — Cigusto</title>
+<!-- v 2026-09-03 17:54 — ✅ MA TODOLIST dans « Mon planning » : une colonne à droite du planning (écris une tâche, coche-la quand elle est faite). Tu peux **glisser une tâche sur ton planning** — ou cliquer 📌 puis le créneau, ça marche aussi au doigt — pour lui donner un moment : « celle-là, je la cale mardi 10h30 ». **La tâche ne quitte jamais la liste** : le calage crée un créneau dans un calendrier perso dédié « ✅ Tâches », donc il se déplace, s'étire et se supprime exactement comme une entrée de calendrier, et se synchronise entre tes postes. Une même tâche peut être calée plusieurs fois ; la liste montre ses créneaux et un ✕ les décale sans perdre la tâche. Une tâche cochée barre ses créneaux au lieu de les effacer (trace de quand tu l'as faite). Chacun a sa propre liste. -->
 <!-- v 2026-09-01 15:33 — Multi-boutiques : chaque boutique affiche les CHIFFRES DE CETTE BOUTIQUE. Un salarié qui travaille dans deux boutiques y figure deux fois, à chaque fois avec ses heures, ses heures sup, ses retards, ses pauses et ses absences de CETTE boutique-là (les congés et arrêts maladie, qui sont des périodes, restent des deux côtés). Une simple puce « 🔁 aussi à … » le signale. Supprimé : « rattaché à », « paie détaillée sous », « X effectuées ici sur N jours », « total du mois » — l'outil ne suppose plus rien sur les contrats. -->
 <!-- v 2026-09-01 15:18 — 🔁 Multi-boutiques, la ventilation est juste : un salarié à cheval apparaît sous CHAQUE boutique dans le récap ET dans le mail comptable (il manquait dans le mail), et chaque événement va où il s'est passé — heures sup, retards, absences et fériés sont rattachés à la boutique du jour ; congés, arrêts maladie et dates de contrat valent pour toutes ses boutiques et portent la mention « (sur ses 2 boutiques) ». Son total du mois et sa ventilation n'apparaissent qu'une fois, chez lui ; sous l'autre boutique : heures faites là-bas, ce qui s'y est passé, et « paie détaillée sous … ». -->
 <!-- v 2026-09-01 15:11 — 🔁 Salarié à cheval sur deux boutiques (cas Louis) : il apparaît maintenant dans le récap paie ET dans le mail comptable de CHAQUE boutique où il a travaillé. Sur sa boutique de rattachement, sa carte dit la ventilation (« 🔁 86h30 à Mérignac · 53h30 à Pessac ») ; dans l'autre, une carte courte donne les heures faites là-bas et renvoie la paie chez lui — aucune heure, aucune prime, aucun événement n'est compté deux fois. Le CSV garde une seule ligne par salarié avec une colonne « Répartition par boutique ». -->
@@ -66,6 +67,21 @@ input,select{border:1px solid #cbd5e1;border-radius:6px;padding:5px 7px;font-siz
 main{padding:12px 16px;max-width:1400px;margin:0 auto}
 /* ---- calendrier ---- */
 #calwrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+#calrow{display:flex;gap:10px;align-items:flex-start}
+#calrow>#calwrap{flex:1;min-width:0}
+#todowrap{width:258px;flex:none;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 9px;max-height:640px;overflow:auto}
+.todohead{font-weight:800;font-size:13px;margin-bottom:6px}
+.todoadd{display:flex;gap:5px;margin-bottom:8px}
+.todoadd input{flex:1;min-width:0}
+.todohint{background:rgba(8,145,178,.16);border:1px solid #0891b2;border-radius:8px;padding:5px 7px;font-size:11.5px;margin-bottom:7px}
+.todoit{border:1px solid var(--line);border-radius:9px;padding:5px 6px;margin-bottom:5px;cursor:grab;background:var(--bg)}
+.todoit:hover{border-color:#0891b2}
+.todoit.arme{border-color:#0891b2;box-shadow:0 0 0 2px rgba(8,145,178,.35)}
+.todoit.done .todotxt{text-decoration:line-through;opacity:.55}
+.todotxt{font-size:12.5px;line-height:1.3;word-break:break-word}
+.todopose{font-size:11px;color:var(--mut);padding:1px 0 0 22px;white-space:nowrap}
+.daycol.tododrop{background:rgba(8,145,178,.14);outline:2px dashed #0891b2;outline-offset:-2px}
+@media(max-width:900px){#calrow{flex-direction:column}#todowrap{width:100%;max-height:none}}
 #monthwrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
 .mgrid{display:grid;grid-template-columns:repeat(7,1fr)}
 .mgrid .mwd{padding:6px 4px;text-align:center;font-size:11px;font-weight:700;color:var(--mut);border-left:1px solid var(--line);background:var(--bg)}
@@ -474,7 +490,7 @@ body.mobfull #mtop,body.mobfull #mfab{display:none!important}
   <div id="testbanner" style="display:none;background:#7c3aed;color:#fff;padding:6px 12px;border-radius:8px;font-size:12.5px;font-weight:600;margin-bottom:8px">🧪 Mode test actif — les alertes et l'assistant tournent sur toutes les dates (historique compris). Désactive-le avant l'usage réel.</div>
   <div id="people"></div>
   <div id="minetools" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px"></div>
-  <div id="calwrap"><div id="calhead"></div><div id="evband"></div><div id="calbody"></div></div>
+  <div id="calrow"><div id="calwrap"><div id="calhead"></div><div id="evband"></div><div id="calbody"></div></div><aside id="todowrap" style="display:none"></aside></div>
   <div id="monthwrap" style="display:none"></div>
   <div id="mcoll"></div>
   <div id="hours"></div>
@@ -1043,8 +1059,8 @@ function mergeData(L,R){
   }
   L.hsdemandes=L.hsdemandes.filter(x=>{const tk=L.tomb['hs|'+x.id];return !(tk&&tk>((x&&x._ts)||''))});
   // congés / maladies / pauses pointées (par numéro, suppressions mémorisées)
-  for(const arr of ['conges','maladies','absinj','ecoles','entreprises','pauses','formations']){
-    const pre={conges:'cg|',maladies:'ml|',absinj:'ai|',ecoles:'ec|',entreprises:'en|',pauses:'pz|',formations:'fo|'}[arr];
+  for(const arr of ['conges','maladies','absinj','ecoles','entreprises','pauses','formations','todos']){
+    const pre={conges:'cg|',maladies:'ml|',absinj:'ai|',ecoles:'ec|',entreprises:'en|',pauses:'pz|',formations:'fo|',todos:'td|'}[arr];
     L[arr]=L[arr]||[];
     for(const r of R[arr]||[]){
       if(L.tomb[pre+r.id]&&L.tomb[pre+r.id]>ts(r))continue;
@@ -1165,6 +1181,10 @@ function absJoursFaute(e,days){return absJours(e,days).filter(d=>absEstFaute(pre
 function absByDayNonPayees(e,days){const w={};for(const d of absJoursNonPayes(e,days)){const m=plannedDayMin(e,d);if(m>0)w[d]=m;}return w;}
 function absMinNonPayees(e,days){return absJoursNonPayes(e,days).reduce((t,d)=>t+plannedDayMin(e,d),0);}
 function NOW(){return new Date().toISOString()}
+// Id unique ET croissant : Date.now() seul se répète quand deux créations tombent dans la même
+// milliseconde (deux tâches tapées à la suite, deux calages enchaînés) → collision de merge.
+let _lastId=0;
+function newId(){let t=Date.now();if(t<=_lastId)t=_lastId+1;_lastId=t;return t;}
 let testMode=false;try{testMode=localStorage.getItem('gestionrh-test')==='1'}catch(e){}
 function isLive(iso){return testMode||!S.goLive||iso>=S.goLive;}
 function toggleTest(){testMode=!testMode;try{localStorage.setItem('gestionrh-test',testMode?'1':'0')}catch(e){}
@@ -1201,7 +1221,8 @@ function migrate(S){
     S.exceptions.push(o.present?{empId:o.empId,date:o.date,b:bb.id,blocks:[[bb.open,bb.close]],hs:false,note:''}:{empId:o.empId,date:o.date,s:'R',note:''})});
   S.overrides=[];S.tomb=S.tomb||{};S.events=S.events||[];S.ecoles=S.ecoles||[];S.entreprises=S.entreprises||[];
   S.calendars=S.calendars||[];   // calendriers personnels {id,name,color,owner,_ts}
-  S.calEntries=S.calEntries||[];  // entrées {id,calId,owner,date,du,au,title,_ts}
+  S.calEntries=S.calEntries||[];  // entrées {id,calId,owner,date,du,au,title,todoId?,_ts}
+  S.todos=S.todos||[];            // ✅ todolist perso {id,owner,txt,fait,cree,_ts}
   if(S.rhPin===undefined)S.rhPin='';
   S.hsdemandes=S.hsdemandes||[];
   if(!S.goLive)S.goLive='2026-06-01';
@@ -1624,6 +1645,87 @@ function calOccurs(x,d){
 function myEntriesOn(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&!x.allday&&!x.skip&&!calHidden.has(x.calId)&&calOccurs(x,d)).sort((a,b)=>a.du<b.du?-1:1);}
 // entrées "journée entière" du jour, pour la bande d'événements de Mon planning
 function myAllDayChips(d){return (S.calEntries||[]).filter(x=>x.owner===(ROLE&&ROLE.empId)&&x.allday&&!x.skip&&!calHidden.has(x.calId)&&calOccurs(x,d)).map(x=>({cls:'op',txt:'🗓️ '+x.title+(x.rec?' 🔁':''),st:'style="border-left:4px solid '+calColor(x.calId)+'"',detail:calName(x.calId)+' — '+x.title}));}
+// ============ ✅ MA TODOLIST (Fabien 2026-09-03) ============
+// Une tâche vit dans MA liste ; la CALER sur le planning ne l'en retire pas — ça crée juste un
+// créneau dans un calendrier perso dédié « ✅ Tâches ». Deux conséquences voulues :
+//  • le créneau posé hérite de TOUT le moteur des calendriers perso (glisser, étirer la durée,
+//    clic pour modifier/supprimer, synchro multi-poste) — aucun mécanisme nouveau à maintenir ;
+//  • une même tâche peut être calée plusieurs fois (« j'y touche mardi puis jeudi »).
+const TODO_CAL_NOM='✅ Tâches';
+function myTodos(){return (S.todos||[]).filter(t=>t.owner===(ROLE&&ROLE.empId))
+  .sort((a,b)=>(a.fait?1:0)-(b.fait?1:0)||((a.cree||'')<(b.cree||'')?-1:1));}
+function todoDe(id){return (S.todos||[]).find(t=>t.id===+id);}
+// Le calendrier « ✅ Tâches » de la personne connectée — créé au premier calage, pas avant.
+function calTaches(creer){
+  let c=(S.calendars||[]).find(x=>x.owner===(ROLE&&ROLE.empId)&&x.name===TODO_CAL_NOM);
+  if(!c&&creer){c={id:newId(),owner:ROLE.empId,name:TODO_CAL_NOM,color:'#0891b2',_ts:NOW()};
+    S.calendars=S.calendars||[];S.calendars.push(c);}
+  return c;
+}
+// Les créneaux où cette tâche est calée (une entrée de calendrier par calage)
+function todoPoses(id){return (S.calEntries||[]).filter(x=>x.todoId===+id&&!x.skip)
+  .sort((a,b)=>((a.date||'')+(a.du||''))<((b.date||'')+(b.du||''))?-1:1);}
+function addTodo(){
+  const el=$('todo-txt');if(!el)return;const txt=(el.value||'').trim();if(!txt)return;
+  S.todos=S.todos||[];
+  S.todos.push({id:newId(),owner:ROLE.empId,txt,fait:false,cree:NOW(),_ts:NOW()});
+  el.value='';save();render();
+}
+function togTodo(id){const t=todoDe(id);if(!t)return;t.fait=!t.fait;t._ts=NOW();save();render();}
+function delTodo(id){
+  const t=todoDe(id);if(!t)return;
+  const poses=todoPoses(id);
+  if(!confirm('Supprimer « '+t.txt+' » ?'+(poses.length?'\n\nSes '+poses.length+' créneau(x) calé(s) sur le planning partent aussi.':'')))return;
+  S.tomb['td|'+t.id]=NOW();S.todos=(S.todos||[]).filter(x=>x.id!==t.id);
+  for(const p of poses){S.tomb['ce|'+p.id]=NOW();}
+  S.calEntries=(S.calEntries||[]).filter(x=>x.todoId!==+id);
+  save();render();
+}
+// LE geste : caler une tâche à un moment. La tâche RESTE dans la liste.
+function poserTodo(id,iso,minute,duree){
+  const t=todoDe(id);if(!t||!iso)return;
+  const c=calTaches(true);
+  const du=clampM(snap15(minute),CAL_START,CAL_END), au=Math.min(du+(duree||30),CAL_END);
+  S.calEntries=S.calEntries||[];
+  S.calEntries.push({id:newId(),calId:c.id,owner:ROLE.empId,date:iso,du:m2t(du),au:m2t(au),title:t.txt,todoId:t.id,_ts:NOW()});
+  save();render();
+  setSave('📌 « '+t.txt+' » calée '+DAYJ[wdOf(iso)]+' '+fmtCourt(iso)+' à '+fmtH(m2t(du)));
+}
+function delPose(ceId){
+  const x=(S.calEntries||[]).find(e=>e.id===+ceId);if(!x)return;
+  S.tomb['ce|'+x.id]=NOW();S.calEntries=(S.calEntries||[]).filter(e=>e.id!==x.id);save();render();
+}
+// Deux façons de caler : glisser-déposer (souris) ou 📌 puis clic (marche aussi au doigt).
+let _todoDrag=null, _todoPose=null;
+function armerPose(id){_todoPose=(_todoPose===+id)?null:+id;render();}
+function renderTodos(){
+  const box=$('todowrap');if(!box)return;
+  if(!(ROLE&&ROLE.empId)||calView!=='mine'){box.style.display='none';box.innerHTML='';return;}
+  box.style.display='';
+  const ts=myTodos(),reste=ts.filter(t=>!t.fait).length;
+  let h='<div class="todohead">📝 Ma todolist'+(reste?' <span class="small" style="color:var(--mut)">'+reste+' à faire</span>':'')+'</div>';
+  h+='<div class="todoadd"><input id="todo-txt" placeholder="Nouvelle tâche…" onkeydown="if(event.key===\'Enter\')addTodo()"><button class="act green" onclick="addTodo()">＋</button></div>';
+  if(_todoPose){const t=todoDe(_todoPose);
+    if(t)h+='<div class="todohint">📌 Clique sur ton planning pour caler « '+esc(t.txt)+' » <button class="mini ghost" onclick="armerPose('+t.id+')">annuler</button></div>';}
+  if(!ts.length)h+='<div class="small" style="color:var(--mut);padding:6px 2px">Rien pour l\'instant. Écris une tâche ci-dessus, puis glisse-la sur ton planning pour lui donner un moment.</div>';
+  for(const t of ts){
+    const poses=todoPoses(t.id);
+    h+='<div class="todoit'+(t.fait?' done':'')+(_todoPose===t.id?' arme':'')+'" draggable="true" ondragstart="_todoDrag='+t.id+';event.dataTransfer.effectAllowed=\'copy\'" ondragend="_todoDrag=null" title="Glisse-moi sur le planning pour me caler à un moment">'+
+      '<div class="brow" style="gap:6px;padding:0">'+
+        '<input type="checkbox" '+(t.fait?'checked':'')+' onchange="togTodo('+t.id+')" title="Fait / à faire">'+
+        '<span class="todotxt">'+esc(t.txt)+'</span>'+
+        '<span style="margin-left:auto;white-space:nowrap">'+
+          '<button class="mini" onclick="armerPose('+t.id+')" title="Caler sur le planning : clique ici puis sur le créneau voulu">📌</button> '+
+          '<button class="mini ghost" onclick="delTodo('+t.id+')" title="Supprimer la tâche">🗑</button></span>'+
+      '</div>';
+    for(const p of poses)
+      h+='<div class="todopose" title="Créneau calé — tu peux le déplacer ou l\'étirer directement sur le planning">📌 '+DAYJ[wdOf(p.date)]+' '+fmtCourt(p.date)+' '+fmtH(p.du)+'–'+fmtH(p.au)+
+        ' <button class="mini ghost" onclick="delPose('+p.id+')" title="Décaler (la tâche reste dans la liste)">✕</button></div>';
+    h+='</div>';
+  }
+  h+='<div class="small" style="color:var(--mut);margin-top:6px">Caler une tâche ne la retire pas de la liste : elle reste à cocher quand elle est faite.</div>';
+  box.innerHTML=h;
+}
 // Glisser sur la grille → pré-remplit le formulaire d'entrée minutée (calendrier + titre à compléter)
 function openNewCalEntry(date,du,au){
   if(!isAdmin())return;
@@ -1799,8 +1901,10 @@ function renderMineWeek(){
     const peN=Math.max(1,peEnd.length);
     for(const o of pe){
       const x=o.x,top=(o.s-CAL_START)*PX,hpx=(o.f-o.s)*PX;
-      const w=baseW/peN,l=baseL+o.col*w;
-      bb+='<div class="blk" data-ce="'+x.id+'" title="'+esc(calName(x.calId))+' — '+esc(x.title)+' (glisse pour déplacer, étire le bas/haut pour la durée)" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 1px);width:calc('+w+'% - 3px);background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:30;cursor:grab"><b>'+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
+      let w=baseW/peN,l=baseL+o.col*w;
+      if(x.todoId){l=1;w=98;}   // tâche calée : pleine largeur, sinon illisible sur 7 colonnes
+      const _td=x.todoId?todoDe(x.todoId):null;   // créneau issu de la todolist
+      bb+='<div class="blk" data-ce="'+x.id+'" title="'+esc(_td?('Tâche calée — '+_td.txt+(_td.fait?' (faite)':'')):(calName(x.calId)+' — '+x.title))+' (glisse pour déplacer, étire le bas/haut pour la durée)" style="top:'+top+'px;height:'+Math.max(hpx-2,14)+'px;left:calc('+l+'% + 1px);width:calc('+w+'% - 3px);background:'+calColor(x.calId)+';border:2px dashed rgba(255,255,255,.85);z-index:'+(_td?40:30)+';cursor:grab'+(_td?';box-shadow:0 1px 6px rgba(0,0,0,.35)':'')+(_td&&_td.fait?';opacity:.5':_td?';opacity:.94':'')+'"><b'+(_td&&_td.fait?' style="text-decoration:line-through"':'')+'>'+(_td?(_td.fait?'✅ ':'📝 '):'')+esc(x.title)+'</b><span>'+x.du+'–'+x.au+'</span></div>';
     }
     if(d===today){const now=new Date();const m=now.getHours()*60+now.getMinutes();
       if(m>CAL_START&&m<CAL_END)bb+='<div class="nowline" style="top:'+((m-CAL_START)*PX)+'px"></div>';}
@@ -1817,6 +1921,7 @@ function renderMineWeek(){
     t+=' <button class="mini" onclick="togCalPanel()">＋ Gérer</button>';
     $('minetools').innerHTML=t;
   } else $('minetools').innerHTML='';
+  renderTodos();
   // Bande d'événements (fériés, congés, OP… + mes journées entières perso ; clic = ajouter une journée perso)
   renderEvBand(days,d=>{const mb=myBof(d);return mb[0]||curB;},isAdmin()?{extra:myAllDayChips,click:'openMineDay'}:undefined);
 }
@@ -1969,6 +2074,7 @@ function render(){
   $('alerts').style.display=(grid||mine||!isAdmin())?'none':'';
   $('people').style.display=(grid||mine)?'none':'';   // pas de chips de masquage en Mon planning
   if($('minetools'))$('minetools').style.display=mine?'flex':'none'; // barre des calendriers perso (Mon planning)
+  renderTodos();   // ✅ la todolist ne vit qu'à côté de Mon planning (elle se masque toute seule ailleurs)
   if(synth){renderSynth();saveUI();return;}
   if(month){renderMonth();saveUI();return;}
   if(mine){const mdays=[...Array(7)].map((_,i)=>addD(curMonday,i));renderMineWeek();renderHoursBar(mdays);if(document.body.classList.contains('mobplan'))renderMColl();saveUI();return;}
@@ -2997,6 +3103,29 @@ function edRevert(){
 }
 
 // ============ DRAG & DROP ============
+// ✅ Todolist : une tâche armée avec 📌 se pose au clic sur le planning (marche aussi au doigt).
+document.addEventListener('mousedown',ev=>{
+  if(ev.button!==0||!_todoPose||calView!=='mine'||!(ROLE&&ROLE.empId))return;
+  const col=ev.target.closest('.daycol');if(!col||!col.dataset.iso)return;
+  const r=col.getBoundingClientRect();
+  poserTodo(_todoPose,col.dataset.iso,(ev.clientY-r.top)/PX+CAL_START);
+  _todoPose=null;ev.preventDefault();ev.stopPropagation();
+},true);
+// … ou par glisser-déposer depuis la liste
+document.addEventListener('dragover',ev=>{
+  if(_todoDrag==null)return;const col=ev.target.closest&&ev.target.closest('.daycol');
+  document.querySelectorAll('.daycol.tododrop').forEach(c=>{if(c!==col)c.classList.remove('tododrop')});
+  if(!col||!col.dataset.iso)return;
+  col.classList.add('tododrop');ev.preventDefault();ev.dataTransfer.dropEffect='copy';
+});
+document.addEventListener('drop',ev=>{
+  if(_todoDrag==null)return;const col=ev.target.closest&&ev.target.closest('.daycol');
+  document.querySelectorAll('.daycol.tododrop').forEach(c=>c.classList.remove('tododrop'));
+  if(!col||!col.dataset.iso)return;
+  const r=col.getBoundingClientRect();
+  poserTodo(_todoDrag,col.dataset.iso,(ev.clientY-r.top)/PX+CAL_START);
+  _todoDrag=null;ev.preventDefault();
+});
 document.addEventListener('mousedown',ev=>{
   if(ev.button!==0)return;
   if(!isAdmin())return; // salarié = lecture seule
@@ -3334,7 +3463,7 @@ function _restampAll(){
   const t=NOW();
   (S.employees||[]).forEach(x=>x._ts=t);
   (S.boutiques||[]).forEach(x=>x._ts=t);
-  ['exceptions','events','hsdemandes','conges','maladies','absinj','ecoles','entreprises','feries'].forEach(k=>(S[k]||[]).forEach(x=>x._ts=t));
+  ['exceptions','events','hsdemandes','conges','maladies','absinj','ecoles','entreprises','feries','todos'].forEach(k=>(S[k]||[]).forEach(x=>x._ts=t));
   for(const k in (S.primes||{}))if(S.primes[k]&&typeof S.primes[k]==='object')S.primes[k]._ts=t;
   for(const k in (S.solidarite||{}))if(S.solidarite[k]&&typeof S.solidarite[k]==='object')S.solidarite[k]._ts=t;
   S.goLiveTs=t;S.adminPinTs=t;S.rhPinTs=t; // réglages globaux
@@ -5424,7 +5553,7 @@ function restoreRole(){
     S=JSON.parse(JSON.stringify(SEED));              // ni local ni serveur : tout premier démarrage
   }
   if(remote&&remote.updated_at)_lastRemoteAt=remote.updated_at;
-  S.overrides=S.overrides||[];S.maladies=S.maladies||[];S.absinj=S.absinj||[];S.solidarite=S.solidarite||{};S.primes=S.primes||{};
+  S.overrides=S.overrides||[];S.maladies=S.maladies||[];S.absinj=S.absinj||[];S.todos=S.todos||[];S.solidarite=S.solidarite||{};S.primes=S.primes||{};
   migrate(S);
   if(!S.theme)S.theme=(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches)?'dark':'light';
   applyTheme();
