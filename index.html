@@ -221,7 +221,7 @@ window.addEventListener('DOMContentLoaded', function() {
     <div id="saveMsg">Sauvegardé !</div>
     <span id="syncDot" onclick="expliquerSyncDot()" style="margin-left:auto; font-size:10px; padding:4px 10px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; color:#94a3b8; background:transparent; white-space:nowrap;" title="État de la synchronisation entre les boutiques — cliquer pour le détail">● …</span>
     <span id="shopsDots" onclick="expliquerPresence()" style="display:none; font-size:10px; padding:4px 8px; border-radius:12px; cursor:pointer; font-weight:700; letter-spacing:0.3px; border:1px solid #47556940; background:transparent; white-space:nowrap;" title="État de connexion des boutiques (heures tamponnées par le serveur) — cliquer pour le détail par boutique"></span>
-    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-08-27 23:31</span>
+    <span id="appVersionTag" style="font-size:10px; color:#64748b; opacity:0.7; padding:4px 8px; border:1px solid #47556940; border-radius:4px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing:0.3px;" title="Version actuellement chargée dans le navigateur. Si tu refresh après un déploiement et que ce numéro change, la nouvelle version est bien en place.">v 2026-09-05 18:50</span>
     <a href="/rh/" target="_blank" rel="noopener" style="text-decoration:none; background:none; border:1px solid #47556980; font-size:14px; padding:5px 10px; border-radius:6px; color:#e2e8f0; font-weight:600;" title="Ouvrir l'outil RH (planning, paie, absences) — s'ouvre dans un nouvel onglet">👥 RH</a>
     <button onclick="openSettings()" style="background:none; border:1px solid #47556980; font-size:18px; padding:4px 8px; border-radius:6px;" title="Paramètres">⚙️</button>
   </header>
@@ -1514,6 +1514,24 @@ const LIQ_FORMAT_ML = { '10mL': 10, '10mL_SDN': 10, '20mL': 20, '50mL': 50, '100
 // Marge par mL d'une gamme = marge unitaire / contenance du format. Affichage seul, aucune donnée stockée.
 function liqMargeMl(g) { const ml = LIQ_FORMAT_ML[g && g.format] || 50; return ml > 0 ? ((g && g.marge) || 0) / ml : 0; }
 const LIQ_FORMAT_LABELS = { '10mL': '10 mL', '10mL_SDN': '10 mL SdN', '20mL': '20 mL', '50mL': '50 mL', '100mL': '100 mL', '+150mL': '+150 mL' };
+// ═══ 🚫 DOSAGES EN DOUBLON 10 mL / SdN (règle Fabien 2026-09-05) ═══
+// « Si une gamme de liquide est disponible en 10 mL ET SdN, les boutiques doivent
+//   désactiver les réf 10 mL en 12 et 16 mg. On ne garde que 0/3/6 en 10 mL et 10/20 en SdN. »
+// Pourquoi : le SdN couvre déjà le besoin en nicotine forte. Garder les 12/16/18 mg en
+// classique à côté, c'est deux fois le même besoin sur la même étagère.
+// ⚠️ L'app ne stocke PAS les dosages ref par ref (le grain le plus fin est le parfum dans
+// une ligne marque × gamme × format). Ces listes sont une CONVENTION : tout parfum 10 mL
+// classique est réputé décliné dans l'échelle ci-dessous. Ce que la boutique n'a pas, elle
+// le déclare absent sur la ligne (p.dosAbsents) — on ne saisit jamais 500 refs à la main.
+const LIQ_DOSAGES_10ML = ['0mg', '3mg', '6mg', '12mg', '16mg', '18mg'];
+const LIQ_DOSAGES_SDN  = ['10mg', '20mg'];
+// Ceux qui sautent quand le parfum existe AUSSI en SdN (décision Fabien 2026-09-05 : 18 mg
+// compris, certaines marques montent à 18 plutôt qu'à 16).
+const LIQ_DOSAGES_DOUBLON = ['12mg', '16mg', '18mg'];
+const LIQ_DOSAGES_GARDES  = ['0mg', '3mg', '6mg'];
+const LIQ_DOSAGE_LABELS = { '0mg': '0 mg', '3mg': '3 mg', '6mg': '6 mg', '12mg': '12 mg', '16mg': '16 mg', '18mg': '18 mg', '10mg': '10 mg', '20mg': '20 mg' };
+function _dosLbl(d) { return LIQ_DOSAGE_LABELS[d] || d; }
+function _dosListeLbl(arr) { return (arr || []).map(_dosLbl).join(' · '); }
 const LIQ_FORMAT_COLORS = { '10mL': '#06b6d4', '10mL_SDN': '#0891b2', '20mL': '#0ea5e9', '50mL': '#8b5cf6', '100mL': '#ec4899', '+150mL': '#f43f5e' };
 // Badge colors for format labels in dashboard (bg + text)
 const LIQ_FORMAT_BADGE = {
@@ -5459,6 +5477,11 @@ const ACTION_STEPS = {
                   { key: 'rayon',     label: 'Changée en rayon', nat: 'imm' }],
   SWAP_COMPOSANT:[{ key: 'swap',      label: 'Composant changé sur le kit', nat: 'imm' },
                   { key: 'etiquette', label: 'Nouvelle étiquette imprimée', nat: 'imm' }],
+  // 🚫 Dosages en doublon 10 mL / SdN (Fabien 2026-09-05) : UNE coche par boutique, la
+  //    désactivation Swappy se fait d'un bloc pour les dosages listés sur la ligne. Le
+  //    libellé est spécialisé par getActionSteps avec les dosages réellement concernés.
+  DOSAGE_OFF:    [{ key: 'dosOff',    label: 'Dosages forts désactivés sur Swappy', nat: 'imm' }],
+  DOSAGE_ON:     [{ key: 'dosOn',     label: 'Dosages forts réactivés sur Swappy', nat: 'imm' }],
   // ── Rétrocession inter-boutiques (chantier 2026-06-12, spéc classeur onglet Dispatch +
   // décision 5 du dictionnaire : transporteur = Fabien, rétrocession Swappy = étape dédiée).
   // Une rétrocession = paire d'actions liées par retroId : l'ENVOI vit chez la boutique
@@ -6156,6 +6179,13 @@ function getActionSteps(typeOrAction) {
       else if (_tOp === 'DEPLACER') _tSt.label = 'Testeur déplacé au bon emplacement';
     }
   }
+  // 🚫 Dosages en doublon : l'étape NOMME les dosages, sinon la boutique ne sait pas quoi
+  //    désactiver sur Swappy — c'est toute l'information utile de la ligne.
+  if ((type === 'DOSAGE_OFF' || type === 'DOSAGE_ON') && typeof typeOrAction === 'object' && typeOrAction) {
+    const _dSt = base[0];
+    const _dLst = _dosListeLbl(typeOrAction.dosages);
+    if (_dSt && _dLst) _dSt.label = (type === 'DOSAGE_OFF' ? 'Désactivé sur Swappy : ' : 'Réactivé sur Swappy : ') + _dLst;
+  }
   // Commande gérée par l'admin (feature 2026-06-18) : la boutique ne commande pas. Le bon ordre
   // est : d'abord RÉCEPTION, ensuite SAISIE en stock. On réordonne (reçu → saisie) et on rend la
   // saisie conditionnée à la réception. Clés inchangées → _stepTs/done préservés.
@@ -6656,6 +6686,9 @@ function cleanupActionsForLiq(gamme) {
       if (gamme.statutVie === 'SORTI') _cancelAction(a);
       return;
     }
+    // 🚫 Dosages en doublon : toujours portés par un parfum → jamais traités ici, mais on
+    // le dit explicitement plutôt que de compter sur le garde produitParfumId au-dessus.
+    if (a.type === 'DOSAGE_OFF' || a.type === 'DOSAGE_ON') return;
     if (_ligneEnInstallation(a)) return; // installation en cours : la ligne vit (2026-08-01)
     const stillValid =
       (a.type === 'SORTIR' && (gamme.statutVie === 'A_SORTIR' || isOneShotActif)) ||
@@ -6716,6 +6749,13 @@ function cleanupActionsForParfum(gamme, parfumId, parfumStatus) {
     }
     if (a.type === 'PRIX') {
       if (parfumStatus === 'SORTI') _cancelAction(a);
+      return;
+    }
+    // 🚫 Dosages en doublon (2026-09-05) : la ligne ne dépend PAS du statut du parfum mais
+    // de l'existence du couple 10 mL / SdN — c'est _dosSyncActions qui juge, elle seule.
+    // Ici, un seul ménage : un parfum sorti n'a plus de dosages à désactiver.
+    if (a.type === 'DOSAGE_OFF' || a.type === 'DOSAGE_ON') {
+      if (parfumStatus === 'SORTI' && !a.dateCloture) _cancelAction(a);
       return;
     }
     // ÉTAPES 5/6 : une ligne parfum créée parce que la GAMME est À RENTRER (ou À SORTIR)
@@ -7304,6 +7344,11 @@ function syncAutoActions() {
       });
     }
   });
+  // ═══ 🚫 DOSAGES EN DOUBLON 10 mL / SdN (Fabien 2026-09-05) ═══
+  // Passe APRÈS le ménage par statut : les lignes qu'elle vient de créer ne doivent pas
+  // être annulées dans la même passe. Elle juge sur l'existence du couple 10 mL / SdN,
+  // jamais sur un statut — c'est pourquoi cleanupActionsForParfum la laisse tranquille.
+  try { _dosSyncActions(); } catch (e) { console.error('[DOSAGES] passe en erreur :', e); }
   // ═══ ÉTAPE 5 — MIGRATION des À rentrer gamme entière → lignes PAR PARFUM (2026-07-21) ═══
   // Idempotente, côté admin (les boutiques adoptent au poll, comme les autres migrations).
   // Pour chaque action RENTRER gamme-level (liquide) encore vivante dont la gamme a des
@@ -12628,6 +12673,25 @@ async function loadData() {
     }
 
     // ───────────────────────────────────────────────────────────────────────
+    // 🚫 Dosages en doublon 10 mL / SdN (2026-09-05) — passe AU CHARGEMENT.
+    // syncAutoActions n'est appelée que sur changement de données (jamais au démarrage,
+    // ni au rendu du dashboard) : sans cette passe, le retard existant — les parfums déjà
+    // en doublon le jour de la livraison — n'apparaîtrait qu'au prochain geste de Fabien
+    // dans la base. Idempotente (elle ne crée que ce qui manque), et c'est la MÊME
+    // fonction que celle branchée dans syncAutoActions : une seule règle, deux appels.
+    // Réservée à l'admin, comme les autres guérisons au chargement — une boutique ne
+    // fabrique pas d'actions, elle les reçoit par le sync.
+    // ───────────────────────────────────────────────────────────────────────
+    if (typeof isAdmin === 'function' && isAdmin()) {
+      try {
+        if (_dosSyncActions()) {
+          console.log('[DOSAGES] passe au chargement — lignes de doublon 10 mL / SdN mises à jour.');
+          setTimeout(() => { try { saveData(); } catch (e) {} }, 1800);
+        }
+      } catch (e) { console.error('[DOSAGES] passe au chargement en erreur :', e); }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────
     // Phase 2 audit OP — hygiène (2026-05-28) : garbage collector des liens orphelins.
     // Quand une action est annulée ou supprimée, son OP fanfare/PR/etc. garde son champ
     // *ActionId qui pointe dans le vide. Le bloc miroir filtre déjà via isOpOuverte mais
@@ -17624,6 +17688,238 @@ function pvLiqExportDeclinaisons() {
 }
 
 
+// ═══════════ 🚫 DOSAGES EN DOUBLON 10 mL / SdN (Fabien, 2026-09-05) ═══════════
+// « Si une gamme est disponible en 10 mL ET SdN, les boutiques doivent désactiver les
+//   réf 10 mL en 12 et 16 mg. On ne garde que 0/3/6 en 10 mL et 10/20 en SdN. »
+//
+// LE GRAIN EST LE PARFUM, pas la gamme (décision Fabien 2026-09-05, sur mesure) : dans les
+// 12 gammes présentes dans les deux formats, 56 parfums existent des deux côtés (vrai
+// doublon) mais 47 n'existent qu'en 10 mL — juger à la gamme leur couperait les dosages
+// forts sans aucun SdN pour les remplacer, soit 94 refs coupées pour rien.
+//
+// OÙ VIT LA MÉMOIRE. Pas dans l'action : sur le PARFUM 10 mL (`p.dosOff`). C'est ce qui rend
+// le cycle réversible — le SdN part, le doublon disparaît, l'app redemande la RÉACTIVATION,
+// puis le SdN revient et elle redemande la désactivation. Une mémoire portée par l'action
+// aurait buté sur la règle « une action FAIT n'est jamais recréée » d'ensureAction.
+// `_mergeLiqDeep` recopie tous les champs d'un parfum distant plus récent : le drapeau se
+// synchronise entre postes comme le reste, sans toucher aux fonctions de fusion.
+//
+// Canoniques (règle 8) : _dosDoublons · _dosAFaire · _dosSyncActions.
+// ⚠️ Un type d'action inconnu est ANNULÉ par cleanupActionsForParfum à la passe suivante :
+//    les deux types sont explicitement traités là-bas (comme TESTEUR et PRIX).
+
+// Les dosages qu'il reste à traiter pour CE parfum : la convention, moins ce que la
+// boutique a déclaré inexistant sur la ligne.
+function _dosAFaire(p) {
+  const abs = (p && Array.isArray(p.dosAbsents)) ? p.dosAbsents : [];
+  return LIQ_DOSAGES_DOUBLON.filter(function (d) { return abs.indexOf(d) < 0; });
+}
+// Tous les parfums présents À LA FOIS en 10 mL et en 10 mL SdN.
+// Clé de rapprochement : _liqCleParfum — LA MÊME que la vue par parfum et que le filtre
+// 🧩 formats combinés. « Classic Blend » et « Classic  Blend » sont le même parfum.
+function _dosDoublons() {
+  const par = new Map();
+  (typeof baseLiq !== 'undefined' ? baseLiq : []).forEach(function (g) {
+    if (!g || !g.marque || !g.gamme) return;
+    if (g.marque === 'autre' && (g.gamme + '').includes('PA +/-')) return;
+    if (g.statutVie === 'SORTI') return;
+    if (typeof _deletedIds !== 'undefined' && _deletedIds && _deletedIds.has && _deletedIds.has(g.id)) return;
+    if (g.format !== '10mL' && g.format !== '10mL_SDN') return;
+    (g.parfums || []).forEach(function (p) {
+      if (!p || !p.id || p.s === 'SORTI') return;
+      const k = _liqCleParfum(g, p);
+      if (!par.has(k)) par.set(k, {});
+      if (!par.get(k)[g.format]) par.get(k)[g.format] = { g: g, p: p };
+    });
+  });
+  const out = [];
+  par.forEach(function (v, k) {
+    if (!v['10mL'] || !v['10mL_SDN']) return;
+    out.push({ cle: k, g: v['10mL'].g, p: v['10mL'].p, gSdn: v['10mL_SDN'].g, pSdn: v['10mL_SDN'].p });
+  });
+  out.sort(function (a, b) { return (a.g.marque + ' ' + a.g.gamme + ' ' + a.p.n).localeCompare(b.g.marque + ' ' + b.g.gamme + ' ' + b.p.n); });
+  return out;
+}
+function _dosId(type, pid, n) { return (type === 'DOSAGE_OFF' ? 'DOS-OFF-' : 'DOS-ON-') + pid + '-C' + n; }
+// Fabrique dédiée (modèle _testeurCreerAction) : ensureAction ne sait pas rouvrir un cycle
+// pour un type autre que RENTRER/SORTIR, or ici un même parfum peut repasser plusieurs fois
+// par la désactivation. Id DÉTERMINISTE par épisode : deux postes non synchronisés créent
+// le MÊME id → le merge fusionne leurs coches, zéro doublon par construction.
+function _dosEnsure(d, sens, dosages) {
+  const type = sens === 'OFF' ? 'DOSAGE_OFF' : 'DOSAGE_ON';
+  const miennes = actions.filter(function (a) {
+    return a.type === type && a.produitType === 'liq' && a.produitId === d.g.id && a.produitParfumId === d.p.id;
+  });
+  const ouverte = miennes.find(function (a) { return !a.annulee && !a._archived && actionGlobalState(a) !== 'FAIT'; });
+  if (ouverte) {
+    // La liste des dosages a pu changer (un « n'existe pas » coché entre-temps).
+    if ((ouverte.dosages || []).join('|') !== dosages.join('|')) {
+      ouverte.dosages = dosages.slice();
+      ouverte._ts = new Date().toISOString();
+    }
+    return ouverte;
+  }
+  let n = miennes.length, id = _dosId(type, d.p.id, n), garde = 0;
+  while ((_deletedIds.has(id) || actions.some(function (a) { return a.id === id; })) && garde++ < 40) {
+    n++; id = _dosId(type, d.p.id, n);
+  }
+  if (_deletedIds.has(id)) return null;   // tombstone : on ne ressuscite jamais
+  const a = {
+    id: id, type: type, produitId: d.g.id, produitType: 'liq', produitParfumId: d.p.id,
+    _parfumNom: d.p.n || null,
+    dosages: dosages.slice(),
+    dosSdnGammeId: d.gSdn ? d.gSdn.id : null,
+    dosSdnParfumId: d.pSdn ? d.pSdn.id : null,
+    priorite: 'AUTO', dateCreation: ymd(new Date()), auteur: 'Auto',
+    etats: makeShopStates(type), dateCloture: null, annulee: false, lienOP: null,
+    _ts: new Date().toISOString()
+  };
+  actions.push(a);
+  console.log('[DOSAGES] ' + type + ' → ' + id + ' — ' + d.g.marque + ' ' + d.g.gamme + ' « ' + (d.p.n || '?') + ' » : ' + _dosListeLbl(dosages));
+  return a;
+}
+// LA passe. Ordre voulu : mémoire d'abord, ménage ensuite, création en dernier — sinon on
+// recrée à l'identique une action qu'on vient de solder.
+function _dosSyncActions() {
+  const doublons = _dosDoublons();
+  const enDoublon = new Set(doublons.map(function (d) { return d.p.id; }));
+  let _chg = false;
+  const _pfDe = function (a) {
+    const g = baseLiq.find(function (x) { return x.id === a.produitId; });
+    if (!g) return null;
+    const p = (g.parfums || []).find(function (x) { return x.id === a.produitParfumId; });
+    return p ? { g: g, p: p } : null;
+  };
+  // ── 1. Mémoire : une action réglée dans les TROIS boutiques bascule le drapeau ──
+  actions.forEach(function (a) {
+    if (a.type !== 'DOSAGE_OFF' && a.type !== 'DOSAGE_ON') return;
+    if (a.annulee || !a.etats) return;
+    if (actionGlobalState(a) !== 'FAIT') return;
+    const e = _pfDe(a); if (!e) return;
+    const veut = (a.type === 'DOSAGE_OFF');
+    if (e.p.dosOff === veut) return;                 // idempotent
+    e.p.dosOff = veut;
+    e.p._ts = e.g._ts = new Date().toISOString();
+    _chg = true;
+    console.log('[DOSAGES] ' + (veut ? 'désactivés' : 'réactivés') + ' partout — ' + e.g.marque + ' ' + e.g.gamme + ' « ' + (e.p.n || '?') + ' »');
+  });
+  // ── 2. Ménage : une action devenue sans objet s'annule (le doublon a bougé) ──
+  actions.forEach(function (a) {
+    if (a.type !== 'DOSAGE_OFF' && a.type !== 'DOSAGE_ON') return;
+    if (a.annulee || a._archived) return;
+    if (actionGlobalState(a) === 'FAIT') return;
+    const e = _pfDe(a);
+    if (!e) return;                                   // le GC des orphelines s'en charge
+    const dansDoublon = enDoublon.has(e.p.id);
+    // Plus aucun dosage à traiter (tout déclaré inexistant sur ce parfum) : la ligne n'a
+    // plus d'objet non plus — sinon elle reste au dashboard avec une liste vide.
+    const plusRienAFaire = _dosAFaire(e.p).length === 0;
+    const sansObjet = plusRienAFaire || ((a.type === 'DOSAGE_OFF') ? (!dansDoublon || e.p.dosOff === true)
+                                                                  : (dansDoublon || e.p.dosOff !== true));
+    if (sansObjet) { _cancelAction(a); _chg = true; }
+  });
+  // ── 3. Le doublon existe et les dosages forts sont encore actifs → À DÉSACTIVER ──
+  doublons.forEach(function (d) {
+    if (d.p.dosOff === true) return;
+    const dos = _dosAFaire(d.p);
+    if (!dos.length) return;                          // tout déclaré inexistant : rien à faire
+    if (_dosEnsure(d, 'OFF', dos)) _chg = true;
+  });
+  // ── 4. Le doublon a disparu alors qu'ils sont désactivés → À RÉACTIVER ──
+  //     Sans ça on creuse un trou permanent que personne ne se rappellera avoir creusé.
+  (typeof baseLiq !== 'undefined' ? baseLiq : []).forEach(function (g) {
+    if (!g || g.format !== '10mL' || g.statutVie === 'SORTI') return;
+    (g.parfums || []).forEach(function (p) {
+      if (!p || !p.id || p.s === 'SORTI') return;
+      if (p.dosOff !== true || enDoublon.has(p.id)) return;
+      const dos = _dosAFaire(p);
+      if (!dos.length) { p.dosOff = false; p._ts = new Date().toISOString(); _chg = true; return; }
+      if (_dosEnsure({ g: g, p: p }, 'ON', dos)) _chg = true;
+    });
+  });
+  return _chg;
+}
+// ═══ 🛡️ GARDE-FOU À L'ENTRÉE (Fabien 2026-09-05) ═══
+// « Quand une nouvelle gamme se met en à rentrer (en SdN ou en 10 mL), automatiquement la
+//   question doit être posée si la même chose existe en SdN ou en 10 mL, pour ne pas créer
+//   de doublon. »
+// On ne POSE PAS la question : l'app a la base sous les yeux, elle RÉPOND. Demander à
+// Fabien ce que l'outil sait déjà, c'est lui refiler le travail. Le message n'apparaît que
+// s'il y a vraiment quelque chose en face — sinon silence, sinon c'est du bruit.
+const _DOS_JUMEAU = { '10mL': '10mL_SDN', '10mL_SDN': '10mL' };
+// La ligne jumelle vivante (même marque + gamme, l'autre format des deux).
+function _dosLigneJumelle(g) {
+  const autre = _DOS_JUMEAU[g && g.format];
+  if (!autre) return null;
+  return baseLiq.find(function (x) {
+    return x && x.id !== g.id && x.format === autre && x.statutVie !== 'SORTI'
+      && !_deletedIds.has(x.id) && _liqCleGamme(x) === _liqCleGamme(g);
+  }) || null;
+}
+// Le message à afficher quand CETTE ligne (ou ce parfum) passe « à rentrer ».
+// p = null → on parle de la gamme entière.
+function _dosAlerteEntree(g, p) {
+  if (!g || !_DOS_JUMEAU[g.format]) return null;
+  const j = _dosLigneJumelle(g);
+  if (!j) return null;
+  const monFmt = LIQ_FORMAT_LABELS[g.format] || g.format;
+  const sonFmt = LIQ_FORMAT_LABELS[j.format] || j.format;
+  const nom = (g.marque || '') + ' — ' + (g.gamme || '');
+  const jVivants = (j.parfums || []).filter(function (x) { return x && x.s !== 'SORTI'; });
+  if (p) {
+    // Niveau parfum : le jumeau, c'est le MÊME parfum dans l'autre format.
+    const cle = _liqCleParfum(g, p);
+    const jp = jVivants.find(function (x) { return _liqCleParfum(j, x) === cle; });
+    if (!jp) {
+      return { titre: '↔ ' + nom + ' existe aussi en ' + sonFmt,
+        corps: '« ' + (p.n || '?') + ' » n\'y est pas encore. Rien à désactiver pour lui — mais vérifie que tu ne rentres pas en ' + monFmt + ' un parfum que tu as déjà sous un autre nom en ' + sonFmt + '.',
+        doublon: false };
+    }
+    const dos = _dosAFaire(g.format === '10mL' ? p : jp);
+    return { titre: '🚫 Doublon de nicotine forte — ' + nom + ' « ' + (p.n || '?') + ' »',
+      corps: 'Ce parfum existe déjà en ' + sonFmt + '. Une fois celui-ci rentré, les réf 10 mL en '
+        + _dosListeLbl(dos) + ' font double emploi avec le SdN : l\'app te les mettra dans « 🚫 Dosages en doublon » à désactiver sur Swappy.',
+      doublon: true };
+  }
+  return { titre: '↔ ' + nom + ' existe déjà en ' + sonFmt,
+    corps: sonFmt + ' : ' + jVivants.length + ' parfum' + (jVivants.length > 1 ? 's' : '') + ' en ligne. Rentrer cette gamme en ' + monFmt
+      + ' fera doublon sur la nicotine forte pour tout parfum présent des deux côtés : leurs réf 10 mL en '
+      + _dosListeLbl(LIQ_DOSAGES_DOUBLON) + ' arriveront dans « 🚫 Dosages en doublon » à désactiver sur Swappy.\n\n'
+      + 'Vérifie surtout que tu ne rentres pas des parfums que tu as déjà, sous une graphie différente.',
+    doublon: true };
+}
+// Affiche l'avertissement, s'il y a lieu. Décalé pour ne pas se battre avec les autres
+// modales que le changement de statut déclenche déjà (proposition de remplacement…).
+function pvDosAvertirEntree(g, p) {
+  let m = null;
+  try { m = _dosAlerteEntree(g, p); } catch (e) { return; }
+  if (!m) return;
+  setTimeout(function () {
+    try { pvAlert(m.titre + '\n\n' + m.corps); } catch (e) {}
+  }, 400);
+}
+
+// Déclarer qu'un dosage n'existe pas (ou revient) pour ce parfum : la boutique corrige la
+// convention sur la ligne, une fois pour toutes — c'est une propriété du parfum, pas de
+// l'épisode en cours.
+function pvDosToggleAbsent(actionId, dosage) {
+  const a = actions.find(function (x) { return x.id === actionId; });
+  if (!a) return;
+  const g = baseLiq.find(function (x) { return x.id === a.produitId; });
+  const p = g && (g.parfums || []).find(function (x) { return x.id === a.produitParfumId; });
+  if (!p) return;
+  const abs = Array.isArray(p.dosAbsents) ? p.dosAbsents.slice() : [];
+  const i = abs.indexOf(dosage);
+  if (i >= 0) abs.splice(i, 1); else abs.push(dosage);
+  p.dosAbsents = abs;
+  p._ts = g._ts = new Date().toISOString();
+  logAction('Dosages', (i >= 0 ? 'Rétabli' : 'Déclaré inexistant') + ' : ' + _dosLbl(dosage) + ' — ' + g.marque + ' ' + g.gamme + ' « ' + (p.n || '?') + ' »');
+  syncAutoActions();
+  saveData();
+  try { renderDashboard(); } catch (e) {}
+  try { renderLiqAll(); } catch (e) {}
+}
+
 // ═══════════ 🧴 VUE PAR PARFUM (Fabien, 2026-08-27) ═══════════
 // « Comme une vue liste, sauf qu'au lieu d'une ligne par format à déplier, UNE ligne par
 //   parfum, avec ses formats marqués dessus : Marque VDLV / Gamme Cirkus / Parfum Classic
@@ -18460,6 +18756,12 @@ function _previewCancelledActions(produitId, produitType, newStatus, parfumId) {
       return;
     }
     if (a.type === 'SWAP_COMPOSANT') return;
+    // 🚫 Dosages en doublon : c'est _dosSyncActions qui juge, pas le statut — l'annoncer
+    //    « sera annulée » serait faux (miroir du garde de cleanupActionsForParfum).
+    if (a.type === 'DOSAGE_OFF' || a.type === 'DOSAGE_ON') {
+      if (newStatus === 'SORTI') cancelled.push('DOSAGES');
+      return;
+    }
     // Même logique que cleanupActions* : l'action est-elle encore valide pour le nouveau statut ?
     const prod = produitType === 'kit' ? baseKits.find(k => k.id === produitId) :
                  produitType === 'liq' ? baseLiq.find(g => g.id === produitId) :
@@ -18877,6 +19179,8 @@ async function updateLiqField(id, field, val) {
     // Re-synchro des actions auto (créer/clôturer la SORTIR/RENTRER selon le nouveau statut).
     // Manquait pour les liquides → le dashboard restait désynchronisé tant qu'on ne rechargeait pas.
     if (typeof syncAutoActions === 'function') syncAutoActions();
+    // 🛡️ Garde-fou anti-doublon 10 mL / SdN : on le dit AVANT de commander, pas après.
+    if (val === 'A_RENTRER' && _oldStatutLiq !== val) pvDosAvertirEntree(g, null);
     // Si passage à A_SORTIR → proposer un remplacement
     if ((val === 'A_SORTIR' || estStatutEcoulement(val)) && _oldStatutLiq !== val) {
       setTimeout(() => promptRemplacement('liq', id, g.marque + ' — ' + g.gamme, null, null), 50);
@@ -18889,6 +19193,7 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
   if (!isAdmin()) { pvAlert('Action réservée à l\'admin'); return; }
   const g = baseLiq.find(l => l.id === gId);
   if (!g || !g.parfums[pIdx]) return;
+  const _sAvantDos = g.parfums[pIdx].s;   // 🛡️ statut AVANT (garde-fou doublon 10 mL / SdN)
   const _now = new Date().toISOString();
   g._ts = _now; // timestamp gamme pour sync multi-ordi
   const p = g.parfums[pIdx];
@@ -18953,6 +19258,8 @@ async function updateLiqParfumField(gId, pIdx, field, val) {
     _recomputeGammeStatutFromParfums(g);
     // Re-synchro actions (cf. updateLiqField) : sans ça, le dashboard restait désynchronisé.
     if (typeof syncAutoActions === 'function') syncAutoActions();
+    // 🛡️ Garde-fou anti-doublon 10 mL / SdN, au grain du parfum (c'est le grain de la règle).
+    if (val === 'A_RENTRER' && _sAvantDos !== 'A_RENTRER') pvDosAvertirEntree(g, g.parfums[pIdx]);
   }
   saveData(); renderLiqAll();
 }
@@ -23828,6 +24135,9 @@ function renderDashboard() {
   const rentrer = actions.filter(a => a.type === 'RENTRER' && isVisible(a));
   const meps = actions.filter(a => a.type === 'MISE_EN_PLACE' && isVisible(a));
   const prix = actions.filter(a => a.type === 'PRIX' && isVisible(a));
+  // 🚫 Dosages en doublon 10 mL / SdN (2026-09-05) : les deux sens dans la MÊME section —
+  //    c'est le même sujet et il ne se produit jamais les deux à la fois sur un parfum.
+  const dosages = actions.filter(a => (a.type === 'DOSAGE_OFF' || a.type === 'DOSAGE_ON') && isVisible(a));
   const besoins = computeBesoins();
   const historique = actions.filter(a => a.dateCloture && (!fPrio || effectivePrio(a) === fPrio));
 
@@ -23855,6 +24165,7 @@ function renderDashboard() {
   const retrosAffich   = _filterAntiDoublonLiq(retros);
   const rentrerAffich  = _filterAntiDoublonLiq(rentrer);
   const prixAffich     = _filterAntiDoublonLiq(prix);
+  const dosagesAffich  = _filterAntiDoublonLiq(dosages);
 
   // Tri : priorité d'abord (HAUTE → NORMALE → BASSE), puis paires liées, puis profil+case
   const _prioRank = { HAUTE: 0, NORMALE: 1, BASSE: 2 };
@@ -24217,7 +24528,9 @@ function renderDashboard() {
     PRIX:             { verb: 'Ajuste prix',       icon: '€',  color: '#f59e0b' },
     SWAP_COMPOSANT:   { verb: 'Swap',             icon: '🔄', color: '#6366f1' },
     RETRO_ENVOI:      { verb: 'Envoie',           icon: '🔁', color: '#06b6d4' },
-    RETRO_RECEPTION:  { verb: 'Réceptionne',      icon: '📥', color: '#06b6d4' }
+    RETRO_RECEPTION:  { verb: 'Réceptionne',      icon: '📥', color: '#06b6d4' },
+    DOSAGE_OFF:       { verb: 'Désactive',        icon: '🚫', color: '#6366f1' },
+    DOSAGE_ON:        { verb: 'Réactive',         icon: '↩',  color: '#84cc16' }
   };
   // Pour les actions PRIX, le verbe/couleur/icône se spécialise selon la décision prise.
   // On dérive de DECISION_META global (source de vérité partagée avec Relevé de prix).
@@ -24737,6 +25050,27 @@ function renderDashboard() {
           badgeTag += `<span onclick="event.stopPropagation(); ouvrirCommandeClient('${a.produitType || 'kit'}','${a.produitId}'${_ccParfumId ? `,'${_ccParfumId}'` : ''})" style="cursor:pointer; font-size:9px; padding:1px 6px; background:${_ccOn ? '#0e749022' : 'transparent'}; color:${_ccOn ? '#67e8f9' : '#64748b'}; border:1px solid ${_ccOn ? '#06b6d460' : '#47556940'}; border-radius:3px; white-space:nowrap; font-weight:600;" title="Commande client : garder ${_ccParfumId ? 'CE PARFUM' : 'cette réf'} en tiroir dans certaines boutiques — la sortie continue pour le reste. Chez la boutique qui garde : ne pas désactiver la réf sur Swappy.">🗄️ tiroir ?</span>`;
         }
       }
+    }
+
+    // ── 🚫 Pastilles de dosage (2026-09-05) : les refs concernées, nommées sur la ligne ──
+    // L'app ne stocke pas les dosages ref par ref : la liste est une CONVENTION. Cliquer une
+    // pastille déclare que CE dosage n'existe pas pour CE parfum — c'est la seule saisie que
+    // la feature demande, et elle est portée par le parfum (donc valable pour les épisodes
+    // suivants), pas par l'action en cours.
+    if ((a.type === 'DOSAGE_OFF' || a.type === 'DOSAGE_ON') && !(_opts && _opts.parfumId)) {
+      const _dPf = (prod.parfums || []).find(x => x.id === a.produitParfumId);
+      const _dAbs = (_dPf && Array.isArray(_dPf.dosAbsents)) ? _dPf.dosAbsents : [];
+      const _dOff = (a.type === 'DOSAGE_OFF');
+      badgeTag += LIQ_DOSAGES_DOUBLON.map(dd => {
+        const _abs = _dAbs.indexOf(dd) >= 0;
+        return `<span onclick="event.stopPropagation(); pvDosToggleAbsent('${a.id}','${dd}')"
+          style="cursor:pointer; font-size:9px; font-weight:700; padding:1px 6px; border-radius:3px; white-space:nowrap; ${_abs
+            ? 'background:transparent; color:#475569; border:1px dashed #47556980; text-decoration:line-through;'
+            : `background:${_dOff ? '#6366f120' : '#84cc1620'}; color:${_dOff ? '#a5b4fc' : '#bef264'}; border:1px solid ${_dOff ? '#6366f160' : '#84cc1660'};`}"
+          title="${_abs ? 'Déclaré inexistant pour ce parfum — cliquer pour le rétablir' : 'Cliquer si ce dosage n\'existe pas pour ce parfum (il sortira du travail, pour cet épisode et les suivants)'}">${_dosLbl(dd)}</span>`;
+      }).join('');
+      const _dSdnG = a.dosSdnGammeId ? baseLiq.find(x => x.id === a.dosSdnGammeId) : null;
+      if (_dSdnG) badgeTag += `<span style="font-size:9px; color:#64748b; white-space:nowrap;" title="C'est ce SdN qui rend les dosages forts du 10 mL redondants">↔ SdN ${String(_dSdnG.gamme || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')}</span>`;
     }
 
     // ── Comptage par parfum (reprise, décision Fabien 2026-06-12) ──
@@ -26023,6 +26357,14 @@ function renderDashboard() {
     + (opsPrixARefaire.length ? `<div style="font-size:9px; color:#fca5a5; font-weight:700; text-transform:uppercase; letter-spacing:0.4px; padding:6px 4px 4px;" title="Prix rouges d'OP : étiquette à (ré)imprimer / poser, prix ou promo à (re)passer en caisse — et 🗄️ prix initial à remettre quand la réf est gardée en tiroir. Les coches se font sur la carte OP">🏷️ Prix rouges — étiquette / caisse à refaire · 🗄️ prix initial à remettre (réf en tiroir)</div>` + opsPrixARefaire.map(op => renderOpCardHtml(op, { shopFilter: fShop || '', compact: true, noEdit: true })).join('') : ''));
   const prixBlock    = block('prix', 'Prix à modifier', '#f59e0b', _nbPrixTotal, prixInner,
     'Prix de BASE à changer (relevés concurrents) + prix rouges d\'OP dont l\'étiquette / la caisse restent à faire + 🗄️ prix initial à remettre chez une boutique qui garde la réf en tiroir. Déplier → cocher par boutique.');
+  // --- 🚫 Dosages en doublon 10 mL / SdN ---
+  const _dosOffN = dosagesAffich.filter(a => a.type === 'DOSAGE_OFF').length;
+  const _dosOnN  = dosagesAffich.filter(a => a.type === 'DOSAGE_ON').length;
+  const dosagesBlock = block('dosages', '🚫 Dosages en doublon', '#6366f1', dosagesAffich.length,
+    dosages.length === 0 ? emptyState('Aucun doublon de dosage ✓') : renderGroupedActionCards(dosages),
+    'Ce parfum existe en 10 mL ET en SdN : le SdN couvre déjà la nicotine forte. Désactiver sur Swappy les réf 10 mL en '
+    + _dosListeLbl(LIQ_DOSAGES_DOUBLON) + ' — on garde ' + _dosListeLbl(LIQ_DOSAGES_GARDES) + ' en 10 mL et '
+    + _dosListeLbl(LIQ_DOSAGES_SDN) + ' en SdN. Déplier → cocher par boutique. Un dosage qui n\'existe pas se déclare d\'un clic sur sa pastille.');
   // --- Opérations en cours ---
   // Rassemble toutes les OP non-terminées (à venir, imminentes, en cours).
   // Groupées par statut temporel, chaque groupe avec sous-header. Terminées exclues.
@@ -27288,6 +27630,7 @@ function renderDashboard() {
     retros:     retrosBlock,
     rentrer:    rentrerBlock,
     prix:       prixBlock,
+    dosages:    dosagesBlock,
     besoins:    besoinsBlock,
     ops:        alertesBlock,
     historique: historiqueBlock
@@ -27310,7 +27653,7 @@ function renderDashboard() {
       _dashHtml = urgenceBlock + _retourBtn + (_sectionContent || `<div style="text-align:center; padding:30px; color:#64748b;">Cette section n'a pas de contenu actuellement.</div>`);
     } else if (dashViewMode === 'all') {
       // Mode legacy : toutes les sections empilées (comme avant la refonte)
-      _dashHtml = urgenceBlock + _modeBtns + nouveauBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+      _dashHtml = urgenceBlock + _modeBtns + nouveauBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + dosagesBlock + besoinsBlock + alertesBlock + historiqueBlock;
     } else {
       // Mode cards (par défaut) : grille de cards résumées, clic = ouvre la section
       // Le filtre anti-doublon a déjà été appliqué en amont (sortirAffich/reprisesAffich/etc.).
@@ -27394,6 +27737,15 @@ function renderDashboard() {
       }
       if (rentrerAffich.length > 0) _cards.push(_renderDashSectionCard('rentrer', 'À rentrer', '#22c55e', rentrerAffich.length, rentrerAffich, _countByProdType(rentrerAffich)));
       if (_nbPrixTotal > 0) _cards.push(_renderDashSectionCard('prix', 'Prix à modifier', '#f59e0b', _nbPrixTotal, prixAffich, _countByProdType(prixAffich)));
+      if (dosagesAffich.length > 0) {
+        // Ligne de contexte : combien de refs, et dans quel sens — désactiver ou rétablir.
+        const _dosRefs = dosagesAffich.reduce((n, a) => n + ((a.dosages || []).length), 0);
+        const _dosCtx = [];
+        if (_dosOffN) _dosCtx.push(_dosOffN + ' à désactiver');
+        if (_dosOnN) _dosCtx.push(_dosOnN + ' à rétablir');
+        _dosCtx.push(_dosRefs + ' réf' + (_dosRefs > 1 ? 's' : ''));
+        _cards.push(_renderDashSectionCard('dosages', '🚫 Dosages en doublon', '#6366f1', dosagesAffich.length, dosagesAffich, _dosCtx.join(' · ')));
+      }
       // « Besoins à combler » et « Historique » ne sont pas rendus en vue cards (décision Fabien
       // 2026-06-10) : trop secondaires pour le coup d'œil quotidien. Restent accessibles via le
       // mode "Tout déplier" si besoin.
@@ -27411,7 +27763,7 @@ function renderDashboard() {
     // l'ancien comportement (toutes sections empilées) pour ne PAS bloquer le dashboard.
     // L'erreur reste visible en console pour diagnostic.
     console.error('[DASH-RENDER] Erreur dans la vue cards/détail, fallback mode legacy :', _err);
-    _dashHtml = urgenceBlock + _modeBtns + nouveauBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + besoinsBlock + alertesBlock + historiqueBlock;
+    _dashHtml = urgenceBlock + _modeBtns + nouveauBlock + installBlock + desinstBlock + opEnCoursBlock + sortirBlock + reprisesBlock + retrosBlock + rentrerBlock + prixBlock + dosagesBlock + besoinsBlock + alertesBlock + historiqueBlock;
   }
   document.getElementById('dashContent').innerHTML = _dashHtml;
 
@@ -27437,6 +27789,7 @@ function renderDashboard() {
   }
   if (staleAlerts.length) summaryParts.push(chip('#ef4444', `${staleAlerts.length} relevé${staleAlerts.length>1?'s':''} à faire`, 'prix'));
   if (_nbPrixTotal) summaryParts.push(chip('#f59e0b', `${_nbPrixTotal} prix à modifier`, 'prix'));
+  if (dosagesAffich.length) summaryParts.push(chip('#6366f1', `🚫 ${dosagesAffich.length} dosage${dosagesAffich.length > 1 ? 's' : ''} en doublon`, 'dosages'));
   // "En cours" = dateDebut déjà passée ou aujourd'hui, pas des prévisions (IMMINENTE, A_VENIR).
   const opsEnCoursStricte = ops.filter(op => opTimeStatus(op) === 'EN_COURS');
   if (opsEnCoursStricte.length) summaryParts.push(chip('#a855f7', `${opsEnCoursStricte.length} OP en cours`, 'opEnCours'));
